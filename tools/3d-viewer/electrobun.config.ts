@@ -10,7 +10,7 @@ export default {
     },
     views: {
       "viewer-ui": {
-        entrypoint: "src/viewer-ui/index.ts",
+        entrypoint: "src/viewer-ui/index.tsx",
       },
     },
     copy: {

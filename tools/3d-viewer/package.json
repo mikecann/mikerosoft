@@ -3,15 +3,22 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
     "electrobun": "latest",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "three": "^0.172.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/three": "^0.172.0"
   },
   "scripts": {
     "start": "bun run build:dev && electrobun dev",
-    "build:dev": "bun install && electrobun build"
+    "build:dev": "bun install && electrobun build",
+    "typecheck": "tsc --noEmit"
   }
 }
