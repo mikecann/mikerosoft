@@ -12,6 +12,9 @@ obj/
 # User settings (machine-specific, auto-created on first run)
 voice-type/settings.json
 
+# 3d-viewer transient launch config (written by VBS launcher to %TEMP%, deleted after use)
+# nothing to ignore here - the file lives in %TEMP%
+
 # Environment variables - copy .env.example to .env and fill in your keys
 .env
 
@@ -19,6 +22,7 @@ voice-type/settings.json
 node_modules/
 bun.lock
 bun.lockb
+package-lock.json
 *.tsbuildinfo
 
 # Editor / OS noise

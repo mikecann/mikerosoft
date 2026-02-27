@@ -1,0 +1,11 @@
+{
+  "name": "3d-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "three": "^0.172.0"
+  },
+  "devDependencies": {
+    "@types/nw.js": "^0.92.0"
+  }
+}

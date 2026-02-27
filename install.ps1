@@ -306,6 +306,7 @@ $wandIco        = "$iconsOut\wand.ico"
 $svgIco         = "$iconsOut\svg-to-png.ico"
 $descriptionIco = "$iconsOut\video-description.ico"
 $imgToSvgIco    = "$iconsOut\img-to-svg.ico"
+$viewer3dIco    = "$iconsOut\3d-viewer.ico"
 ConvertTo-Ico "$RepoDir\tools\transcribe\icons\wrench.png"                        $wrenchIco
 ConvertTo-Ico "$RepoDir\tools\transcribe\icons\film.png"                          $filmIco
 ConvertTo-Ico "$RepoDir\tools\removebg\icons\picture.png"                         $pictureIco
@@ -316,6 +317,7 @@ ConvertTo-Ico "$RepoDir\tools\generate-from-image\icons\wand.png"               
 ConvertTo-Ico "$RepoDir\tools\svg-to-png\icons\svg-to-png.png"                   $svgIco
 ConvertTo-Ico "$RepoDir\tools\video-description\icons\video-description.png"     $descriptionIco
 ConvertTo-Ico "$RepoDir\tools\img-to-svg\icons\img-to-svg.png"                   $imgToSvgIco
+ConvertTo-Ico "$RepoDir\tools\3d-viewer\icons\3d-viewer.png"                     $viewer3dIco
 Write-Host "  [ico]  Icons written to $iconsOut" -ForegroundColor Green
 
 # --- transcribe + vid2md: video file extensions ---
@@ -343,6 +345,36 @@ foreach ($ext in $imageExts) {
 $svgRoot = "HKCU:\Software\Classes\SystemFileAssociations\.svg\shell\MikesTools"
 Set-MikesToolsRoot $svgRoot $wrenchIco
 Add-MikesVerb $svgRoot "SvgToPng" "Render to PNG (2048px min)" $svgIco 'cmd.exe /k ""C:\dev\tools\svg-to-png.bat" "%1""'
+
+# --- 3d-viewer: GLB files (context menu) ---
+$glbRoot = "HKCU:\Software\Classes\SystemFileAssociations\.glb\shell\MikesTools"
+Set-MikesToolsRoot $glbRoot $wrenchIco
+Add-MikesVerb $glbRoot "View3D" "View in 3D Viewer" $viewer3dIco "wscript.exe `"$RepoDir\tools\3d-viewer\3d-viewer.vbs`" `"%1`""
+
+# --- 3d-viewer: GLB default file association (double-click to open) ---
+# Register a ProgID with the open verb, then point .glb at it.
+# UserChoice takes priority on Win10+ if a default was previously set via the OS dialog;
+# in that case a reminder is printed below to check Default Apps.
+$progId     = 'Mikerosoft.3DViewer'
+$openCmd    = "wscript.exe `"$RepoDir\tools\3d-viewer\3d-viewer.vbs`" `"%1`""
+
+# ProgID registration
+New-Item -Path "HKCU:\Software\Classes\$progId"                        -Force | Out-Null
+Set-ItemProperty "HKCU:\Software\Classes\$progId"                      -Name '(Default)'  -Value 'GLB 3D Model'
+New-Item -Path "HKCU:\Software\Classes\$progId\DefaultIcon"            -Force | Out-Null
+Set-ItemProperty "HKCU:\Software\Classes\$progId\DefaultIcon"          -Name '(Default)'  -Value $viewer3dIco
+New-Item -Path "HKCU:\Software\Classes\$progId\shell\open"             -Force | Out-Null
+Set-ItemProperty "HKCU:\Software\Classes\$progId\shell\open"           -Name '(Default)'  -Value 'View in 3D Viewer'
+New-Item -Path "HKCU:\Software\Classes\$progId\shell\open\command"     -Force | Out-Null
+Set-ItemProperty "HKCU:\Software\Classes\$progId\shell\open\command"   -Name '(Default)'  -Value $openCmd
+
+# Point .glb at the ProgID and add to OpenWithProgids
+New-Item -Path "HKCU:\Software\Classes\.glb"                           -Force | Out-Null
+Set-ItemProperty "HKCU:\Software\Classes\.glb"                         -Name '(Default)'  -Value $progId
+New-Item -Path "HKCU:\Software\Classes\.glb\OpenWithProgids"           -Force | Out-Null
+New-ItemProperty "HKCU:\Software\Classes\.glb\OpenWithProgids"         -Name $progId -Value '' -PropertyType String -Force | Out-Null
+
+Write-Host "  [reg]  .glb default open: $progId" -ForegroundColor Green
 
 # --- vid2md: Internet Shortcut files (.url) - YouTube links ---
 $urlRoot = "HKCU:\Software\Classes\SystemFileAssociations\.url\shell\MikesTools"
@@ -418,3 +450,4 @@ Write-Host ""
 Write-Host "Reminder: right-click 'Scale Monitor.lnk' in $ToolsDir and pin to taskbar." -ForegroundColor Cyan
 Write-Host "Reminder: right-click 'Task Stats.lnk' in $ToolsDir and pin to taskbar." -ForegroundColor Cyan
 Write-Host "Reminder: right-click 'Voice Type.lnk' in $ToolsDir and pin to taskbar (or run on login)." -ForegroundColor Cyan
+Write-Host "Reminder: if double-clicking .glb files doesn't open 3D Viewer, go to Settings > Default Apps > choose by file type > .glb." -ForegroundColor Cyan
