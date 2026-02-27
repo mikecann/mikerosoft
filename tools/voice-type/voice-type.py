@@ -23,6 +23,17 @@ import tkinter as tk
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
+# Add the PyTorch lib directory to the Windows DLL search path so that
+# ctranslate2 can find cublas64_12.dll (bundled with the cu128 torch wheel)
+# without needing the full CUDA Toolkit on PATH.
+try:
+    import torch as _torch
+    _torch_lib = os.path.join(os.path.dirname(_torch.__file__), "lib")
+    if os.path.isdir(_torch_lib):
+        os.add_dll_directory(_torch_lib)
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -76,6 +87,11 @@ HOTKEY_VK        = 0xA3   # VK_RCONTROL — Right Ctrl only (0xA2 = Left Ctrl)
 POLL_INTERVAL    = 0.01   # key-state poll rate (100 Hz)
 STREAM_INTERVAL  = 0.5    # seconds between streaming preview passes
 STREAM_MIN_AUDIO = 0.8    # don't start streaming until this many seconds recorded
+PRECOMP_MIN_AUDIO = 2.5   # only precompute once enough audio has accumulated
+PRECOMP_MIN_DELTA = 0.8   # minimum new audio before launching another pass
+PRECOMP_OVERLAP = 1.2     # seconds of overlap to stitch base+tail safely
+PRECOMP_IDLE_SLEEP = 0.08 # small backoff while waiting for enough new audio
+PRECOMP_STOP_WAIT = 0.75  # wait briefly for in-flight pass to finish on key-up
 
 # Final transcription model (accurate):
 #   CPU → "small.en"        ~0.5–1.5s depending on clip length
@@ -96,8 +112,20 @@ COMPUTE_TYPE = "float16"  # float16 on GPU; overridden to int8 on CPU
 # Models available in the tray settings menu.
 # Final model: accuracy matters most; stream model: speed matters most.
 FINAL_MODEL_OPTIONS  = ["tiny.en", "base.en", "small.en", "medium.en",
-                        "large-v2", "large-v3", "large-v3-turbo"]
+                        "large-v2", "large-v3", "large-v3-turbo", "parakeet-tdt-0.6b"]
 STREAM_MODEL_OPTIONS = ["tiny.en", "base.en", "small.en"]
+
+MODEL_LABELS = {
+    "tiny.en":          "Whisper: tiny",
+    "base.en":          "Whisper: base",
+    "small.en":         "Whisper: small",
+    "medium.en":        "Whisper: medium",
+    "large-v2":         "Whisper: large-v2",
+    "large-v3":         "Whisper: large-v3",
+    "large-v3-turbo":   "Whisper: large-v3-turbo",
+    "parakeet-tdt-0.6b": "NVIDIA Parakeet: TDT 0.6b",
+}
+OUTPUT_MODE_OPTIONS  = ["final_only", "hybrid", "stabilized", "precompute"]
 
 # ---------------------------------------------------------------------------
 # Settings (persisted to settings.json beside the script)
@@ -121,6 +149,14 @@ def _load_settings():
     cuda = _cuda_available()
     _settings.setdefault("final_model",  GPU_MODEL if cuda else CPU_MODEL)
     _settings.setdefault("stream_model", GPU_MODEL if cuda else STREAM_MODEL)
+    _settings.setdefault("output_mode",  "final_only")
+    # User-editable word/phrase corrections applied after every transcription.
+    # Keys are what the model says (case-insensitive), values are what to inject.
+    # Example: "Q DA" -> "CUDA", "congress" -> "Convex"
+    _settings.setdefault("corrections", {
+        "Q DA": "CUDA",
+        "Kuda": "CUDA",
+    })
     _save_settings()
 
 
@@ -142,6 +178,7 @@ _KEYEVENTF_KEYUP    = 0x0002
 _KEYEVENTF_UNICODE  = 0x0004
 _VK_CONTROL         = 0x11
 _VK_V               = 0x56
+_VK_BACK            = 0x08
 
 # SendInput structures for clipboard-free text injection
 _INPUT_KEYBOARD = 1
@@ -226,6 +263,26 @@ def _send_text_input(text: str):
     log(f"SendInput: {sent}/{len(inputs) // 2} char events delivered")
 
 
+def _send_backspaces(count: int):
+    """Send `count` Backspace key presses via SendInput."""
+    if count <= 0:
+        return
+    inputs = []
+    for _ in range(count):
+        for flags in (0, _KEYEVENTF_KEYUP):
+            inp = _INPUT()
+            inp.type                 = _INPUT_KEYBOARD
+            inp.union.ki.wVk         = _VK_BACK
+            inp.union.ki.wScan       = 0
+            inp.union.ki.dwFlags     = flags
+            inp.union.ki.time        = 0
+            inp.union.ki.dwExtraInfo = 0
+            inputs.append(inp)
+    arr  = (_INPUT * len(inputs))(*inputs)
+    sent = ctypes.windll.user32.SendInput(len(inputs), arr, ctypes.sizeof(_INPUT))
+    log(f"SendInput: {sent}/{len(inputs) // 2} backspace events delivered")
+
+
 def _startup_enabled() -> bool:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_RUN) as k:
@@ -274,22 +331,98 @@ def _cuda_available() -> bool:
 #                  (large-v3-turbo on CUDA for both)
 # ---------------------------------------------------------------------------
 
-_model: WhisperModel | None = None
+import re
+
+# Parakeet is very literal and transcribes filler words exactly.
+# Strip the most common English speech disfluencies from Parakeet output.
+_FILLER_RE = re.compile(
+    r'\b(uh+|um+|er+|ah+|hmm+|hm+|mhm|erm)\b[,.]?',
+    re.IGNORECASE,
+)
+
+def _clean_parakeet(text: str) -> str:
+    cleaned = _FILLER_RE.sub('', text)
+    return ' '.join(cleaned.split())
+
+
+def _apply_corrections(text: str) -> str:
+    """Apply user-defined word/phrase corrections from settings.json.
+
+    Matches are case-insensitive whole-word. Replacements preserve the
+    exact casing from the corrections dict value.
+    """
+    corrections: dict = _settings.get("corrections", {})
+    for wrong, right in corrections.items():
+        pattern = re.compile(r'(?<!\w)' + re.escape(wrong) + r'(?!\w)', re.IGNORECASE)
+        text = pattern.sub(right, text)
+    return text
+
+
+class ParakeetSegment:
+    def __init__(self, text):
+        self.text = text
+
+class ParakeetInfo:
+    language = "en"
+    language_probability = 1.0
+
+# Map of short names (used in settings/menu) to HuggingFace repo IDs.
+# csukuangfj is the primary sherpa-onnx developer — most reliable exports.
+PARAKEET_REPOS = {
+    "parakeet-tdt-0.6b": "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+}
+
+class ParakeetWrapper:
+    def __init__(self, repo_id: str):
+        from huggingface_hub import snapshot_download
+        import sherpa_onnx
+
+        log(f"Downloading/verifying Parakeet model {repo_id}...")
+        local_dir = snapshot_download(repo_id=repo_id)
+
+        self.recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+            encoder=os.path.join(local_dir, "encoder.int8.onnx"),
+            decoder=os.path.join(local_dir, "decoder.int8.onnx"),
+            joiner=os.path.join(local_dir, "joiner.int8.onnx"),
+            tokens=os.path.join(local_dir, "tokens.txt"),
+            num_threads=4,
+            sample_rate=SAMPLE_RATE,
+            feature_dim=80,
+            model_type="nemo_transducer"
+        )
+
+    def transcribe(self, audio, **kwargs):
+        stream = self.recognizer.create_stream()
+        stream.accept_waveform(SAMPLE_RATE, audio)
+        self.recognizer.decode_stream(stream)
+        text = _clean_parakeet(stream.result.text)
+
+        segments = [ParakeetSegment(text)] if text else []
+        return segments, ParakeetInfo()
+
+
+_model = None
 _model_lock = threading.Lock()
 
 
-def get_model() -> WhisperModel:
+def get_model():
     global _model
     if _model is None:
         with _model_lock:
             if _model is None:
-                cuda   = _cuda_available()
-                device = "cuda" if cuda else "cpu"
-                ct     = COMPUTE_TYPE if cuda else "int8"
                 name   = _settings.get("final_model", CPU_MODEL)
-                log(f"Loading final model {name!r} on {device} ({ct})...")
-                _model = WhisperModel(name, device=device, compute_type=ct)
-                log("Final model ready.")
+                if name in PARAKEET_REPOS:
+                    log(f"Loading final model {name!r} (sherpa-onnx)...")
+                    repo_id = PARAKEET_REPOS[name]
+                    _model = ParakeetWrapper(repo_id)
+                    log("Final model ready.")
+                else:
+                    cuda   = _cuda_available()
+                    device = "cuda" if cuda else "cpu"
+                    ct     = COMPUTE_TYPE if cuda else "int8"
+                    log(f"Loading final model {name!r} on {device} ({ct})...")
+                    _model = WhisperModel(name, device=device, compute_type=ct)
+                    log("Final model ready.")
     return _model
 
 
@@ -342,6 +475,26 @@ def _set_stream_model(name: str):
     with _stream_model_lock:
         _stream_model = None
     threading.Thread(target=_load_stream_model, daemon=True).start()
+
+
+def _set_output_mode(name: str):
+    """Switch the finalize output mode; persists immediately."""
+    if _settings.get("output_mode") == name:
+        return
+    log(f"Output mode switching to {name!r}...")
+    _settings["output_mode"] = name
+    _save_settings()
+
+
+def _effective_output_mode() -> str:
+    """Return the active output mode, forcing final_only for Parakeet.
+
+    Parakeet returns a single segment for the whole recording, so hybrid /
+    stabilized / precompute provide no benefit and would behave oddly.
+    """
+    if _settings.get("final_model", "") in PARAKEET_REPOS:
+        return "final_only"
+    return _settings.get("output_mode", "final_only")
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +581,7 @@ class TrayIcon:
         def _final_model_items():
             return [
                 pystray.MenuItem(
-                    m,
+                    MODEL_LABELS.get(m, m),
                     _make_final_action(m),
                     checked=_make_final_check(m),
                     radio=True,
@@ -439,12 +592,36 @@ class TrayIcon:
         def _stream_model_items():
             return [
                 pystray.MenuItem(
-                    m,
+                    MODEL_LABELS.get(m, m),
                     _make_stream_action(m),
                     checked=_make_stream_check(m),
                     radio=True,
                 )
                 for m in STREAM_MODEL_OPTIONS
+            ]
+
+        _OUTPUT_MODE_LABELS = {
+            "final_only":  "Final Only (quality)",
+            "hybrid":      "Hybrid (live overlay)",
+            "stabilized":  "Stabilized (faster output)",
+            "precompute":  "Precompute (faster finalize)",
+        }
+
+        def _make_output_mode_action(name):
+            return lambda: _set_output_mode(name)
+
+        def _make_output_mode_check(name):
+            return lambda item: _settings.get("output_mode") == name
+
+        def _output_mode_items():
+            return [
+                pystray.MenuItem(
+                    _OUTPUT_MODE_LABELS.get(m, m),
+                    _make_output_mode_action(m),
+                    checked=_make_output_mode_check(m),
+                    radio=True,
+                )
+                for m in OUTPUT_MODE_OPTIONS
             ]
 
         menu = pystray.Menu(
@@ -462,8 +639,9 @@ class TrayIcon:
                 checked=lambda item: _startup_enabled(),
             ),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Final Model",  pystray.Menu(lambda: _final_model_items())),
+            pystray.MenuItem("Final Model",   pystray.Menu(lambda: _final_model_items())),
             pystray.MenuItem("Preview Model", pystray.Menu(lambda: _stream_model_items())),
+            pystray.MenuItem("Output Mode",   pystray.Menu(lambda: _output_mode_items())),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit", self._on_exit),
         )
@@ -805,7 +983,13 @@ class Recorder:
 # Transcription
 # ---------------------------------------------------------------------------
 
-def transcribe(audio: np.ndarray, verbose: bool = True) -> str:
+def transcribe(audio: np.ndarray, verbose: bool = True, on_segment=None) -> str:
+    """Transcribe audio using the final model.
+
+    on_segment: optional callable(text: str) called for each non-empty segment
+    as it is decoded, before the full result is assembled. Used by hybrid and
+    stabilized modes to act on partial output early.
+    """
     duration = len(audio) / SAMPLE_RATE
     if duration < 0.3:
         return ""
@@ -817,8 +1001,14 @@ def transcribe(audio: np.ndarray, verbose: bool = True) -> str:
         beam_size=1,
         condition_on_previous_text=False,
     )
-    parts = [seg.text.strip() for seg in segments]
-    result = " ".join(parts).strip()
+    parts = []
+    for seg in segments:
+        text = seg.text.strip()
+        if text:
+            parts.append(text)
+            if on_segment:
+                on_segment(text)
+    result = _apply_corrections(" ".join(parts).strip())
     if verbose:
         log(f"Transcribed {duration:.1f}s → {result!r}  "
             f"(lang={info.language} p={info.language_probability:.2f})")
@@ -879,6 +1069,90 @@ class StreamingTranscriber:
 
 
 # ---------------------------------------------------------------------------
+# Final-model precompute worker — runs while key is held (precompute mode)
+# ---------------------------------------------------------------------------
+
+class FinalPrecomputer:
+    """Periodically runs the final model on a growing audio snapshot while the
+    user is still recording. At key-up we can reuse the latest snapshot result
+    and only finalize the tail, which reduces post-release latency."""
+
+    def __init__(self, recorder: Recorder):
+        self._recorder = recorder
+        self._active = False
+        self._lock = threading.Lock()
+        self._best_text = ""
+        self._best_samples = 0
+        self._last_requested_samples = 0
+        self._run_id = 0
+        self._thread: threading.Thread | None = None
+        self._inflight = False
+
+    def start(self):
+        with self._lock:
+            self._best_text = ""
+            self._best_samples = 0
+            self._last_requested_samples = 0
+            self._run_id += 1
+            run_id = self._run_id
+            self._inflight = False
+        self._active = True
+        self._thread = threading.Thread(target=self._loop, args=(run_id,), daemon=True)
+        self._thread.start()
+
+    def stop(self, wait: float = 0.0):
+        self._active = False
+        if wait > 0 and self._thread is not None:
+            self._thread.join(timeout=wait)
+
+    def snapshot(self) -> tuple[str, int]:
+        with self._lock:
+            return self._best_text, self._best_samples
+
+    def _loop(self, run_id: int):
+        min_samples = int(PRECOMP_MIN_AUDIO * SAMPLE_RATE)
+        delta_samples = int(PRECOMP_MIN_DELTA * SAMPLE_RATE)
+        while self._active:
+            with self._lock:
+                if run_id != self._run_id:
+                    break
+            audio = self._recorder.peek()
+            n_samples = len(audio)
+            if n_samples < min_samples:
+                time.sleep(PRECOMP_IDLE_SLEEP)
+                continue
+            with self._lock:
+                last_requested = self._last_requested_samples
+            if n_samples < last_requested + delta_samples:
+                time.sleep(PRECOMP_IDLE_SLEEP)
+                continue
+
+            with self._lock:
+                self._last_requested_samples = n_samples
+                self._inflight = True
+
+            t0 = time.perf_counter()
+            try:
+                text = transcribe(audio, verbose=False)
+            except Exception as e:
+                log(f"[precompute] pass failed: {e}")
+                with self._lock:
+                    self._inflight = False
+                time.sleep(PRECOMP_IDLE_SLEEP)
+                continue
+            elapsed = time.perf_counter() - t0
+            with self._lock:
+                if n_samples >= self._best_samples:
+                    self._best_samples = n_samples
+                    self._best_text = text
+                self._inflight = False
+            log(f"[precompute] pass: {n_samples / SAMPLE_RATE:.1f}s -> {elapsed:.2f}s")
+            # No fixed interval here, run again as soon as enough new audio exists.
+            if not self._active:
+                break
+
+
+# ---------------------------------------------------------------------------
 # Text injection
 # ---------------------------------------------------------------------------
 
@@ -895,16 +1169,183 @@ def paste_text(text: str):
 
 
 # ---------------------------------------------------------------------------
+# Finalize helpers (one per output mode)
+# ---------------------------------------------------------------------------
+
+def _merge_text(base: str, tail: str) -> str:
+    """Merge base + tail transcripts with a simple overlap heuristic."""
+    base = base.strip()
+    tail = tail.strip()
+    if not base:
+        return tail
+    if not tail:
+        return base
+    if tail.startswith(base):
+        return tail
+    if base.endswith(tail):
+        return base
+
+    max_overlap = min(len(base), len(tail), 240)
+    overlap = 0
+    for k in range(max_overlap, 0, -1):
+        if base[-k:].lower() == tail[:k].lower():
+            overlap = k
+            break
+    if overlap > 0:
+        merged = base + tail[overlap:]
+        return merged.strip()
+    return f"{base} {tail}".strip()
+
+
+def _finish_one_shot(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
+                     t0: float, mode: str):
+    """final_only and hybrid: wait for full transcription then inject once.
+
+    hybrid differs from final_only only in that it updates the overlay text
+    live as each segment arrives, giving visual feedback during the wait.
+    """
+    on_seg = None
+    if mode == "hybrid":
+        def on_seg(text: str):
+            overlay.show_processing(_wrap_preview(text))
+
+    try:
+        text = transcribe(audio, on_segment=on_seg)
+    except Exception as e:
+        log(f"Transcription error [{mode}]: {e}")
+        text = ""
+
+    elapsed = time.perf_counter() - t0
+    overlay.hide()
+    tray.set_state("idle")
+    if text:
+        log(f"Done ({elapsed:.2f}s) [{mode}]: {text!r}")
+        paste_text(text)
+    else:
+        log(f"Nothing to paste ({elapsed:.2f}s) [{mode}].")
+
+
+def _finish_precompute(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
+                       t0: float, base_text: str, base_samples: int):
+    """Precompute mode: reuse best in-recording snapshot, then transcribe tail."""
+    overlap_samples = int(PRECOMP_OVERLAP * SAMPLE_RATE)
+    total_samples = len(audio)
+    use_base = bool(base_text and base_samples > 0 and base_samples < total_samples)
+    if base_samples > 0:
+        lag = max(0.0, (total_samples - base_samples) / SAMPLE_RATE)
+        log(f"[precompute] snapshot lag: {lag:.2f}s")
+
+    try:
+        if use_base:
+            tail_start = max(0, base_samples - overlap_samples)
+            tail_audio = audio[tail_start:]
+            log(f"[precompute] base={base_samples / SAMPLE_RATE:.1f}s "
+                f"tail={len(tail_audio) / SAMPLE_RATE:.1f}s")
+            tail_text = transcribe(tail_audio)
+            text = _merge_text(base_text, tail_text)
+        else:
+            if base_text and base_samples >= total_samples:
+                log("[precompute] using full precomputed transcript.")
+                text = base_text
+            else:
+                log("[precompute] no usable base snapshot, falling back to full pass.")
+                text = transcribe(audio)
+    except Exception as e:
+        log(f"Transcription error [precompute]: {e}")
+        text = ""
+
+    elapsed = time.perf_counter() - t0
+    overlay.hide()
+    tray.set_state("idle")
+    if text:
+        log(f"Done ({elapsed:.2f}s) [precompute]: {text!r}")
+        paste_text(text)
+    else:
+        log(f"Nothing to paste ({elapsed:.2f}s) [precompute].")
+
+
+def _finish_stabilized(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
+                       t0: float):
+    """Stabilized: inject segments as decoded, then run bounded tail correction."""
+    hwnd = _user32.GetForegroundWindow()
+    buf  = ctypes.create_unicode_buffer(256)
+    _user32.GetWindowTextW(hwnd, buf, 256)
+    log(f"[stabilized] target: {buf.value!r}")
+
+    injected_parts: list[str] = []
+    first_char_t: list[float | None] = [None]
+
+    def _commit(text: str):
+        prefix = " " if injected_parts else ""
+        if not injected_parts:
+            time.sleep(0.05)   # brief settle before first keystroke
+            first_char_t[0] = time.perf_counter()
+        _send_text_input(prefix + text)
+        injected_parts.append(text)
+        overlay.show_processing(_wrap_preview(text))
+        log(f"[stabilized] commit: {text!r}")
+
+    def on_segment(text: str):
+        # Segments are decoded with condition_on_previous_text=False so each
+        # one is independent and won't be revised when later segments arrive.
+        # Commit immediately rather than holding back — this is what makes
+        # stabilized faster than final_only.
+        _commit(text)
+
+    try:
+        full_text = transcribe(audio, on_segment=on_segment)
+    except Exception as e:
+        log(f"Transcription error [stabilized]: {e}")
+        overlay.hide()
+        tray.set_state("idle")
+        log(f"Done (error) [stabilized].")
+        return
+
+    # Tail correction: compare what we typed against the final joined result.
+    # With beam_size=1 and condition_on_previous_text=False the segments are
+    # independent, so this usually matches. If there is a difference (e.g. a
+    # space at a segment boundary), find the common prefix and fix only the tail.
+    injected_text = " ".join(injected_parts)
+    if injected_text and injected_text != full_text:
+        log(f"[stabilized] tail correction needed: {injected_text!r} -> {full_text!r}")
+        common = 0
+        for a, b in zip(injected_text, full_text):
+            if a == b:
+                common += 1
+            else:
+                break
+        to_delete = len(injected_text) - common
+        tail      = full_text[common:]
+        log(f"[stabilized] delete {to_delete} chars, append {tail!r}")
+        if to_delete > 0:
+            _send_backspaces(to_delete)
+            time.sleep(0.02)
+        if tail:
+            _send_text_input(tail)
+
+    elapsed = time.perf_counter() - t0
+    overlay.hide()
+    tray.set_state("idle")
+    if first_char_t[0] is not None:
+        log(f"[stabilized] first char +{first_char_t[0] - t0:.2f}s, total {elapsed:.2f}s")
+    if full_text:
+        log(f"Done ({elapsed:.2f}s) [stabilized]: {full_text!r}")
+    else:
+        log(f"Nothing to paste ({elapsed:.2f}s) [stabilized].")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def run():
     _load_settings()
-    log(f"Settings: final_model={_settings['final_model']!r}  stream_model={_settings['stream_model']!r}")
+    log(f"Settings: final_model={_settings['final_model']!r}  stream_model={_settings['stream_model']!r}  output_mode={_settings['output_mode']!r}")
 
     recorder = Recorder()
     overlay  = Overlay(get_level=recorder.get_rms)
     streamer = StreamingTranscriber(recorder, overlay)
+    precomputer = FinalPrecomputer(recorder)
     tray     = TrayIcon(overlay)
     tray.start()
 
@@ -927,32 +1368,39 @@ def run():
                     overlay.show_rec()
                     recorder.start()
                     streamer.start()
+                    mode = _effective_output_mode()
+                    if mode == "precompute":
+                        precomputer.start()
+                    else:
+                        precomputer.stop()
 
             elif not is_down and was_down:
                 if tray.enabled:
                     log("--- Key UP ---")
                     audio = recorder.stop()
                     streamer.stop()   # signal stream loop; final pass always runs below
+                    mode = _effective_output_mode()
+                    if mode == "precompute":
+                        precomputer.stop(wait=PRECOMP_STOP_WAIT)
+                    else:
+                        precomputer.stop()
+                    pre_state = precomputer.snapshot()
 
-                    def _finish(audio=audio, preview=streamer.last_preview):
+                    def _finish(audio=audio, preview=streamer.last_preview, pre_state=pre_state):
                         # Show "processing" with the last streaming preview so the
                         # user sees what was recognised so far while we finalise.
+                        mode = _effective_output_mode()
                         overlay.show_processing(preview)
                         tray.set_state("processing")
                         t0 = time.perf_counter()
-                        try:
-                            text = transcribe(audio)
-                        except Exception as e:
-                            log(f"Transcription error: {e}")
-                            text = ""
-                        elapsed = time.perf_counter() - t0
-                        overlay.hide()
-                        tray.set_state("idle")
-                        if text:
-                            log(f"Done ({elapsed:.2f}s): {text!r}")
-                            paste_text(text)
+                        log(f"Finalize mode: {mode!r}")
+                        if mode == "precompute":
+                            base_text, base_samples = pre_state
+                            _finish_precompute(audio, overlay, tray, t0, base_text, base_samples)
+                        elif mode == "stabilized":
+                            _finish_stabilized(audio, overlay, tray, t0)
                         else:
-                            log(f"Nothing to paste ({elapsed:.2f}s).")
+                            _finish_one_shot(audio, overlay, tray, t0, mode)
 
                     threading.Thread(target=_finish, daemon=True).start()
 

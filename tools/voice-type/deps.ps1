@@ -8,7 +8,9 @@ $packages = @(
     @{ import = "sounddevice";     pip = "sounddevice" },
     @{ import = "numpy";           pip = "numpy" },
     @{ import = "PIL";             pip = "Pillow" },
-    @{ import = "pystray";         pip = "pystray" }
+    @{ import = "pystray";         pip = "pystray" },
+    @{ import = "sherpa_onnx";     pip = "sherpa-onnx" },
+    @{ import = "huggingface_hub"; pip = "huggingface_hub" }
 )
 
 foreach ($pkg in $packages) {

@@ -1,4 +1,9 @@
 {
-  "final_model": "small.en",
-  "stream_model": "tiny.en"
+  "final_model": "large-v3-turbo",
+  "stream_model": "small.en",
+  "output_mode": "final_only",
+  "corrections": {
+    "Q DA": "CUDA",
+    "Kuda": "CUDA"
+  }
 }
