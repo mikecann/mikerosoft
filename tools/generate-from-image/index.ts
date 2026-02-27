@@ -7,7 +7,7 @@ import { join, extname, basename, dirname, resolve } from 'path';
 import { exec } from 'child_process';
 import { configDotenv } from 'dotenv';
 
-const MODEL   = 'google/gemini-3-pro-image-preview';
+const MODEL   = 'google/gemini-3.1-flash-image-preview';
 const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const SEP     = '  ' + '\u2500'.repeat(58);
 
