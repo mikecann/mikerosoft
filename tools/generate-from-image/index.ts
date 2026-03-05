@@ -7,7 +7,11 @@ import { join, extname, basename, dirname, resolve } from 'path';
 import { exec } from 'child_process';
 import { configDotenv } from 'dotenv';
 
-const MODEL   = 'google/gemini-3.1-flash-image-preview';
+const MODELS  = [
+  'google/gemini-3.1-flash-image-preview',
+  'google/gemini-2.5-flash-image',
+  'google/gemini-3-pro-image-preview',
+];
 const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const SEP     = '  ' + '\u2500'.repeat(58);
 
@@ -55,7 +59,7 @@ console.log('\x1b[36m  GENERATE FROM IMAGE\x1b[0m');
 console.log(SEP);
 console.log(`  Input : ${imageName}${imageExt}`);
 console.log(`\x1b[90m  Dir   : ${imageDir}\x1b[0m`);
-console.log(`\x1b[90m  Model : ${MODEL}\x1b[0m`);
+  console.log(`\x1b[90m  Model : ${MODELS[0]}\x1b[0m`);
 console.log(SEP);
 console.log('');
 
@@ -133,13 +137,13 @@ function nextOutputPath(): string {
   return join(imageDir, `${imageName}-generated-${String(genCount).padStart(3, '0')}.png`);
 }
 
-async function generateOne(prompt: string, dataUrl: string): Promise<void> {
+async function generateOne(prompt: string, dataUrl: string, model: string): Promise<void> {
   const imageConfig: Record<string, string> = {};
   if (cfg.aspectRatio !== 'auto') imageConfig.aspect_ratio = cfg.aspectRatio;
   if (cfg.imageSize   !== 'auto') imageConfig.image_size   = cfg.imageSize;
 
   const body: Record<string, unknown> = {
-    model:      MODEL,
+    model,
     modalities: ['image', 'text'],
     messages: [
       {
@@ -187,6 +191,23 @@ async function generateOne(prompt: string, dataUrl: string): Promise<void> {
   }
 }
 
+async function generateOneWithFallback(prompt: string, dataUrl: string): Promise<void> {
+  for (const model of MODELS) {
+    try {
+      await generateOne(prompt, dataUrl, model);
+      return;
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes('429')) {
+        console.warn(`  \x1b[33mWARNING: ${model} is rate-limited (429). Downgrading to next model...\x1b[0m`);
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('All models rate-limited. Try again later.');
+}
+
 async function generate(prompt: string): Promise<void> {
   const varLabel = cfg.variations > 1 ? ` (${cfg.variations} variations)` : '';
   console.log(`\x1b[90m  Generating${varLabel}...\x1b[0m`);
@@ -197,7 +218,7 @@ async function generate(prompt: string): Promise<void> {
   for (let i = 1; i <= cfg.variations; i++) {
     if (cfg.variations > 1) console.log(`\x1b[90m  Variation ${i} of ${cfg.variations}...\x1b[0m`);
     try {
-      await generateOne(prompt, dataUrl);
+      await generateOneWithFallback(prompt, dataUrl);
     } catch (err) {
       console.error(`  \x1b[31mERROR (variation ${i}): ${err}\x1b[0m`);
     }
