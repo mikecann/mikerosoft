@@ -379,11 +379,13 @@ public class OverlayForm : Form {
 
         if (S.ShowNetUp) {
             string upVal = SpeedStr(_m.NetUpBps);
-            DrawSection(g, ref x, h, "UP \u2191", upVal, _cUp, _m.HNetUp, _m.NetPeak, upVal);
+            float upScale = Math.Max(100 * 1024f, _m.HNetUp.Max());
+            DrawSection(g, ref x, h, "UP \u2191", upVal, _cUp, _m.HNetUp, upScale, upVal);
         }
         if (S.ShowNetDown) {
             string dnVal = SpeedStr(_m.NetDnBps);
-            DrawSection(g, ref x, h, "DL \u2193", dnVal, _cDn, _m.HNetDn, _m.NetPeak, dnVal);
+            float dnScale = Math.Max(500 * 1024f, _m.HNetDn.Max());
+            DrawSection(g, ref x, h, "DL \u2193", dnVal, _cDn, _m.HNetDn, dnScale, dnVal);
         }
         if (S.ShowCpu) {
             if (S.CpuMode == "PerCore")

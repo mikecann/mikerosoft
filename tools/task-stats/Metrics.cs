@@ -18,6 +18,11 @@ class CircularBuffer {
     public void CopyTo(float[] dst) {
         for (int i = 0; i < Capacity; i++) dst[i] = _d[(_head + i) % Capacity];
     }
+    public float Max() {
+        float m = 0f;
+        for (int i = 0; i < Capacity; i++) if (_d[i] > m) m = _d[i];
+        return m;
+    }
 }
 
 // =============================================================================
@@ -33,8 +38,6 @@ class Metrics : IDisposable {
     public float   GpuUtil;
     public uint    GpuTempC;
     public bool    NvmlOk;
-    // Auto-scaling ceiling for network sparklines (decays slowly when traffic drops)
-    public float   NetPeak = 1024 * 1024f;
 
     // -- Sparkline history buffers ---------------------------------------------
     public readonly CircularBuffer  HCpu, HMem, HNetUp, HNetDn, HGpu;
@@ -131,14 +134,9 @@ class Metrics : IDisposable {
             : 0f;
         HMem.Push(MemPct);
 
-        // Network: auto-scale peak decays slowly so the sparkline re-centres
         if (_pcNetUp != null) {
             NetUpBps = Math.Max(0f, _pcNetUp.NextValue());
             NetDnBps = Math.Max(0f, _pcNetDn.NextValue());
-            float peak = Math.Max(NetUpBps, NetDnBps);
-            if (peak > NetPeak) NetPeak = peak;
-            // Very slow decay: ~0.05% per sample -- keeps graph readable
-            NetPeak = Math.Max(1024 * 1024f, NetPeak * 0.9995f);
         }
         HNetUp.Push(NetUpBps);
         HNetDn.Push(NetDnBps);
