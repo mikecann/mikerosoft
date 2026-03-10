@@ -29,10 +29,12 @@ public class OverlayForm : Form {
     readonly IMetricsSource _metricsSource;
     readonly OverlayFormOptions _options;
     readonly IProcessLauncher _processLauncher;
+    readonly ISectionContextProvider _sectionContextProvider;
     MetricsSnapshot _snapshot;
     internal string _scriptDir; // set by App.Run() -- needed to update startup reg entry
     internal System.Windows.Forms.Timer _timer;
     ContextMenuStrip _menu;
+    ContextMenuStrip _graphMenu;
     NotifyIcon _notify;
 
     // Pre-allocated GDI resources -- created once in AllocGdi(), never in paint loop.
@@ -45,13 +47,16 @@ public class OverlayForm : Form {
     IntPtr _mouseHookId = IntPtr.Zero;
 
     public OverlayForm(Settings s, string scriptDir = null, IMetricsSource metricsSource = null,
-                       OverlayFormOptions options = null, IProcessLauncher processLauncher = null) {
+                       OverlayFormOptions options = null, IProcessLauncher processLauncher = null,
+                       ISectionContextProvider sectionContextProvider = null) {
         S          = s;
         _scriptDir = scriptDir;
         _options = options ?? new OverlayFormOptions();
         _processLauncher = processLauncher ?? new ProcessLauncher();
+        _sectionContextProvider = sectionContextProvider ?? new LiveSectionContextProvider();
         _metricsSource = metricsSource ?? new LiveMetricsSource(s.NetworkAdapter);
         _snapshot = _metricsSource.Sample();
+        _sectionContextProvider.Refresh();
         AllocGdi();
 
         FormBorderStyle = FormBorderStyle.None;
@@ -127,6 +132,7 @@ public class OverlayForm : Form {
 
     public void RefreshNow() {
         _snapshot = _metricsSource.Sample();
+        if (_sectionContextProvider != null) _sectionContextProvider.Refresh();
         DoLayout();
         Invalidate();
         Update();
@@ -230,8 +236,10 @@ public class OverlayForm : Form {
             var scrRect = RectangleToScreen(ClientRectangle);
             if (scrRect.Contains(pt)) {
                 if (wParam == (IntPtr)Native.WM_RBUTTONDOWN) {
+                    var clPt = PointToClient(pt);
+                    var section = OverlayLayout.HitTest(S, _snapshot.CoreCount, clPt.X);
                     Native.SetForegroundWindow(Handle);
-                    _menu.Show(Cursor.Position);
+                    ShowGraphMenu(section, Cursor.Position);
                 } else if (wParam == (IntPtr)Native.WM_LBUTTONDOWN) {
                     var clPt = PointToClient(pt);
                     LaunchForSection(OverlayLayout.HitTest(S, _snapshot.CoreCount, clPt.X));
@@ -250,6 +258,8 @@ public class OverlayForm : Form {
         if (d) {
             if (_timer  != null) { _timer.Stop();  _timer.Dispose(); }
             if (_notify != null) { _notify.Visible = false; _notify.Dispose(); }
+            if (_graphMenu != null) _graphMenu.Dispose();
+            if (_sectionContextProvider != null) _sectionContextProvider.Dispose();
             if (_metricsSource != null) _metricsSource.Dispose();
             if (_fLbl        != null) _fLbl.Dispose();
             if (_fVal        != null) _fVal.Dispose();
@@ -304,11 +314,57 @@ public class OverlayForm : Form {
     void LaunchTaskMgr() { _processLauncher.Launch("taskmgr.exe"); }
 
     void BuildMenu() {
-        _menu = new ContextMenuStrip {
+        _menu = CreateMenuShell();
+        AddGlobalMenuItems(_menu);
+    }
+
+    void ShowGraphMenu(Section section, Point screenPos) {
+        if (_graphMenu != null) {
+            _graphMenu.Dispose();
+            _graphMenu = null;
+        }
+        _graphMenu = CreateMenuShell();
+        AddSectionContextItems(_graphMenu, section);
+        AddGlobalMenuItems(_graphMenu);
+        _graphMenu.Show(screenPos);
+    }
+
+    ContextMenuStrip CreateMenuShell() {
+        return new ContextMenuStrip {
             BackColor = Color.FromArgb(0x2D, 0x2D, 0x2D),
             ForeColor = Color.White,
             Renderer  = new DarkRenderer()
         };
+    }
+
+    void AddSectionContextItems(ContextMenuStrip menu, Section section) {
+        if (section == Section.None || _sectionContextProvider == null) return;
+
+        var info = _sectionContextProvider.GetContextInfo(section);
+        if (info == null) return;
+
+        var title = new ToolStripMenuItem(info.Title) { Enabled = false };
+        menu.Items.Add(title);
+        if (info.Rows != null && info.Rows.Length > 0) {
+            for (int i = 0; i < info.Rows.Length; i++) {
+                var row = info.Rows[i];
+                string text = string.Format("{0} ({1})  {2}", row.Name, row.ProcessId, row.Value);
+                menu.Items.Add(new ToolStripMenuItem(text) { Enabled = false });
+            }
+        }
+
+        if (info.LaunchesExternalTool) {
+            var actionText = string.IsNullOrWhiteSpace(info.ActionText) ? "Open details" : info.ActionText;
+            var command = info.LaunchCommand;
+            var actionItem = new ToolStripMenuItem(actionText);
+            actionItem.Click += (o, e) => _processLauncher.Launch(command);
+            menu.Items.Add(actionItem);
+        }
+
+        menu.Items.Add(new ToolStripSeparator());
+    }
+
+    void AddGlobalMenuItems(ContextMenuStrip menu) {
         var miSet     = new ToolStripMenuItem("Settings...");
         miSet.Click  += (o, e) => OpenSettings();
         miSet.Image   = LoadIcon("cog");
@@ -325,7 +381,7 @@ public class OverlayForm : Form {
         miQuit.Click  += (o, e) => Application.Exit();
         miQuit.Image   = LoadIcon("door_out");
 
-        _menu.Items.AddRange(new ToolStripItem[] {
+        menu.Items.AddRange(new ToolStripItem[] {
             miSet, new ToolStripSeparator(), miResmon, miTaskMgr, new ToolStripSeparator(), miQuit
         });
     }

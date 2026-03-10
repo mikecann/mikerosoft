@@ -16,7 +16,9 @@ static class UnitTests {
             new NamedTest("OverlayLayout calculates per-core CPU width", OverlayLayoutCalculatesPerCoreCpuWidth),
             new NamedTest("OverlayLayout hit-testing follows enabled sections", OverlayLayoutHitTestingFollowsEnabledSections),
             new NamedTest("OverlayFormatting speed strings are readable", OverlayFormattingSpeedStringsAreReadable),
-            new NamedTest("OverlayFormatting heat colors match endpoints", OverlayFormattingHeatColorsMatchEndpoints)
+            new NamedTest("OverlayFormatting heat colors match endpoints", OverlayFormattingHeatColorsMatchEndpoints),
+            new NamedTest("SectionContextInfoFactory builds CPU context rows", SectionContextInfoFactoryBuildsCpuContextRows),
+            new NamedTest("SectionContextInfoFactory builds network fallback context", SectionContextInfoFactoryBuildsNetworkFallbackContext)
         });
     }
 
@@ -123,6 +125,32 @@ static class UnitTests {
         AssertEx.ColorEqual(Color.FromArgb(0, 200, 0), OverlayFormatting.HeatColor(0f), "0% should be green");
         AssertEx.ColorEqual(Color.FromArgb(255, 200, 0), OverlayFormatting.HeatColor(0.5f), "50% should be yellow");
         AssertEx.ColorEqual(Color.FromArgb(255, 0, 0), OverlayFormatting.HeatColor(1f), "100% should be red");
+    }
+
+    static void SectionContextInfoFactoryBuildsCpuContextRows() {
+        var info = SectionContextInfoFactory.BuildProcessSummary(
+            Section.Cpu,
+            new[] {
+                new ProcessInsightRow("chrome", 101, "12.5%"),
+                new ProcessInsightRow("Cursor", 202, "5.0%")
+            });
+
+        AssertEx.Equal("Top CPU processes", info.Title, "CPU context should have a CPU-specific title");
+        AssertEx.True(!info.LaunchesExternalTool, "CPU context should be shown in-app");
+        AssertEx.Equal(2, info.Rows.Length, "CPU context should keep the provided process rows");
+        AssertEx.Equal("chrome", info.Rows[0].Name, "CPU context should preserve row names");
+        AssertEx.Equal("12.5%", info.Rows[0].Value, "CPU context should preserve formatted values");
+    }
+
+    static void SectionContextInfoFactoryBuildsNetworkFallbackContext() {
+        var info = SectionContextInfoFactory.BuildFallback(Section.NetDown);
+
+        AssertEx.Equal("Top downloaders", info.Title, "Download context should use a download-specific title");
+        AssertEx.True(info.LaunchesExternalTool, "Network fallback should launch an external tool");
+        AssertEx.True(info.LaunchCommand.IndexOf("resmon.exe", StringComparison.OrdinalIgnoreCase) >= 0,
+            "Network fallback should point at Resource Monitor");
+        AssertEx.True(info.Description.IndexOf("ETW", StringComparison.OrdinalIgnoreCase) >= 0,
+            "Network fallback should explain why this is not shown directly in-app yet");
     }
 }
 
