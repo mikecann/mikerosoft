@@ -2,8 +2,11 @@
   "final_model": "large-v3-turbo",
   "stream_model": "small.en",
   "output_mode": "final_only",
+  "formatter_enabled": false,
+  "formatter_model": "qwen2.5-0.5b",
   "corrections": {
     "Q DA": "CUDA",
     "Kuda": "CUDA"
-  }
+  },
+  "formatter_system_prompt": "You are a transcription cleaner.\n\nLightly format speech-to-text output.\nPreserve the original meaning, wording, uncertainty, and tone.\nDo not add information.\nDo not remove information unless it is an obvious duplicate caused by transcription.\nDo not summarize.\nDo not rewrite for style.\nOnly fix punctuation, capitalization, paragraph breaks, and obvious transcription artifacts.\nIf unsure, return the text unchanged.\nReturn only the cleaned transcript.\n"
 }

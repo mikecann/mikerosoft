@@ -83,12 +83,16 @@ A microphone icon sits in the system tray. Its colour reflects the current state
 
 **Right-click menu:**
 
-| Item               | Description                                              |
-| ------------------ | -------------------------------------------------------- |
-| **Enabled** ✓      | Toggle the tool on/off without killing the process       |
-| **Open Log**       | Opens `voice-type.log` in Notepad                        |
-| **Run on Startup** | Add/remove from `HKCU\...\Run` (auto-start with Windows) |
-| **Exit**           | Quit cleanly                                             |
+| Item                  | Description                                                        |
+| --------------------- | ------------------------------------------------------------------ |
+| **Enabled** ✓         | Toggle the tool on/off without killing the process                 |
+| **Formatter Enabled** | Turn local transcript cleanup on/off near the top of the menu      |
+| **Open Log**          | Opens `voice-type.log` in Notepad                                  |
+| **Run on Startup**    | Add/remove from `HKCU\...\Run` (auto-start with Windows)           |
+| **Formatter → Model** | Choose the local cleanup model, only shown when formatter is enabled |
+| **Formatter → Edit System Prompt...** | Open a multiline editor for the formatter system prompt |
+| **Formatter → Reset System Prompt** | Restore the built-in default formatter prompt            |
+| **Exit**              | Quit cleanly                                                       |
 
 ---
 
@@ -106,6 +110,13 @@ A microphone icon sits in the system tray. Its colour reflects the current state
   on CUDA) transcribes all recorded audio for accuracy. Result is injected
   directly into the focused window via `SendInput` with `KEYEVENTF_UNICODE`
   flags — the clipboard is never touched.
+- **Optional transcript cleanup** — for `final_only`, `hybrid`, and
+  `precompute`, an optional local GGUF instruct model can lightly clean the
+  final transcript before it is typed. Guardrails reject outputs that remove
+  numbers, acronyms, URLs, or too much of the original wording, and the tool
+  falls back to the raw transcript on validator failures, backend errors, or
+  timeout. `stabilized` skips this step on purpose because it types partial
+  segments before the full sentence exists.
 - **Two-model design** — `tiny.en` (~75 MB, ~0.1 s/pass) for live preview;
   `small.en` (~244 MB, ~0.5–1.5 s) for final. No lock contention, so the
   streaming never delays the paste.
@@ -133,11 +144,40 @@ CUDA is auto-detected at startup (`ctranslate2.get_cuda_device_count()` +
 Both models download once from HuggingFace on first use and are cached in
 `%USERPROFILE%\.cache\huggingface\`.
 
+### Formatter benchmark
+
+I benchmarked the local cleanup models on real transcript samples on this
+machine after the model was warm:
+
+| Formatter model | Typical added latency | What happened |
+| --------------- | --------------------- | ------------- |
+| `Qwen2.5 0.5B`  | ~0.9–1.7 s            | Best latency/guardrail balance, now the default |
+| `Qwen2.5 1.5B`  | ~1.6–3.8 s            | Cleaner punctuation, but too eager to rewrite wording |
+| `SmolLM2 1.7B`  | ~2.1–3.9 s            | Usually left the text unchanged |
+
+That is why the formatter is **off by default**, and why the default model is
+the smaller `Qwen2.5 0.5B` rather than the stronger 1.5B model.
+
 ---
 
 ## Configuration
 
-Edit the constants near the top of `voice-type.py`:
+Use the tray menu for normal configuration. The persisted settings live in
+`settings.json` beside the script.
+
+Useful keys:
+
+| Setting              | Default          | Description |
+| -------------------- | ---------------- | ----------- |
+| `final_model`        | `"small.en"` / `"large-v3-turbo"` | Final transcription model |
+| `stream_model`       | `"tiny.en"`      | Preview model |
+| `output_mode`        | `"final_only"`   | Finalise strategy |
+| `formatter_enabled`  | `false`          | Turn local transcript cleanup on/off |
+| `formatter_model`    | `"qwen2.5-0.5b"` | Local cleanup model preset |
+| `corrections`        | `{...}`          | Exact phrase replacements applied after transcription |
+
+If you want to tweak hardcoded behaviour, edit the constants near the top of
+`voice-type.py`:
 
 | Constant          | Default            | Description                                   |
 | ----------------- | ------------------ | --------------------------------------------- |
@@ -169,16 +209,21 @@ sounddevice      microphone capture
 numpy            audio buffer maths
 Pillow           tray icon drawing
 pystray          system tray integration
+huggingface_hub  GGUF model downloads
+llama-cpp-python local GGUF inference for transcript cleanup
 ```
 
 ---
 
 ## Files
 
-| File             | Purpose                                        |
-| ---------------- | ---------------------------------------------- |
-| `voice-type.py`  | Main script — all logic                        |
-| `voice-type.vbs` | Silent launcher (no console window)            |
-| `voice-type.ps1` | PowerShell launcher called by the VBS          |
-| `deps.ps1`       | Installs Python dependencies                   |
-| `voice-type.log` | Runtime log (gitignored, auto-rotates at 1 MB) |
+| File                  | Purpose                                                  |
+| --------------------- | -------------------------------------------------------- |
+| `voice-type.py`       | Main script — audio, tray UI, transcription, injection   |
+| `text_formatter.py`   | Local LLM formatting guardrails and GGUF backend         |
+| `benchmark_formatter.py` | Quick local benchmark for formatter model experiments |
+| `tests/test_text_formatter.py` | Unit tests for formatter validation and fallback |
+| `voice-type.vbs`      | Silent launcher (no console window)                      |
+| `voice-type.ps1`      | PowerShell launcher called by the VBS                    |
+| `deps.ps1`            | Installs Python dependencies                             |
+| `voice-type.log`      | Runtime log (gitignored, auto-rotates at 1 MB)           |

@@ -6,7 +6,8 @@ as you talk. Release to paste the final text into the active window.
 
 A microphone icon lives in the system tray; right-click for settings and exit.
 
-Requirements: faster-whisper, sounddevice, numpy, Pillow, pystray
+Requirements: faster-whisper, sounddevice, numpy, Pillow, pystray,
+huggingface_hub, llama-cpp-python
 """
 
 import os
@@ -20,6 +21,8 @@ import queue
 import ctypes
 import ctypes.wintypes
 import tkinter as tk
+from tkinter import messagebox
+from tkinter import scrolledtext
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
@@ -78,6 +81,14 @@ log(f"=== voice-type started === log: {_LOG_PATH}")
 import numpy as np
 import sounddevice as sd
 from faster_whisper import WhisperModel
+from text_formatter import (
+    DEFAULT_FORMATTER_MODEL,
+    DEFAULT_FORMATTER_SYSTEM_PROMPT,
+    FORMATTER_MODEL_PRESETS,
+    LlamaCppFormatter,
+    format_for_injection as format_text_for_injection,
+    resolve_system_prompt,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -92,6 +103,7 @@ PRECOMP_MIN_DELTA = 0.8   # minimum new audio before launching another pass
 PRECOMP_OVERLAP = 1.2     # seconds of overlap to stitch base+tail safely
 PRECOMP_IDLE_SLEEP = 0.08 # small backoff while waiting for enough new audio
 PRECOMP_STOP_WAIT = 0.75  # wait briefly for in-flight pass to finish on key-up
+FORMATTER_TIMEOUT = 6.0   # soft timeout for local text cleanup
 
 # Final transcription model (accurate):
 #   CPU → "small.en"        ~0.5–1.5s depending on clip length
@@ -126,6 +138,7 @@ MODEL_LABELS = {
     "parakeet-tdt-0.6b": "NVIDIA Parakeet: TDT 0.6b",
 }
 OUTPUT_MODE_OPTIONS  = ["final_only", "hybrid", "stabilized", "precompute"]
+FORMATTER_MODEL_OPTIONS = list(FORMATTER_MODEL_PRESETS.keys())
 
 # ---------------------------------------------------------------------------
 # Settings (persisted to settings.json beside the script)
@@ -150,6 +163,11 @@ def _load_settings():
     _settings.setdefault("final_model",  GPU_MODEL if cuda else CPU_MODEL)
     _settings.setdefault("stream_model", GPU_MODEL if cuda else STREAM_MODEL)
     _settings.setdefault("output_mode",  "final_only")
+    _settings.setdefault("formatter_enabled", False)
+    _settings.setdefault("formatter_model", DEFAULT_FORMATTER_MODEL)
+    _settings.setdefault("formatter_system_prompt", DEFAULT_FORMATTER_SYSTEM_PROMPT)
+    if _settings.get("formatter_model") not in FORMATTER_MODEL_PRESETS:
+        _settings["formatter_model"] = DEFAULT_FORMATTER_MODEL
     # User-editable word/phrase corrections applied after every transcription.
     # Keys are what the model says (case-insensitive), values are what to inject.
     # Example: "Q DA" -> "CUDA", "congress" -> "Convex"
@@ -451,6 +469,45 @@ def _load_stream_model():
             log("Stream model ready.")
 
 
+_text_formatter: LlamaCppFormatter | None = None
+_text_formatter_lock = threading.Lock()
+
+
+def get_text_formatter() -> LlamaCppFormatter | None:
+    global _text_formatter
+    if not _settings.get("formatter_enabled", False):
+        return None
+    model_key = _settings.get("formatter_model", DEFAULT_FORMATTER_MODEL)
+    system_prompt = resolve_system_prompt(_settings.get("formatter_system_prompt"))
+    if model_key not in FORMATTER_MODEL_PRESETS:
+        model_key = DEFAULT_FORMATTER_MODEL
+    needs_reload = (
+        _text_formatter is None
+        or _text_formatter.model_key != model_key
+        or _text_formatter.system_prompt != system_prompt
+    )
+    if needs_reload:
+        with _text_formatter_lock:
+            needs_reload = (
+                _text_formatter is None
+                or _text_formatter.model_key != model_key
+                or _text_formatter.system_prompt != system_prompt
+            )
+            if needs_reload:
+                try:
+                    _text_formatter = LlamaCppFormatter(
+                        model_key,
+                        logger=log,
+                        system_prompt=system_prompt,
+                    )
+                    _text_formatter.warm()
+                    log(f"Formatter model ready: {_text_formatter.describe()}")
+                except Exception:
+                    _text_formatter = None
+                    raise
+    return _text_formatter
+
+
 def _set_final_model(name: str):
     """Switch the final transcription model; reloads it in the background."""
     global _model
@@ -486,6 +543,46 @@ def _set_output_mode(name: str):
     _save_settings()
 
 
+def _set_formatter_enabled(enabled: bool):
+    enabled = bool(enabled)
+    if bool(_settings.get("formatter_enabled", False)) == enabled:
+        return
+    log(f"Formatter {'enabled' if enabled else 'disabled'}.")
+    _settings["formatter_enabled"] = enabled
+    _save_settings()
+    if enabled:
+        threading.Thread(target=get_text_formatter, daemon=True).start()
+
+
+def _set_formatter_model(name: str):
+    global _text_formatter
+    if name not in FORMATTER_MODEL_PRESETS:
+        return
+    if _settings.get("formatter_model") == name:
+        return
+    log(f"Formatter model switching to {name!r}...")
+    _settings["formatter_model"] = name
+    _save_settings()
+    with _text_formatter_lock:
+        _text_formatter = None
+    if _settings.get("formatter_enabled", False):
+        threading.Thread(target=get_text_formatter, daemon=True).start()
+
+
+def _set_formatter_system_prompt(prompt: str):
+    global _text_formatter
+    prompt = resolve_system_prompt(prompt)
+    if _settings.get("formatter_system_prompt") == prompt:
+        return
+    log("Formatter system prompt updated.")
+    _settings["formatter_system_prompt"] = prompt
+    _save_settings()
+    with _text_formatter_lock:
+        _text_formatter = None
+    if _settings.get("formatter_enabled", False):
+        threading.Thread(target=get_text_formatter, daemon=True).start()
+
+
 def _effective_output_mode() -> str:
     """Return the active output mode, forcing final_only for Parakeet.
 
@@ -495,6 +592,32 @@ def _effective_output_mode() -> str:
     if _settings.get("final_model", "") in PARAKEET_REPOS:
         return "final_only"
     return _settings.get("output_mode", "final_only")
+
+
+def _maybe_format_final_text(text: str, mode: str) -> str:
+    enabled = bool(_settings.get("formatter_enabled", False))
+    started = time.perf_counter()
+    formatter = None
+    if enabled:
+        try:
+            formatter = get_text_formatter()
+        except Exception as e:
+            log(f"Formatter unavailable: {e}")
+            formatter = None
+    result = format_text_for_injection(
+        text,
+        enabled=enabled,
+        mode=mode,
+        formatter=formatter,
+        timeout_sec=FORMATTER_TIMEOUT,
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    if enabled:
+        if result.used_formatter:
+            log(f"Formatter accepted [{mode}] in {elapsed_ms:.0f} ms: {result.reason}")
+        else:
+            log(f"Formatter skipped [{mode}] in {elapsed_ms:.0f} ms: {result.reason}")
+    return result.text
 
 
 # ---------------------------------------------------------------------------
@@ -624,27 +747,65 @@ class TrayIcon:
                 for m in OUTPUT_MODE_OPTIONS
             ]
 
-        menu = pystray.Menu(
-            pystray.MenuItem("Voice Type", None, enabled=False),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                "Enabled",
-                self._toggle_enabled,
-                checked=lambda item: self.enabled,
-            ),
-            pystray.MenuItem("Open Log",        self._open_log),
-            pystray.MenuItem(
-                "Run on Startup",
-                self._toggle_startup,
-                checked=lambda item: _startup_enabled(),
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Final Model",   pystray.Menu(lambda: _final_model_items())),
-            pystray.MenuItem("Preview Model", pystray.Menu(lambda: _stream_model_items())),
-            pystray.MenuItem("Output Mode",   pystray.Menu(lambda: _output_mode_items())),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Exit", self._on_exit),
-        )
+        def _make_formatter_model_action(name):
+            return lambda: _set_formatter_model(name)
+
+        def _make_formatter_model_check(name):
+            return lambda item: _settings.get("formatter_model") == name
+
+        def _formatter_model_items():
+            return [
+                pystray.MenuItem(
+                    FORMATTER_MODEL_PRESETS[m].label,
+                    _make_formatter_model_action(m),
+                    checked=_make_formatter_model_check(m),
+                    radio=True,
+                )
+                for m in FORMATTER_MODEL_OPTIONS
+            ]
+
+        def _formatter_section_items():
+            items = []
+            if _settings.get("formatter_enabled", False):
+                items.append(pystray.MenuItem("Model", pystray.Menu(lambda: _formatter_model_items())))
+            items.append(pystray.MenuItem("Edit System Prompt...", self._edit_formatter_prompt))
+            items.append(pystray.MenuItem("Reset System Prompt", self._reset_formatter_prompt))
+            return items
+
+        def _menu_items():
+            items = [
+                pystray.MenuItem("Voice Type", None, enabled=False),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem(
+                    "Enabled",
+                    self._toggle_enabled,
+                    checked=lambda item: self.enabled,
+                ),
+                pystray.MenuItem(
+                    "Formatter Enabled",
+                    lambda: _set_formatter_enabled(not _settings.get("formatter_enabled", False)),
+                    checked=lambda item: bool(_settings.get("formatter_enabled", False)),
+                ),
+                pystray.MenuItem("Open Log", self._open_log),
+                pystray.MenuItem(
+                    "Run on Startup",
+                    self._toggle_startup,
+                    checked=lambda item: _startup_enabled(),
+                ),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Final Model", pystray.Menu(lambda: _final_model_items())),
+                pystray.MenuItem("Preview Model", pystray.Menu(lambda: _stream_model_items())),
+                pystray.MenuItem("Output Mode", pystray.Menu(lambda: _output_mode_items())),
+            ]
+            if _settings.get("formatter_enabled", False):
+                items.append(pystray.MenuItem("Formatter", pystray.Menu(lambda: _formatter_section_items())))
+            items.extend([
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Exit", self._on_exit),
+            ])
+            return items
+
+        menu = pystray.Menu(lambda: _menu_items())
         self._icon = pystray.Icon(
             "voice-type",
             _make_tray_icon("idle"),
@@ -674,6 +835,17 @@ class TrayIcon:
 
     def _toggle_startup(self, icon, item):
         _set_startup(not _startup_enabled())
+
+    def _edit_formatter_prompt(self, icon=None, item=None):
+        self._overlay.edit_text(
+            title="Edit Formatter System Prompt",
+            initial_text=resolve_system_prompt(_settings.get("formatter_system_prompt")),
+            on_save=_set_formatter_system_prompt,
+            reset_text=DEFAULT_FORMATTER_SYSTEM_PROMPT,
+        )
+
+    def _reset_formatter_prompt(self, icon=None, item=None):
+        _set_formatter_system_prompt(DEFAULT_FORMATTER_SYSTEM_PROMPT)
 
     def _on_exit(self, icon, item):
         log("Exit requested via tray.")
@@ -800,6 +972,7 @@ class Overlay:
         )
 
         self._visible   = False
+        self._editor_win = None
         self._cmd_queue: queue.Queue = queue.Queue()
         self._root.after(50,  self._poll)
         self._root.after(33,  self._animate)   # 30 fps animation loop
@@ -814,6 +987,17 @@ class Overlay:
 
     def hide(self):
         self._cmd_queue.put(("hide", ""))
+
+    def edit_text(self, title: str, initial_text: str, on_save, reset_text: str | None = None):
+        self._cmd_queue.put((
+            "edit_text",
+            {
+                "title": title,
+                "initial_text": initial_text,
+                "on_save": on_save,
+                "reset_text": reset_text,
+            },
+        ))
 
     def quit(self):
         self._cmd_queue.put(("quit", ""))
@@ -834,6 +1018,8 @@ class Overlay:
                     self._root.withdraw()
                     self._visible = False
                     self._state   = "hidden"
+                elif cmd == "edit_text":
+                    self._open_text_editor(preview)
                 else:
                     self._state = cmd
                     col   = _COL_REC  if cmd == "rec" else _COL_PROC
@@ -887,6 +1073,80 @@ class Overlay:
                 self._canvas.coords(rid, x0, y_base - int(h), x1, y_base)
 
         self._root.after(33, self._animate)
+
+    def _open_text_editor(self, payload):
+        if self._editor_win is not None and self._editor_win.winfo_exists():
+            self._editor_win.deiconify()
+            self._editor_win.lift()
+            self._editor_win.focus_force()
+            return
+
+        title = payload["title"]
+        initial_text = payload["initial_text"]
+        on_save = payload["on_save"]
+        reset_text = payload.get("reset_text")
+
+        win = tk.Toplevel(self._root)
+        self._editor_win = win
+        win.title(title)
+        win.geometry("760x520")
+        win.minsize(520, 360)
+        win.configure(bg=_OVL_BG)
+
+        body = tk.Frame(win, bg=_OVL_BG, padx=12, pady=12)
+        body.pack(fill="both", expand=True)
+
+        label = tk.Label(
+            body,
+            text="Changes are saved to settings.json and used for future formatter runs.",
+            fg=_COL_TEXT,
+            bg=_OVL_BG,
+            anchor="w",
+            justify="left",
+        )
+        label.pack(fill="x", pady=(0, 8))
+
+        editor = scrolledtext.ScrolledText(
+            body,
+            wrap="word",
+            font=("Consolas", 10),
+            undo=True,
+            padx=8,
+            pady=8,
+        )
+        editor.pack(fill="both", expand=True)
+        editor.insert("1.0", initial_text)
+        editor.focus_set()
+
+        buttons = tk.Frame(body, bg=_OVL_BG)
+        buttons.pack(fill="x", pady=(10, 0))
+
+        def _close():
+            if win.winfo_exists():
+                win.destroy()
+            self._editor_win = None
+
+        def _save():
+            text = editor.get("1.0", "end-1c")
+            try:
+                on_save(text)
+            except Exception as e:
+                messagebox.showerror("voice-type", str(e), parent=win)
+                return
+            _close()
+
+        def _reset():
+            if reset_text is None:
+                return
+            editor.delete("1.0", "end")
+            editor.insert("1.0", reset_text)
+
+        tk.Button(buttons, text="Save", command=_save, width=10).pack(side="right")
+        tk.Button(buttons, text="Cancel", command=_close, width=10).pack(side="right", padx=(0, 8))
+        if reset_text is not None:
+            tk.Button(buttons, text="Reset Default", command=_reset, width=14).pack(side="left")
+
+        win.protocol("WM_DELETE_WINDOW", _close)
 
     def _position(self):
         """Position at bottom-centre of the monitor holding the focused window."""
@@ -1219,6 +1479,7 @@ def _finish_one_shot(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
     overlay.hide()
     tray.set_state("idle")
     if text:
+        text = _maybe_format_final_text(text, mode)
         log(f"Done ({elapsed:.2f}s) [{mode}]: {text!r}")
         paste_text(text)
     else:
@@ -1258,6 +1519,7 @@ def _finish_precompute(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
     overlay.hide()
     tray.set_state("idle")
     if text:
+        text = _maybe_format_final_text(text, "precompute")
         log(f"Done ({elapsed:.2f}s) [precompute]: {text!r}")
         paste_text(text)
     else:
@@ -1340,7 +1602,14 @@ def _finish_stabilized(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
 
 def run():
     _load_settings()
-    log(f"Settings: final_model={_settings['final_model']!r}  stream_model={_settings['stream_model']!r}  output_mode={_settings['output_mode']!r}")
+    log(
+        "Settings: "
+        f"final_model={_settings['final_model']!r}  "
+        f"stream_model={_settings['stream_model']!r}  "
+        f"output_mode={_settings['output_mode']!r}  "
+        f"formatter_enabled={_settings['formatter_enabled']!r}  "
+        f"formatter_model={_settings['formatter_model']!r}"
+    )
 
     recorder = Recorder()
     overlay  = Overlay(get_level=recorder.get_rms)
@@ -1353,6 +1622,13 @@ def run():
         # Load main model first, then stream model (sequenced to avoid CPU contention)
         threading.Thread(target=get_model, daemon=True).start()
         threading.Thread(target=_load_stream_model, daemon=True).start()
+        if _settings.get("formatter_enabled", False):
+            def _warm_formatter_after_startup():
+                get_model()
+                _load_stream_model()
+                get_text_formatter()
+
+            threading.Thread(target=_warm_formatter_after_startup, daemon=True).start()
         log("Ready. Hold Right Ctrl to record.")
 
         was_down = False

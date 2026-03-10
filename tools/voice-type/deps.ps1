@@ -10,7 +10,8 @@ $packages = @(
     @{ import = "PIL";             pip = "Pillow" },
     @{ import = "pystray";         pip = "pystray" },
     @{ import = "sherpa_onnx";     pip = "sherpa-onnx" },
-    @{ import = "huggingface_hub"; pip = "huggingface_hub" }
+    @{ import = "huggingface_hub"; pip = "huggingface_hub" },
+    @{ import = "llama_cpp";       pip = "llama-cpp-python" }
 )
 
 foreach ($pkg in $packages) {
@@ -29,5 +30,5 @@ foreach ($pkg in $packages) {
 }
 
 Write-Host ""
-Write-Host "    NOTE: The Whisper model (~1.5 GB) downloads automatically on first use." -ForegroundColor DarkGray
-Write-Host "    It is cached in %USERPROFILE%\.cache\huggingface after the first run." -ForegroundColor DarkGray
+Write-Host "    NOTE: Whisper and formatter models download automatically on first use." -ForegroundColor DarkGray
+Write-Host "    They are cached under %USERPROFILE%\.cache\huggingface and %LOCALAPPDATA%\voice-type\llm-models." -ForegroundColor DarkGray
