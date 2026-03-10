@@ -51,6 +51,21 @@ public sealed class MetricsSnapshot {
 // LiveMetricsSource -- PerformanceCounter + NVML backed source
 // =============================================================================
 public sealed class LiveMetricsSource : IMetricsSource {
+    sealed class NetworkCounters : IDisposable {
+        public readonly PerformanceCounter Up;
+        public readonly PerformanceCounter Down;
+
+        public NetworkCounters(string instanceName) {
+            Up = new PerformanceCounter("Network Interface", "Bytes Sent/sec", instanceName, true);
+            Down = new PerformanceCounter("Network Interface", "Bytes Received/sec", instanceName, true);
+        }
+
+        public void Dispose() {
+            if (Up != null) Up.Dispose();
+            if (Down != null) Down.Dispose();
+        }
+    }
+
     // -- Current values (written by timer tick, read by paint -- same UI thread)
     float   _cpuTotal;
     float[] _cpuCores;   // one entry per logical core
@@ -69,7 +84,7 @@ public sealed class LiveMetricsSource : IMetricsSource {
     PerformanceCounter    _pcCpuTotal;
     PerformanceCounter[]  _pcCores;
     PerformanceCounter    _pcMem;
-    PerformanceCounter    _pcNetUp, _pcNetDn;
+    NetworkCounters[]     _netCounters;
     ulong  _memTotalMb;
     IntPtr _nvDev;
     bool   _disposed;
@@ -118,7 +133,12 @@ public sealed class LiveMetricsSource : IMetricsSource {
         _pcCpuTotal.NextValue();
         if (_pcCores != null) foreach (var p in _pcCores) p.NextValue();
         _pcMem.NextValue();
-        if (_pcNetUp != null) { _pcNetUp.NextValue(); _pcNetDn.NextValue(); }
+        if (_netCounters != null) {
+            for (int i = 0; i < _netCounters.Length; i++) {
+                _netCounters[i].Up.NextValue();
+                _netCounters[i].Down.NextValue();
+            }
+        }
     }
 
     void InitNet(string adapter) {
@@ -134,10 +154,11 @@ public sealed class LiveMetricsSource : IMetricsSource {
                 : all.Where(n =>
                     n.IndexOf(adapter, StringComparison.OrdinalIgnoreCase) >= 0).ToArray();
             if (pool.Length == 0) pool = all;
-            string pick = pool[0];
-            _pcNetUp = new PerformanceCounter("Network Interface", "Bytes Sent/sec",     pick, true);
-            _pcNetDn = new PerformanceCounter("Network Interface", "Bytes Received/sec", pick, true);
-            _pcNetUp.NextValue(); _pcNetDn.NextValue();
+            _netCounters = pool.Select(n => new NetworkCounters(n)).ToArray();
+            for (int i = 0; i < _netCounters.Length; i++) {
+                _netCounters[i].Up.NextValue();
+                _netCounters[i].Down.NextValue();
+            }
         } catch { /* silently skip network if counters unavailable */ }
     }
 
@@ -158,9 +179,22 @@ public sealed class LiveMetricsSource : IMetricsSource {
             : 0f;
         _hMem.Push(_memPct);
 
-        if (_pcNetUp != null) {
-            _netUpBps = Math.Max(0f, _pcNetUp.NextValue());
-            _netDnBps = Math.Max(0f, _pcNetDn.NextValue());
+        if (_netCounters != null && _netCounters.Length > 0) {
+            float bestUp = 0f;
+            float bestDn = 0f;
+            float bestTotal = -1f;
+            for (int i = 0; i < _netCounters.Length; i++) {
+                float up = Math.Max(0f, _netCounters[i].Up.NextValue());
+                float dn = Math.Max(0f, _netCounters[i].Down.NextValue());
+                float total = up + dn;
+                if (total > bestTotal) {
+                    bestTotal = total;
+                    bestUp = up;
+                    bestDn = dn;
+                }
+            }
+            _netUpBps = bestUp;
+            _netDnBps = bestDn;
         }
         _hNetUp.Push(_netUpBps);
         _hNetDn.Push(_netDnBps);
@@ -222,8 +256,7 @@ public sealed class LiveMetricsSource : IMetricsSource {
         if (_pcCpuTotal != null) _pcCpuTotal.Dispose();
         if (_pcCores != null) foreach (var p in _pcCores) if (p != null) p.Dispose();
         if (_pcMem   != null) _pcMem.Dispose();
-        if (_pcNetUp != null) _pcNetUp.Dispose();
-        if (_pcNetDn != null) _pcNetDn.Dispose();
+        if (_netCounters != null) foreach (var n in _netCounters) if (n != null) n.Dispose();
         if (_nvmlOk) { try { Native.NvmlShutdown(); } catch { } }
     }
 }

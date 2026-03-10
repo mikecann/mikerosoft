@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using Microsoft.Win32;
 using TaskMon;
@@ -13,7 +16,8 @@ static class IntegrationTests {
         return TestRunner.Run("TaskStats.IntegrationTests", new List<NamedTest> {
             new NamedTest("FileSettingsStore persists settings to disk", FileSettingsStorePersistsSettingsToDisk),
             new NamedTest("RegistryStartupRegistration writes and removes startup value", RegistryStartupRegistrationWritesAndRemovesStartupValue),
-            new NamedTest("LiveMetricsSource samples Windows counters", LiveMetricsSourceSamplesWindowsCounters)
+            new NamedTest("LiveMetricsSource samples Windows counters", LiveMetricsSourceSamplesWindowsCounters),
+            new NamedTest("LiveMetricsSource auto mode follows the busiest active network adapter", LiveMetricsSourceAutoModeFollowsBusiestActiveNetworkAdapter)
         });
     }
 
@@ -88,6 +92,121 @@ static class IntegrationTests {
             }
         } catch (Exception ex) {
             AssertEx.Skip("Skipped live counter sampling because the machine did not expose the required Windows counters cleanly: " + ex.Message);
+        }
+    }
+
+    static void LiveMetricsSourceAutoModeFollowsBusiestActiveNetworkAdapter() {
+        using (var source = new LiveMetricsSource("auto")) {
+            // Warm up the rate-based counters before trying to observe real traffic.
+            Thread.Sleep(1200);
+            source.Sample();
+
+            NetworkBurstSample observed = null;
+            try {
+                for (int i = 0; i < 3; i++) {
+                    observed = CaptureBurstSample(source);
+                    if (observed != null && observed.BusiestTotalBps >= 4096f) break;
+                }
+            } catch (Exception ex) {
+                AssertEx.Skip("Skipped auto network selection test because the machine could not produce reliable live network traffic: " + ex.Message);
+            }
+
+            if (observed == null || observed.BusiestTotalBps < 4096f) {
+                AssertEx.Skip("Skipped auto network selection test because the machine did not expose enough measurable network activity.");
+            }
+
+            float sourceTotal = observed.SourceUpBps + observed.SourceDnBps;
+            AssertEx.True(sourceTotal > 0f,
+                string.Format(
+                    "Auto network selection should observe live traffic when adapter '{0}' is active. Busiest adapter saw {1:F0}B/s up and {2:F0}B/s down, but LiveMetricsSource stayed at zero.",
+                    observed.BusiestName, observed.BusiestUpBps, observed.BusiestDnBps));
+        }
+    }
+
+    sealed class NetworkBurstSample {
+        public string BusiestName;
+        public float BusiestUpBps;
+        public float BusiestDnBps;
+        public float BusiestTotalBps;
+        public float SourceUpBps;
+        public float SourceDnBps;
+    }
+
+    sealed class NetworkCounterProbe : IDisposable {
+        public readonly string Name;
+        public readonly PerformanceCounter Up;
+        public readonly PerformanceCounter Down;
+
+        public NetworkCounterProbe(string name) {
+            Name = name;
+            Up = new PerformanceCounter("Network Interface", "Bytes Sent/sec", name, true);
+            Down = new PerformanceCounter("Network Interface", "Bytes Received/sec", name, true);
+        }
+
+        public void Dispose() {
+            if (Up != null) Up.Dispose();
+            if (Down != null) Down.Dispose();
+        }
+    }
+
+    static NetworkBurstSample CaptureBurstSample(LiveMetricsSource source) {
+        var probes = CreateNetworkCounterProbes();
+        try {
+            if (probes.Count == 0) return null;
+
+            for (int i = 0; i < probes.Count; i++) {
+                probes[i].Up.NextValue();
+                probes[i].Down.NextValue();
+            }
+
+            GenerateNetworkTrafficBurst();
+            Thread.Sleep(1200);
+
+            var busiest = probes
+                .Select(p => new {
+                    p.Name,
+                    Up = Math.Max(0f, p.Up.NextValue()),
+                    Down = Math.Max(0f, p.Down.NextValue())
+                })
+                .OrderByDescending(p => p.Up + p.Down)
+                .FirstOrDefault();
+            var snapshot = source.Sample();
+
+            if (busiest == null) return null;
+            return new NetworkBurstSample {
+                BusiestName = busiest.Name,
+                BusiestUpBps = busiest.Up,
+                BusiestDnBps = busiest.Down,
+                BusiestTotalBps = busiest.Up + busiest.Down,
+                SourceUpBps = snapshot.NetUpBps,
+                SourceDnBps = snapshot.NetDnBps
+            };
+        } finally {
+            for (int i = 0; i < probes.Count; i++) probes[i].Dispose();
+        }
+    }
+
+    static List<NetworkCounterProbe> CreateNetworkCounterProbes() {
+        var category = new PerformanceCounterCategory("Network Interface");
+        var names = category.GetInstanceNames()
+            .Where(name =>
+                name.IndexOf("Loopback", StringComparison.OrdinalIgnoreCase) < 0 &&
+                name.IndexOf("ISATAP", StringComparison.OrdinalIgnoreCase) < 0 &&
+                name.IndexOf("Pseudo", StringComparison.OrdinalIgnoreCase) < 0 &&
+                name.IndexOf("Teredo", StringComparison.OrdinalIgnoreCase) < 0 &&
+                name.IndexOf("6to4", StringComparison.OrdinalIgnoreCase) < 0)
+            .ToArray();
+        if (names.Length == 0) names = category.GetInstanceNames();
+        return names.Select(name => new NetworkCounterProbe(name)).ToList();
+    }
+
+    static void GenerateNetworkTrafficBurst() {
+        using (var client = new HttpClient()) {
+            client.Timeout = TimeSpan.FromSeconds(10);
+            for (int i = 0; i < 4; i++) {
+                var bytes = client.GetByteArrayAsync("https://example.com/").GetAwaiter().GetResult();
+                AssertEx.True(bytes != null && bytes.Length > 0, "The network burst should download at least some bytes");
+            }
         }
     }
 }
