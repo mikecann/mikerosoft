@@ -19,12 +19,11 @@ function Load-DotEnv($RepoRoot) {
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..\..")).Path
 $ToolRoot   = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Artifacts  = Join-Path $PSScriptRoot "artifacts"
-$MsBuild    = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe'
 $VisualProj = Join-Path $ToolRoot 'tests\visual\TaskStats.VisualHarness.csproj'
 $VisualExe  = Join-Path $env:LOCALAPPDATA 'task-stats-tests\visual\TaskStats.VisualHarness.exe'
 
-if (-not (Test-Path $MsBuild)) {
-    throw "MSBuild.exe not found at $MsBuild"
+if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+    throw "dotnet SDK not found. Install .NET 8 SDK and try again."
 }
 
 Load-DotEnv $RepoRoot
@@ -35,11 +34,11 @@ if (Test-Path $Artifacts) {
 New-Item -ItemType Directory -Path $Artifacts | Out-Null
 
 Write-Host "Building task-stats..." -ForegroundColor Cyan
-& $MsBuild (Join-Path $ToolRoot 'task-stats.csproj') /nologo /v:minimal /p:Configuration=Release
+dotnet build (Join-Path $ToolRoot 'task-stats.csproj') -c Release -nologo -v minimal
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "Building visual harness..." -ForegroundColor Cyan
-& $MsBuild $VisualProj /nologo /v:minimal /p:Configuration=Release
+dotnet build $VisualProj -c Release -nologo -v minimal
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "Capturing deterministic screenshots..." -ForegroundColor Cyan

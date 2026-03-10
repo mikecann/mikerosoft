@@ -1,32 +1,21 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" DefaultTargets="Build"
-         xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <AssemblyName>TaskStats.VisualHarness</AssemblyName>
     <OutputType>Exe</OutputType>
-    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>TaskMon.VisualHarness</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
     <OutputPath>$(LOCALAPPDATA)\task-stats-tests\visual\</OutputPath>
-    <BaseIntermediateOutputPath>$(LOCALAPPDATA)\task-stats-tests\visual-obj\</BaseIntermediateOutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Drawing" />
-    <Reference Include="System.Windows.Forms" />
-    <Reference Include="task-stats">
-      <HintPath>$(LOCALAPPDATA)\task-stats\task-stats.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
+    <ProjectReference Include="..\..\task-stats.csproj" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="Program.cs" />
-  </ItemGroup>
-
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 
 </Project>

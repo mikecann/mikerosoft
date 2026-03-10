@@ -14,41 +14,29 @@ if (Test-Path $nvml) {
 }
 
 # ---------------------------------------------------------------------------
-# MSBuild -- required to compile task-stats.csproj
+# dotnet SDK -- required to compile task-stats.csproj
 # ---------------------------------------------------------------------------
-$msbuild = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe'
-if (-not (Test-Path $msbuild)) {
-    Write-Host "  [task-stats] ERROR: MSBuild.exe not found at $msbuild" -ForegroundColor Red
-    Write-Host "               .NET Framework 4 is required. It ships with Windows 10/11." -ForegroundColor DarkGray
+$dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+if (-not $dotnet) {
+    Write-Host "  [task-stats] ERROR: dotnet SDK not found." -ForegroundColor Red
+    Write-Host "               Install .NET 8 SDK: winget install Microsoft.DotNet.SDK.8" -ForegroundColor DarkGray
     exit 1
 }
-Write-Host "  [task-stats] MSBuild found." -ForegroundColor Green
+Write-Host "  [task-stats] dotnet SDK found." -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
-# .NET 4.8.1 Developer Pack -- optional, silences the MSB3644 build warning.
-# Without it, MSBuild falls back to GAC DLLs (works fine, just noisy).
+# Build task-stats.exe if it doesn't exist yet (first install on a fresh clone)
 # ---------------------------------------------------------------------------
-$refPath = 'C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework'
-$hasRefAsm = Test-Path "$refPath\v4.8.1"
-if (-not $hasRefAsm) {
-    Write-Host "  [task-stats] NOTE: .NET Framework targeting pack not installed." -ForegroundColor DarkGray
-    Write-Host "               Build will show warning MSB3644 (harmless -- MSBuild uses GAC fallback)." -ForegroundColor DarkGray
-    Write-Host "               To silence it: install the .NET 4.8.1 Developer Pack from https://dotnet.microsoft.com/en-us/download/dotnet-framework/net481" -ForegroundColor DarkGray
-}
-
-# ---------------------------------------------------------------------------
-# Build task-stats.dll if it doesn't exist yet (first install on a fresh clone)
-# ---------------------------------------------------------------------------
-$dll = Join-Path $env:LOCALAPPDATA 'task-stats\task-stats.dll'
-if (Test-Path $dll) {
-    Write-Host "  [task-stats] task-stats.dll already built -- skipping build." -ForegroundColor Green
+$exe = Join-Path $env:LOCALAPPDATA 'task-stats\task-stats.exe'
+if (Test-Path $exe) {
+    Write-Host "  [task-stats] task-stats.exe already built -- skipping build." -ForegroundColor Green
 } else {
-    Write-Host "  [task-stats] task-stats.dll not found -- building now..." -ForegroundColor Yellow
+    Write-Host "  [task-stats] task-stats.exe not found -- building now..." -ForegroundColor Yellow
     $proj = Join-Path $PSScriptRoot 'task-stats.csproj'
-    & $msbuild $proj /nologo /v:minimal /p:Configuration=Release
+    & dotnet build $proj -c Release -nologo -v minimal
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  [task-stats] ERROR: Build failed. See errors above." -ForegroundColor Red
         exit 1
     }
-    Write-Host "  [task-stats] Build succeeded: $dll" -ForegroundColor Green
+    Write-Host "  [task-stats] Build succeeded: $exe" -ForegroundColor Green
 }

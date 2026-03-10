@@ -1,58 +1,33 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-  task-stats.csproj - MSBuild project (no .NET SDK required)
-  Compiler:  C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe
-  Output:    %LOCALAPPDATA%\task-stats\task-stats.dll
-  Build:     run build.bat  (or build-and-run.bat for dev cycle)
--->
-<Project ToolsVersion="4.0" DefaultTargets="Build"
-         xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <AssemblyName>task-stats</AssemblyName>
-    <OutputType>Library</OutputType>
-    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>TaskMon</RootNamespace>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
     <Optimize>true</Optimize>
-    <!-- Output DLL directly to %LOCALAPPDATA%\task-stats\ (same path task-stats.ps1 loads from) -->
-    <OutputPath>$(LOCALAPPDATA)\task-stats\</OutputPath>
-    <!-- Keep intermediate obj files outside the repo -->
-    <BaseIntermediateOutputPath>$(LOCALAPPDATA)\task-stats\obj\</BaseIntermediateOutputPath>
-    <!-- task-stats always loads inside 64-bit PowerShell, so target x64 explicitly.
-         This fixes MSB3270 (MSIL vs AMD64 reference mismatch). -->
     <PlatformTarget>x64</PlatformTarget>
-    <!-- MSB3644 (.NET 4.8.1 targeting pack not installed) is expected and harmless:
-         MSBuild falls back to GAC DLLs, which are the same files we run against.
-         MSBuildWarningsAsMessages does not work in MSBuild 4; ignore this warning. -->
+    <OutputPath>$(LOCALAPPDATA)\task-stats\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <Reference Include="System.Drawing" />
-    <Reference Include="System.Windows.Forms" />
+    <Compile Remove="diag.cs" />
+    <Compile Remove="diag2.cs" />
+    <Compile Remove="diag3.cs" />
+    <Compile Remove="tests\**\*.cs" />
   </ItemGroup>
 
-  <!-- All .cs files in this folder are compiled together -->
-  <ItemGroup>
-    <Compile Include="App.cs" />
-    <Compile Include="Metrics.cs" />
-    <Compile Include="Native.cs" />
-    <Compile Include="OverlayContracts.cs" />
-    <Compile Include="OverlayForm.cs" />
-    <Compile Include="OverlayFormatting.cs" />
-    <Compile Include="OverlayLayout.cs" />
-    <Compile Include="Settings.cs" />
-    <Compile Include="SettingsForm.cs" />
-    <Compile Include="SettingsStore.cs" />
-    <Compile Include="StartupRegistration.cs" />
-  </ItemGroup>
-
-  <!-- PNG icons are embedded as manifest resources (TaskMon.icons.<name>.png) -->
   <ItemGroup>
     <EmbeddedResource Include="icons\*.png" />
   </ItemGroup>
 
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <ItemGroup>
+    <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="10.0.3" />
+  </ItemGroup>
 
 </Project>

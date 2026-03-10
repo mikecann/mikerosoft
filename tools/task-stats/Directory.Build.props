@@ -1,0 +1,19 @@
+<Project>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'task-stats'">
+    <BaseIntermediateOutputPath>$(LOCALAPPDATA)\task-stats\obj\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'TaskStats.UnitTests'">
+    <BaseIntermediateOutputPath>$(LOCALAPPDATA)\task-stats-tests\unit-obj\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'TaskStats.IntegrationTests'">
+    <BaseIntermediateOutputPath>$(LOCALAPPDATA)\task-stats-tests\integration-obj\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'TaskStats.VisualHarness'">
+    <BaseIntermediateOutputPath>$(LOCALAPPDATA)\task-stats-tests\visual-obj\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+
+</Project>

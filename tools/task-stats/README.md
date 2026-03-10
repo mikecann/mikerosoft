@@ -46,9 +46,10 @@ More detail lives in [`tests/README.md`](tests/README.md).
 
 ## Architecture
 
-- Built with MSBuild against .NET Framework 4.8.1 - no .NET SDK required.
-- Compiled to `%LOCALAPPDATA%\task-stats\task-stats.dll`; `task-stats.ps1` loads the DLL and calls `App::Run()`.
-- `task-stats.vbs` is the silent launcher (no console window flash).
+- Built with `dotnet build` against `net8.0-windows`.
+- Compiled to `%LOCALAPPDATA%\task-stats\task-stats.exe`.
+- `task-stats.vbs` is the silent launcher and starts the built EXE with no console window flash.
+- `task-stats.ps1` still exists as a compatibility wrapper, but the primary host is now the EXE.
 
 | File | Purpose |
 |---|---|

@@ -174,12 +174,11 @@ The PNGs live in `task-stats\icons\` and are embedded into the DLL as manifest r
 `<EmbeddedResource Include="icons\*.png" />` in `task-stats.csproj`.
 
 ### Architecture
-- **No .NET SDK required.** Built by `MSBuild.exe` targeting .NET Framework 4.8.1
-  (`C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe`).
-- Project file: `task-stats\task-stats.csproj` (targets .NET Framework 4.8.1, embeds `icons\*.png` as manifest resources).
-- Compiled DLL is cached at `%LOCALAPPDATA%\task-stats\task-stats.dll`.
-- `task-stats.ps1` is a thin launcher - it loads the DLL and calls `[TaskMon.App]::Run()`.
-  No compilation at runtime, so startup is instant and no OOM risk in Cursor.
+- **Requires .NET 8 SDK for builds.** Build with `dotnet build`; runtime host is `net8.0-windows`.
+- Project file: `task-stats\task-stats.csproj` (SDK-style, targets `net8.0-windows`, embeds `icons\*.png` as manifest resources).
+- Compiled output is cached at `%LOCALAPPDATA%\task-stats\task-stats.exe`.
+- `task-stats.vbs` is the primary silent launcher and starts the built EXE directly.
+- `task-stats.ps1` is only a compatibility wrapper around the EXE, not the primary host.
 
 ### Dev workflow
 ```
@@ -234,7 +233,7 @@ cd tools\task-stats
 ### Important paths for task-stats
 | Path | What it is |
 |---|---|
-| `tools\task-stats\task-stats.csproj` | MSBuild project file |
+| `tools\task-stats\task-stats.csproj` | SDK-style .NET project file |
 | `tools\task-stats\Native.cs` | Win32 P/Invoke + NVML declarations |
 | `tools\task-stats\Settings.cs` | JSON-backed settings |
 | `tools\task-stats\Metrics.cs` | CircularBuffer + PerformanceCounter/NVML sampling |
@@ -245,7 +244,7 @@ cd tools\task-stats
 | `tools\task-stats\build.bat` | Builds via MSBuild.exe, kills old instance first |
 | `tools\task-stats\build-and-run.bat` | Full dev cycle: kill + build + launch |
 | `tools\task-stats\kill.bat` | Kills task-stats by matching `*task-stats.ps1*` in WMI |
-| `%LOCALAPPDATA%\task-stats\task-stats.dll` | Compiled output (not in git) |
+| `%LOCALAPPDATA%\task-stats\task-stats.exe` | Compiled output (not in git) |
 | `%LOCALAPPDATA%\task-stats\settings.json` | User settings (not in git) |
 | `C:\Windows\System32\nvml.dll` | NVIDIA GPU monitoring (ships with drivers) |
 

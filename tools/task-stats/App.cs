@@ -23,10 +23,10 @@ class DarkRenderer : ToolStripProfessionalRenderer {
 }
 
 // =============================================================================
-// App -- entry point called by task-stats.ps1
+// App -- app bootstrap called by the EXE host
 // =============================================================================
 public static class App {
-    // scriptDir is passed from task-stats.ps1 ($PSScriptRoot) so we can find task-stats.vbs.
+    // scriptDir is passed by the EXE host so we can find task-stats.vbs.
     public static void Run(string scriptDir = null) {
         Run(scriptDir, new FileSettingsStore(), new RegistryStartupRegistration(), null);
     }

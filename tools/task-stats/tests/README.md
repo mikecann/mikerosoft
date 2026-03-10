@@ -52,7 +52,7 @@ The visual stack has two parts:
    This launches `OverlayForm` with fake metrics, fixed settings, and deterministic bounds so the screenshots are stable.
 
 2. `tests\e2e\run-e2e.ps1`
-   This builds the app, captures screenshots into `tests\e2e\artifacts`, checks that the artifacts exist, then optionally asks OpenRouter to judge the screenshots.
+   This builds the app with `dotnet build`, captures screenshots into `tests\e2e\artifacts`, checks that the artifacts exist, then optionally asks OpenRouter to judge the screenshots.
 
 Run it with:
 
