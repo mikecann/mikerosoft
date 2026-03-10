@@ -234,16 +234,17 @@ cd tools\task-stats
 | Path | What it is |
 |---|---|
 | `tools\task-stats\task-stats.csproj` | SDK-style .NET project file |
-| `tools\task-stats\Native.cs` | Win32 P/Invoke + NVML declarations |
-| `tools\task-stats\Settings.cs` | JSON-backed settings |
-| `tools\task-stats\Metrics.cs` | CircularBuffer + PerformanceCounter/NVML sampling |
-| `tools\task-stats\OverlayForm.cs` | Layered window rendering + hit-test + menu |
-| `tools\task-stats\SettingsForm.cs` | Tabbed settings dialog |
-| `tools\task-stats\App.cs` | DarkRenderer + App entry point |
+| `tools\task-stats\src\Native.cs` | Win32 P/Invoke + NVML declarations |
+| `tools\task-stats\src\Settings.cs` | JSON-backed settings |
+| `tools\task-stats\src\Metrics.cs` | CircularBuffer + PerformanceCounter/NVML sampling |
+| `tools\task-stats\src\OverlayForm.cs` | Layered window rendering + hit-test + menu |
+| `tools\task-stats\src\SettingsForm.cs` | Tabbed settings dialog |
+| `tools\task-stats\src\App.cs` | DarkRenderer + App entry point |
+| `tools\task-stats\src\Program.cs` | EXE entry point and single-instance guard |
 | `tools\task-stats\icons\` | famfamfam silk icons - CC BY 2.5, https://www.famfamfam.com/lab/icons/silk/ |
-| `tools\task-stats\build.bat` | Builds via MSBuild.exe, kills old instance first |
+| `tools\task-stats\build.bat` | Builds via `dotnet build` |
 | `tools\task-stats\build-and-run.bat` | Full dev cycle: kill + build + launch |
-| `tools\task-stats\kill.bat` | Kills task-stats by matching `*task-stats.ps1*` in WMI |
+| `tools\task-stats\kill.bat` | Kills `task-stats.exe` and legacy PowerShell-hosted instances |
 | `%LOCALAPPDATA%\task-stats\task-stats.exe` | Compiled output (not in git) |
 | `%LOCALAPPDATA%\task-stats\settings.json` | User settings (not in git) |
 | `C:\Windows\System32\nvml.dll` | NVIDIA GPU monitoring (ships with drivers) |

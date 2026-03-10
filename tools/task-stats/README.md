@@ -54,12 +54,13 @@ More detail lives in [`tests/README.md`](tests/README.md).
 | File | Purpose |
 |---|---|
 | `task-stats.csproj` | MSBuild project |
-| `Native.cs` | Win32 P/Invoke + NVML declarations |
-| `Settings.cs` | JSON-backed settings (`%LOCALAPPDATA%\task-stats\settings.json`) |
-| `Metrics.cs` | Circular buffer + PerformanceCounter/NVML sampling |
-| `OverlayForm.cs` | Layered window, rendering, hit-test, right-click menu |
-| `SettingsForm.cs` | Tabbed settings dialog |
-| `App.cs` | DarkRenderer + entry point |
+| `src\Native.cs` | Win32 P/Invoke + NVML declarations |
+| `src\Settings.cs` | JSON-backed settings (`%LOCALAPPDATA%\task-stats\settings.json`) |
+| `src\Metrics.cs` | Circular buffer + PerformanceCounter/NVML sampling |
+| `src\OverlayForm.cs` | Layered window, rendering, hit-test, right-click menu |
+| `src\SettingsForm.cs` | Tabbed settings dialog |
+| `src\App.cs` | DarkRenderer + entry point |
+| `src\Program.cs` | EXE entry point and single-instance guard |
 | `icons\` | famfamfam silk icons (CC BY 2.5) embedded as manifest resources |
 | `build.bat` | Compile only |
 | `build-and-run.bat` | Kill + compile + launch |
