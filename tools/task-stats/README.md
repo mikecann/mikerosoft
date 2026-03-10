@@ -27,6 +27,23 @@ build-and-run.bat   # kill old instance + compile + launch
 
 After editing any `.cs` file, just re-run `build-and-run.bat`.
 
+## Tests
+
+```bat
+cd tools\task-stats
+run-unit-tests.bat
+run-integration-tests.bat
+run-tests.bat
+run-e2e-tests.bat
+```
+
+- `run-unit-tests.bat` checks the pure logic.
+- `run-integration-tests.bat` checks the Windows-backed seams.
+- `run-tests.bat` runs the non-AI suite.
+- `run-e2e-tests.bat` captures deterministic screenshots and optionally asks OpenRouter to judge them.
+
+More detail lives in [`tests/README.md`](tests/README.md).
+
 ## Architecture
 
 - Built with MSBuild against .NET Framework 4 - no .NET SDK required.

@@ -1,8 +1,6 @@
 using System;
 using System.Drawing;
-using System.IO;
 using System.Windows.Forms;
-using Microsoft.Win32;
 
 namespace TaskMon {
 
@@ -28,18 +26,21 @@ class DarkRenderer : ToolStripProfessionalRenderer {
 // App -- entry point called by task-stats.ps1
 // =============================================================================
 public static class App {
-    const string REG_KEY  = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string REG_NAME = "task-stats";
-
     // scriptDir is passed from task-stats.ps1 ($PSScriptRoot) so we can find task-stats.vbs.
     public static void Run(string scriptDir = null) {
+        Run(scriptDir, new FileSettingsStore(), new RegistryStartupRegistration(), null);
+    }
+
+    internal static void Run(string scriptDir, ISettingsStore settingsStore,
+                             IStartupRegistration startupRegistration,
+                             IMetricsSource metricsSource) {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        var s = Settings.Load();
+        var s = settingsStore != null ? settingsStore.Load() : Settings.Load();
         // Apply startup registration on every launch so it stays in sync with the setting.
         if (scriptDir != null)
-            ApplyStartup(s.RunOnStartup, scriptDir);
-        using (var f = new OverlayForm(s, scriptDir)) {
+            ApplyStartup(s.RunOnStartup, scriptDir, startupRegistration);
+        using (var f = new OverlayForm(s, scriptDir, metricsSource)) {
             f.Show();
             Application.Run(f);
         }
@@ -48,18 +49,12 @@ public static class App {
     // Adds or removes the HKCU Run entry.
     // cmd = wscript.exe "<path to taskmon.vbs>"
     internal static void ApplyStartup(bool enable, string scriptDir) {
-        try {
-            using (var key = Registry.CurrentUser.OpenSubKey(REG_KEY, writable: true)) {
-                if (key == null) return;
-                if (enable) {
-                    var vbs = Path.Combine(scriptDir, "task-stats.vbs");
-                    key.SetValue(REG_NAME,
-                        string.Format("wscript.exe \"{0}\"", vbs));
-                } else {
-                    key.DeleteValue(REG_NAME, throwOnMissingValue: false);
-                }
-            }
-        } catch { }
+        ApplyStartup(enable, scriptDir, new RegistryStartupRegistration());
+    }
+
+    internal static void ApplyStartup(bool enable, string scriptDir, IStartupRegistration startupRegistration) {
+        try { if (startupRegistration != null) startupRegistration.Apply(enable, scriptDir); }
+        catch { }
     }
 }
 

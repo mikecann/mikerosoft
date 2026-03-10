@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -41,30 +40,38 @@ public class Settings {
     public string ColorGpuTemp  = "#FFDD44"; // GPU temperature (distinct from util)
     public string ColorMemory   = "#CC44FF";
 
-    // -- Persistence ----------------------------------------------------------
-    static string FilePath { get {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "task-stats", "settings.json");
-    }}
-
     public static Settings Load() {
-        try { if (File.Exists(FilePath)) return Parse(File.ReadAllText(FilePath)); }
-        catch { }
-        return new Settings();
+        return new FileSettingsStore().Load();
     }
 
     public void Save() {
-        try {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
-            File.WriteAllText(FilePath, Serialize());
-        } catch { }
+        new FileSettingsStore().Save(this);
     }
 
     public Settings Clone() { return (Settings)MemberwiseClone(); }
 
+    public void CopyTo(Settings dest) {
+        dest.ShowNetUp = ShowNetUp;
+        dest.ShowNetDown = ShowNetDown;
+        dest.ShowCpu = ShowCpu;
+        dest.CpuMode = CpuMode;
+        dest.ShowGpuUtil = ShowGpuUtil;
+        dest.ShowGpuTemp = ShowGpuTemp;
+        dest.ShowMemory = ShowMemory;
+        dest.NetworkAdapter = NetworkAdapter;
+        dest.UpdateIntervalMs = UpdateIntervalMs;
+        dest.Opacity = Opacity;
+        dest.RunOnStartup = RunOnStartup;
+        dest.ColorNetUp = ColorNetUp;
+        dest.ColorNetDown = ColorNetDown;
+        dest.ColorCpu = ColorCpu;
+        dest.ColorGpu = ColorGpu;
+        dest.ColorGpuTemp = ColorGpuTemp;
+        dest.ColorMemory = ColorMemory;
+    }
+
     // Writes a richly commented JSON file so it's easy to hand-edit.
-    string Serialize() {
+    public string Serialize() {
         var b = new StringBuilder();
         b.AppendLine("{");
         b.AppendLine("  \"_info\": \"task-stats settings -- edit here or use right-click > Settings in the overlay\",");
@@ -131,7 +138,7 @@ public class Settings {
 
     // Minimal JSON parser -- handles the flat key/value structure we write above.
     // Ignores "_comment" keys and lines starting with "//".
-    static Settings Parse(string json) {
+    public static Settings Parse(string json) {
         var s = new Settings();
         foreach (Match m in Regex.Matches(json,
             "\"(\\w+)\"\\s*:\\s*(?:\"([^\"]*)\"|\\b(true|false)\\b|([\\d.]+))")) {

@@ -2,16 +2,10 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace TaskMon {
-
-// =============================================================================
-// Section -- identifies which overlay panel the user clicked
-// =============================================================================
-enum Section { None, NetUp, NetDown, Cpu, Gpu, Mem }
 
 // =============================================================================
 // DBPanel -- double-buffered Panel eliminates all GDI+ flicker
@@ -32,7 +26,10 @@ class DBPanel : Panel {
 // =============================================================================
 public class OverlayForm : Form {
     public  Settings S;
-    Metrics  _m;
+    readonly IMetricsSource _metricsSource;
+    readonly OverlayFormOptions _options;
+    readonly IProcessLauncher _processLauncher;
+    MetricsSnapshot _snapshot;
     internal string _scriptDir; // set by App.Run() -- needed to update startup reg entry
     internal System.Windows.Forms.Timer _timer;
     ContextMenuStrip _menu;
@@ -43,43 +40,46 @@ public class OverlayForm : Form {
     SolidBrush _dimBrush, _coreBgBrush;
     Pen        _divPen;
     Color      _cUp, _cDn, _cCpu, _cGpu, _cGpuTemp, _cMem;
-    float[]    _buf = new float[60]; // scratch buffer for CopyTo
 
     Native.LowLevelMouseProc _mouseProc;
     IntPtr _mouseHookId = IntPtr.Zero;
 
-    // -- Layout constants ------------------------------------------------------
-    const int SW     = 70;  // standard section width (px)
-    const int CBAR_W = 9;   // per-core bar width (px)
-    const int CBAR_G = 2;   // per-core bar gap (px)
-
-    public OverlayForm(Settings s, string scriptDir = null) {
+    public OverlayForm(Settings s, string scriptDir = null, IMetricsSource metricsSource = null,
+                       OverlayFormOptions options = null, IProcessLauncher processLauncher = null) {
         S          = s;
         _scriptDir = scriptDir;
-        _m         = new Metrics(s.NetworkAdapter);
+        _options = options ?? new OverlayFormOptions();
+        _processLauncher = processLauncher ?? new ProcessLauncher();
+        _metricsSource = metricsSource ?? new LiveMetricsSource(s.NetworkAdapter);
+        _snapshot = _metricsSource.Sample();
         AllocGdi();
 
         FormBorderStyle = FormBorderStyle.None;
         StartPosition   = FormStartPosition.Manual;
         ShowInTaskbar   = false;
-        BackColor       = Color.FromArgb(16, 16, 16); // Perfectly matches key to become visually transparent
-        TransparencyKey = Color.FromArgb(16, 16, 16);
+        BackColor       = Color.FromArgb(16, 16, 16);
+        if (_options.TransparentBackground)
+            TransparencyKey = Color.FromArgb(16, 16, 16);
         
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                  ControlStyles.OptimizedDoubleBuffer, true);
                  
         // We use a Low-Level Mouse Hook because perfectly keyed-out transparent pixels 
         // fall through the normal hit test and receive no Windows mouse messages.
-        _mouseProc = MouseHookCallback;
-        _mouseHookId = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, _mouseProc,
-            Native.GetModuleHandle(null), 0);
+        if (_options.InstallMouseHook) {
+            _mouseProc = MouseHookCallback;
+            _mouseHookId = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, _mouseProc,
+                Native.GetModuleHandle(null), 0);
+        }
 
         BuildMenu();
-        BuildNotifyIcon();
+        if (_options.CreateNotifyIcon) BuildNotifyIcon();
 
-        _timer = new System.Windows.Forms.Timer { Interval = Math.Max(250, s.UpdateIntervalMs) };
-        _timer.Tick += (o, e) => Tick();
-        _timer.Start();
+        if (_options.StartTimer) {
+            _timer = new System.Windows.Forms.Timer { Interval = Math.Max(250, s.UpdateIntervalMs) };
+            _timer.Tick += (o, e) => Tick();
+            _timer.Start();
+        }
     }
 
     protected override void OnHandleCreated(EventArgs e) {
@@ -89,20 +89,26 @@ public class OverlayForm : Form {
 
     protected override void OnShown(EventArgs e) {
         base.OnShown(e);
-        IntPtr trayWnd = Native.FindWindow("Shell_TrayWnd", null);
-        if (trayWnd != IntPtr.Zero) {
-            int style = Native.GetWindowLong(Handle, Native.GWL_STYLE);
-            style = (style & ~Native.WS_POPUP) | Native.WS_CHILD | Native.WS_VISIBLE | Native.WS_CLIPSIBLINGS;
-            Native.SetWindowLong(Handle, Native.GWL_STYLE, style);
-            Native.SetParent(Handle, trayWnd);
-            
-            byte globalAlpha = (byte)Math.Max(1, Math.Min(255, (int)(Clamp01(S.Opacity) * 255)));
-            // 0x00101010 is the COLORREF (0x00bbggrr) for RGB(16, 16, 16)
-            Native.SetLayeredWindowAttributes(Handle, 0x00101010, globalAlpha, Native.LWA_COLORKEY | Native.LWA_ALPHA);
-            
-            // Put our window at the top of the Z-order so it isn't hidden by the DesktopWindowContentBridge
-            Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 
-                Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+        if (_options.AttachToTaskbar) {
+            IntPtr trayWnd = Native.FindWindow("Shell_TrayWnd", null);
+            if (trayWnd != IntPtr.Zero) {
+                int style = Native.GetWindowLong(Handle, Native.GWL_STYLE);
+                style = (style & ~Native.WS_POPUP) | Native.WS_CHILD | Native.WS_VISIBLE | Native.WS_CLIPSIBLINGS;
+                Native.SetWindowLong(Handle, Native.GWL_STYLE, style);
+                Native.SetParent(Handle, trayWnd);
+                
+                byte globalAlpha = (byte)Math.Max(1, Math.Min(255, (int)(OverlayFormatting.ClampOpacity(S.Opacity) * 255)));
+                if (_options.TransparentBackground) {
+                    // 0x00101010 is the COLORREF (0x00bbggrr) for RGB(16, 16, 16)
+                    Native.SetLayeredWindowAttributes(Handle, 0x00101010, globalAlpha, Native.LWA_COLORKEY | Native.LWA_ALPHA);
+                } else {
+                    Native.SetLayeredWindowAttributes(Handle, 0, globalAlpha, Native.LWA_ALPHA);
+                }
+                
+                // Put our window at the top of the Z-order so it isn't hidden by the DesktopWindowContentBridge
+                Native.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 
+                    Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+            }
         }
         DoLayout();
     }
@@ -116,13 +122,25 @@ public class OverlayForm : Form {
     }}
 
     void Tick() {
-        _m.Sample();
+        RefreshNow();
+    }
+
+    public void RefreshNow() {
+        _snapshot = _metricsSource.Sample();
         DoLayout();
         Invalidate();
+        Update();
     }
 
     // Position the overlay just to the left of the system tray / clock area.
     internal void DoLayout() {
+        int w = OverlayLayout.CalculateWidth(S, _snapshot.CoreCount);
+        if (!_options.AttachToTaskbar) {
+            if (_options.FixedBounds.HasValue) Bounds = _options.FixedBounds.Value;
+            else Bounds = new Rectangle(100, 100, w, 40);
+            return;
+        }
+
         IntPtr trayWnd = Native.FindWindow("Shell_TrayWnd", null);
         if (trayWnd == IntPtr.Zero) return;
 
@@ -130,7 +148,6 @@ public class OverlayForm : Form {
         if (!Native.GetWindowRect(trayWnd, out trayRect)) return;
         int tbH = trayRect.Bottom - trayRect.Top;
 
-        int w = CalcW();
         int leftEdgeScreen = TrayLeftEdge(Screen.PrimaryScreen);
         int targetLeftScreen = leftEdgeScreen - w;
 
@@ -186,24 +203,6 @@ public class OverlayForm : Form {
         return scr.Bounds.Right;
     }
 
-    int CalcW() {
-        int w = 0;
-        if (S.ShowNetUp)   w += SW;
-        if (S.ShowNetDown) w += SW;
-        if (S.ShowCpu) {
-            if (S.CpuMode == "PerCore") {
-                // 24 cores -> 3 rows x 8 cols; width = cols * (barW + gap) - last gap + padding
-                int cols = (_m.CoreCount + 2) / 3;
-                w += 4 + cols * (CBAR_W + CBAR_G) - CBAR_G + 4;
-            } else {
-                w += SW;
-            }
-        }
-        if (S.ShowGpuUtil || S.ShowGpuTemp) w += SW;
-        if (S.ShowMemory)  w += SW;
-        return Math.Max(60, w);
-    }
-
     void AllocGdi() {
         _fLbl        = new Font("Segoe UI", 6.5f, FontStyle.Regular, GraphicsUnit.Point);
         _fVal        = new Font("Segoe UI", 7.5f, FontStyle.Bold,    GraphicsUnit.Point);
@@ -214,12 +213,12 @@ public class OverlayForm : Form {
     }
 
     internal void RefreshColors() {
-        _cUp  = ParseHex(S.ColorNetUp,   "#00FF88");
-        _cDn  = ParseHex(S.ColorNetDown, "#00AAFF");
-        _cCpu = ParseHex(S.ColorCpu,     "#FFB300");
-        _cGpu     = ParseHex(S.ColorGpu,     "#FF6B35");
-        _cGpuTemp = ParseHex(S.ColorGpuTemp, "#FFDD44");
-        _cMem     = ParseHex(S.ColorMemory,  "#CC44FF");
+        _cUp  = OverlayFormatting.ParseHex(S.ColorNetUp,   "#00FF88");
+        _cDn  = OverlayFormatting.ParseHex(S.ColorNetDown, "#00AAFF");
+        _cCpu = OverlayFormatting.ParseHex(S.ColorCpu,     "#FFB300");
+        _cGpu     = OverlayFormatting.ParseHex(S.ColorGpu,     "#FF6B35");
+        _cGpuTemp = OverlayFormatting.ParseHex(S.ColorGpuTemp, "#FFDD44");
+        _cMem     = OverlayFormatting.ParseHex(S.ColorMemory,  "#CC44FF");
     }
 
     IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
@@ -235,7 +234,7 @@ public class OverlayForm : Form {
                     _menu.Show(Cursor.Position);
                 } else if (wParam == (IntPtr)Native.WM_LBUTTONDOWN) {
                     var clPt = PointToClient(pt);
-                    LaunchForSection(HitTest(clPt.X));
+                    LaunchForSection(OverlayLayout.HitTest(S, _snapshot.CoreCount, clPt.X));
                 }
                 return new IntPtr(1); // Swallow the event
             }
@@ -251,7 +250,7 @@ public class OverlayForm : Form {
         if (d) {
             if (_timer  != null) { _timer.Stop();  _timer.Dispose(); }
             if (_notify != null) { _notify.Visible = false; _notify.Dispose(); }
-            if (_m           != null) _m.Dispose();
+            if (_metricsSource != null) _metricsSource.Dispose();
             if (_fLbl        != null) _fLbl.Dispose();
             if (_fVal        != null) _fVal.Dispose();
             if (_dimBrush    != null) _dimBrush.Dispose();
@@ -296,36 +295,13 @@ public class OverlayForm : Form {
         _notify.DoubleClick += (o, e) => OpenSettings();
     }
 
-    // Returns the pixel width of the CPU section (depends on CpuMode and core count).
-    int CpuSectionWidth() {
-        if (S.CpuMode == "PerCore") {
-            const int ROWS = 3;
-            int cols = (_m.CoreCount + ROWS - 1) / ROWS;
-            return 4 + cols * (CBAR_W + CBAR_G) - CBAR_G + 4;
-        }
-        return SW;
-    }
-
-    // Maps an X pixel coordinate (relative to the overlay) to a Section.
-    Section HitTest(int mouseX) {
-        int x = 0;
-        if (S.ShowNetUp)   { if (mouseX < x + SW)               return Section.NetUp;   x += SW; }
-        if (S.ShowNetDown) { if (mouseX < x + SW)               return Section.NetDown;  x += SW; }
-        if (S.ShowCpu)     { int cw = CpuSectionWidth();
-                             if (mouseX < x + cw)               return Section.Cpu;     x += cw; }
-        if (S.ShowGpuUtil || S.ShowGpuTemp)
-                           { if (mouseX < x + SW)               return Section.Gpu;     x += SW; }
-        if (S.ShowMemory)  { if (mouseX < x + SW)               return Section.Mem;              }
-        return Section.None;
-    }
-
     // Left-click on any panel opens Resource Monitor.
     void LaunchForSection(Section sec) {
         if (sec != Section.None) LaunchResmon();
     }
 
-    static void LaunchResmon()   { try { Process.Start("resmon.exe");   } catch { } }
-    static void LaunchTaskMgr()  { try { Process.Start("taskmgr.exe");  } catch { } }
+    void LaunchResmon()  { _processLauncher.Launch("resmon.exe"); }
+    void LaunchTaskMgr() { _processLauncher.Launch("taskmgr.exe"); }
 
     void BuildMenu() {
         _menu = new ContextMenuStrip {
@@ -378,28 +354,28 @@ public class OverlayForm : Form {
         int x = 0;
 
         if (S.ShowNetUp) {
-            string upVal = SpeedStr(_m.NetUpBps);
-            float upScale = Math.Max(100 * 1024f, _m.HNetUp.Max());
-            DrawSection(g, ref x, h, "UP \u2191", upVal, _cUp, _m.HNetUp, upScale, upVal);
+            string upVal = OverlayFormatting.SpeedStr(_snapshot.NetUpBps);
+            float upScale = Math.Max(100 * 1024f, OverlayFormatting.Max(_snapshot.HNetUp));
+            DrawSection(g, ref x, h, "UP \u2191", upVal, _cUp, _snapshot.HNetUp, upScale, upVal);
         }
         if (S.ShowNetDown) {
-            string dnVal = SpeedStr(_m.NetDnBps);
-            float dnScale = Math.Max(500 * 1024f, _m.HNetDn.Max());
-            DrawSection(g, ref x, h, "DL \u2193", dnVal, _cDn, _m.HNetDn, dnScale, dnVal);
+            string dnVal = OverlayFormatting.SpeedStr(_snapshot.NetDnBps);
+            float dnScale = Math.Max(500 * 1024f, OverlayFormatting.Max(_snapshot.HNetDn));
+            DrawSection(g, ref x, h, "DL \u2193", dnVal, _cDn, _snapshot.HNetDn, dnScale, dnVal);
         }
         if (S.ShowCpu) {
             if (S.CpuMode == "PerCore")
                 DrawCoreGrid(g, ref x, h);
             else {
-                string cpuVal = string.Format("{0:F0}%", _m.CpuTotal);
-                DrawSection(g, ref x, h, "CPU", cpuVal, _cCpu, _m.HCpu, 100f, cpuVal);
+                string cpuVal = string.Format("{0:F0}%", _snapshot.CpuTotal);
+                DrawSection(g, ref x, h, "CPU", cpuVal, _cCpu, _snapshot.HCpu, 100f, cpuVal);
             }
         }
         if (S.ShowGpuUtil || S.ShowGpuTemp)
             DrawGpuSection(g, ref x, h);
         if (S.ShowMemory) {
-            string memVal = string.Format("{0:F0}%", _m.MemPct);
-            DrawSection(g, ref x, h, "MEM", memVal, _cMem, _m.HMem, 100f, memVal);
+            string memVal = string.Format("{0:F0}%", _snapshot.MemPct);
+            DrawSection(g, ref x, h, "MEM", memVal, _cMem, _snapshot.HMem, 100f, memVal);
         }
     }
 
@@ -407,20 +383,20 @@ public class OverlayForm : Form {
     // colour and temp in a distinct colour so they're easy to tell apart at a glance.
     void DrawGpuSection(Graphics g, ref int x, int h) {
         if (x > 0) g.DrawLine(_divPen, x, 2, x, h - 2);
-        DrawSparkline(g, _m.HGpu, new Rectangle(x, 0, SW, h), _cGpu, 100f);
+        DrawSparkline(g, _snapshot.HGpu, new Rectangle(x, 0, OverlayLayout.StandardSectionWidth, h), _cGpu, 100f);
         var sfLblN = new StringFormat { Alignment = StringAlignment.Near,
                                         LineAlignment = StringAlignment.Near };
         var sfLblF = new StringFormat { Alignment = StringAlignment.Far,
                                         LineAlignment = StringAlignment.Near };
         g.DrawString("GPU", _fLbl, _dimBrush,
-            new RectangleF(x + 3, 1, SW - 6, h * 0.45f), sfLblN);
+            new RectangleF(x + 3, 1, OverlayLayout.StandardSectionWidth - 6, h * 0.45f), sfLblN);
         // Show util% (or temp if util is hidden) right-aligned in the label row.
         string gpuHdr = S.ShowGpuUtil
-            ? string.Format("{0:F0}%", _m.GpuUtil)
-            : string.Format("{0}\u00B0C", _m.GpuTempC);
+            ? string.Format("{0:F0}%", _snapshot.GpuUtil)
+            : string.Format("{0}\u00B0C", _snapshot.GpuTempC);
         using (var b = new SolidBrush(S.ShowGpuUtil ? _cGpu : _cGpuTemp))
             g.DrawString(gpuHdr, _fLbl, b,
-                new RectangleF(x + 3, 1, SW - 6, h * 0.45f), sfLblF);
+                new RectangleF(x + 3, 1, OverlayLayout.StandardSectionWidth - 6, h * 0.45f), sfLblF);
 
         // When both util and temp are shown, keep temp in the body since the label
         // row only has room for one value (util%).
@@ -428,29 +404,29 @@ public class OverlayForm : Form {
             var sfc = new StringFormat { Alignment = StringAlignment.Center,
                                          LineAlignment = StringAlignment.Center };
             using (var b = new SolidBrush(_cGpuTemp))
-                ShadowStr(g, string.Format("{0}\u00B0C", _m.GpuTempC), _fVal, b,
-                    new RectangleF(x + 2, h * 0.42f, SW - 4, h * 0.58f), sfc);
+                ShadowStr(g, string.Format("{0}\u00B0C", _snapshot.GpuTempC), _fVal, b,
+                    new RectangleF(x + 2, h * 0.42f, OverlayLayout.StandardSectionWidth - 4, h * 0.58f), sfc);
         }
-        x += SW;
+        x += OverlayLayout.StandardSectionWidth;
     }
 
     // Draw one metric section: sparkline fills the background, text is overlaid.
     // headerVal: if non-null, drawn right-aligned in the label row (e.g. "43%" for MEM).
     void DrawSection(Graphics g, ref int x, int h,
                      string lbl, string val, Color col,
-                     CircularBuffer hist, float scale, string headerVal = null) {
+                     float[] hist, float scale, string headerVal = null) {
         if (x > 0) g.DrawLine(_divPen, x, 2, x, h - 2);
-        DrawSparkline(g, hist, new Rectangle(x, 0, SW, h), col, scale);
+        DrawSparkline(g, hist, new Rectangle(x, 0, OverlayLayout.StandardSectionWidth, h), col, scale);
         // Label: small dim text at the top-left.
         g.DrawString(lbl, _fLbl, _dimBrush,
-            new RectangleF(x + 3, 1, SW - 6, h * 0.45f));
+            new RectangleF(x + 3, 1, OverlayLayout.StandardSectionWidth - 6, h * 0.45f));
         // Optional right-aligned value in the label row.
         if (headerVal != null) {
             var sfR = new StringFormat { Alignment = StringAlignment.Far,
                                          LineAlignment = StringAlignment.Near };
             using (var b = new SolidBrush(col))
                 g.DrawString(headerVal, _fLbl, b,
-                    new RectangleF(x + 3, 1, SW - 6, h * 0.45f), sfR);
+                    new RectangleF(x + 3, 1, OverlayLayout.StandardSectionWidth - 6, h * 0.45f), sfR);
         }
         // Value: bold coloured text centred in the lower half.
         // Skipped when the value is already shown in the label row.
@@ -462,9 +438,9 @@ public class OverlayForm : Form {
             };
             using (var b = new SolidBrush(col))
                 ShadowStr(g, val, _fVal, b,
-                    new RectangleF(x + 2, h * 0.42f, SW - 4, h * 0.58f), sf);
+                    new RectangleF(x + 2, h * 0.42f, OverlayLayout.StandardSectionWidth - 4, h * 0.58f), sf);
         }
-        x += SW;
+        x += OverlayLayout.StandardSectionWidth;
     }
 
     // Draws text with a 1px dark drop shadow so it reads clearly over any graph colour.
@@ -479,10 +455,10 @@ public class OverlayForm : Form {
     }
 
     // Filled-area sparkline.  Semi-transparent fill + full-opacity edge line.
-    void DrawSparkline(Graphics g, CircularBuffer hist,
+    void DrawSparkline(Graphics g, float[] hist,
                        Rectangle r, Color col, float scale) {
-        hist.CopyTo(_buf);
-        int n = _buf.Length; if (n < 2 || r.Width < 2) return;
+        int n = hist != null ? hist.Length : 0;
+        if (n < 2 || r.Width < 2) return;
         float sc = scale > 0f ? scale : 100f;
 
         var pts = new PointF[n + 2];
@@ -493,7 +469,7 @@ public class OverlayForm : Form {
         float maxH = Math.Max(1f, r.Height - 14f);
         
         for (int i = 0; i < n; i++) {
-            float pct = Math.Min(_buf[i] / sc, 1f);
+            float pct = Math.Min(hist[i] / sc, 1f);
             pts[i + 1] = new PointF(
                 r.Left + (float)i / (n - 1) * r.Width,
                 r.Bottom - pct * maxH);
@@ -510,9 +486,8 @@ public class OverlayForm : Form {
     // XMeters-style per-core CPU grid.
     // 24 cores -> 3 rows x 8 cols of vertical bars with a green->yellow->red heat map.
     void DrawCoreGrid(Graphics g, ref int x, int h) {
-        const int ROWS = 3;
-        int cols  = (_m.CoreCount + ROWS - 1) / ROWS; // ceil(24/3) = 8
-        int gridW = cols * (CBAR_W + CBAR_G) - CBAR_G;
+        int cols  = (_snapshot.CoreCount + OverlayLayout.CpuRows - 1) / OverlayLayout.CpuRows;
+        int gridW = cols * (OverlayLayout.CpuBarWidth + OverlayLayout.CpuBarGap) - OverlayLayout.CpuBarGap;
         int secW  = 4 + gridW + 4;
 
         if (x > 0) g.DrawLine(_divPen, x, 2, x, h - 2);
@@ -526,52 +501,29 @@ public class OverlayForm : Form {
         g.DrawString("CPU", _fLbl, _dimBrush,
             new RectangleF(gx, 1, gridW, 9), sfLbl);
         using (var b = new SolidBrush(_cCpu))
-            g.DrawString(string.Format("{0:F0}%", _m.CpuTotal), _fLbl, b,
+            g.DrawString(string.Format("{0:F0}%", _snapshot.CpuTotal), _fLbl, b,
                 new RectangleF(gx, 1, gridW, 9), sfPct);
 
-        int rowsH = h - 10;                          // vertical space for bars
-        int rowH  = (rowsH - (ROWS - 1) * 2) / ROWS; // bar height with 2px row gaps
+        int rowsH = h - 10;
+        int rowH  = (rowsH - (OverlayLayout.CpuRows - 1) * 2) / OverlayLayout.CpuRows;
 
-        for (int row = 0; row < ROWS; row++) {
+        for (int row = 0; row < OverlayLayout.CpuRows; row++) {
             int yt = 10 + row * (rowH + 2);
             for (int col = 0; col < cols; col++) {
                 int idx = row * cols + col;
-                if (idx >= _m.CoreCount) break;
+                if (idx >= _snapshot.CoreCount) break;
 
-                float pct = Math.Min(_m.CpuCores[idx] / 100f, 1f);
-                int bx = gx + col * (CBAR_W + CBAR_G);
+                float pct = Math.Min(_snapshot.CpuCores[idx] / 100f, 1f);
+                int bx = gx + col * (OverlayLayout.CpuBarWidth + OverlayLayout.CpuBarGap);
                 int bh = Math.Max(1, (int)(pct * rowH));
                 int by = yt + (rowH - bh); // bars grow upward from bottom of row
 
-                g.FillRectangle(_coreBgBrush, bx, yt, CBAR_W, rowH);
-                using (var br = new SolidBrush(HeatColor(pct)))
-                    g.FillRectangle(br, bx, by, CBAR_W, bh);
+                g.FillRectangle(_coreBgBrush, bx, yt, OverlayLayout.CpuBarWidth, rowH);
+                using (var br = new SolidBrush(OverlayFormatting.HeatColor(pct)))
+                    g.FillRectangle(br, bx, by, OverlayLayout.CpuBarWidth, bh);
             }
         }
         x += secW;
-    }
-
-    // Smooth heat-map colour: green (0%) -> yellow (50%) -> red (100%)
-    static Color HeatColor(float p) {
-        if (p <= 0.5f) {
-            int r = (int)(p * 2f * 255f);
-            return Color.FromArgb(r, 200, 0);
-        } else {
-            int g2 = (int)((1f - (p - 0.5f) * 2f) * 200f);
-            return Color.FromArgb(255, g2, 0);
-        }
-    }
-
-    static string SpeedStr(float bps) {
-        if (bps >= 1073741824f) return string.Format("{0:F1}GB/s", bps / 1073741824f);
-        if (bps >=    1048576f) return string.Format("{0:F1}MB/s", bps / 1048576f);
-        if (bps >=       1024f) return string.Format("{0:F0}KB/s", bps / 1024f);
-        return string.Format("{0:F0}B/s", bps);
-    }
-    static double Clamp01(double v) { return Math.Max(0.1, Math.Min(1.0, v)); }
-    static Color  ParseHex(string h, string fb) {
-        try { return ColorTranslator.FromHtml(h); }
-        catch { return ColorTranslator.FromHtml(fb); }
     }
 }
 

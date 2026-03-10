@@ -19,9 +19,17 @@ PATH) via thin stub `.bat` files or `.lnk` shortcuts.
   gets auto-generated stubs from `install.ps1`.
 - **Large binaries stay in `C:\dev\tools`**, not here. Never commit `.exe` or
   `.dll` files. They are gitignored.
-- **Test before committing.** Run the actual script/tool to verify it works.
-  For `.ps1` scripts, run them directly with PowerShell. For `.vbs` launchers,
-  run via `wscript.exe`. Check exit codes.
+- **Use test-first development for non-trivial changes.** Write or update the
+ automated test first, then implement the change until the test passes. If the
+ current code has no clean test seam, extract one first and then add the test.
+- **When behaviour changes, rerun the relevant tests.** If your change affects
+ expectations, UI copy, layout, persistence, startup behaviour, or any tested
+ contract, update the tests and rerun them instead of assuming the old tests
+ are still valid.
+- **Test before committing.** Run the relevant automated tests first, then run
+ the actual script/tool to verify it works. For `.ps1` scripts, run them
+ directly with PowerShell. For `.vbs` launchers, run via `wscript.exe`. Check
+ exit codes.
 - **No console windows for GUI/taskbar tools.** Use the `.vbs` launcher pattern
   (see `tools\scale-monitor\scale-monitor.vbs`) which calls `wscript.exe` with
   window style 0. Never launch PowerShell from a taskbar shortcut without a
@@ -89,8 +97,10 @@ them in alphabetical order. Pass `-SkipDeps` to skip this step.
 ## Editing an existing tool
 
 1. Edit the file in this repo directly (e.g. `tools\scale-monitor\scale-monitor.ps1`)
-2. Test it: run via `wscript.exe` (GUI) or directly with PowerShell (CLI)
-3. Commit — no reinstall needed
+2. For non-trivial behaviour changes, write or update the automated tests first
+3. If the change affects an existing test expectation, update that test or test fixture in the same change
+4. Run the relevant automated tests again after the implementation change, then smoke-test it: run via `wscript.exe` (GUI) or directly with PowerShell (CLI)
+5. Commit - no reinstall needed
 
 ---
 
@@ -177,6 +187,29 @@ cd task-stats
 .\build-and-run.bat    # kill old instance + compile + launch
 ```
 After code changes to any `.cs` file, just re-run `build-and-run.bat`.
+
+### Test workflow
+```
+cd tools\task-stats
+.\run-unit-tests.bat
+.\run-integration-tests.bat
+.\run-tests.bat
+.\run-e2e-tests.bat
+```
+
+- `run-unit-tests.bat` covers pure logic like layout math, formatting, buffers,
+  and settings round-trips.
+- `run-integration-tests.bat` covers Windows-backed behaviour like settings
+  persistence, startup registration, and live metric sampling contracts.
+- `run-tests.bat` runs everything except the AI screenshot judge.
+- `run-e2e-tests.bat` captures deterministic overlay screenshots and then uses
+  OpenRouter vision to check them. This is opt-in because it costs money and
+  depends on external services.
+- For `task-stats`, prefer deterministic fake-data tests before relying on
+  manual tray screenshots.
+- If you change rendering or layout, run `run-e2e-tests.bat` before committing.
+- If you change behaviour covered by tests, rerun the affected test command
+  after the implementation change, not just before it.
 
 ### Key implementation details
 - `OverlayForm` is a frameless `WS_POPUP` + `HWND_TOPMOST` WinForms Form.

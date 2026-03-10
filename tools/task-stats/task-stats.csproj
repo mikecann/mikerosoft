@@ -35,7 +35,17 @@
 
   <!-- All .cs files in this folder are compiled together -->
   <ItemGroup>
-    <Compile Include="*.cs" />
+    <Compile Include="App.cs" />
+    <Compile Include="Metrics.cs" />
+    <Compile Include="Native.cs" />
+    <Compile Include="OverlayContracts.cs" />
+    <Compile Include="OverlayForm.cs" />
+    <Compile Include="OverlayFormatting.cs" />
+    <Compile Include="OverlayLayout.cs" />
+    <Compile Include="Settings.cs" />
+    <Compile Include="SettingsForm.cs" />
+    <Compile Include="SettingsStore.cs" />
+    <Compile Include="StartupRegistration.cs" />
   </ItemGroup>
 
   <!-- PNG icons are embedded as manifest resources (TaskMon.icons.<name>.png) -->

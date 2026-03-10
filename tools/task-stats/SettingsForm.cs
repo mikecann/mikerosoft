@@ -137,12 +137,12 @@ public class SettingsForm : Form {
         var p = TP("Display"); int y = 10;
 
         SecHead(p, "chart_bar", "Metrics to show", ref y);
-        MetricRow(p, ref _cbUp,  "Upload speed  (NET \u2191)",                    SafeColor(_d.ColorNetUp),   _d.ShowNetUp,   ref y);
-        MetricRow(p, ref _cbDn,  "Download speed  (NET \u2193)",                  SafeColor(_d.ColorNetDown), _d.ShowNetDown, ref y);
-        MetricRow(p, ref _cbCpu, "CPU utilisation",                               SafeColor(_d.ColorCpu),     _d.ShowCpu,     ref y);
-        MetricRow(p, ref _cbGU,  "GPU utilisation %  (NVIDIA RTX 5070 Ti)",      SafeColor(_d.ColorGpu),     _d.ShowGpuUtil, ref y);
-        MetricRow(p, ref _cbGT,  "GPU temperature \u00B0C  (NVIDIA RTX 5070 Ti)", SafeColor(_d.ColorGpuTemp), _d.ShowGpuTemp, ref y);
-        MetricRow(p, ref _cbMem, "Memory usage %",                               SafeColor(_d.ColorMemory),  _d.ShowMemory,  ref y);
+        MetricRow(p, ref _cbUp,  "Upload speed  (NET \u2191)",                    OverlayFormatting.SafeColor(_d.ColorNetUp),   _d.ShowNetUp,   ref y);
+        MetricRow(p, ref _cbDn,  "Download speed  (NET \u2193)",                  OverlayFormatting.SafeColor(_d.ColorNetDown), _d.ShowNetDown, ref y);
+        MetricRow(p, ref _cbCpu, "CPU utilisation",                               OverlayFormatting.SafeColor(_d.ColorCpu),     _d.ShowCpu,     ref y);
+        MetricRow(p, ref _cbGU,  "GPU utilisation %  (NVIDIA RTX 5070 Ti)",      OverlayFormatting.SafeColor(_d.ColorGpu),     _d.ShowGpuUtil, ref y);
+        MetricRow(p, ref _cbGT,  "GPU temperature \u00B0C  (NVIDIA RTX 5070 Ti)", OverlayFormatting.SafeColor(_d.ColorGpuTemp), _d.ShowGpuTemp, ref y);
+        MetricRow(p, ref _cbMem, "Memory usage %",                               OverlayFormatting.SafeColor(_d.ColorMemory),  _d.ShowMemory,  ref y);
         y += 6;
 
         SecHead(p, "computer", "CPU display mode", ref y);
@@ -189,12 +189,12 @@ public class SettingsForm : Form {
     }
 
     void ColRow(TabPage p, string lbl, string hex, ref Button btn, ref int y) {
-        var dot = new Panel { Location = new Point(12, y + 9), Size = new Size(10, 10), BackColor = SafeColor(hex) };
+        var dot = new Panel { Location = new Point(12, y + 9), Size = new Size(10, 10), BackColor = OverlayFormatting.SafeColor(hex) };
         p.Controls.Add(dot);
         p.Controls.Add(new Label { Text = lbl, Location = new Point(28, y + 6), Size = new Size(130, 20) });
         var b = new Button {
             Location = new Point(164, y + 2), Size = new Size(56, 26),
-            FlatStyle = FlatStyle.Flat, Text = "", BackColor = SafeColor(hex)
+            FlatStyle = FlatStyle.Flat, Text = "", BackColor = OverlayFormatting.SafeColor(hex)
         };
         b.FlatAppearance.BorderColor = Color.FromArgb(0xAA, 0xAA, 0xAA);
         b.Click += (o, e) => {
@@ -286,7 +286,7 @@ public class SettingsForm : Form {
         _d.Opacity          = _tbOp.Value / 100.0;
         _d.RunOnStartup     = _cbStartup.Checked;
 
-        CopyTo(_d, _host.S);
+        _d.CopyTo(_host.S);
         _d.Save();
         // Apply startup registry entry immediately
         if (_host._scriptDir != null)
@@ -298,21 +298,6 @@ public class SettingsForm : Form {
         _host.DoLayout(); // repositions and calls UpdateLayer()
     }
 
-    static void CopyTo(Settings s, Settings d) {
-        d.ShowNetUp = s.ShowNetUp; d.ShowNetDown = s.ShowNetDown;
-        d.ShowCpu = s.ShowCpu; d.CpuMode = s.CpuMode;
-        d.ShowGpuUtil = s.ShowGpuUtil; d.ShowGpuTemp = s.ShowGpuTemp;
-        d.ShowMemory = s.ShowMemory; d.NetworkAdapter = s.NetworkAdapter;
-        d.UpdateIntervalMs = s.UpdateIntervalMs; d.Opacity = s.Opacity;
-        d.RunOnStartup = s.RunOnStartup;
-        d.ColorNetUp = s.ColorNetUp; d.ColorNetDown = s.ColorNetDown;
-        d.ColorCpu = s.ColorCpu; d.ColorGpu = s.ColorGpu; d.ColorGpuTemp = s.ColorGpuTemp;
-        d.ColorMemory = s.ColorMemory;
-    }
-
-    static Color SafeColor(string h) {
-        try { return ColorTranslator.FromHtml(h); } catch { return Color.DimGray; }
-    }
 }
 
 } // namespace TaskMon

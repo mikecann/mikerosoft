@@ -1,0 +1,13 @@
+{
+  "name": "task-stats-e2e",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^17.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.3"
+  }
+}

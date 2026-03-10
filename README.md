@@ -93,14 +93,17 @@ Re-run `install.ps1` only when **adding a new tool**.
 
 ```powershell
 # 1. Edit the source file in the repo (e.g. tools\scale-monitor\scale-monitor.ps1)
-# 2. Test it
-# 3. Commit
+# 2. Run the relevant automated tests
+# 3. Smoke-test the real tool entry point if behaviour changed
+# 4. Commit
 cd C:\dev\me\mikerosoft.app
 git add .
 git commit -m "scale-monitor: describe the change"
 ```
 
 No reinstall needed. The stub in `C:\dev\tools` already points at the repo file.
+
+For `task-stats`, there is now a proper automated stack under [`tools/task-stats/tests/README.md`](tools/task-stats/tests/README.md), including unit tests, Windows integration tests, and opt-in screenshot + AI evaluation.
 
 ---
 
