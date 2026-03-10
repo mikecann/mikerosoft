@@ -3,7 +3,7 @@
   <PropertyGroup>
     <AssemblyName>TaskStats.VisualHarness</AssemblyName>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>TaskMon.VisualHarness</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>

@@ -174,8 +174,8 @@ The PNGs live in `task-stats\icons\` and are embedded into the DLL as manifest r
 `<EmbeddedResource Include="icons\*.png" />` in `task-stats.csproj`.
 
 ### Architecture
-- **Requires .NET 8 SDK for builds.** Build with `dotnet build`; runtime host is `net8.0-windows`.
-- Project file: `task-stats\task-stats.csproj` (SDK-style, targets `net8.0-windows`, embeds `icons\*.png` as manifest resources).
+- **Requires .NET 10 SDK for builds.** Build with `dotnet build`; runtime host is `net10.0-windows`.
+- Project file: `task-stats\task-stats.csproj` (SDK-style, targets `net10.0-windows`, embeds `icons\*.png` as manifest resources).
 - Compiled output is cached at `%LOCALAPPDATA%\task-stats\task-stats.exe`.
 - `task-stats.vbs` is the primary silent launcher and starts the built EXE directly.
 - `task-stats.ps1` is only a compatibility wrapper around the EXE, not the primary host.

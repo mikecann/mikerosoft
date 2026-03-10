@@ -23,7 +23,7 @@ $VisualProj = Join-Path $ToolRoot 'tests\visual\TaskStats.VisualHarness.csproj'
 $VisualExe  = Join-Path $env:LOCALAPPDATA 'task-stats-tests\visual\TaskStats.VisualHarness.exe'
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    throw "dotnet SDK not found. Install .NET 8 SDK and try again."
+    throw "dotnet SDK not found. Install .NET 10 SDK and try again."
 }
 
 Load-DotEnv $RepoRoot

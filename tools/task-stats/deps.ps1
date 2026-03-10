@@ -19,7 +19,7 @@ if (Test-Path $nvml) {
 $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
 if (-not $dotnet) {
     Write-Host "  [task-stats] ERROR: dotnet SDK not found." -ForegroundColor Red
-    Write-Host "               Install .NET 8 SDK: winget install Microsoft.DotNet.SDK.8" -ForegroundColor DarkGray
+    Write-Host "               Install .NET 10 SDK: winget install Microsoft.DotNet.SDK.10" -ForegroundColor DarkGray
     exit 1
 }
 Write-Host "  [task-stats] dotnet SDK found." -ForegroundColor Green

@@ -7,7 +7,7 @@ call "%~dp0kill.bat"
 where dotnet >nul 2>nul
 if %errorlevel% neq 0 (
     echo ERROR: dotnet SDK not found.
-    echo Install .NET 8 SDK and try again.
+    echo Install .NET 10 SDK and try again.
     pause
     exit /b 1
 )
