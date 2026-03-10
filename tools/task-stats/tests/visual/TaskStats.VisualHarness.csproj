@@ -5,7 +5,7 @@
   <PropertyGroup>
     <AssemblyName>TaskStats.VisualHarness</AssemblyName>
     <OutputType>Exe</OutputType>
-    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
     <RootNamespace>TaskMon.VisualHarness</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
     <OutputPath>$(LOCALAPPDATA)\task-stats-tests\visual\</OutputPath>

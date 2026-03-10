@@ -174,9 +174,9 @@ The PNGs live in `task-stats\icons\` and are embedded into the DLL as manifest r
 `<EmbeddedResource Include="icons\*.png" />` in `task-stats.csproj`.
 
 ### Architecture
-- **No .NET SDK required.** Built by `MSBuild.exe` from .NET Framework 4
+- **No .NET SDK required.** Built by `MSBuild.exe` targeting .NET Framework 4.8.1
   (`C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe`).
-- Project file: `task-stats\task-stats.csproj` (targets .NET Framework 4, embeds `icons\*.png` as manifest resources).
+- Project file: `task-stats\task-stats.csproj` (targets .NET Framework 4.8.1, embeds `icons\*.png` as manifest resources).
 - Compiled DLL is cached at `%LOCALAPPDATA%\task-stats\task-stats.dll`.
 - `task-stats.ps1` is a thin launcher - it loads the DLL and calls `[TaskMon.App]::Run()`.
   No compilation at runtime, so startup is instant and no OOM risk in Cursor.

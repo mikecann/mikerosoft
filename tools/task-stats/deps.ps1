@@ -25,15 +25,15 @@ if (-not (Test-Path $msbuild)) {
 Write-Host "  [task-stats] MSBuild found." -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
-# .NET 4.8 Developer Pack -- optional, silences the MSB3644 build warning.
+# .NET 4.8.1 Developer Pack -- optional, silences the MSB3644 build warning.
 # Without it, MSBuild falls back to GAC DLLs (works fine, just noisy).
 # ---------------------------------------------------------------------------
 $refPath = 'C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework'
-$hasRefAsm = (Test-Path "$refPath\v4.8") -or (Test-Path "$refPath\v4.8.1")
+$hasRefAsm = Test-Path "$refPath\v4.8.1"
 if (-not $hasRefAsm) {
     Write-Host "  [task-stats] NOTE: .NET Framework targeting pack not installed." -ForegroundColor DarkGray
     Write-Host "               Build will show warning MSB3644 (harmless -- MSBuild uses GAC fallback)." -ForegroundColor DarkGray
-    Write-Host "               To silence it: install the .NET 4.8 Developer Pack from https://aka.ms/net48devpack" -ForegroundColor DarkGray
+    Write-Host "               To silence it: install the .NET 4.8.1 Developer Pack from https://dotnet.microsoft.com/en-us/download/dotnet-framework/net481" -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------------

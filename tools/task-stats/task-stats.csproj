@@ -11,7 +11,7 @@
   <PropertyGroup>
     <AssemblyName>task-stats</AssemblyName>
     <OutputType>Library</OutputType>
-    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
     <RootNamespace>TaskMon</RootNamespace>
     <Optimize>true</Optimize>
     <!-- Output DLL directly to %LOCALAPPDATA%\task-stats\ (same path task-stats.ps1 loads from) -->
@@ -21,7 +21,7 @@
     <!-- task-stats always loads inside 64-bit PowerShell, so target x64 explicitly.
          This fixes MSB3270 (MSIL vs AMD64 reference mismatch). -->
     <PlatformTarget>x64</PlatformTarget>
-    <!-- MSB3644 (.NET 4.0 targeting pack not installed) is expected and harmless:
+    <!-- MSB3644 (.NET 4.8.1 targeting pack not installed) is expected and harmless:
          MSBuild falls back to GAC DLLs, which are the same files we run against.
          MSBuildWarningsAsMessages does not work in MSBuild 4; ignore this warning. -->
   </PropertyGroup>
