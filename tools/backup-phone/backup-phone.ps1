@@ -1,5 +1,5 @@
 # backup-phone.ps1
-# Copies all photos/videos from an iPhone (MTP device) to a flat backup folder.
+# Copies all photos/videos from an iPhone (MTP device) into year/month subfolders (YYYY/mmm).
 # Processes one folder at a time, newest first (so recent photos come first).
 # Filenames are prefixed with their source folder to avoid collisions.
 # HEIC files are automatically converted to WebP (in background while next file copies).
@@ -23,6 +23,30 @@ function Get-ShellFolder {
         }
     }
     return $null
+}
+
+$script:MediaYmPy = Join-Path $PSScriptRoot "get_media_ym.py"
+$script:MonthFolderNames = @(
+    "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec"
+)
+
+function Get-BackupSubfolderRelativePath {
+    param([string]$FilePath)
+    $ext = [IO.Path]::GetExtension($FilePath).ToLowerInvariant()
+    # Keep in sync with IMAGE_EXTS_FOR_EXIF in get_media_ym.py
+    $imageExts = @(
+        ".heic", ".heif", ".jpg", ".jpeg", ".jpe", ".png", ".webp", ".tif", ".tiff"
+    )
+    if ($imageExts -contains $ext) {
+        $rel = & python $script:MediaYmPy $FilePath 2>$null
+        if ($LASTEXITCODE -eq 0 -and $rel) {
+            return ($rel.Trim() -replace "/", [IO.Path]::DirectorySeparatorChar)
+        }
+    }
+    $item = Get-Item -LiteralPath $FilePath
+    $d = $item.LastWriteTime
+    return "{0}{1}{2}" -f $d.Year, [IO.Path]::DirectorySeparatorChar, $script:MonthFolderNames[$d.Month - 1]
 }
 
 # --- Main ---
@@ -80,10 +104,10 @@ if (-not $Yes) {
     Read-Host "Press Enter when ready"
 }
 
-# Build lookup of existing backup files
+# Build lookup of existing backup files (any depth under destination)
 Write-Host "Checking existing backups in $Destination ..."
 $existingFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-Get-ChildItem -Path $Destination -File -ErrorAction SilentlyContinue | ForEach-Object {
+Get-ChildItem -Path $Destination -File -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
     $existingFiles.Add($_.Name) | Out-Null
 }
 Write-Host "  Existing files in backup: $($existingFiles.Count)" -ForegroundColor DarkGray
@@ -231,7 +255,6 @@ foreach ($folder in $folders) {
         }
 
         $stagedPath = Join-Path $stagingDir $fileName
-        $finalPath = Join-Path $Destination $destNameFinal
 
         try {
             # Clean staging area for this file
@@ -254,6 +277,14 @@ foreach ($folder in $folders) {
                     $heicTempPath = Join-Path $stagingDir "${folderName}_${fileName}"
                     Move-Item -Path $stagedPath -Destination $heicTempPath -Force
 
+                    $sub = Get-BackupSubfolderRelativePath -FilePath $heicTempPath
+                    $destSubDir = Join-Path $Destination $sub
+                    if (-not (Test-Path -LiteralPath $destSubDir)) {
+                        New-Item -ItemType Directory -Path $destSubDir -Force | Out-Null
+                    }
+                    $finalPath = Join-Path $destSubDir $destNameFinal
+                    $fallbackHeicPath = Join-Path $destSubDir $destName
+
                     # Start conversion in background
                     $proc = Start-Process -FilePath "python" `
                         -ArgumentList "`"$convertScript`" `"$heicTempPath`" `"$finalPath`"" `
@@ -262,7 +293,7 @@ foreach ($folder in $folders) {
                         Process       = $proc
                         StagedPath    = $heicTempPath
                         FinalPath     = $finalPath
-                        FallbackPath  = Join-Path $Destination $destName
+                        FallbackPath  = $fallbackHeicPath
                         DestName      = $destName
                         DestNameFinal = $destNameFinal
                     }) | Out-Null
@@ -271,9 +302,15 @@ foreach ($folder in $folders) {
                     Wait-ConversionJobs -WaitAll $false
                     $folderConverted++
                 } else {
+                    $sub = Get-BackupSubfolderRelativePath -FilePath $stagedPath
+                    $destSubDir = Join-Path $Destination $sub
+                    if (-not (Test-Path -LiteralPath $destSubDir)) {
+                        New-Item -ItemType Directory -Path $destSubDir -Force | Out-Null
+                    }
+                    $finalPath = Join-Path $destSubDir $destNameFinal
                     Move-Item -Path $stagedPath -Destination $finalPath -Force
                     $folderCopied++
-                    Write-Host "    $destNameFinal" -ForegroundColor Green
+                    Write-Host "    $sub\$destNameFinal" -ForegroundColor Green
                 }
                 $existingFiles.Add($destNameFinal) | Out-Null
             } else {

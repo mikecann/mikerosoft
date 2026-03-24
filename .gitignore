@@ -26,6 +26,10 @@ bun.lockb
 package-lock.json
 *.tsbuildinfo
 
+# Python
+__pycache__/
+*.pyc
+
 # Editor / OS noise
 .vs/
 Thumbs.db
