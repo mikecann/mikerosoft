@@ -86,21 +86,32 @@ export function buildFallbackOrder(preferred: string, allModels: string[]): stri
 // Network calls - injected fetch for testability
 // ---------------------------------------------------------------------------
 
+const REQUEST_TIMEOUT_MS = 90_000;
+
 export async function generateOne(
   args: GenerateOneArgs,
   fetchFn: typeof fetch = fetch,
 ): Promise<GenerateOneResult> {
   const body = buildRequestBody(args);
-  const res = await fetchFn(API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${args.apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://github.com/mikecann/mikerosoft",
-      "X-Title": "mikerosoft/img-gen",
-    },
-    body: JSON.stringify(body),
-  });
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetchFn(API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${args.apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/mikecann/mikerosoft",
+        "X-Title": "mikerosoft/img-gen",
+      },
+      body: JSON.stringify(body),
+      signal: abort.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
   return extractImage(await res.json() as Parameters<typeof extractImage>[0]);

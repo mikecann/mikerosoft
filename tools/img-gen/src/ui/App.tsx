@@ -257,6 +257,10 @@ export function App() {
           setIsGenerating(false);
         }
       };
+      es.onerror = () => {
+        // EventSource will auto-reconnect; surface a transient note in console only.
+        console.warn("SSE connection lost, reconnecting...");
+      };
     });
 
     return () => { es?.close(); };

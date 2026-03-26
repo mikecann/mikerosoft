@@ -100,36 +100,39 @@ async function runGeneration(params: GenerateParams) {
 
   broadcastSse({ kind: "generating", jobId });
 
-  for (let i = 0; i < count; i++) {
-    try {
-      const { b64, comment } = await generateWithFallback(
-        {
-          prompt: params.prompt,
-          inputDataUrl: params.inputImageDataUrl,
-          aspectRatio: params.aspectRatio,
-          imageSize: params.imageSize,
-          model: params.model,
-          apiKey: apiKey ?? "",
-        },
-        MODELS,
-      );
+  try {
+    for (let i = 0; i < count; i++) {
+      try {
+        const { b64, comment } = await generateWithFallback(
+          {
+            prompt: params.prompt,
+            inputDataUrl: params.inputImageDataUrl,
+            aspectRatio: params.aspectRatio,
+            imageSize: params.imageSize,
+            model: params.model,
+            apiKey: apiKey ?? "",
+          },
+          MODELS,
+        );
 
-      const imageId = crypto.randomUUID();
-      const filename = `${imageId}.png`;
-      const tempPath = path.join(tempDir, filename);
-      fs.writeFileSync(tempPath, Buffer.from(b64, "base64"));
-      imageStore.set(imageId, { tempPath });
+        const imageId = crypto.randomUUID();
+        const filename = `${imageId}.png`;
+        const tempPath = path.join(tempDir, filename);
+        fs.writeFileSync(tempPath, Buffer.from(b64, "base64"));
+        imageStore.set(imageId, { tempPath });
 
-      const image: GeneratedImage = {
-        imageId,
-        serveUrl: `${baseUrl}/images/${filename}`,
-        tempPath,
-        modelComment: comment,
-      };
-      broadcastSse({ kind: "imageResult", jobId, image });
-    } catch (err) {
-      broadcastSse({ kind: "imageError", jobId, error: String(err) });
+        broadcastSse({
+          kind: "imageResult",
+          jobId,
+          image: { imageId, serveUrl: `${baseUrl}/images/${filename}`, tempPath, modelComment: comment },
+        });
+      } catch (err) {
+        broadcastSse({ kind: "imageError", jobId, error: String(err) });
+      }
     }
+  } catch (err) {
+    // Outer catch - unexpected crash before or between iterations
+    broadcastSse({ kind: "imageError", jobId, error: `Unexpected error: ${err}` });
   }
 }
 
