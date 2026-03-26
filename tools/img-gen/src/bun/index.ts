@@ -1,28 +1,24 @@
 import { BrowserWindow, BrowserView } from "electrobun/bun";
-import type { ImgGenRPC, GenerateParams, SseEvent, ImageModel, GeneratedImage } from "../shared/types.js";
+import type { ImgGenRPC, GenerateParams, SseEvent, GeneratedImage } from "../shared/types.js";
+import {
+  MODELS,
+  generateWithFallback,
+  fetchImageModels,
+} from "./generation.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as crypto from "crypto";
 
 // ---------------------------------------------------------------------------
-// Config + env
+// Config
 // ---------------------------------------------------------------------------
-
-const MODELS = [
-  "google/gemini-3.1-flash-image-preview",
-  "google/gemini-2.5-flash-image",
-  "google/gemini-3-pro-image-preview",
-];
-const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const folderPath = process.env["FOLDER_PATH"] ?? process.cwd();
 const sessionId = crypto.randomUUID();
-
-// OPENROUTER_API_KEY is loaded from .env by the VBS launcher before starting bun.
 const apiKey = process.env["OPENROUTER_API_KEY"];
 
 // ---------------------------------------------------------------------------
-// Temp directory for generated images
+// Temp directory
 // ---------------------------------------------------------------------------
 
 const tempDir = path.join(process.env["TEMP"] ?? "/tmp", "img-gen", sessionId);
@@ -31,14 +27,13 @@ fs.mkdirSync(tempDir, { recursive: true });
 const imageStore = new Map<string, { tempPath: string }>();
 
 // ---------------------------------------------------------------------------
-// SSE - bun -> webview real-time events
+// SSE - bun -> webview
 // ---------------------------------------------------------------------------
 
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 
 function broadcastSse(event: SseEvent) {
-  const line = `data: ${JSON.stringify(event)}\n\n`;
-  const bytes = new TextEncoder().encode(line);
+  const bytes = new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
   for (const ctrl of sseClients) {
     try {
       ctrl.enqueue(bytes);
@@ -49,7 +44,7 @@ function broadcastSse(event: SseEvent) {
 }
 
 // ---------------------------------------------------------------------------
-// Local HTTP server - images + SSE
+// HTTP server - images + SSE
 // ---------------------------------------------------------------------------
 
 const server = Bun.serve({
@@ -63,18 +58,12 @@ const server = Bun.serve({
         start(c) {
           ctrl = c;
           sseClients.add(ctrl);
-          // Keep-alive ping every 15s
           const ping = setInterval(() => {
-            try {
-              ctrl.enqueue(new TextEncoder().encode(": ping\n\n"));
-            } catch {
-              clearInterval(ping);
-            }
+            try { ctrl.enqueue(new TextEncoder().encode(": ping\n\n")); }
+            catch { clearInterval(ping); }
           }, 15_000);
         },
-        cancel() {
-          sseClients.delete(ctrl);
-        },
+        cancel() { sseClients.delete(ctrl); },
       });
       return new Response(stream, {
         headers: {
@@ -102,90 +91,46 @@ const baseUrl = `http://127.0.0.1:${server.port}`;
 console.log(`img-gen server at ${baseUrl}`);
 
 // ---------------------------------------------------------------------------
-// OpenRouter generation
+// Background generation task
 // ---------------------------------------------------------------------------
 
-type GenerateOneArgs = {
-  prompt: string;
-  inputDataUrl: string | undefined;
-  aspectRatio: string | undefined;
-  imageSize: string | undefined;
-  model: string;
-};
+async function runGeneration(params: GenerateParams) {
+  const { jobId } = params;
+  const count = Math.min(Math.max(params.variations ?? 1, 1), 4);
 
-async function generateOne({
-  prompt,
-  inputDataUrl,
-  aspectRatio,
-  imageSize,
-  model,
-}: GenerateOneArgs): Promise<{ b64: string; comment: string }> {
-  const content: unknown[] = [];
-  if (inputDataUrl) content.push({ type: "image_url", image_url: { url: inputDataUrl } });
-  content.push({ type: "text", text: prompt });
+  broadcastSse({ kind: "generating", jobId });
 
-  const imageConfig: Record<string, string> = {};
-  if (aspectRatio && aspectRatio !== "auto") imageConfig.aspect_ratio = aspectRatio;
-  if (imageSize && imageSize !== "auto") imageConfig.image_size = imageSize;
-
-  const body: Record<string, unknown> = {
-    model,
-    modalities: ["image", "text"],
-    messages: [{ role: "user", content }],
-  };
-  if (Object.keys(imageConfig).length > 0) body.image_config = imageConfig;
-
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://github.com/mikecann/mikerosoft",
-      "X-Title": "mikerosoft/img-gen",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-
-  const data = (await res.json()) as {
-    choices: Array<{
-      message: { images?: Array<{ image_url: { url: string } }>; content?: string };
-    }>;
-  };
-
-  const message = data.choices[0].message;
-  if (!message.images?.length)
-    throw new Error(`No image in response. Model said: ${message.content ?? "(nothing)"}`);
-
-  return {
-    b64: message.images[0].image_url.url.split(",", 2)[1],
-    comment: message.content?.trim() ?? "",
-  };
-}
-
-async function generateWithFallback(params: GenerateParams): Promise<{ b64: string; comment: string }> {
-  const preferred = params.model ?? MODELS[0];
-  const order = [preferred, ...MODELS.filter((m) => m !== preferred)];
-
-  for (const model of order) {
+  for (let i = 0; i < count; i++) {
     try {
-      return await generateOne({
-        prompt: params.prompt,
-        inputDataUrl: params.inputImageDataUrl,
-        aspectRatio: params.aspectRatio,
-        imageSize: params.imageSize,
-        model,
-      });
+      const { b64, comment } = await generateWithFallback(
+        {
+          prompt: params.prompt,
+          inputDataUrl: params.inputImageDataUrl,
+          aspectRatio: params.aspectRatio,
+          imageSize: params.imageSize,
+          model: params.model,
+          apiKey: apiKey ?? "",
+        },
+        MODELS,
+      );
+
+      const imageId = crypto.randomUUID();
+      const filename = `${imageId}.png`;
+      const tempPath = path.join(tempDir, filename);
+      fs.writeFileSync(tempPath, Buffer.from(b64, "base64"));
+      imageStore.set(imageId, { tempPath });
+
+      const image: GeneratedImage = {
+        imageId,
+        serveUrl: `${baseUrl}/images/${filename}`,
+        tempPath,
+        modelComment: comment,
+      };
+      broadcastSse({ kind: "imageResult", jobId, image });
     } catch (err) {
-      if (String(err).includes("429")) {
-        console.warn(`Model ${model} rate-limited, trying next...`);
-        continue;
-      }
-      throw err;
+      broadcastSse({ kind: "imageError", jobId, error: String(err) });
     }
   }
-  throw new Error("All models rate-limited. Try again later.");
 }
 
 // ---------------------------------------------------------------------------
@@ -193,68 +138,27 @@ async function generateWithFallback(params: GenerateParams): Promise<{ b64: stri
 // ---------------------------------------------------------------------------
 
 const rpc = BrowserView.defineRPC<ImgGenRPC>({
-  maxRequestTime: 120_000,
+  maxRequestTime: 15_000,
   handlers: {
     requests: {
       getConfig: () => ({ workingDir: folderPath, eventsUrl: `${baseUrl}/events` }),
 
       getModels: async () => {
+        if (!apiKey) return MODELS.map((id) => ({ id, name: id }));
         try {
-          const res = await fetch("https://openrouter.ai/api/v1/models", {
-            headers: { Authorization: `Bearer ${apiKey}` },
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const json = (await res.json()) as {
-            data: Array<{ id: string; name: string; architecture?: { modality?: string } }>;
-          };
-          return json.data
-            .filter((m) => {
-              if (m.id === "openrouter/auto") return false;
-              const output = m.architecture?.modality?.split("->")[1] ?? "";
-              return output.includes("image");
-            })
-            .map((m): ImageModel => ({ id: m.id, name: m.name }));
+          return await fetchImageModels(apiKey);
         } catch (err) {
-          console.warn(`getModels failed: ${err} - falling back to defaults`);
+          console.warn(`getModels failed: ${err}`);
           return MODELS.map((id) => ({ id, name: id }));
         }
       },
 
-      generate: async (params) => {
-        const { jobId } = params;
-        const count = Math.min(Math.max(params.variations ?? 1, 1), 4);
-
+      generate: (params) => {
         if (!apiKey)
           throw new Error("OPENROUTER_API_KEY is not set. Add it to .env in the repo root.");
-
-        broadcastSse({ kind: "generating", jobId });
-
-        const results: GeneratedImage[] = [];
-
-        for (let i = 0; i < count; i++) {
-          try {
-            const { b64, comment } = await generateWithFallback(params);
-            const imageId = crypto.randomUUID();
-            const filename = `${imageId}.png`;
-            const tempPath = path.join(tempDir, filename);
-            fs.writeFileSync(tempPath, Buffer.from(b64, "base64"));
-            imageStore.set(imageId, { tempPath });
-
-            const image: GeneratedImage = {
-              imageId,
-              serveUrl: `${baseUrl}/images/${filename}`,
-              tempPath,
-              modelComment: comment,
-            };
-            results.push(image);
-            broadcastSse({ kind: "imageResult", jobId, image });
-          } catch (err) {
-            broadcastSse({ kind: "imageError", jobId, error: String(err) });
-            if (i === 0) throw err;
-          }
-        }
-
-        return results;
+        // Fire-and-forget - result arrives via SSE, not via RPC response
+        runGeneration(params).catch(console.error);
+        return { jobId: params.jobId };
       },
 
       download: ({ imageId }) => {

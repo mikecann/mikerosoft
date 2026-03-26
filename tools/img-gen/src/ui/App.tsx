@@ -321,26 +321,18 @@ export function App() {
     setAttachedImage(null);
     setIsGenerating(true);
 
-    try {
-      await rpc.request.generate({
-        jobId,
-        prompt: trimmed,
-        inputImageDataUrl: inputDataUrl,
-        aspectRatio,
-        imageSize,
-        model,
-        variations,
+    // generate() returns immediately with {jobId} - results arrive via SSE.
+    // Only catch hard synchronous errors (e.g. missing API key).
+    rpc.request
+      .generate({ jobId, prompt: trimmed, inputImageDataUrl: inputDataUrl, aspectRatio, imageSize, model, variations })
+      .catch((err: unknown) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId ? { ...m, error: String(err), isGenerating: false } : m,
+          ),
+        );
+        setIsGenerating(false);
       });
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMsgId
-            ? { ...m, error: String(err), isGenerating: false }
-            : m,
-        ),
-      );
-      setIsGenerating(false);
-    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

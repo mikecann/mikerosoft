@@ -26,7 +26,7 @@ export type ImgGenRPC = {
     requests: {
       getConfig: { params: void; response: { workingDir: string; eventsUrl: string } };
       getModels: { params: void; response: ImageModel[] };
-      generate: { params: GenerateParams; response: GenerateResult };
+      generate: { params: GenerateParams; response: { jobId: string } };
       download: { params: { imageId: string }; response: { savedPath: string } };
     };
     messages: {};
