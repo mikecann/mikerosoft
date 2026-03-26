@@ -18,20 +18,7 @@ const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const folderPath = process.env["FOLDER_PATH"] ?? process.cwd();
 const sessionId = crypto.randomUUID();
 
-// Load .env from repo root: src/bun -> src -> img-gen -> tools -> repo
-const envPath = path.join(import.meta.dirname, "..", "..", "..", "..", ".env");
-if (fs.existsSync(envPath)) {
-  for (const line of fs.readFileSync(envPath, "utf-8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-    if (!process.env[key]) process.env[key] = val;
-  }
-}
-
+// OPENROUTER_API_KEY is loaded from .env by the VBS launcher before starting bun.
 const apiKey = process.env["OPENROUTER_API_KEY"];
 
 // ---------------------------------------------------------------------------
