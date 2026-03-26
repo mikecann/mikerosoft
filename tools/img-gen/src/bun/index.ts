@@ -1,5 +1,5 @@
 import { BrowserWindow, BrowserView } from "electrobun/bun";
-import type { ImgGenRPC, GenerateParams, SseEvent } from "../shared/types.js";
+import type { ImgGenRPC, GenerateParams, SseEvent, ImageModel } from "../shared/types.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as crypto from "crypto";
@@ -197,6 +197,28 @@ const rpc = BrowserView.defineRPC<ImgGenRPC>({
   handlers: {
     requests: {
       getConfig: () => ({ workingDir: folderPath, eventsUrl: `${baseUrl}/events` }),
+
+      getModels: async () => {
+        try {
+          const res = await fetch("https://openrouter.ai/api/v1/models", {
+            headers: { Authorization: `Bearer ${apiKey}` },
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const json = (await res.json()) as {
+            data: Array<{ id: string; name: string; architecture?: { modality?: string } }>;
+          };
+          return json.data
+            .filter((m) => {
+              if (m.id === "openrouter/auto") return false;
+              const output = m.architecture?.modality?.split("->")[1] ?? "";
+              return output.includes("image");
+            })
+            .map((m): ImageModel => ({ id: m.id, name: m.name }));
+        } catch (err) {
+          console.warn(`getModels failed: ${err} - falling back to defaults`);
+          return MODELS.map((id) => ({ id, name: id }));
+        }
+      },
 
       generate: async (params) => {
         const { jobId } = params;

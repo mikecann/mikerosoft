@@ -16,10 +16,13 @@ export type GenerateResult = {
   modelComment: string;
 };
 
+export type ImageModel = { id: string; name: string };
+
 export type ImgGenRPC = {
   bun: RPCSchema<{
     requests: {
       getConfig: { params: void; response: { workingDir: string; eventsUrl: string } };
+      getModels: { params: void; response: ImageModel[] };
       generate: { params: GenerateParams; response: GenerateResult };
       download: { params: { imageId: string }; response: { savedPath: string } };
     };

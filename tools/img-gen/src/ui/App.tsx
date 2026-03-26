@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Electroview } from "electrobun/view";
-import type { ImgGenRPC, SseEvent } from "../shared/types.js";
+import type { ImgGenRPC, SseEvent, ImageModel } from "../shared/types.js";
 import { AnnotationModal } from "./AnnotationModal.js";
 
 // ---------------------------------------------------------------------------
@@ -28,10 +28,10 @@ type ChatMessage =
       error?: string;
     };
 
-const MODELS = [
-  { label: "Gemini 3.1 Flash (fast)", value: "google/gemini-3.1-flash-image-preview" },
-  { label: "Gemini 2.5 Flash", value: "google/gemini-2.5-flash-image" },
-  { label: "Gemini 3 Pro (best)", value: "google/gemini-3-pro-image-preview" },
+const FALLBACK_MODELS: ImageModel[] = [
+  { id: "google/gemini-3.1-flash-image-preview", name: "Gemini 3.1 Flash Image" },
+  { id: "google/gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image" },
+  { id: "google/gemini-3-pro-image-preview", name: "Gemini 3 Pro Image" },
 ];
 
 const ASPECT_RATIOS = [
@@ -178,7 +178,8 @@ export function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [attachedImage, setAttachedImage] = useState<{ dataUrl: string; name: string } | null>(null);
-  const [model, setModel] = useState(MODELS[0].value);
+  const [models, setModels] = useState<ImageModel[]>(FALLBACK_MODELS);
+  const [model, setModel] = useState(FALLBACK_MODELS[0].id);
   const [aspectRatio, setAspectRatio] = useState("auto");
   const [imageSize, setImageSize] = useState("auto");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -197,6 +198,13 @@ export function App() {
   // Connect RPC + SSE on mount
   useEffect(() => {
     let es: EventSource | null = null;
+
+    rpc.request.getModels().then((list) => {
+      if (list.length > 0) {
+        setModels(list);
+        setModel(list[0].id);
+      }
+    });
 
     rpc.request.getConfig().then(({ workingDir: wd, eventsUrl }) => {
       setWorkingDir(wd);
@@ -362,9 +370,9 @@ export function App() {
           onChange={(e) => setModel(e.target.value)}
           style={selectStyle}
         >
-          {MODELS.map((m) => (
-            <option key={m.value} value={m.value}>
-              {m.label}
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
             </option>
           ))}
         </select>
