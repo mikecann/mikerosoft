@@ -136,4 +136,11 @@ export const tools: Tool[] = [
     screenshots: [`${base}/copypath/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/copypath',
   },
+  {
+    name: 'img-gen',
+    desc: 'Chat-style AI image generation using Gemini via OpenRouter; right-click any folder in Explorer to open; annotate generated images and refine iteratively; drag images out to Explorer to save (requires OpenRouter API key)',
+    icon: `${base}/img-gen/icons/img-gen.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/img-gen',
+  },
 ];

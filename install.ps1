@@ -307,6 +307,7 @@ $svgIco         = "$iconsOut\svg-to-png.ico"
 $descriptionIco = "$iconsOut\video-description.ico"
 $imgToSvgIco    = "$iconsOut\img-to-svg.ico"
 $viewer3dIco    = "$iconsOut\3d-viewer.ico"
+$imgGenIco      = "$iconsOut\img-gen.ico"
 ConvertTo-Ico "$RepoDir\tools\transcribe\icons\wrench.png"                        $wrenchIco
 ConvertTo-Ico "$RepoDir\tools\transcribe\icons\film.png"                          $filmIco
 ConvertTo-Ico "$RepoDir\tools\removebg\icons\picture.png"                         $pictureIco
@@ -318,6 +319,7 @@ ConvertTo-Ico "$RepoDir\tools\svg-to-png\icons\svg-to-png.png"                  
 ConvertTo-Ico "$RepoDir\tools\video-description\icons\video-description.png"     $descriptionIco
 ConvertTo-Ico "$RepoDir\tools\img-to-svg\icons\img-to-svg.png"                   $imgToSvgIco
 ConvertTo-Ico "$RepoDir\tools\3d-viewer\icons\3d-viewer.png"                     $viewer3dIco
+ConvertTo-Ico "$RepoDir\tools\img-gen\icons\img-gen.png"                          $imgGenIco
 Write-Host "  [ico]  Icons written to $iconsOut" -ForegroundColor Green
 
 # --- transcribe + vid2md: video file extensions ---
@@ -388,6 +390,7 @@ $vid2mdCmd = 'cmd.exe /k ""C:\dev\tools\video-to-markdown.bat" "%1""'
 $dirRoot = "HKCU:\Software\Classes\Directory\shell\MikesTools"
 Set-MikesToolsRoot $dirRoot $wrenchIco
 Add-MikesVerb $dirRoot "GhOpen"           "Open on GitHub"     $worldIco       'cmd.exe /k "cd /d "%1" && "C:\dev\tools\ghopen.bat""'
+Add-MikesVerb $dirRoot "ImgGen"           "Image Gen"          $imgGenIco      "wscript.exe `"$RepoDir\tools\img-gen\img-gen.vbs`" `"%1`""
 Add-MikesVerb $dirRoot "VideoDescription" "Video Description"  $descriptionIco 'cmd.exe /k ""C:\dev\tools\video-description.bat" "%1""'
 Add-MikesVerb $dirRoot "Vid2md"           "Video to Markdown"  $linkPageIco    $vid2mdCmd
 
@@ -395,6 +398,7 @@ Add-MikesVerb $dirRoot "Vid2md"           "Video to Markdown"  $linkPageIco    $
 $bgRoot = "HKCU:\Software\Classes\Directory\Background\shell\MikesTools"
 Set-MikesToolsRoot $bgRoot $wrenchIco
 Add-MikesVerb $bgRoot "GhOpen"           "Open on GitHub"     $worldIco       'cmd.exe /k "cd /d "%V" && "C:\dev\tools\ghopen.bat""'
+Add-MikesVerb $bgRoot "ImgGen"           "Image Gen"          $imgGenIco      "wscript.exe `"$RepoDir\tools\img-gen\img-gen.vbs`" `"%V`""
 Add-MikesVerb $bgRoot "VideoDescription" "Video Description"  $descriptionIco 'cmd.exe /k ""C:\dev\tools\video-description.bat" "%V""'
 Add-MikesVerb $bgRoot "Vid2md"           "Video to Markdown"  $linkPageIco    'cmd.exe /k "C:\dev\tools\video-to-markdown.bat"'
 

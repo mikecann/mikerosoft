@@ -41,6 +41,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/svg-to-png/docs/header.png" width="220"><br>[svg-to-png](tools/svg-to-png/README.md) | Context menu | Render an SVG to PNG at high resolution; right-click any `.svg` file in Explorer; output is always at least 2048px on its smallest dimension |
 | <img src="tools/img-to-svg/docs/header.png" width="220"><br>[img-to-svg](tools/img-to-svg/README.md) | CLI + context menu | Convert a raster image to SVG vector using vtracer; right-click any image file in Explorer |
 | <img src="tools/copypath/docs/header.png" width="220"><br>[copypath](tools/copypath/README.md) | CLI | Copy the absolute path of a file or folder to the clipboard; defaults to the current directory if no argument given |
+| <img src="tools/img-gen/icons/img-gen.png" width="220"><br>[img-gen](tools/img-gen/) | GUI + context menu | Chat-style AI image generation using Gemini via OpenRouter; right-click any folder in Explorer; annotate generated images and refine iteratively; drag images out to Explorer to save (requires `OPENROUTER_API_KEY` in `.env`) |
 
 ---
 
