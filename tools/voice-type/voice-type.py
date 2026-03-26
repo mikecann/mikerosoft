@@ -1188,6 +1188,10 @@ class Recorder:
         self._frames:    list[np.ndarray] = []
         self._lock       = threading.Lock()
         self._recording  = False
+        self._stream_error = False  # set on any callback status; triggers restart on next key press
+        self._open_stream()
+
+    def _open_stream(self):
         info = sd.query_devices(DEVICE, "input")
         log(f"Mic: {info['name']!r}")
         # blocksize=256 → 16 ms per callback — low enough that the first
@@ -1198,7 +1202,32 @@ class Recorder:
         )
         self._stream.start()
 
+    def _ensure_stream(self):
+        """Restart the audio stream if it's dead or errored.
+
+        Called on each key press. Handles suspend/resume and device resets -
+        after Windows wakes from sleep the portaudio device can silently die
+        while the sd.InputStream object still thinks it's active.
+        """
+        needs_restart = self._stream_error or not self._stream.active
+        if not needs_restart:
+            return
+        reason = "error flag set" if self._stream_error else "stream inactive"
+        log(f"Audio stream needs restart ({reason}), reconnecting...")
+        try:
+            self._stream.stop()
+            self._stream.close()
+        except Exception as e:
+            log(f"Stream close error (ignored): {e}")
+        try:
+            self._open_stream()
+            self._stream_error = False
+            log("Audio stream restarted successfully.")
+        except Exception as e:
+            log(f"Audio stream restart failed: {e}")
+
     def start(self):
+        self._ensure_stream()
         with self._lock:
             self._frames    = []
             self._recording = True
@@ -1235,6 +1264,7 @@ class Recorder:
     def _callback(self, indata, frames, time_info, status):
         if status:
             log(f"Audio status: {status}")
+            self._stream_error = True   # flag for restart on next key press
         if self._recording:
             self._frames.append(indata.copy())
 
