@@ -1,5 +1,5 @@
 import { BrowserWindow, BrowserView } from "electrobun/bun";
-import type { ImgGenRPC, GenerateParams, SseEvent, ImageModel } from "../shared/types.js";
+import type { ImgGenRPC, GenerateParams, SseEvent, ImageModel, GeneratedImage } from "../shared/types.js";
 import * as path from "path";
 import * as fs from "fs";
 import * as crypto from "crypto";
@@ -222,29 +222,39 @@ const rpc = BrowserView.defineRPC<ImgGenRPC>({
 
       generate: async (params) => {
         const { jobId } = params;
+        const count = Math.min(Math.max(params.variations ?? 1, 1), 4);
 
         if (!apiKey)
           throw new Error("OPENROUTER_API_KEY is not set. Add it to .env in the repo root.");
 
         broadcastSse({ kind: "generating", jobId });
 
-        try {
-          const { b64, comment } = await generateWithFallback(params);
+        const results: GeneratedImage[] = [];
 
-          const imageId = crypto.randomUUID();
-          const filename = `${imageId}.png`;
-          const tempPath = path.join(tempDir, filename);
-          fs.writeFileSync(tempPath, Buffer.from(b64, "base64"));
-          imageStore.set(imageId, { tempPath });
+        for (let i = 0; i < count; i++) {
+          try {
+            const { b64, comment } = await generateWithFallback(params);
+            const imageId = crypto.randomUUID();
+            const filename = `${imageId}.png`;
+            const tempPath = path.join(tempDir, filename);
+            fs.writeFileSync(tempPath, Buffer.from(b64, "base64"));
+            imageStore.set(imageId, { tempPath });
 
-          const serveUrl = `${baseUrl}/images/${filename}`;
-          broadcastSse({ kind: "imageResult", jobId, imageId, serveUrl, tempPath, modelComment: comment });
-
-          return { imageId, serveUrl, tempPath, modelComment: comment };
-        } catch (err) {
-          broadcastSse({ kind: "imageError", jobId, error: String(err) });
-          throw err;
+            const image: GeneratedImage = {
+              imageId,
+              serveUrl: `${baseUrl}/images/${filename}`,
+              tempPath,
+              modelComment: comment,
+            };
+            results.push(image);
+            broadcastSse({ kind: "imageResult", jobId, image });
+          } catch (err) {
+            broadcastSse({ kind: "imageError", jobId, error: String(err) });
+            if (i === 0) throw err;
+          }
         }
+
+        return results;
       },
 
       download: ({ imageId }) => {

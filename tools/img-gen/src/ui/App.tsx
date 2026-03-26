@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Electroview } from "electrobun/view";
-import type { ImgGenRPC, SseEvent, ImageModel } from "../shared/types.js";
+import type { ImgGenRPC, SseEvent, ImageModel, GeneratedImage } from "../shared/types.js";
 import { AnnotationModal } from "./AnnotationModal.js";
 
 // ---------------------------------------------------------------------------
@@ -20,10 +20,7 @@ type ChatMessage =
       id: string;
       role: "assistant";
       jobId: string;
-      imageId?: string;
-      serveUrl?: string;
-      tempPath?: string;
-      modelComment?: string;
+      images: GeneratedImage[];
       isGenerating: boolean;
       error?: string;
     };
@@ -82,75 +79,101 @@ function Spinner() {
   );
 }
 
-function ImageBubble({
-  msg,
+function SettingControl({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <span style={{ fontSize: 10, color: "#555", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function SingleImage({
+  img,
   onAnnotate,
   onDownload,
+  downloadStatus,
 }: {
-  msg: Extract<ChatMessage, { role: "assistant" }>;
+  img: GeneratedImage;
   onAnnotate: (dataUrl: string, imageId: string) => void;
   onDownload: (imageId: string) => void;
+  downloadStatus?: string;
 }) {
-  if (msg.isGenerating && !msg.serveUrl) return <Spinner />;
-  if (msg.error) return <div style={{ color: "#e07070", fontSize: 13 }}>{msg.error}</div>;
-  if (!msg.serveUrl) return null;
-
   const handleDragStart = (e: React.DragEvent<HTMLImageElement>) => {
-    if (!msg.tempPath) return;
-    const fileUrl = "file:///" + msg.tempPath.replace(/\\/g, "/");
+    const fileUrl = "file:///" + img.tempPath.replace(/\\/g, "/");
     e.dataTransfer.effectAllowed = "copy";
     e.dataTransfer.setData("text/uri-list", fileUrl);
-    e.dataTransfer.setData(
-      "DownloadURL",
-      `image/png:${msg.imageId}.png:${fileUrl}`,
-    );
+    e.dataTransfer.setData("DownloadURL", `image/png:${img.imageId}.png:${fileUrl}`);
   };
 
   const handleAnnotateClick = () => {
-    if (!msg.serveUrl || !msg.imageId) return;
-    // Fetch image as data URL for the canvas
-    fetch(msg.serveUrl)
+    fetch(img.serveUrl)
       .then((r) => r.blob())
       .then((blob) => {
         const reader = new FileReader();
-        reader.onload = () => onAnnotate(reader.result as string, msg.imageId!);
+        reader.onload = () => onAnnotate(reader.result as string, img.imageId);
         reader.readAsDataURL(blob);
       });
   };
 
   return (
-    <div>
-      <div style={{ position: "relative", display: "inline-block" }}>
-        <img
-          src={msg.serveUrl}
-          draggable
-          onDragStart={handleDragStart}
-          style={{
-            maxWidth: "100%",
-            maxHeight: 480,
-            borderRadius: 8,
-            display: "block",
-            cursor: "grab",
-          }}
-          title="Drag to Explorer to save"
-        />
-        <div style={imageActionsStyle}>
-          <button style={iconBtnStyle} onClick={handleAnnotateClick} title="Annotate">
-            ✏
-          </button>
-          <button
-            style={iconBtnStyle}
-            onClick={() => { if (msg.imageId) onDownload(msg.imageId); }}
-            title="Download to folder"
-          >
-            ⬇
-          </button>
-        </div>
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <img
+        src={img.serveUrl}
+        draggable
+        onDragStart={handleDragStart}
+        style={{ maxWidth: "100%", maxHeight: 400, borderRadius: 8, display: "block", cursor: "grab" }}
+        title="Drag to Explorer to save"
+      />
+      <div style={imageActionsStyle}>
+        <button style={iconBtnStyle} onClick={handleAnnotateClick} title="Annotate">✏</button>
+        <button style={iconBtnStyle} onClick={() => onDownload(img.imageId)} title="Download">⬇</button>
       </div>
-      {msg.modelComment && (
-        <p style={{ color: "#888", fontSize: 12, marginTop: 6, maxWidth: 520 }}>
-          {msg.modelComment}
-        </p>
+      {downloadStatus && (
+        <div style={{ color: "#6b9", fontSize: 11, marginTop: 4 }}>{downloadStatus}</div>
+      )}
+      {img.modelComment && (
+        <p style={{ color: "#888", fontSize: 12, marginTop: 4, maxWidth: 400 }}>{img.modelComment}</p>
+      )}
+    </div>
+  );
+}
+
+function ImageBubble({
+  msg,
+  onAnnotate,
+  onDownload,
+  downloadStatus,
+}: {
+  msg: Extract<ChatMessage, { role: "assistant" }>;
+  onAnnotate: (dataUrl: string, imageId: string) => void;
+  onDownload: (imageId: string) => void;
+  downloadStatus: Record<string, string>;
+}) {
+  if (msg.isGenerating && msg.images.length === 0) return <Spinner />;
+  if (msg.error && msg.images.length === 0)
+    return <div style={{ color: "#e07070", fontSize: 13 }}>{msg.error}</div>;
+
+  return (
+    <div>
+      {msg.isGenerating && msg.images.length > 0 && (
+        <div style={{ marginBottom: 8 }}><Spinner /></div>
+      )}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {msg.images.map((img) => (
+          <SingleImage
+            key={img.imageId}
+            img={img}
+            onAnnotate={onAnnotate}
+            onDownload={onDownload}
+            downloadStatus={downloadStatus[img.imageId]}
+          />
+        ))}
+      </div>
+      {msg.error && (
+        <div style={{ color: "#e07070", fontSize: 12, marginTop: 6 }}>{msg.error}</div>
       )}
     </div>
   );
@@ -182,6 +205,7 @@ export function App() {
   const [model, setModel] = useState(FALLBACK_MODELS[0].id);
   const [aspectRatio, setAspectRatio] = useState("auto");
   const [imageSize, setImageSize] = useState("auto");
+  const [variations, setVariations] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
   const [workingDir, setWorkingDir] = useState("");
   const [downloadStatus, setDownloadStatus] = useState<Record<string, string>>({});
@@ -217,7 +241,7 @@ export function App() {
           setMessages((prev) =>
             prev.map((m) =>
               m.role === "assistant" && m.jobId === event.jobId
-                ? { ...m, imageId: event.imageId, serveUrl: event.serveUrl, tempPath: event.tempPath, modelComment: event.modelComment, isGenerating: false }
+                ? { ...m, images: [...m.images, event.image], isGenerating: false }
                 : m,
             ),
           );
@@ -245,7 +269,8 @@ export function App() {
   const getLastServeUrl = (): string | undefined => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
-      if (m.role === "assistant" && m.serveUrl && !m.error) return m.serveUrl;
+      if (m.role === "assistant" && m.images.length > 0 && !m.error)
+        return m.images[m.images.length - 1].serveUrl;
     }
     return undefined;
   };
@@ -287,6 +312,7 @@ export function App() {
       id: assistantMsgId,
       role: "assistant",
       jobId,
+      images: [],
       isGenerating: true,
     };
 
@@ -303,6 +329,7 @@ export function App() {
         aspectRatio,
         imageSize,
         model,
+        variations,
       });
     } catch (err) {
       setMessages((prev) =>
@@ -407,12 +434,8 @@ export function App() {
                   msg={msg}
                   onAnnotate={(dataUrl, imageId) => setAnnotateTarget({ dataUrl, imageId })}
                   onDownload={handleDownload}
+                  downloadStatus={downloadStatus}
                 />
-                {downloadStatus[msg.imageId ?? ""] && (
-                  <div style={{ color: "#6b9", fontSize: 11, marginTop: 4 }}>
-                    {downloadStatus[msg.imageId ?? ""]}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -448,6 +471,44 @@ export function App() {
         </div>
       )}
 
+      {/* Settings strip */}
+      <div style={settingsStripStyle}>
+        <SettingControl label="Aspect ratio">
+          <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} style={settingSelectStyle}>
+            {ASPECT_RATIOS.map((r) => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+        </SettingControl>
+        <div style={settingDivider} />
+        <SettingControl label="Size">
+          <select value={imageSize} onChange={(e) => setImageSize(e.target.value)} style={settingSelectStyle}>
+            {IMAGE_SIZES.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+        </SettingControl>
+        <div style={settingDivider} />
+        <SettingControl label="Variations">
+          <div style={{ display: "flex", gap: 3 }}>
+            {[1, 2, 3, 4].map((n) => (
+              <button
+                key={n}
+                style={{
+                  ...variationBtnStyle,
+                  background: variations === n ? "#2563eb" : "#1e1e1e",
+                  color: variations === n ? "#fff" : "#888",
+                  borderColor: variations === n ? "#2563eb" : "#333",
+                }}
+                onClick={() => setVariations(n)}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        </SettingControl>
+      </div>
+
       {/* Input area */}
       <div style={inputAreaStyle}>
         <div style={inputRowStyle}>
@@ -475,20 +536,6 @@ export function App() {
           >
             {isGenerating ? <div style={spinnerStyle} /> : "Generate"}
           </button>
-        </div>
-        <div style={toolbarStyle}>
-          <label style={toolbarLabelStyle}>Aspect</label>
-          <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} style={selectSmallStyle}>
-            {ASPECT_RATIOS.map((r) => (
-              <option key={r.value} value={r.value}>{r.label}</option>
-            ))}
-          </select>
-          <label style={toolbarLabelStyle}>Size</label>
-          <select value={imageSize} onChange={(e) => setImageSize(e.target.value)} style={selectSmallStyle}>
-            {IMAGE_SIZES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
         </div>
       </div>
 
@@ -637,16 +684,42 @@ const attachBtnStyle: React.CSSProperties = {
   height: 52,
 };
 
-const toolbarStyle: React.CSSProperties = {
+const settingsStripStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 8,
-  marginTop: 6,
+  gap: 16,
+  padding: "8px 16px",
+  borderTop: "1px solid #1e1e1e",
+  background: "#141414",
+  flexShrink: 0,
+  flexWrap: "wrap",
 };
 
-const toolbarLabelStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: "#555",
+const settingDivider: React.CSSProperties = {
+  width: 1,
+  height: 28,
+  background: "#222",
+  flexShrink: 0,
+};
+
+const settingSelectStyle: React.CSSProperties = {
+  background: "#1e1e1e",
+  border: "1px solid #2a2a2a",
+  borderRadius: 5,
+  color: "#ccc",
+  fontSize: 12,
+  padding: "3px 6px",
+  cursor: "pointer",
+};
+
+const variationBtnStyle: React.CSSProperties = {
+  border: "1px solid #333",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: 12,
+  fontWeight: 600,
+  padding: "2px 7px",
+  lineHeight: "18px",
 };
 
 const selectStyle: React.CSSProperties = {
@@ -656,11 +729,6 @@ const selectStyle: React.CSSProperties = {
   color: "#aaa",
   fontSize: 12,
   padding: "4px 8px",
-};
-
-const selectSmallStyle: React.CSSProperties = {
-  ...selectStyle,
-  padding: "3px 6px",
 };
 
 const annotationNoticeStyle: React.CSSProperties = {
