@@ -88,17 +88,19 @@ export function buildFallbackOrder(preferred: string, allModels: string[]): stri
 
 const REQUEST_TIMEOUT_MS = 90_000;
 
+function timeout(ms: number): Promise<never> {
+  return new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Request timed out after ${ms / 1000}s`)), ms),
+  );
+}
+
 export async function generateOne(
   args: GenerateOneArgs,
   fetchFn: typeof fetch = fetch,
 ): Promise<GenerateOneResult> {
   const body = buildRequestBody(args);
-  const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
-
-  let res: Response;
-  try {
-    res = await fetchFn(API_URL, {
+  const res = await Promise.race([
+    fetchFn(API_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${args.apiKey}`,
@@ -107,11 +109,9 @@ export async function generateOne(
         "X-Title": "mikerosoft/img-gen",
       },
       body: JSON.stringify(body),
-      signal: abort.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+    }),
+    timeout(REQUEST_TIMEOUT_MS),
+  ]);
 
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
   return extractImage(await res.json() as Parameters<typeof extractImage>[0]);

@@ -18,6 +18,19 @@ const sessionId = crypto.randomUUID();
 const apiKey = process.env["OPENROUTER_API_KEY"];
 
 // ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+
+const logPath = path.join(process.env["TEMP"] ?? "/tmp", "img-gen", "img-gen.log");
+fs.mkdirSync(path.dirname(logPath), { recursive: true });
+
+function log(msg: string) {
+  const line = `${new Date().toISOString()} ${msg}\n`;
+  fs.appendFileSync(logPath, line);
+  console.log(msg);
+}
+
+// ---------------------------------------------------------------------------
 // Temp directory
 // ---------------------------------------------------------------------------
 
@@ -88,7 +101,7 @@ const server = Bun.serve({
 });
 
 const baseUrl = `http://127.0.0.1:${server.port}`;
-console.log(`img-gen server at ${baseUrl}`);
+log(`img-gen server at ${baseUrl} | apiKey=${apiKey ? "set" : "MISSING"}`);
 
 // ---------------------------------------------------------------------------
 // Background generation task
@@ -98,11 +111,13 @@ async function runGeneration(params: GenerateParams) {
   const { jobId } = params;
   const count = Math.min(Math.max(params.variations ?? 1, 1), 4);
 
+  log(`[${jobId}] Starting generation: count=${count} model=${params.model ?? "default"}`);
   broadcastSse({ kind: "generating", jobId });
 
   try {
     for (let i = 0; i < count; i++) {
       try {
+        log(`[${jobId}] Calling OpenRouter (variation ${i + 1}/${count})...`);
         const { b64, comment } = await generateWithFallback(
           {
             prompt: params.prompt,
@@ -121,12 +136,14 @@ async function runGeneration(params: GenerateParams) {
         fs.writeFileSync(tempPath, Buffer.from(b64, "base64"));
         imageStore.set(imageId, { tempPath });
 
+        log(`[${jobId}] Success: ${imageId}`);
         broadcastSse({
           kind: "imageResult",
           jobId,
           image: { imageId, serveUrl: `${baseUrl}/images/${filename}`, tempPath, modelComment: comment },
         });
       } catch (err) {
+        log(`[${jobId}] Error: ${err}`);
         broadcastSse({ kind: "imageError", jobId, error: String(err) });
       }
     }
