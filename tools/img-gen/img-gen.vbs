@@ -36,4 +36,11 @@ End If
 oShell.Environment("Process")("FOLDER_PATH") = sFolder
 oShell.CurrentDirectory = sDir
 
-oShell.Run "bun start", 0, False
+' On first run (no build output yet) do a full build first, then launch.
+' On subsequent runs skip the build so the window opens immediately.
+Dim buildDir
+buildDir = sDir & "\build"
+If Not fso.FolderExists(buildDir) Then
+    oShell.Run "cmd /c cd /d """ & sDir & """ && bun run build:dev", 1, True
+End If
+oShell.Run "bun run dev", 0, False

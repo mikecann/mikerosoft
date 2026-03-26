@@ -11,7 +11,15 @@
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+    <div id="root">
+      <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:#111">
+        <div style="width:36px;height:36px;border:3px solid #1e1e1e;border-top-color:#2563eb;border-radius:50%;animation:spin 0.7s linear infinite"></div>
+        <span style="color:#333;font-size:13px;font-family:system-ui,sans-serif;letter-spacing:0.03em">Image Gen</span>
+      </div>
+    </div>
     <script src="views://img-gen-ui/index.js"></script>
   </body>
 </html>
