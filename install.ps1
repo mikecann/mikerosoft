@@ -104,6 +104,15 @@ call "$RepoDir\tools\removebg\removebg.bat" %*
 "@
 
 # ---------------------------------------------------------------------------
+# img-upscale
+# ---------------------------------------------------------------------------
+Write-BatStub "img-upscale" @"
+@echo off
+set "EXEDIR=%~dp0"
+call "$RepoDir\tools\img-upscale\img-upscale.bat" %*
+"@
+
+# ---------------------------------------------------------------------------
 # ghopen — open current repo/PR in browser
 # ---------------------------------------------------------------------------
 Write-BatStub "ghopen" @"
@@ -255,7 +264,7 @@ Write-Host "  [lnk]  $vtShortcutPath" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
 # Context menu - "Mike's Tools" submenu in File Explorer
-# Covers: video files (transcribe), image files (removebg), folders (ghopen)
+# Covers: video files, image files, and folders
 # ---------------------------------------------------------------------------
 Write-Host "  [reg]  Registering 'Mike''s Tools' context menus..." -ForegroundColor Green
 
@@ -339,6 +348,7 @@ foreach ($ext in $imageExts) {
     $root = "HKCU:\Software\Classes\SystemFileAssociations\$ext\shell\MikesTools"
     Set-MikesToolsRoot $root $wrenchIco
     Add-MikesVerb $root "RemoveBg"           "Remove Background"    $pictureIco 'cmd.exe /k ""C:\dev\tools\removebg.bat" "%1""'
+    Add-MikesVerb $root "ImgUpscale"         "Upscale Image"        $pictureIco 'cmd.exe /k ""C:\dev\tools\img-upscale.bat" "%1""'
     Add-MikesVerb $root "GenerateFromImage" "Generate from Image"  $wandIco    'cmd.exe /k ""C:\dev\tools\generate-from-image.bat" "%1""'
     Add-MikesVerb $root "ImgToSvg"          "Convert to SVG"       $imgToSvgIco 'cmd.exe /k ""C:\dev\tools\img-to-svg.bat" "%1""'
 }

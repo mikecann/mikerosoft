@@ -38,6 +38,14 @@ export const tools: Tool[] = [
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/removebg',
   },
   {
+    name: 'img-upscale',
+    desc: 'Upscale an image locally with a quality-first transformer backend; right-click any image file in Explorer, choose 2x, 4x, 8x, or 16x, and keep the original file format',
+    icon: `${base}/img-upscale/icons/picture.png`,
+    header: `${base}/img-upscale/docs/header.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/img-upscale',
+  },
+  {
     name: 'ghopen',
     desc: 'Open the current repo on GitHub; opens the PR page if on a PR branch; right-click any folder in Explorer',
     icon: `${base}/ghopen/icons/world_go.png`,
