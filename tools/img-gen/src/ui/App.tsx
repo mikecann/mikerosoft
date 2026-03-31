@@ -561,7 +561,9 @@ export function App() {
 const rootStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  height: "100vh",
+  flex: 1,
+  minHeight: 0,
+  width: "100%",
   overflow: "hidden",
   background: "#111",
 };
@@ -578,7 +580,9 @@ const headerStyle: React.CSSProperties = {
 
 const messagesStyle: React.CSSProperties = {
   flex: 1,
+  minHeight: 0,
   overflowY: "auto",
+  WebkitOverflowScrolling: "touch",
   padding: "16px",
   display: "flex",
   flexDirection: "column",

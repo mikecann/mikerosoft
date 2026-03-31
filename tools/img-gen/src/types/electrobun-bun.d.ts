@@ -68,4 +68,6 @@ export declare class BrowserWindow {
     rpc?: unknown;
     [key: string]: unknown;
   });
+  setSize(width: number, height: number): unknown;
+  getFrame(): { x: number; y: number; width: number; height: number };
 }

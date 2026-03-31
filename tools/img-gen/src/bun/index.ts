@@ -206,9 +206,35 @@ const rpc = BrowserView.defineRPC<ImgGenRPC>({
 // Window
 // ---------------------------------------------------------------------------
 
-new BrowserWindow({
+const win = new BrowserWindow({
   title: "Image Gen",
   url: "views://img-gen-ui/index.html",
   frame: { width: 900, height: 720, x: 120, y: 80 },
   rpc,
 });
+
+// Electrobun/WebView2 on Windows sometimes paints the initial webview before
+// the native window settles into its final client size. A tiny native resize
+// pulse reproduces the manual drag-resize fix.
+function pulseWindowSize() {
+  try {
+    const { width, height } = win.getFrame();
+    win.setSize(width + 1, height + 1);
+    setTimeout(() => {
+      try {
+        win.setSize(width, height);
+      } catch (err) {
+        log(`[window] resize restore failed: ${err}`);
+      }
+    }, 40);
+  } catch (err) {
+    log(`[window] resize pulse failed: ${err}`);
+  }
+}
+
+for (const delay of [150, 500, 1000]) {
+  setTimeout(() => {
+    log(`[window] resize pulse at ${delay}ms`);
+    pulseWindowSize();
+  }, delay);
+}

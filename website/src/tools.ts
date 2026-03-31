@@ -151,4 +151,12 @@ export const tools: Tool[] = [
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/img-gen',
   },
+  {
+    name: 'face-swap',
+    desc: 'Swap a face from one image into another locally using InsightFace; right-click any image to pre-load the target, or launch it from Windows Search',
+    icon: `${base}/face-swap/icons/face-swap.png`,
+    header: `${base}/face-swap/docs/header.png`,
+    screenshots: [`${base}/face-swap/docs/ss1.png`],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/face-swap',
+  },
 ];

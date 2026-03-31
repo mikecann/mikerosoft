@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Face Swap</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; min-height: 0; overflow: hidden; }
+      /* flex column so the app fills the real webview height (100vh is often taller than the client area and clips the bottom). */
+      #root {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      body { background: #111; color: #e8e8e8; font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+    <div id="root">
+      <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:#111">
+        <div style="width:36px;height:36px;border:3px solid #1e1e1e;border-top-color:#2563eb;border-radius:50%;animation:spin 0.7s linear infinite"></div>
+        <span style="color:#333;font-size:13px;font-family:system-ui,sans-serif;letter-spacing:0.03em">Face Swap</span>
+      </div>
+    </div>
+    <script src="views://face-swap-ui/index.js"></script>
+  </body>
+</html>

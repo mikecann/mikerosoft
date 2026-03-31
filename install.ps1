@@ -249,6 +249,20 @@ $tmSmSc.Save()
 Write-Host "  [lnk]  $tmStartMenuPath" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
+# face-swap — Start Menu shortcut so Windows Search finds it
+# ---------------------------------------------------------------------------
+$fsVbsPath      = "$RepoDir\tools\face-swap\face-swap.vbs"
+$fsStartMenuPath = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Face Swap.lnk"
+$fsSm = $wsh.CreateShortcut($fsStartMenuPath)
+$fsSm.TargetPath       = "wscript.exe"
+$fsSm.Arguments        = "`"$fsVbsPath`""
+$fsSm.WorkingDirectory = "$RepoDir\tools\face-swap"
+$fsSm.Description      = "Swap faces in images using InsightFace (local AI)"
+$fsSm.IconLocation     = "%SystemRoot%\System32\imageres.dll,109"
+$fsSm.Save()
+Write-Host "  [lnk]  $fsStartMenuPath" -ForegroundColor Green
+
+# ---------------------------------------------------------------------------
 # voice-type — taskbar shortcut (launched via VBS for no console window)
 # ---------------------------------------------------------------------------
 $vtVbsPath      = "$RepoDir\tools\voice-type\voice-type.vbs"
@@ -317,6 +331,7 @@ $descriptionIco = "$iconsOut\video-description.ico"
 $imgToSvgIco    = "$iconsOut\img-to-svg.ico"
 $viewer3dIco    = "$iconsOut\3d-viewer.ico"
 $imgGenIco      = "$iconsOut\img-gen.ico"
+$faceSwapIco    = "$iconsOut\face-swap.ico"
 ConvertTo-Ico "$RepoDir\tools\transcribe\icons\wrench.png"                        $wrenchIco
 ConvertTo-Ico "$RepoDir\tools\transcribe\icons\film.png"                          $filmIco
 ConvertTo-Ico "$RepoDir\tools\removebg\icons\picture.png"                         $pictureIco
@@ -329,6 +344,7 @@ ConvertTo-Ico "$RepoDir\tools\video-description\icons\video-description.png"    
 ConvertTo-Ico "$RepoDir\tools\img-to-svg\icons\img-to-svg.png"                   $imgToSvgIco
 ConvertTo-Ico "$RepoDir\tools\3d-viewer\icons\3d-viewer.png"                     $viewer3dIco
 ConvertTo-Ico "$RepoDir\tools\img-gen\icons\img-gen.png"                          $imgGenIco
+ConvertTo-Ico "$RepoDir\tools\face-swap\icons\face-swap.png"                      $faceSwapIco
 Write-Host "  [ico]  Icons written to $iconsOut" -ForegroundColor Green
 
 # --- transcribe + vid2md: video file extensions ---
@@ -351,6 +367,7 @@ foreach ($ext in $imageExts) {
     Add-MikesVerb $root "ImgUpscale"         "Upscale Image"        $pictureIco 'cmd.exe /k ""C:\dev\tools\img-upscale.bat" "%1""'
     Add-MikesVerb $root "GenerateFromImage" "Generate from Image"  $wandIco    'cmd.exe /k ""C:\dev\tools\generate-from-image.bat" "%1""'
     Add-MikesVerb $root "ImgToSvg"          "Convert to SVG"       $imgToSvgIco 'cmd.exe /k ""C:\dev\tools\img-to-svg.bat" "%1""'
+    Add-MikesVerb $root "FaceSwap"          "Face Swap"            $faceSwapIco "wscript.exe `"$RepoDir\tools\face-swap\face-swap.vbs`" `"%1`""
 }
 
 # --- svg-to-png: SVG files ---
@@ -401,6 +418,7 @@ $dirRoot = "HKCU:\Software\Classes\Directory\shell\MikesTools"
 Set-MikesToolsRoot $dirRoot $wrenchIco
 Add-MikesVerb $dirRoot "GhOpen"           "Open on GitHub"     $worldIco       'cmd.exe /k "cd /d "%1" && "C:\dev\tools\ghopen.bat""'
 Add-MikesVerb $dirRoot "ImgGen"           "Image Gen"          $imgGenIco      "wscript.exe `"$RepoDir\tools\img-gen\img-gen.vbs`" `"%1`""
+Add-MikesVerb $dirRoot "FaceSwap"         "Face Swap"          $faceSwapIco    "wscript.exe `"$RepoDir\tools\face-swap\face-swap.vbs`" `"%1`""
 Add-MikesVerb $dirRoot "VideoDescription" "Video Description"  $descriptionIco 'cmd.exe /k ""C:\dev\tools\video-description.bat" "%1""'
 Add-MikesVerb $dirRoot "Vid2md"           "Video to Markdown"  $linkPageIco    $vid2mdCmd
 
@@ -409,6 +427,7 @@ $bgRoot = "HKCU:\Software\Classes\Directory\Background\shell\MikesTools"
 Set-MikesToolsRoot $bgRoot $wrenchIco
 Add-MikesVerb $bgRoot "GhOpen"           "Open on GitHub"     $worldIco       'cmd.exe /k "cd /d "%V" && "C:\dev\tools\ghopen.bat""'
 Add-MikesVerb $bgRoot "ImgGen"           "Image Gen"          $imgGenIco      "wscript.exe `"$RepoDir\tools\img-gen\img-gen.vbs`" `"%V`""
+Add-MikesVerb $bgRoot "FaceSwap"         "Face Swap"          $faceSwapIco    "wscript.exe `"$RepoDir\tools\face-swap\face-swap.vbs`" `"%V`""
 Add-MikesVerb $bgRoot "VideoDescription" "Video Description"  $descriptionIco 'cmd.exe /k ""C:\dev\tools\video-description.bat" "%V""'
 Add-MikesVerb $bgRoot "Vid2md"           "Video to Markdown"  $linkPageIco    'cmd.exe /k "C:\dev\tools\video-to-markdown.bat"'
 
@@ -465,3 +484,4 @@ Write-Host "Reminder: right-click 'Scale Monitor.lnk' in $ToolsDir and pin to ta
 Write-Host "Reminder: right-click 'Task Stats.lnk' in $ToolsDir and pin to taskbar." -ForegroundColor Cyan
 Write-Host "Reminder: right-click 'Voice Type.lnk' in $ToolsDir and pin to taskbar (or run on login)." -ForegroundColor Cyan
 Write-Host "Reminder: if double-clicking .glb files doesn't open 3D Viewer, go to Settings > Default Apps > choose by file type > .glb." -ForegroundColor Cyan
+Write-Host "Reminder: face-swap needs inswapper_128.onnx - run tools\face-swap\deps.ps1 for download instructions." -ForegroundColor Cyan
