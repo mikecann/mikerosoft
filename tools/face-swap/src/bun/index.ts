@@ -112,13 +112,14 @@ function loadInitialTargetDataUrl(): string | undefined {
   return `data:${mimeType};base64,${b64}`;
 }
 
-function createAutoSavedPath(targetOriginalPath?: string): string {
+function createAutoSavedPath(targetOriginalPath?: string, isVideo: boolean = false): string {
+  const defaultExt = isVideo ? ".mp4" : ".png";
   if (!targetOriginalPath) {
-    return path.join(folderPath, `face-swapped-${crypto.randomUUID()}.png`);
+    return path.join(folderPath, `face-swapped-${crypto.randomUUID()}${defaultExt}`);
   }
 
   const dir = path.dirname(targetOriginalPath);
-  const ext = path.extname(targetOriginalPath) || ".png";
+  const ext = path.extname(targetOriginalPath) || defaultExt;
   const base = path.basename(targetOriginalPath, ext);
   let savedPath = path.join(dir, `${base}_face-swapped${ext}`);
   let counter = 1;
@@ -184,16 +185,18 @@ const server = Bun.serve({
       });
     }
 
-    const match = url.pathname.match(/^\/images\/([^/]+\.png)$/);
+    const match = url.pathname.match(/^\/images\/([^/]+\.(png|mp4))$/);
     if (match) {
       const filePath = path.join(tempDir, match[1]);
-      if (fs.existsSync(filePath))
+      if (fs.existsSync(filePath)) {
+        const isVideo = match[2] === "mp4";
         return new Response(Bun.file(filePath), {
           headers: {
-            "Content-Type": "image/png",
+            "Content-Type": isVideo ? "video/mp4" : "image/png",
             "Access-Control-Allow-Origin": "*",
           },
         });
+      }
     }
 
     return new Response("Not found", { status: 404 });
@@ -210,10 +213,12 @@ log(
 // ---------------------------------------------------------------------------
 
 function dataUrlToTempFile(dataUrl: string, suffix: string): string {
-  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/);
+  const match = dataUrl.match(/^data:(image|video)\/([^;]+);base64,(.+)$/);
   if (!match) throw new Error("Invalid data URL");
-  const buf = Buffer.from(match[1], "base64");
-  const filePath = path.join(tempDir, `${suffix}-${crypto.randomUUID()}.png`);
+  const isVideo = match[1] === "video";
+  const ext = isVideo ? ".mp4" : ".png";
+  const buf = Buffer.from(match[3], "base64");
+  const filePath = path.join(tempDir, `${suffix}-${crypto.randomUUID()}${ext}`);
   fs.writeFileSync(filePath, buf);
   return filePath;
 }
@@ -223,14 +228,30 @@ function dataUrlToTempFile(dataUrl: string, suffix: string): string {
 // ---------------------------------------------------------------------------
 
 async function runSwap(params: SwapParams) {
-  const { jobId, targetDataUrl, sourceDataUrl, targetOriginalPath } = params;
+  const { jobId, targetDataUrl, targetPath, sourceDataUrl, targetOriginalPath } = params;
   log(`[${jobId}] Starting face swap`);
   broadcastSse({ kind: "swapping", jobId });
 
-  const targetFile = dataUrlToTempFile(targetDataUrl, "target");
+  let targetFile = "";
+  let isTargetTemp = false;
+
+  if (targetPath) {
+    targetFile = targetPath;
+  } else if (targetDataUrl) {
+    targetFile = dataUrlToTempFile(targetDataUrl, "target");
+    isTargetTemp = true;
+  } else {
+    broadcastSse({ kind: "swapError", jobId, error: "No target provided" });
+    return;
+  }
+
   const sourceFile = dataUrlToTempFile(sourceDataUrl, "source");
+  
+  const isVideo = targetFile.match(/\.(mp4|avi|mov|mkv|webm)$/i) !== null;
+  const ext = isVideo ? ".mp4" : ".png";
+  
   const outputId = crypto.randomUUID();
-  const outputFile = path.join(tempDir, `${outputId}.png`);
+  const outputFile = path.join(tempDir, `${outputId}${ext}`);
 
   try {
     if (!(await pythonOkPromise)) {
@@ -306,11 +327,11 @@ async function runSwap(params: SwapParams) {
       return;
     }
 
-    const autoSavedPath = createAutoSavedPath(targetOriginalPath);
+    const autoSavedPath = createAutoSavedPath(targetOriginalPath, isVideo);
     fs.copyFileSync(outputFile, autoSavedPath);
     log(`[${jobId}] auto-saved to: ${autoSavedPath}`);
 
-    const filename = `${outputId}.png`;
+    const filename = `${outputId}${ext}`;
     imageStore.set(outputId, { tempPath: outputFile });
 
     const image: SwapResult = {
@@ -318,6 +339,7 @@ async function runSwap(params: SwapParams) {
       serveUrl: `${baseUrl}/images/${filename}`,
       tempPath: outputFile,
       autoSavedPath,
+      isVideo,
     };
 
     broadcastSse({ kind: "swapResult", jobId, image });
@@ -325,8 +347,12 @@ async function runSwap(params: SwapParams) {
     log(`[${jobId}] Unexpected error: ${err}`);
     broadcastSse({ kind: "swapError", jobId, error: String(err) });
   } finally {
-    fs.rmSync(targetFile, { force: true });
-    fs.rmSync(sourceFile, { force: true });
+    if (isTargetTemp && fs.existsSync(targetFile)) {
+      fs.rmSync(targetFile, { force: true });
+    }
+    if (fs.existsSync(sourceFile)) {
+      fs.rmSync(sourceFile, { force: true });
+    }
   }
 }
 

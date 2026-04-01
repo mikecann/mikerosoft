@@ -26,14 +26,16 @@ async function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-function isImageFile(file: File) {
-  return file.type.startsWith("image/");
+function isMediaFile(file: File) {
+  return file.type.startsWith("image/") || file.type.startsWith("video/");
 }
 
-type SelectedImage = {
-  dataUrl: string;
+type SelectedMedia = {
+  previewUrl: string;
+  dataUrl?: string;
   name: string;
   originalPath?: string;
+  isVideo: boolean;
 };
 
 function getFilePath(file: File): string | undefined {
@@ -48,15 +50,17 @@ function getFilePath(file: File): string | undefined {
 function DropZone({
   label,
   sublabel,
-  dataUrl,
-  onImage,
+  media,
+  onMedia,
   disabled,
+  acceptVideo = false,
 }: {
   label: string;
   sublabel: string;
-  dataUrl: string | null;
-  onImage: (image: SelectedImage | null) => void;
+  media: SelectedMedia | null;
+  onMedia: (media: SelectedMedia | null) => void;
   disabled: boolean;
+  acceptVideo?: boolean;
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -68,23 +72,52 @@ function DropZone({
       if (disabled) return;
 
       const file = e.dataTransfer.files[0];
-      if (!file || !isImageFile(file)) return;
-      onImage({
-        dataUrl: await fileToDataUrl(file),
+      if (!file) return;
+      if (!file.type.startsWith("image/") && (!acceptVideo || !file.type.startsWith("video/"))) return;
+      
+      const isVideo = file.type.startsWith("video/");
+      const previewUrl = URL.createObjectURL(file);
+      
+      let dataUrl: string | undefined = undefined;
+      const originalPath = getFilePath(file);
+      
+      // If we don't have a direct file path (e.g. they clicked Browse instead of drag/drop),
+      // we have to read it into memory as a data URL to send it to the backend.
+      if (!isVideo || !originalPath) {
+        dataUrl = await fileToDataUrl(file);
+      }
+      
+      onMedia({
+        previewUrl,
+        dataUrl,
         name: file.name,
-        originalPath: getFilePath(file),
+        originalPath,
+        isVideo,
       });
     },
-    [disabled, onImage],
+    [disabled, onMedia, acceptVideo],
   );
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    onImage({
-      dataUrl: await fileToDataUrl(file),
+    
+    const isVideo = file.type.startsWith("video/");
+    const previewUrl = URL.createObjectURL(file);
+    
+    let dataUrl: string | undefined = undefined;
+    const originalPath = getFilePath(file);
+    
+    if (!isVideo || !originalPath) {
+      dataUrl = await fileToDataUrl(file);
+    }
+    
+    onMedia({
+      previewUrl,
+      dataUrl,
       name: file.name,
-      originalPath: getFilePath(file),
+      originalPath,
+      isVideo,
     });
     e.target.value = "";
   };
@@ -98,8 +131,8 @@ function DropZone({
       <div
         style={{
           ...dropZoneStyle,
-          borderColor: isDragOver ? "#2563eb" : dataUrl ? "#2a2a2a" : "#222",
-          background: isDragOver ? "#0f1e3a" : dataUrl ? "transparent" : "#141414",
+          borderColor: isDragOver ? "#2563eb" : media ? "#2a2a2a" : "#222",
+          background: isDragOver ? "#0f1e3a" : media ? "transparent" : "#141414",
           cursor: disabled ? "not-allowed" : "pointer",
         }}
         onDragOver={(e) => { e.preventDefault(); if (!disabled) setIsDragOver(true); }}
@@ -107,15 +140,25 @@ function DropZone({
         onDrop={handleDrop}
         onClick={() => { if (!disabled) inputRef.current?.click(); }}
       >
-        {dataUrl ? (
-          <img
-            src={dataUrl}
-            style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 6, display: "block" }}
-          />
+        {media ? (
+          media.isVideo ? (
+            <video
+              src={media.previewUrl}
+              autoPlay
+              loop
+              muted
+              style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 6, display: "block" }}
+            />
+          ) : (
+            <img
+              src={media.previewUrl}
+              style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 6, display: "block" }}
+            />
+          )
         ) : (
           <div style={dropPlaceholderStyle}>
             <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.3 }}>⬆</div>
-            <div style={{ fontSize: 13, color: "#444" }}>Drop image here</div>
+            <div style={{ fontSize: 13, color: "#444" }}>Drop {acceptVideo ? "image or video" : "image"} here</div>
             <div style={{ fontSize: 11, color: "#333", marginTop: 4 }}>or click to browse</div>
           </div>
         )}
@@ -123,10 +166,10 @@ function DropZone({
 
       <div style={{ fontSize: 11, color: "#444", marginTop: 6, textAlign: "center" }}>{sublabel}</div>
 
-      {dataUrl && (
+      {media && (
         <button
           style={clearBtnStyle}
-          onClick={(e) => { e.stopPropagation(); onImage(null); }}
+          onClick={(e) => { e.stopPropagation(); onMedia(null); }}
           disabled={disabled}
         >
           clear
@@ -136,7 +179,7 @@ function DropZone({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept={acceptVideo ? "image/*,video/*" : "image/*"}
         style={{ display: "none" }}
         onChange={handleFileChange}
       />
@@ -160,8 +203,8 @@ export function App() {
     | { kind: "error"; error: string }
   >({ kind: "idle" });
 
-  const [targetImage, setTargetImage] = useState<SelectedImage | null>(null);
-  const [sourceImage, setSourceImage] = useState<SelectedImage | null>(null);
+  const [targetImage, setTargetImage] = useState<SelectedMedia | null>(null);
+  const [sourceImage, setSourceImage] = useState<SelectedMedia | null>(null);
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [result, setResult] = useState<SwapResult | null>(null);
@@ -176,9 +219,11 @@ export function App() {
     rpc.request.getConfig().then(({ initialTargetDataUrl, initialTargetPath, eventsUrl: url, modelMissing: missing, modelPath: mp, pythonMissing: pyMissing }) => {
       if (initialTargetDataUrl) {
         setTargetImage({
+          previewUrl: initialTargetDataUrl,
           dataUrl: initialTargetDataUrl,
           name: initialTargetPath?.split("\\").pop() ?? "target image",
           originalPath: initialTargetPath,
+          isVideo: false, // Initial target from context menu is always an image currently
         });
       }
       setModelMissing(missing);
@@ -225,6 +270,15 @@ export function App() {
 
   const handleSwap = () => {
     if (!targetImage || !sourceImage || step !== 1) return;
+    if (!sourceImage.dataUrl) {
+      setError("Source image must be a valid image file.");
+      return;
+    }
+    if (targetImage.isVideo && !targetImage.originalPath && !targetImage.dataUrl) {
+      setError("Video file is missing data. Please try dragging and dropping it instead.");
+      return;
+    }
+
     const jobId = randomId();
     setStep(2);
     setError(null);
@@ -234,6 +288,7 @@ export function App() {
       .swap({
         jobId,
         targetDataUrl: targetImage.dataUrl,
+        targetPath: targetImage.originalPath,
         sourceDataUrl: sourceImage.dataUrl,
         targetOriginalPath: targetImage.originalPath,
       })
@@ -242,12 +297,17 @@ export function App() {
       });
   };
 
-  const handleResultDragStart = (e: React.DragEvent<HTMLImageElement>) => {
+  const handleResultDragStart = (e: React.DragEvent<HTMLImageElement | HTMLVideoElement>) => {
     if (!result) return;
     const fileUrl = "file:///" + result.tempPath.replace(/\\/g, "/");
     e.dataTransfer.effectAllowed = "copy";
     e.dataTransfer.setData("text/uri-list", fileUrl);
-    e.dataTransfer.setData("DownloadURL", `image/png:face-swap-result.png:${fileUrl}`);
+    
+    if (result.isVideo) {
+      e.dataTransfer.setData("DownloadURL", `video/mp4:face-swap-result.mp4:${fileUrl}`);
+    } else {
+      e.dataTransfer.setData("DownloadURL", `image/png:face-swap-result.png:${fileUrl}`);
+    }
   };
 
   const canSwap = Boolean(targetImage) && Boolean(sourceImage) && step === 1;
@@ -345,11 +405,12 @@ export function App() {
         <div style={stepContainerStyle}>
           <div style={panelsRowStyle}>
             <DropZone
-              label="Target Image"
-              sublabel="Face in this image gets replaced"
-              dataUrl={targetImage?.dataUrl ?? null}
-              onImage={setTargetImage}
+              label="Target Media"
+              sublabel="Face in this image or video gets replaced"
+              media={targetImage}
+              onMedia={setTargetImage}
               disabled={false}
+              acceptVideo={true}
             />
 
             <div style={arrowDividerStyle}>→</div>
@@ -357,8 +418,8 @@ export function App() {
             <DropZone
               label="Source Face"
               sublabel="Face to use from this image"
-              dataUrl={sourceImage?.dataUrl ?? null}
-              onImage={setSourceImage}
+              media={sourceImage}
+              onMedia={setSourceImage}
               disabled={false}
             />
           </div>
@@ -376,6 +437,11 @@ export function App() {
               Swap Faces
             </button>
           </div>
+          {error && (
+            <div style={{ ...errorBoxStyle, margin: "0 16px 16px" }}>
+              <strong>Error:</strong> {error}
+            </div>
+          )}
         </div>
       )}
 
@@ -386,8 +452,8 @@ export function App() {
             {!error ? (
               <>
                 <div style={largeSpinnerStyle} />
-                <div style={{ fontSize: 18, fontWeight: 600, marginTop: 16 }}>Generating Image...</div>
-                <div style={{ fontSize: 13, color: "#888", marginTop: 8 }}>This may take 10-30 seconds.</div>
+                <div style={{ fontSize: 18, fontWeight: 600, marginTop: 16 }}>Generating...</div>
+                <div style={{ fontSize: 13, color: "#888", marginTop: 8 }}>This may take 10-30 seconds for images, or longer for videos.</div>
               </>
             ) : (
               <>
@@ -422,13 +488,26 @@ export function App() {
       {step === 3 && result && (
         <div style={stepContainerStyle}>
           <div style={{ flex: 1, minHeight: 0, padding: 24, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <img
-              src={result.serveUrl}
-              style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 8, boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}
-              draggable
-              onDragStart={handleResultDragStart}
-              title="Drag to save"
-            />
+            {result.isVideo ? (
+              <video
+                src={result.serveUrl}
+                autoPlay
+                loop
+                controls
+                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 8, boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}
+                draggable
+                onDragStart={handleResultDragStart}
+                title="Drag to save"
+              />
+            ) : (
+              <img
+                src={result.serveUrl}
+                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 8, boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}
+                draggable
+                onDragStart={handleResultDragStart}
+                title="Drag to save"
+              />
+            )}
           </div>
           <div style={resultActionsStyle}>
             <button style={secondaryBtnStyle} onClick={() => { setStep(1); setResult(null); }}>

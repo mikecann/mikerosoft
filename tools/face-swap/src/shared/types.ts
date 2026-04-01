@@ -2,7 +2,8 @@ import type { RPCSchema } from "electrobun/bun";
 
 export type SwapParams = {
   jobId: string;
-  targetDataUrl: string;
+  targetDataUrl?: string;
+  targetPath?: string;
   sourceDataUrl: string;
   targetOriginalPath?: string;
 };
@@ -12,6 +13,7 @@ export type SwapResult = {
   serveUrl: string;
   tempPath: string;
   autoSavedPath: string;
+  isVideo: boolean;
 };
 
 export type FaceSwapRPC = {
