@@ -6,7 +6,7 @@ Instructions for AI agents (Cursor, etc.) working in this repo.
 
 ## Repo purpose
 
-A bunch of personalised tools for Windows users. Each tool lives in its own
+A bunch of personalised desktop tools. Each tool lives in its own
 subfolder. `install.ps1` wires everything into `C:\dev\tools` (which is on
 PATH) via thin stub `.bat` files or `.lnk` shortcuts.
 
@@ -282,6 +282,62 @@ cmd /c "tasklist /FO CSV" | ConvertFrom-Csv | Where-Object { $_."Image Name" -li
 - Always kill all instances before launching a new one. Never leave multiple instances running.
 - Always launch via `restart.bat` or `voice-type.vbs` - never directly with `Start-Process python ...`.
 - After launching, tail the log to confirm a clean startup.
+
+---
+
+## mac-screenshot specifics
+
+Global hotkey screenshot daemon for macOS. Press F12 to enter
+selection-capture mode, save to `~/Desktop/Screenshots` with a timestamp name,
+copy to clipboard, and open in Preview for annotation.
+
+### Dev workflow
+
+After any code change to `tools/mac-screenshot/mac-screenshot.py`, restart with:
+
+```bash
+bash tools/mac-screenshot/restart.sh
+```
+
+Confirm a clean startup:
+```bash
+tail -f ~/Library/Logs/mac-screenshot.log
+```
+
+### First-time setup
+
+```bash
+bash tools/mac-screenshot/setup_mac.sh
+bash tools/mac-screenshot/install-launchagent.sh
+```
+
+Then grant Accessibility permissions:
+- System Settings > Privacy & Security > Accessibility
+- Add Terminal (or whichever app runs the Python process) and enable it
+
+### Key files
+
+| Path | What it is |
+|---|---|
+| `tools/mac-screenshot/mac-screenshot.py` | Daemon - global hotkey listener + screenshot logic |
+| `tools/mac-screenshot/setup_mac.sh` | One-time setup: creates `.venv`, installs `pynput` |
+| `tools/mac-screenshot/restart.sh` | Kill + relaunch (daily dev command) |
+| `tools/mac-screenshot/kill.sh` | Kill running instance |
+| `tools/mac-screenshot/install-launchagent.sh` | Install as login item via LaunchAgent |
+| `tools/mac-screenshot/uninstall-launchagent.sh` | Remove login item |
+| `~/Library/Logs/mac-screenshot.log` | Runtime log (not in git) |
+| `~/Desktop/Screenshots/` | Default save directory |
+
+### Configuration
+
+Edit the constants at the top of `mac-screenshot.py`:
+- `HOTKEY` - defaults to `<f12>`
+- `SAVE_DIR` - defaults to `~/Desktop/Screenshots`
+
+### Rules
+
+- Always use `restart.sh` to restart - never launch the script directly, it leaves stale instances.
+- After any code change, run `restart.sh` and tail the log to confirm clean startup.
 
 ---
 

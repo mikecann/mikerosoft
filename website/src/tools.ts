@@ -159,4 +159,11 @@ export const tools: Tool[] = [
     screenshots: [`${base}/face-swap/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/face-swap',
   },
+  {
+    name: 'mac-screenshot',
+    desc: 'Global macOS screenshot hotkey daemon. Press F12 to capture a selection, save it with a timestamp, copy it to the clipboard, and open it in Preview for annotation',
+    icon: `${base}/removebg/icons/picture.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/mac-screenshot',
+  },
 ];

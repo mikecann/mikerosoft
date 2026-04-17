@@ -38,7 +38,7 @@ export default function App() {
             />
             <Title order={1} c="blue" mt="xs">Mikerosoft</Title>
             <Text c="dimmed" ta="center" maw={600} lh={1.6}>
-              A collection of personalised windows tools for{' '}
+              A collection of personalised desktop tools for{' '}
               <Anchor href="https://mikecann.blog" target="_blank" rel="noopener">
                 Mike Cann
               </Anchor>.
