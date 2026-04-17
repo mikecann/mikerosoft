@@ -90,7 +90,7 @@ export const tools: Tool[] = [
   },
   {
     name: 'voice-type',
-    desc: 'Push-to-talk local voice transcription - hold Right Ctrl, speak, release to paste',
+    desc: 'Push-to-talk local voice transcription for Windows and macOS. On Apple Silicon it uses MLX for faster final transcription',
     icon: `${base}/voice-type/icons/sound.png`,
     header: `${base}/voice-type/docs/header.png`,
     screenshots: [`${base}/voice-type/docs/ss1.png`],

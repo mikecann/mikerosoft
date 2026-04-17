@@ -35,7 +35,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/backup-phone/docs/header.png" width="220"><br>[backup-phone](tools/backup-phone/README.md) | CLI | Back up an iPhone over MTP (USB) to a flat folder on disk |
 | <img src="tools/scale-monitor/docs/header.png" width="220"><br>[scale-monitor](tools/scale-monitor/README.md) | Taskbar | Toggle Monitor 4 between 200% (normal) and 300% (filming) scaling |
 | <img src="tools/task-stats/docs/header.png" width="220"><br>[task-stats](tools/task-stats/README.md) | Taskbar | Real-time NET/CPU/GPU/MEM sparklines overlaid on the taskbar |
-| <img src="tools/voice-type/docs/header.png" width="220"><br>[voice-type](tools/voice-type/README.md) | Taskbar | Push-to-talk local voice transcription - hold Right Ctrl, speak, release to paste |
+| <img src="tools/voice-type/docs/header.png" width="220"><br>[voice-type](tools/voice-type/README.md) | Taskbar + macOS daemon | Push-to-talk local voice transcription on Windows and macOS. On Apple Silicon it uses MLX for faster final transcription |
 | <img src="tools/video-titles/docs/header.png" width="220"><br>[video-titles](tools/video-titles/README.md) | Context menu | Chat with an AI agent to ideate YouTube titles using the Compelling Title Matrix; right-click any video in Explorer (requires `OPENROUTER_API_KEY` in `.env`) |
 | <img src="tools/video-description/docs/header.png" width="220"><br>[video-description](tools/video-description/README.md) | CLI + context menu | Generate a YouTube description via Gemini; auto-loads or generates a transcript, then drops into an interactive chat for revisions; right-click any video in Explorer (requires `OPENROUTER_API_KEY` in `.env`) |
 | <img src="tools/generate-from-image/docs/header.png" width="220"><br>[generate-from-image](tools/generate-from-image/README.md) | Context menu | AI image generation from a reference image; right-click any image in Explorer, describe what you want, and Gemini generates a new image (requires `OPENROUTER_API_KEY` in `.env`) |
@@ -48,7 +48,7 @@ If you want to use any of this, the recommended approach is:
 
 ---
 
-## Quick start (fresh machine)
+## Quick start (fresh Windows machine)
 
 ```powershell
 git clone <repo-url> C:\dev\me\mikerosoft.app
@@ -60,6 +60,33 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 `install.ps1` loads `.env`, checks whether `C:\dev\tools` is on your `PATH`
 and offers to add it automatically if not. It will error out if any required
 API keys are missing.
+
+---
+
+## macOS setup
+
+The root install flow is still **Windows-specific**. It creates `C:\dev\tools`
+stubs, Explorer context menu entries, `.lnk` shortcuts, and other Windows-only
+integration points.
+
+For macOS, set tools up individually where mac support exists:
+
+- `voice-type`:
+  `bash tools/voice-type/setup_mac.sh`
+- `mac-screenshot`:
+  `bash tools/mac-screenshot/setup_mac.sh`
+
+At the moment that is the right shape for the repo. A fake "universal" root
+installer would mostly be a wrapper around platform checks and per-tool scripts,
+while still not covering the Windows-only integrations.
+
+### macOS support matrix
+
+| Tool | Status | Setup | Daily command | Notes |
+| --- | --- | --- | --- | --- |
+| `voice-type` | Supported | `bash tools/voice-type/setup_mac.sh` | `bash tools/voice-type/voice-type-mac.sh` | Push-to-talk voice typing on macOS. On Apple Silicon it prefers `MLX Whisper` for supported final models. Settings can be opened with `bash tools/voice-type/open-settings-mac.sh` or via Spotlight `Voice Type` |
+| `mac-screenshot` | Supported | `bash tools/mac-screenshot/setup_mac.sh` | `bash tools/mac-screenshot/restart.sh` | Global screenshot hotkey daemon for macOS. Optional login-item install via `bash tools/mac-screenshot/install-launchagent.sh` |
+| Everything else | Windows-only for now | Use `install.ps1` on Windows | Varies by tool | Most tools still depend on Windows-specific shell integration, taskbar shortcuts, or Explorer context menus |
 
 ---
 

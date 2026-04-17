@@ -15,27 +15,27 @@ import sys
 import time
 import math
 import json
-import winreg
 import threading
 import queue
-import ctypes
-import ctypes.wintypes
 import tkinter as tk
 from tkinter import messagebox
 from tkinter import scrolledtext
+from tkinter import ttk
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
-# Add the PyTorch lib directory to the Windows DLL search path so that
-# ctranslate2 can find cublas64_12.dll (bundled with the cu128 torch wheel)
-# without needing the full CUDA Toolkit on PATH.
-try:
-    import torch as _torch
-    _torch_lib = os.path.join(os.path.dirname(_torch.__file__), "lib")
-    if os.path.isdir(_torch_lib):
-        os.add_dll_directory(_torch_lib)
-except Exception:
-    pass
+# ---------------------------------------------------------------------------
+# Platform abstraction — all OS-specific behaviour lives in platform_*.py
+# ---------------------------------------------------------------------------
+
+if sys.platform == "win32":
+    import platform_win as platform  # type: ignore[import]
+elif sys.platform == "darwin":
+    import platform_mac as platform  # type: ignore[import]
+else:
+    raise RuntimeError(f"Unsupported platform: {sys.platform}")
+
+platform.setup_dll_paths()
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -43,6 +43,7 @@ except Exception:
 
 _LOG_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice-type.log")
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+_CONTROL_SOCKET_PATH = os.path.join(_SCRIPT_DIR, "voice-type-control.sock")
 _LOG_MAX_MB  = 1       # rotate when log exceeds this size
 _LOG_KEEP    = 200     # lines to keep after rotation
 
@@ -81,6 +82,7 @@ log(f"=== voice-type started === log: {_LOG_PATH}")
 import numpy as np
 import sounddevice as sd
 from faster_whisper import WhisperModel
+from speech_backends import MlxWhisperModel, resolve_local_mlx_repo
 from text_formatter import (
     DEFAULT_FORMATTER_MODEL,
     DEFAULT_FORMATTER_SYSTEM_PROMPT,
@@ -89,12 +91,12 @@ from text_formatter import (
     format_for_injection as format_text_for_injection,
     resolve_system_prompt,
 )
+from voice_type_control import ControlServer
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-HOTKEY_VK        = 0xA3   # VK_RCONTROL — Right Ctrl only (0xA2 = Left Ctrl)
 POLL_INTERVAL    = 0.01   # key-state poll rate (100 Hz)
 STREAM_INTERVAL  = 0.5    # seconds between streaming preview passes
 STREAM_MIN_AUDIO = 0.8    # don't start streaming until this many seconds recorded
@@ -159,7 +161,7 @@ def _load_settings():
             log(f"Settings load failed: {e}; using defaults.")
             _settings = {}
     # Defaults are resolved after CUDA detection so the right model is chosen.
-    cuda = _cuda_available()
+    cuda = platform.cuda_available()
     _settings.setdefault("final_model",  GPU_MODEL if cuda else CPU_MODEL)
     _settings.setdefault("stream_model", GPU_MODEL if cuda else STREAM_MODEL)
     _settings.setdefault("output_mode",  "final_only")
@@ -186,158 +188,15 @@ def _save_settings():
         log(f"Settings save failed: {e}")
 
 
-# ---------------------------------------------------------------------------
-# Win32 helpers
-# ---------------------------------------------------------------------------
-
-_user32 = ctypes.windll.user32
-
-_KEYEVENTF_KEYUP    = 0x0002
-_KEYEVENTF_UNICODE  = 0x0004
-_VK_CONTROL         = 0x11
-_VK_V               = 0x56
-_VK_BACK            = 0x08
-
-# SendInput structures for clipboard-free text injection
-_INPUT_KEYBOARD = 1
-
-class _KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk",         ctypes.c_ushort),
-        ("wScan",       ctypes.c_ushort),
-        ("dwFlags",     ctypes.c_uint32),
-        ("time",        ctypes.c_uint32),
-        ("dwExtraInfo", ctypes.c_uint64),
-    ]
-
-class _INPUT_UNION(ctypes.Union):
-    _fields_ = [
-        ("ki",   _KEYBDINPUT),
-        ("_pad", ctypes.c_byte * 28),   # ensure union >= sizeof(MOUSEINPUT)
-    ]
-
-class _INPUT(ctypes.Structure):
-    _fields_ = [
-        ("type",  ctypes.c_uint32),
-        ("union", _INPUT_UNION),
-    ]
-
-_REG_RUN  = r"Software\Microsoft\Windows\CurrentVersion\Run"
-_REG_NAME = "VoiceType"
+# Windows-only: path to the VBS silent launcher (used by startup registration).
 _VBS_PATH = os.path.join(_SCRIPT_DIR, "voice-type.vbs")
 
-
-def _key_is_down(vk: int) -> bool:
-    return bool(_user32.GetAsyncKeyState(vk) & 0x8000)
-
-
-class _MONITORINFOEX(ctypes.Structure):
-    _fields_ = [
-        ("cbSize",    ctypes.c_uint32),
-        ("rcMonitor", ctypes.wintypes.RECT),
-        ("rcWork",    ctypes.wintypes.RECT),
-        ("dwFlags",   ctypes.c_uint32),
-    ]
-
-
-def _foreground_monitor_work_area() -> tuple[int, int, int, int]:
-    """Return (left, top, right, bottom) of the work area of the monitor
-    that contains the current foreground window."""
-    MONITOR_DEFAULTTONEAREST = 2
-    hwnd = _user32.GetForegroundWindow()
-    hmon = _user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
-    info = _MONITORINFOEX()
-    info.cbSize = ctypes.sizeof(_MONITORINFOEX)
-    ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(info))
-    r = info.rcWork
-    return r.left, r.top, r.right, r.bottom
-
-
-def _send_text_input(text: str):
-    """Inject text via SendInput (KEYEVENTF_UNICODE) — clipboard is never touched."""
-    inputs = []
-    for ch in text:
-        code = ord(ch)
-        if code > 0xFFFF:
-            # Encode as surrogate pair for characters outside the BMP
-            code -= 0x10000
-            chars = [0xD800 | (code >> 10), 0xDC00 | (code & 0x3FF)]
-        else:
-            chars = [code]
-        for scan in chars:
-            for flags in (_KEYEVENTF_UNICODE, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP):
-                inp = _INPUT()
-                inp.type                 = _INPUT_KEYBOARD
-                inp.union.ki.wVk         = 0
-                inp.union.ki.wScan       = scan
-                inp.union.ki.dwFlags     = flags
-                inp.union.ki.time        = 0
-                inp.union.ki.dwExtraInfo = 0
-                inputs.append(inp)
-    if not inputs:
-        return
-    arr  = (_INPUT * len(inputs))(*inputs)
-    sent = ctypes.windll.user32.SendInput(len(inputs), arr, ctypes.sizeof(_INPUT))
-    log(f"SendInput: {sent}/{len(inputs) // 2} char events delivered")
-
-
-def _send_backspaces(count: int):
-    """Send `count` Backspace key presses via SendInput."""
-    if count <= 0:
-        return
-    inputs = []
-    for _ in range(count):
-        for flags in (0, _KEYEVENTF_KEYUP):
-            inp = _INPUT()
-            inp.type                 = _INPUT_KEYBOARD
-            inp.union.ki.wVk         = _VK_BACK
-            inp.union.ki.wScan       = 0
-            inp.union.ki.dwFlags     = flags
-            inp.union.ki.time        = 0
-            inp.union.ki.dwExtraInfo = 0
-            inputs.append(inp)
-    arr  = (_INPUT * len(inputs))(*inputs)
-    sent = ctypes.windll.user32.SendInput(len(inputs), arr, ctypes.sizeof(_INPUT))
-    log(f"SendInput: {sent}/{len(inputs) // 2} backspace events delivered")
-
-
-def _startup_enabled() -> bool:
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_RUN) as k:
-            winreg.QueryValueEx(k, _REG_NAME)
-            return True
-    except OSError:
-        return False
-
-
-def _set_startup(enable: bool):
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_RUN,
-                            access=winreg.KEY_SET_VALUE) as k:
-            if enable:
-                winreg.SetValueEx(k, _REG_NAME, 0, winreg.REG_SZ,
-                                  f'wscript.exe "{_VBS_PATH}"')
-                log("Run on Startup enabled.")
-            else:
-                winreg.DeleteValue(k, _REG_NAME)
-                log("Run on Startup disabled.")
-    except Exception as e:
-        log(f"Startup toggle failed: {e}")
-
-
-# ---------------------------------------------------------------------------
-# CUDA detection
-# ---------------------------------------------------------------------------
-
-def _cuda_available() -> bool:
-    try:
-        import ctranslate2
-        if ctranslate2.get_cuda_device_count() == 0:
-            return False
-        ctypes.cdll.LoadLibrary("cublas64_12.dll")
-        return True
-    except Exception:
-        return False
+_OUTPUT_MODE_LABELS = {
+    "final_only": "Final Only (quality)",
+    "hybrid": "Hybrid (live overlay)",
+    "stabilized": "Stabilized (faster output)",
+    "precompute": "Precompute (faster finalize)",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -423,24 +282,41 @@ _model = None
 _model_lock = threading.Lock()
 
 
+def _load_faster_whisper_model(name: str):
+    cuda = platform.cuda_available()
+    device = "cuda" if cuda else "cpu"
+    ct = COMPUTE_TYPE if cuda else "int8"
+    log(f"Loading final model {name!r} on {device} ({ct})...")
+    return WhisperModel(name, device=device, compute_type=ct)
+
+
 def get_model():
     global _model
     if _model is None:
         with _model_lock:
             if _model is None:
-                name   = _settings.get("final_model", CPU_MODEL)
+                name = _settings.get("final_model", CPU_MODEL)
                 if name in PARAKEET_REPOS:
                     log(f"Loading final model {name!r} (sherpa-onnx)...")
                     repo_id = PARAKEET_REPOS[name]
                     _model = ParakeetWrapper(repo_id)
                     log("Final model ready.")
-                else:
-                    cuda   = _cuda_available()
-                    device = "cuda" if cuda else "cpu"
-                    ct     = COMPUTE_TYPE if cuda else "int8"
-                    log(f"Loading final model {name!r} on {device} ({ct})...")
-                    _model = WhisperModel(name, device=device, compute_type=ct)
-                    log("Final model ready.")
+                    return _model
+
+                mlx_repo = resolve_local_mlx_repo(model_name=name)
+                if mlx_repo:
+                    try:
+                        log(f"Loading final model {name!r} on mlx ({mlx_repo})...")
+                        mlx_model = MlxWhisperModel(repo_id=mlx_repo)
+                        mlx_model.warm()
+                        _model = mlx_model
+                        log("Final model ready.")
+                        return _model
+                    except Exception as e:
+                        log(f"MLX load failed for {name!r}: {e}. Falling back to faster-whisper.")
+
+                _model = _load_faster_whisper_model(name)
+                log("Final model ready.")
     return _model
 
 
@@ -460,7 +336,7 @@ def _load_stream_model():
     get_model()   # ensure final model finishes first
     with _stream_model_lock:
         if _stream_model is None:
-            cuda   = _cuda_available()
+            cuda   = platform.cuda_available()
             name   = _settings.get("stream_model", STREAM_MODEL)
             device = "cuda" if cuda else "cpu"
             ct     = COMPUTE_TYPE if cuda else "int8"
@@ -790,7 +666,7 @@ class TrayIcon:
                 pystray.MenuItem(
                     "Run on Startup",
                     self._toggle_startup,
-                    checked=lambda item: _startup_enabled(),
+                    checked=lambda item: platform.startup_enabled(_VBS_PATH),
                 ),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Final Model", pystray.Menu(lambda: _final_model_items())),
@@ -806,13 +682,29 @@ class TrayIcon:
             return items
 
         menu = pystray.Menu(lambda: _menu_items())
+        icon_kwargs = {}
+        if sys.platform == "darwin":
+            from AppKit import NSApp  # type: ignore[import]
+            icon_kwargs["darwin_nsapplication"] = NSApp
+
         self._icon = pystray.Icon(
             "voice-type",
             _make_tray_icon("idle"),
             _TRAY_LABELS["idle"],
-            menu,
+            **icon_kwargs,
         )
-        self._icon.run_detached()
+
+        def _icon_setup(icon):
+            icon.visible = True
+            icon.menu = menu
+            icon.update_menu()
+            if sys.platform == "darwin":
+                button = icon._status_item.button()
+                button.setTarget_(None)
+                button.setAction_(None)
+            log("Tray menu attached.")
+
+        self._icon.run_detached(setup=_icon_setup)
         log("Tray icon started.")
 
     def set_state(self, state: str):
@@ -831,10 +723,10 @@ class TrayIcon:
         self.set_state("idle")
 
     def _open_log(self, icon, item):
-        os.startfile(_LOG_PATH)
+        platform.open_log(_LOG_PATH)
 
     def _toggle_startup(self, icon, item):
-        _set_startup(not _startup_enabled())
+        platform.set_startup(not platform.startup_enabled(_VBS_PATH), _VBS_PATH, log)
 
     def _edit_formatter_prompt(self, icon=None, item=None):
         self._overlay.edit_text(
@@ -851,6 +743,150 @@ class TrayIcon:
         log("Exit requested via tray.")
         icon.stop()
         self._overlay.quit()   # ask tkinter main loop to exit cleanly
+
+
+class MacTrayIcon:
+    def __init__(self, overlay: "Overlay"):
+        self._overlay = overlay
+        self.enabled = True
+        self._state = "idle"
+
+    def start(self):
+        log("macOS settings are available by clicking the overlay.")
+
+    def set_state(self, state: str):
+        effective = "disabled" if not self.enabled else state
+        self._state = effective
+
+    def _on_exit(self, icon, item):
+        log("Exit requested via tray.")
+        self._overlay.quit()
+
+
+def _build_control_state(tray) -> dict:
+    return {
+        "enabled": tray.enabled,
+        "ui_state": getattr(tray, "_state", "idle"),
+        "final_model": _settings.get("final_model"),
+        "stream_model": _settings.get("stream_model"),
+        "output_mode": _settings.get("output_mode"),
+        "formatter_enabled": bool(_settings.get("formatter_enabled", False)),
+        "formatter_model": _settings.get("formatter_model"),
+        "startup_enabled": platform.startup_enabled(_VBS_PATH),
+        "log_path": _LOG_PATH,
+        "final_model_options": FINAL_MODEL_OPTIONS,
+        "stream_model_options": STREAM_MODEL_OPTIONS,
+        "output_mode_options": OUTPUT_MODE_OPTIONS,
+        "formatter_model_options": FORMATTER_MODEL_OPTIONS,
+        "model_labels": MODEL_LABELS,
+        "output_mode_labels": _OUTPUT_MODE_LABELS,
+        "formatter_model_labels": {
+            name: FORMATTER_MODEL_PRESETS[name].label
+            for name in FORMATTER_MODEL_OPTIONS
+        },
+    }
+
+
+def _apply_settings_changes(*, tray, updates: dict) -> None:
+    enabled = bool(updates.get("enabled", True))
+    if tray.enabled != enabled:
+        tray.enabled = enabled
+        log(f"Voice Type {'enabled' if enabled else 'disabled'} via settings.")
+        tray.set_state("idle")
+
+    startup_enabled = bool(updates.get("startup_enabled", False))
+    if platform.startup_enabled(_VBS_PATH) != startup_enabled:
+        platform.set_startup(startup_enabled, _VBS_PATH, log)
+
+    _set_final_model(str(updates.get("final_model", _settings.get("final_model"))))
+    _set_stream_model(str(updates.get("stream_model", _settings.get("stream_model"))))
+    _set_output_mode(str(updates.get("output_mode", _settings.get("output_mode"))))
+    _set_formatter_enabled(bool(updates.get("formatter_enabled", _settings.get("formatter_enabled", False))))
+    _set_formatter_model(str(updates.get("formatter_model", _settings.get("formatter_model"))))
+
+
+def _show_settings_dialog(overlay: "Overlay", tray) -> None:
+    overlay.edit_settings(
+        state=_build_control_state(tray),
+        on_save=lambda updates: _apply_settings_changes(tray=tray, updates=updates),
+        on_open_log=lambda: platform.open_log(_LOG_PATH),
+        defer_until_hidden=False,
+    )
+
+
+def _queue_settings_dialog_after_hide(overlay: "Overlay", tray) -> None:
+    overlay.edit_settings(
+        state=_build_control_state(tray),
+        on_save=lambda updates: _apply_settings_changes(tray=tray, updates=updates),
+        on_open_log=lambda: platform.open_log(_LOG_PATH),
+        defer_until_hidden=True,
+    )
+
+
+def _make_control_server(tray, overlay: "Overlay") -> ControlServer:
+    def _toggle_enabled(_request):
+        tray.enabled = not tray.enabled
+        log(f"Voice Type {'enabled' if tray.enabled else 'disabled'} via menu helper.")
+        tray.set_state("idle")
+
+    def _set_final(request):
+        name = request.get("value")
+        if name not in FINAL_MODEL_OPTIONS:
+            raise ValueError(f"Unsupported final model: {name!r}")
+        _set_final_model(name)
+
+    def _set_stream(request):
+        name = request.get("value")
+        if name not in STREAM_MODEL_OPTIONS:
+            raise ValueError(f"Unsupported preview model: {name!r}")
+        _set_stream_model(name)
+
+    def _set_output(request):
+        name = request.get("value")
+        if name not in OUTPUT_MODE_OPTIONS:
+            raise ValueError(f"Unsupported output mode: {name!r}")
+        _set_output_mode(name)
+
+    def _set_formatter_enabled_command(request):
+        enabled = bool(request.get("value"))
+        _set_formatter_enabled(enabled)
+
+    def _set_formatter_model_command(request):
+        name = request.get("value")
+        if name not in FORMATTER_MODEL_OPTIONS:
+            raise ValueError(f"Unsupported formatter model: {name!r}")
+        _set_formatter_model(name)
+
+    def _open_log(_request):
+        platform.open_log(_LOG_PATH)
+
+    def _toggle_startup(_request):
+        platform.set_startup(not platform.startup_enabled(_VBS_PATH), _VBS_PATH, log)
+
+    def _quit(_request):
+        log("Exit requested via menu helper.")
+        overlay.quit()
+
+    def _show_settings(_request):
+        _show_settings_dialog(overlay, tray)
+
+    return ControlServer(
+        socket_path=_CONTROL_SOCKET_PATH,
+        get_state=lambda: _build_control_state(tray),
+        commands={
+            "toggle_enabled": _toggle_enabled,
+            "set_final_model": _set_final,
+            "set_stream_model": _set_stream,
+            "set_output_mode": _set_output,
+            "set_formatter_enabled": _set_formatter_enabled_command,
+            "set_formatter_model": _set_formatter_model_command,
+            "open_log": _open_log,
+            "toggle_startup": _toggle_startup,
+            "show_settings": _show_settings,
+            "quit": _quit,
+        },
+        log=log,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -901,10 +937,6 @@ def _wrap_preview(text: str) -> str:
 
 
 class Overlay:
-    GWL_EXSTYLE      = -20
-    WS_EX_NOACTIVATE = 0x08000000
-    WS_EX_TOOLWINDOW = 0x00000080
-
     def __init__(self, get_level):
         """
         get_level: callable() -> float  — returns current mic RMS (0.0–1.0).
@@ -914,6 +946,7 @@ class Overlay:
         self._state     = "hidden"   # "hidden" | "rec" | "processing"
         self._bar_h     = [float(_BAR_MIN_H)] * _N_BARS
         self._monitor   = None       # cached work-area tuple for reposition
+        self._on_click  = None
 
         self._root = tk.Tk()
         self._root.withdraw()
@@ -963,19 +996,23 @@ class Overlay:
                                  justify="left", wraplength=360,
                                  pady=2)
 
-        # Win32 window style — no focus steal, hidden from Alt+Tab
-        hwnd  = self._root.winfo_id()
-        style = ctypes.windll.user32.GetWindowLongW(hwnd, self.GWL_EXSTYLE)
-        ctypes.windll.user32.SetWindowLongW(
-            hwnd, self.GWL_EXSTYLE,
-            style | self.WS_EX_NOACTIVATE | self.WS_EX_TOOLWINDOW,
-        )
+        # Prevent the overlay from stealing keyboard focus.
+        platform.apply_overlay_no_activate(self._root)
 
         self._visible   = False
         self._editor_win = None
+        self._settings_win = None
+        self._dialog_requested = False
+        self._pending_settings_payload = None
         self._cmd_queue: queue.Queue = queue.Queue()
         self._root.after(50,  self._poll)
         self._root.after(33,  self._animate)   # 30 fps animation loop
+
+        for widget in (
+            self._root, self._accent, body, top, self._dot, self._label,
+            self._canvas, self._preview,
+        ):
+            widget.bind("<Button-1>", self._handle_click, add="+")
 
     # ── Thread-safe public commands ──────────────────────────────────────
 
@@ -989,6 +1026,7 @@ class Overlay:
         self._cmd_queue.put(("hide", ""))
 
     def edit_text(self, title: str, initial_text: str, on_save, reset_text: str | None = None):
+        self._dialog_requested = True
         self._cmd_queue.put((
             "edit_text",
             {
@@ -998,6 +1036,21 @@ class Overlay:
                 "reset_text": reset_text,
             },
         ))
+
+    def edit_settings(self, state: dict, on_save, on_open_log, defer_until_hidden: bool = False):
+        self._dialog_requested = True
+        self._cmd_queue.put((
+            "edit_settings",
+            {
+                "state": state,
+                "on_save": on_save,
+                "on_open_log": on_open_log,
+                "defer_until_hidden": defer_until_hidden,
+            },
+        ))
+
+    def set_click_action(self, on_click) -> None:
+        self._on_click = on_click
 
     def quit(self):
         self._cmd_queue.put(("quit", ""))
@@ -1015,11 +1068,23 @@ class Overlay:
                     self._root.destroy()
                     sys.exit(0)
                 elif cmd == "hide":
-                    self._root.withdraw()
+                    if self._has_open_or_pending_dialogs():
+                        self._move_overlay_offscreen()
+                    else:
+                        self._root.withdraw()
                     self._visible = False
                     self._state   = "hidden"
+                    if self._pending_settings_payload is not None:
+                        payload = self._pending_settings_payload
+                        self._pending_settings_payload = None
+                        self._root.after(10, lambda payload=payload: self._open_settings_editor(payload))
                 elif cmd == "edit_text":
                     self._open_text_editor(preview)
+                elif cmd == "edit_settings":
+                    if preview.get("defer_until_hidden") and self._visible:
+                        self._pending_settings_payload = preview
+                    else:
+                        self._open_settings_editor(preview)
                 else:
                     self._state = cmd
                     col   = _COL_REC  if cmd == "rec" else _COL_PROC
@@ -1036,6 +1101,7 @@ class Overlay:
                         self._preview.pack_forget()
                     if not self._visible:
                         self._position()
+                        self._root.attributes("-alpha", 1.0)
                         self._root.deiconify()
                         self._visible = True
                     else:
@@ -1043,6 +1109,29 @@ class Overlay:
         except queue.Empty:
             pass
         self._root.after(50, self._poll)
+
+    def _handle_click(self, _event):
+        if not self._visible or self._on_click is None:
+            return None
+        self._on_click()
+        return "break"
+
+    def _has_open_dialogs(self) -> bool:
+        return any(
+            win is not None and win.winfo_exists()
+            for win in (self._editor_win, self._settings_win)
+        )
+
+    def _has_open_or_pending_dialogs(self) -> bool:
+        return (
+            self._dialog_requested
+            or self._pending_settings_payload is not None
+            or self._has_open_dialogs()
+        )
+
+    def _move_overlay_offscreen(self) -> None:
+        self._root.attributes("-alpha", 0.0)
+        self._root.geometry("1x1+-2000+-2000")
 
     def _animate(self):
         if self._visible and self._state != "hidden":
@@ -1075,6 +1164,7 @@ class Overlay:
         self._root.after(33, self._animate)
 
     def _open_text_editor(self, payload):
+        self._dialog_requested = False
         if self._editor_win is not None and self._editor_win.winfo_exists():
             self._editor_win.deiconify()
             self._editor_win.lift()
@@ -1125,6 +1215,8 @@ class Overlay:
             if win.winfo_exists():
                 win.destroy()
             self._editor_win = None
+            if not self._visible and not self._has_open_or_pending_dialogs():
+                self._root.withdraw()
 
         def _save():
             text = editor.get("1.0", "end-1c")
@@ -1148,10 +1240,159 @@ class Overlay:
 
         win.protocol("WM_DELETE_WINDOW", _close)
 
+    def _open_settings_editor(self, payload):
+        self._dialog_requested = False
+        if self._settings_win is not None and self._settings_win.winfo_exists():
+            self._settings_win.deiconify()
+            self._settings_win.lift()
+            self._settings_win.focus_force()
+            return
+
+        state = payload["state"]
+        on_save = payload["on_save"]
+        on_open_log = payload["on_open_log"]
+
+        def _choice_maps(options: list[str], labels: dict[str, str]):
+            value_to_label = {value: labels.get(value, value) for value in options}
+            label_to_value = {label: value for value, label in value_to_label.items()}
+            return value_to_label, label_to_value
+
+        final_v2l, final_l2v = _choice_maps(state["final_model_options"], state["model_labels"])
+        stream_v2l, stream_l2v = _choice_maps(state["stream_model_options"], state["model_labels"])
+        output_v2l, output_l2v = _choice_maps(state["output_mode_options"], state["output_mode_labels"])
+        formatter_v2l, formatter_l2v = _choice_maps(
+            state["formatter_model_options"], state["formatter_model_labels"]
+        )
+
+        win = tk.Toplevel(self._root)
+        self._settings_win = win
+        win.title("Voice Type Settings")
+        win.geometry("560x420")
+        win.minsize(520, 380)
+
+        body = ttk.Frame(win, padding=14)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+
+        ttk.Label(
+            body,
+            text="Save changes to update the running app and persist them to settings.json. Startup changes apply on the next login.",
+            justify="left",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+
+        enabled_var = tk.BooleanVar(value=bool(state["enabled"]))
+        startup_var = tk.BooleanVar(value=bool(state["startup_enabled"]))
+        formatter_enabled_var = tk.BooleanVar(value=bool(state["formatter_enabled"]))
+
+        final_var = tk.StringVar(value=final_v2l[state["final_model"]])
+        stream_var = tk.StringVar(value=stream_v2l[state["stream_model"]])
+        output_var = tk.StringVar(value=output_v2l[state["output_mode"]])
+        formatter_var = tk.StringVar(value=formatter_v2l[state["formatter_model"]])
+
+        row = 1
+
+        ttk.Checkbutton(body, text="Voice Type Enabled", variable=enabled_var).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+        row += 1
+
+        ttk.Checkbutton(body, text="Run on Startup", variable=startup_var).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(0, 14)
+        )
+        row += 1
+
+        ttk.Label(body, text="Final Model").grid(row=row, column=0, sticky="w", pady=4)
+        final_combo = ttk.Combobox(
+            body,
+            textvariable=final_var,
+            values=[final_v2l[value] for value in state["final_model_options"]],
+            state="readonly",
+        )
+        final_combo.grid(row=row, column=1, sticky="ew", pady=4)
+        row += 1
+
+        ttk.Label(body, text="Preview Model").grid(row=row, column=0, sticky="w", pady=4)
+        stream_combo = ttk.Combobox(
+            body,
+            textvariable=stream_var,
+            values=[stream_v2l[value] for value in state["stream_model_options"]],
+            state="readonly",
+        )
+        stream_combo.grid(row=row, column=1, sticky="ew", pady=4)
+        row += 1
+
+        ttk.Label(body, text="Output Mode").grid(row=row, column=0, sticky="w", pady=4)
+        output_combo = ttk.Combobox(
+            body,
+            textvariable=output_var,
+            values=[output_v2l[value] for value in state["output_mode_options"]],
+            state="readonly",
+        )
+        output_combo.grid(row=row, column=1, sticky="ew", pady=4)
+        row += 1
+
+        ttk.Checkbutton(body, text="Formatter Enabled", variable=formatter_enabled_var).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(10, 4)
+        )
+        row += 1
+
+        ttk.Label(body, text="Formatter Model").grid(row=row, column=0, sticky="w", pady=4)
+        formatter_combo = ttk.Combobox(
+            body,
+            textvariable=formatter_var,
+            values=[formatter_v2l[value] for value in state["formatter_model_options"]],
+            state="readonly",
+        )
+        formatter_combo.grid(row=row, column=1, sticky="ew", pady=4)
+        row += 1
+
+        buttons = ttk.Frame(body)
+        buttons.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(18, 0))
+        buttons.columnconfigure(0, weight=1)
+
+        def _sync_formatter_state():
+            formatter_combo.configure(
+                state="readonly" if formatter_enabled_var.get() else "disabled"
+            )
+
+        def _close():
+            if win.winfo_exists():
+                win.destroy()
+            self._settings_win = None
+            if not self._visible and not self._has_open_or_pending_dialogs():
+                self._root.withdraw()
+
+        def _save():
+            updates = {
+                "enabled": enabled_var.get(),
+                "startup_enabled": startup_var.get(),
+                "final_model": final_l2v[final_var.get()],
+                "stream_model": stream_l2v[stream_var.get()],
+                "output_mode": output_l2v[output_var.get()],
+                "formatter_enabled": formatter_enabled_var.get(),
+                "formatter_model": formatter_l2v[formatter_var.get()],
+            }
+            try:
+                on_save(updates)
+            except Exception as e:
+                messagebox.showerror("voice-type", str(e), parent=win)
+                return
+            _close()
+
+        formatter_enabled_var.trace_add("write", lambda *_args: _sync_formatter_state())
+        _sync_formatter_state()
+
+        ttk.Button(buttons, text="Open Log", command=on_open_log).grid(row=0, column=0, sticky="w")
+        ttk.Button(buttons, text="Cancel", command=_close).grid(row=0, column=1, sticky="e", padx=(0, 8))
+        ttk.Button(buttons, text="Save", command=_save).grid(row=0, column=2, sticky="e")
+
+        win.protocol("WM_DELETE_WINDOW", _close)
+        win.focus_force()
+
     def _position(self):
         """Position at bottom-centre of the monitor holding the focused window."""
         try:
-            self._monitor = _foreground_monitor_work_area()
+            self._monitor = platform.get_foreground_monitor_work_area()
         except Exception:
             self._monitor = (0, 0,
                              self._root.winfo_screenwidth(),
@@ -1449,12 +1690,10 @@ class FinalPrecomputer:
 def paste_text(text: str):
     if not text.strip():
         return
-    hwnd = _user32.GetForegroundWindow()
-    buf  = ctypes.create_unicode_buffer(256)
-    _user32.GetWindowTextW(hwnd, buf, 256)
-    log(f"Injecting into {buf.value!r}: {text!r}")
+    title = platform.get_foreground_window_title()
+    log(f"Injecting into {title!r}: {text!r}")
     time.sleep(0.05)
-    _send_text_input(text)
+    platform.inject_text(text, log)
     time.sleep(0.05)
 
 
@@ -1559,10 +1798,8 @@ def _finish_precompute(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
 def _finish_stabilized(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
                        t0: float):
     """Stabilized: inject segments as decoded, then run bounded tail correction."""
-    hwnd = _user32.GetForegroundWindow()
-    buf  = ctypes.create_unicode_buffer(256)
-    _user32.GetWindowTextW(hwnd, buf, 256)
-    log(f"[stabilized] target: {buf.value!r}")
+    title = platform.get_foreground_window_title()
+    log(f"[stabilized] target: {title!r}")
 
     injected_parts: list[str] = []
     first_char_t: list[float | None] = [None]
@@ -1572,7 +1809,7 @@ def _finish_stabilized(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
         if not injected_parts:
             time.sleep(0.05)   # brief settle before first keystroke
             first_char_t[0] = time.perf_counter()
-        _send_text_input(prefix + text)
+        platform.inject_text(prefix + text, log)
         injected_parts.append(text)
         overlay.show_processing(_wrap_preview(text))
         log(f"[stabilized] commit: {text!r}")
@@ -1610,10 +1847,10 @@ def _finish_stabilized(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
         tail      = full_text[common:]
         log(f"[stabilized] delete {to_delete} chars, append {tail!r}")
         if to_delete > 0:
-            _send_backspaces(to_delete)
+            platform.inject_backspaces(to_delete, log)
             time.sleep(0.02)
         if tail:
-            _send_text_input(tail)
+            platform.inject_text(tail, log)
 
     elapsed = time.perf_counter() - t0
     overlay.hide()
@@ -1645,8 +1882,17 @@ def run():
     overlay  = Overlay(get_level=recorder.get_rms)
     streamer = StreamingTranscriber(recorder, overlay)
     precomputer = FinalPrecomputer(recorder)
-    tray     = TrayIcon(overlay)
-    tray.start()
+    tray_class = MacTrayIcon if sys.platform == "darwin" else TrayIcon
+    tray     = tray_class(overlay)
+    control_server = None
+    if sys.platform == "darwin":
+        control_server = _make_control_server(tray, overlay)
+        control_server.start()
+        overlay._root.after(0, tray.start)
+        overlay._root.after(0, platform.setup_process)
+    else:
+        tray.start()
+        platform.setup_process()
 
     def hotkey_worker():
         # Load main model first, then stream model (sequenced to avoid CPU contention)
@@ -1659,11 +1905,13 @@ def run():
                 get_text_formatter()
 
             threading.Thread(target=_warm_formatter_after_startup, daemon=True).start()
-        log("Ready. Hold Right Ctrl to record.")
+        import sys as _sys
+        _hotkey_label = "Right Option" if _sys.platform == "darwin" else "Right Ctrl"
+        log(f"Ready. Hold {_hotkey_label} to record.")
 
         was_down = False
         while True:
-            is_down = _key_is_down(HOTKEY_VK)
+            is_down = platform.is_hotkey_down()
 
             if is_down and not was_down:
                 if not tray.enabled:
@@ -1716,7 +1964,11 @@ def run():
     threading.Thread(target=hotkey_worker, daemon=True).start()
 
     # Tkinter mainloop MUST run on the main thread on Windows
-    overlay.mainloop()
+    try:
+        overlay.mainloop()
+    finally:
+        if control_server is not None:
+            control_server.stop()
 
 
 if __name__ == "__main__":

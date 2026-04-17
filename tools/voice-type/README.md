@@ -3,8 +3,11 @@
 # voice-type
 
 Push-to-talk voice transcription that types directly into any focused window.
-Hold **Right Ctrl** while speaking, release to paste. Runs entirely locally —
-no cloud, no subscription.
+Runs entirely locally, no cloud, no subscription.
+
+- **Windows**: hold **Right Ctrl**, speak, release to paste
+- **macOS**: hold **Right Option**, speak, release to paste
+- **Apple Silicon macOS**: uses **MLX Whisper** for the final transcription path when available for much better performance than the old CPU-only path
 
 [![voice type](https://thumbs.video-to-markdown.com/dd2eac67.jpg)](https://youtu.be/lYjgJ8KIh-Y)
 
@@ -18,11 +21,20 @@ no cloud, no subscription.
 
 ## Quick start
 
+### Prerequisites
+
+- **Windows**: Python on `PATH`
+- **macOS**: Apple Silicon recommended if you want the MLX speedup
+- **macOS**: Homebrew installed
+- **Both**: internet access on first run so models can download from Hugging Face
+
+### Windows
+
 ```powershell
 # First time: install dependencies
 powershell -ExecutionPolicy Bypass -File .\tools\voice-type\deps.ps1
 
-# Add to taskbar (run install.ps1 from repo root if not already done)
+# Add to taskbar / Start menu
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 # Or launch manually for testing
@@ -31,19 +43,64 @@ wscript.exe "C:\dev\me\mikerosoft.app\tools\voice-type\voice-type.vbs"
 
 Right-click `C:\dev\tools\Voice Type.lnk` → **Pin to taskbar** for one-click launch.
 
+### macOS
+
+Known-good path:
+
+- Apple Silicon Mac
+- Homebrew Python
+- run `setup_mac.sh`
+- grant permissions when macOS asks
+- launch with `voice-type-mac.sh`
+
+```bash
+# First time: create a venv and install dependencies
+bash tools/voice-type/setup_mac.sh
+
+# Launch or restart the background worker
+bash tools/voice-type/voice-type-mac.sh
+
+# Open settings
+bash tools/voice-type/open-settings-mac.sh
+```
+
+On macOS, Spotlight can also open the settings app by typing `Voice Type`.
+
+### Permissions on macOS
+
+`voice-type` needs a few macOS permissions to work properly:
+
+1. `Accessibility`
+   Required so it can detect the global hotkey and inject text into other apps.
+2. `Microphone`
+   Required so it can record your speech.
+
+If the hotkey does nothing, or transcription works but text does not paste, check:
+
+- `System Settings` -> `Privacy & Security` -> `Accessibility`
+- `System Settings` -> `Privacy & Security` -> `Microphone`
+
+Grant access to the app that is actually running `voice-type`, usually your terminal
+or the Python host it launched under.
+
 ---
 
 ## Usage
 
-| Action                    | What happens                                                                     |
-| ------------------------- | -------------------------------------------------------------------------------- |
-| Hold **Right Ctrl**       | Recording starts — animated overlay appears at the bottom-centre of your monitor |
-| Keep holding              | Waveform bars respond to your voice; partial transcription builds up below them  |
-| Release **Right Ctrl**    | Final transcription runs and text is pasted into the active window               |
-| Right-click **tray icon** | Settings menu (see below)                                                        |
+| Action | What happens |
+| --- | --- |
+| Hold the hotkey | Recording starts and an animated overlay appears at the bottom-centre of your monitor |
+| Keep holding | Waveform bars respond to your voice and partial transcription builds up below them |
+| Release the hotkey | Final transcription runs and text is pasted into the active window |
+| Open settings | On Windows use the tray icon, on macOS use Spotlight `Voice Type` or `open-settings-mac.sh` |
 
 The text is injected into whatever window had focus when you released the key —
 text editors, browsers, chat apps, terminals, etc. Your clipboard is left untouched.
+
+Hotkey by platform:
+
+- **Windows**: Right Ctrl
+- **macOS**: Right Option
 
 ---
 
@@ -66,11 +123,13 @@ monitor containing the focused window**:
 | Waveform bars                | 7 bars that animate to your mic level in real time    |
 | Partial text                 | Streaming preview — updates ~every 0.5 s as you speak |
 
-The overlay uses `WS_EX_NOACTIVATE` so it **never steals keyboard focus**.
+The overlay is configured so it **never steals keyboard focus**.
 
 ---
 
-## System tray icon
+## Settings UI
+
+### Windows
 
 A microphone icon sits in the system tray. Its colour reflects the current state:
 
@@ -94,22 +153,34 @@ A microphone icon sits in the system tray. Its colour reflects the current state
 | **Formatter → Reset System Prompt** | Restore the built-in default formatter prompt            |
 | **Exit**              | Quit cleanly                                                       |
 
----
+### macOS
+
+macOS does not currently use the Windows tray flow.
+
+- Open settings via Spotlight by typing `Voice Type`
+- Or run `bash tools/voice-type/open-settings-mac.sh`
+- The worker itself runs in the background via `voice-type-mac.sh`
+- `Run on Startup` writes a LaunchAgent so it starts on next login
 
 ## How it works
 
-- **Hotkey polling** — `GetAsyncKeyState(VK_RCONTROL)` at 100 Hz. No global
-  keyboard hook is installed, so `Ctrl+C`, `Ctrl+V`, etc. are never affected.
+- **Hotkey handling** — Windows polls `GetAsyncKeyState(VK_RCONTROL)` at 100 Hz.
+  macOS uses a native event tap for Right Option and suppresses its normal accent-picker
+  behaviour while the tool is active.
 - **Audio capture** — `sounddevice` streams 16 kHz mono float32 from the
   default microphone into a NumPy buffer.
 - **Streaming preview** — while the key is held, a background thread uses
   `tiny.en` to transcribe accumulated audio every 0.5 s and updates the
   overlay. This model is loaded as a separate instance so it never blocks
   the final transcription.
-- **Final transcription** — on key release, `small.en` (or `large-v3-turbo`
-  on CUDA) transcribes all recorded audio for accuracy. Result is injected
-  directly into the focused window via `SendInput` with `KEYEVENTF_UNICODE`
-  flags — the clipboard is never touched.
+- **Final transcription** — on key release, the final model transcribes the
+  full audio for accuracy. On Windows this is `faster-whisper` on CPU or CUDA.
+  On Apple Silicon macOS, `voice-type` now prefers **MLX Whisper** for supported
+  final models, which makes the final pass much faster than the previous CPU-only
+  macOS path.
+- **Text injection** — Windows injects text via `SendInput` with
+  `KEYEVENTF_UNICODE`. macOS re-activates the target app and pastes with a
+  clipboard-preserving `pbcopy` + `Cmd+V` flow.
 - **Optional transcript cleanup** — for `final_only`, `hybrid`, and
   `precompute`, an optional local GGUF instruct model can lightly clean the
   final transcript before it is typed. Guardrails reject outputs that remove
@@ -120,9 +191,8 @@ A microphone icon sits in the system tray. Its colour reflects the current state
 - **Two-model design** — `tiny.en` (~75 MB, ~0.1 s/pass) for live preview;
   `small.en` (~244 MB, ~0.5–1.5 s) for final. No lock contention, so the
   streaming never delays the paste.
-- **Monitor detection** — `MonitorFromWindow` + `GetMonitorInfoW` find the
-  work area of the monitor containing the focused window. The overlay is
-  centred at its bottom edge.
+- **Monitor detection** — each platform finds the monitor containing the
+  focused window, then centres the overlay at its bottom edge.
 - **Waveform animation** — the overlay canvas polls `Recorder.get_rms()` at
   30 fps, driving 7 bottom-anchored bars with a smoothed exponential moving
   average. A sine-sweep animation plays during transcription.
@@ -133,16 +203,22 @@ A microphone icon sits in the system tray. Its colour reflects the current state
 
 ## Performance
 
-| Hardware          | Final model      | Typical post-release delay          |
-| ----------------- | ---------------- | ----------------------------------- |
-| CPU (any)         | `small.en`       | ~0.5–1.5 s depending on clip length |
-| NVIDIA GPU (CUDA) | `large-v3-turbo` | ~0.2 s                              |
+| Hardware | Final backend | Final model | Typical post-release delay |
+| --- | --- | --- | --- |
+| CPU (any) | `faster-whisper` | `small.en` | ~0.5–1.5 s depending on clip length |
+| NVIDIA GPU (CUDA) | `faster-whisper` | `large-v3-turbo` | ~0.2 s |
+| Apple Silicon | `mlx-whisper` | `small.en` / `large-v3-turbo` | much faster than the old CPU-only macOS path, with `large-v3-turbo` now feeling comfortably usable |
 
-CUDA is auto-detected at startup (`ctranslate2.get_cuda_device_count()` +
-`cublas64_12.dll` load check). Falls back to CPU automatically.
+Windows auto-detects CUDA (`ctranslate2.get_cuda_device_count()` +
+`cublas64_12.dll` load check) and falls back to CPU automatically.
 
-Both models download once from HuggingFace on first use and are cached in
-`%USERPROFILE%\.cache\huggingface\`.
+On Apple Silicon, `voice-type` prefers MLX for supported **final** models and
+falls back safely if MLX is unavailable. The streaming preview path remains a
+separate `faster-whisper` model for now.
+
+On Intel Macs, expect the fallback path rather than the MLX speedup.
+
+Models download once from HuggingFace on first use and are cached locally.
 
 ### Formatter benchmark
 
@@ -162,14 +238,14 @@ the smaller `Qwen2.5 0.5B` rather than the stronger 1.5B model.
 
 ## Configuration
 
-Use the tray menu for normal configuration. The persisted settings live in
-`settings.json` beside the script.
+Use the Windows tray menu or the macOS settings window for normal configuration.
+The persisted settings live in `settings.json` beside the script.
 
 Useful keys:
 
 | Setting              | Default          | Description |
 | -------------------- | ---------------- | ----------- |
-| `final_model`        | `"small.en"` / `"large-v3-turbo"` | Final transcription model |
+| `final_model`        | `"small.en"` / `"large-v3-turbo"` | Final transcription model. On Apple Silicon, supported values can use MLX |
 | `stream_model`       | `"tiny.en"`      | Preview model |
 | `output_mode`        | `"final_only"`   | Finalise strategy |
 | `formatter_enabled`  | `false`          | Turn local transcript cleanup on/off |
@@ -179,14 +255,14 @@ Useful keys:
 If you want to tweak hardcoded behaviour, edit the constants near the top of
 `voice-type.py`:
 
-| Constant          | Default            | Description                                   |
-| ----------------- | ------------------ | --------------------------------------------- |
-| `HOTKEY_VK`       | `0xA3`             | Virtual key for push-to-talk (Right Ctrl)     |
-| `CPU_MODEL`       | `"small.en"`       | Final transcription model on CPU              |
-| `GPU_MODEL`       | `"large-v3-turbo"` | Final transcription model on CUDA             |
-| `STREAM_MODEL`    | `"tiny.en"`        | Preview model (always CPU, separate instance) |
-| `STREAM_INTERVAL` | `0.5`              | Seconds between streaming preview passes      |
-| `DEVICE`          | `None`             | Mic device (`None` = system default)          |
+| Constant | Default | Description |
+| --- | --- | --- |
+| `HOTKEY_VK` | `0xA3` | Windows virtual key for push-to-talk (Right Ctrl) |
+| `CPU_MODEL` | `"small.en"` | Final transcription model on CPU |
+| `GPU_MODEL` | `"large-v3-turbo"` | Final transcription model on CUDA |
+| `STREAM_MODEL` | `"tiny.en"` | Preview model (separate instance) |
+| `STREAM_INTERVAL` | `0.5` | Seconds between streaming preview passes |
+| `DEVICE` | `None` | Mic device (`None` = system default) |
 
 **Common hotkey alternatives:**
 
@@ -201,6 +277,8 @@ If you want to tweak hardcoded behaviour, edit the constants near the top of
 
 ## Dependencies
 
+### Windows
+
 Installed automatically by `deps.ps1`:
 
 ```
@@ -213,17 +291,35 @@ huggingface_hub  GGUF model downloads
 llama-cpp-python local GGUF inference for transcript cleanup
 ```
 
----
+### macOS
+
+Installed automatically by `setup_mac.sh`:
+
+```
+mlx-whisper      Apple Silicon Whisper backend for fast final transcription
+faster-whisper   speech-to-text engine for preview and fallback transcription
+sounddevice      microphone capture
+numpy            audio buffer maths
+Pillow           overlay drawing
+huggingface_hub  model downloads
+llama-cpp-python local GGUF inference for transcript cleanup
+pyobjc-framework-Cocoa native macOS integration
+```
 
 ## Files
 
 | File                  | Purpose                                                  |
 | --------------------- | -------------------------------------------------------- |
 | `voice-type.py`       | Main script — audio, tray UI, transcription, injection   |
+| `speech_backends.py`  | Backend selection and the MLX Whisper adapter            |
 | `text_formatter.py`   | Local LLM formatting guardrails and GGUF backend         |
 | `benchmark_formatter.py` | Quick local benchmark for formatter model experiments |
 | `tests/test_text_formatter.py` | Unit tests for formatter validation and fallback |
+| `tests/test_speech_backends.py` | Unit tests for backend selection logic          |
 | `voice-type.vbs`      | Silent launcher (no console window)                      |
 | `voice-type.ps1`      | PowerShell launcher called by the VBS                    |
 | `deps.ps1`            | Installs Python dependencies                             |
+| `setup_mac.sh`        | Creates the macOS venv and installs Python dependencies  |
+| `voice-type-mac.sh`   | macOS restart script                                     |
+| `open-settings-mac.sh`| Opens the macOS settings window                          |
 | `voice-type.log`      | Runtime log (gitignored, auto-rotates at 1 MB)           |

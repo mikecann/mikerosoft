@@ -61,11 +61,13 @@ FORMATTER_MODEL_PRESETS = {
     ),
 }
 DEFAULT_FORMATTER_MODEL = "qwen2.5-0.5b"
-DEFAULT_HF_CACHE_DIR = os.path.join(
-    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
-    "voice-type",
-    "llm-models",
-)
+def _default_data_dir() -> str:
+    if os.name == "nt":
+        return os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+    # XDG / macOS convention
+    return os.path.join(os.path.expanduser("~"), ".local", "share")
+
+DEFAULT_HF_CACHE_DIR = os.path.join(_default_data_dir(), "voice-type", "llm-models")
 
 
 @dataclasses.dataclass(frozen=True)

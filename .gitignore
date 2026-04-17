@@ -29,6 +29,7 @@ package-lock.json
 # Python
 __pycache__/
 *.pyc
+.venv/
 
 # Editor / OS noise
 .vs/
