@@ -82,6 +82,7 @@ log(f"=== voice-type started === log: {_LOG_PATH}")
 import numpy as np
 import sounddevice as sd
 from faster_whisper import WhisperModel
+from runtime_policy import should_keep_mic_stream_open_local
 from speech_backends import MlxWhisperModel, resolve_local_mlx_repo
 from text_formatter import (
     DEFAULT_FORMATTER_MODEL,
@@ -1421,16 +1422,22 @@ class Overlay:
 # ---------------------------------------------------------------------------
 
 class Recorder:
-    """Keeps the microphone stream open permanently so there is no hardware
-    activation delay when the key is pressed.  Audio is only captured into
-    _frames while _recording is True."""
+    """Owns the microphone stream and captures audio while recording.
+
+    Windows keeps the stream open to minimize activation delay. macOS closes
+    it while idle so the system microphone indicator is only shown while
+    actively recording.
+    """
 
     def __init__(self):
-        self._frames:    list[np.ndarray] = []
-        self._lock       = threading.Lock()
-        self._recording  = False
+        self._frames: list[np.ndarray] = []
+        self._lock = threading.Lock()
+        self._recording = False
         self._stream_error = False  # set on any callback status; triggers restart on next key press
-        self._open_stream()
+        self._keep_stream_open = should_keep_mic_stream_open_local()
+        self._stream: sd.InputStream | None = None
+        if self._keep_stream_open:
+            self._open_stream()
 
     def _open_stream(self):
         info = sd.query_devices(DEVICE, "input")
@@ -1443,6 +1450,16 @@ class Recorder:
         )
         self._stream.start()
 
+    def _close_stream(self):
+        if self._stream is None:
+            return
+        try:
+            self._stream.stop()
+            self._stream.close()
+        except Exception as e:
+            log(f"Stream close error (ignored): {e}")
+        self._stream = None
+
     def _ensure_stream(self):
         """Restart the audio stream if it's dead or errored.
 
@@ -1450,16 +1467,17 @@ class Recorder:
         after Windows wakes from sleep the portaudio device can silently die
         while the sd.InputStream object still thinks it's active.
         """
+        if self._stream is None:
+            self._open_stream()
+            self._stream_error = False
+            return
+
         needs_restart = self._stream_error or not self._stream.active
         if not needs_restart:
             return
         reason = "error flag set" if self._stream_error else "stream inactive"
         log(f"Audio stream needs restart ({reason}), reconnecting...")
-        try:
-            self._stream.stop()
-            self._stream.close()
-        except Exception as e:
-            log(f"Stream close error (ignored): {e}")
+        self._close_stream()
         try:
             self._open_stream()
             self._stream_error = False
@@ -1494,13 +1512,21 @@ class Recorder:
         with self._lock:
             self._recording = False
             if not self._frames:
-                return np.array([], dtype=np.float32)
-            audio = np.concatenate(self._frames, axis=0).flatten()
-            dur   = len(audio) / SAMPLE_RATE
-            rms   = float(np.sqrt(np.mean(audio ** 2)))
-            peak  = float(np.max(np.abs(audio)))
-            log(f"Stopped: {dur:.2f}s  rms={rms:.4f}  peak={peak:.4f}")
+                audio = np.array([], dtype=np.float32)
+            else:
+                audio = np.concatenate(self._frames, axis=0).flatten()
+
+        if not self._keep_stream_open:
+            self._close_stream()
+
+        if len(audio) == 0:
             return audio
+
+        dur = len(audio) / SAMPLE_RATE
+        rms = float(np.sqrt(np.mean(audio ** 2)))
+        peak = float(np.max(np.abs(audio)))
+        log(f"Stopped: {dur:.2f}s  rms={rms:.4f}  peak={peak:.4f}")
+        return audio
 
     def _callback(self, indata, frames, time_info, status):
         if status:
