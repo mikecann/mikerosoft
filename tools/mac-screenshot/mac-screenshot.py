@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mac-screenshot: Global hotkey screenshot daemon for macOS.
 
-Press F12 to:
+Press F11 to:
   1. Enter selection-capture mode (crosshair cursor)
   2. Save the region to ~/Desktop/Screenshots with a timestamp name
   3. Copy the image to the clipboard
@@ -20,7 +20,7 @@ from datetime import datetime
 
 from pynput import keyboard
 
-HOTKEY = "<f12>"
+HOTKEY = "<f11>"
 SAVE_DIR = os.path.expanduser("~/Desktop/Screenshots")
 LOG_FILE = os.path.expanduser("~/Library/Logs/mac-screenshot.log")
 

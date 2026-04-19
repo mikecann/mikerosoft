@@ -22,12 +22,12 @@ if [ -f "$PLIST_PATH" ]; then
   launchctl unload "$PLIST_PATH" 2>/dev/null || true
   sleep 0.3
   launchctl load "$PLIST_PATH"
-  echo "Started via LaunchAgent. Hotkey: F12"
+  echo "Started via LaunchAgent. Hotkey: F11"
   echo "Tail log:  tail -f $LOG"
   exit 0
 fi
 
 echo "Launching mac-screenshot..."
 nohup "$VENV/bin/python3" "$SCRIPT_DIR/mac-screenshot.py" > /dev/null 2>> "$LOG" &
-echo "Started (pid $!). Hotkey: F12"
+echo "Started (pid $!). Hotkey: F11"
 echo "Tail log:  tail -f $LOG"

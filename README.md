@@ -44,7 +44,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/copypath/docs/header.png" width="220"><br>[copypath](tools/copypath/README.md) | CLI | Copy the absolute path of a file or folder to the clipboard; defaults to the current directory if no argument given |
 | <img src="tools/img-gen/icons/img-gen.png" width="220"><br>[img-gen](tools/img-gen/) | GUI + context menu | Chat-style AI image generation using Gemini via OpenRouter; right-click any folder in Explorer; annotate generated images and refine iteratively; drag images out to Explorer to save (requires `OPENROUTER_API_KEY` in `.env`) |
 | <img src="tools/face-swap/docs/header.png" width="220"><br>[face-swap](tools/face-swap/README.md) | GUI + context menu | Swap a face from one image into another locally using InsightFace; right-click any image to pre-load the target, or launch it from Windows Search |
-| [mac-screenshot](tools/mac-screenshot/README.md) | Mac - global hotkey daemon | Press `F12` to capture a screen region, auto-name it, copy it to the clipboard, and open it in Preview for annotation |
+| [mac-screenshot](tools/mac-screenshot/README.md) | Mac - global hotkey daemon | Press `F11` to capture a screen region, auto-name it, copy it to the clipboard, and open it in Preview for annotation |
 
 ---
 

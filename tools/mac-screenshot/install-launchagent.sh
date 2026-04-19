@@ -51,7 +51,7 @@ launchctl load "$PLIST_PATH"
 
 echo "Installed and started mac-screenshot as a login item."
 echo ""
-echo "  Hotkey:     F12"
+echo "  Hotkey:     F11"
 echo "  Save dir:   ~/Desktop/Screenshots"
 echo "  Log:        $LOG"
 echo ""

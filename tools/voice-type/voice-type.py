@@ -35,6 +35,9 @@ elif sys.platform == "darwin":
 else:
     raise RuntimeError(f"Unsupported platform: {sys.platform}")
 
+if sys.platform == "darwin":
+    from appkit_overlay import AppKitOverlaySurface
+
 platform.setup_dll_paths()
 
 # ---------------------------------------------------------------------------
@@ -951,54 +954,63 @@ class Overlay:
 
         self._root = tk.Tk()
         self._root.withdraw()
-        self._root.overrideredirect(True)
-        self._root.attributes("-topmost", True)
-        self._root.configure(bg=_OVL_BG)
-        self._root.resizable(False, False)
-
-        # ── Left accent bar (4 px wide, coloured by state) ──────────────
-        self._accent = tk.Frame(self._root, width=4, bg=_COL_REC)
-        self._accent.pack(side="left", fill="y")
-
-        # ── Main content ────────────────────────────────────────────────
-        body = tk.Frame(self._root, bg=_OVL_BG, padx=10, pady=8)
-        body.pack(side="left", fill="both", expand=True)
-
-        # Top row: dot · label · waveform canvas
-        top = tk.Frame(body, bg=_OVL_BG)
-        top.pack(fill="x")
-
-        self._dot = tk.Label(top, text="●", fg=_COL_REC, bg=_OVL_BG,
-                             font=("Segoe UI", 8))
-        self._dot.pack(side="left")
-
-        self._label = tk.Label(top, text=" REC", fg=_COL_TEXT, bg=_OVL_BG,
-                               font=("Segoe UI", 10, "bold"))
-        self._label.pack(side="left")
-
-        self._canvas = tk.Canvas(top, width=_CANVAS_W + 4, height=_CANVAS_H,
-                                 bg=_OVL_BG, highlightthickness=0)
-        self._canvas.pack(side="left", padx=(12, 0))
-
-        # Draw bar rectangles (initially at minimum height, bottom-anchored)
+        self._is_native_surface = sys.platform == "darwin"
+        self._native_surface = AppKitOverlaySurface() if self._is_native_surface else None
         self._bar_ids = []
-        for i in range(_N_BARS):
-            x0 = 2 + i * (_BAR_W + _BAR_GAP)
-            x1 = x0 + _BAR_W
-            y1 = _CANVAS_H - 2
-            y0 = y1 - _BAR_MIN_H
-            rid = self._canvas.create_rectangle(x0, y0, x1, y1,
-                                                fill=_COL_REC, outline="")
-            self._bar_ids.append(rid)
 
-        # Preview text (only shown when streaming text is available)
-        self._preview = tk.Label(body, text="", fg=_COL_PREVIEW, bg=_OVL_BG,
-                                 font=("Segoe UI", 10), anchor="w",
-                                 justify="left", wraplength=360,
-                                 pady=2)
+        if not self._is_native_surface:
+            self._root.overrideredirect(True)
+            self._root.attributes("-topmost", True)
+            self._root.configure(bg=_OVL_BG)
+            self._root.resizable(False, False)
 
-        # Prevent the overlay from stealing keyboard focus.
-        platform.apply_overlay_no_activate(self._root)
+            self._accent = tk.Frame(self._root, width=4, bg=_COL_REC)
+            self._accent.pack(side="left", fill="y")
+
+            body = tk.Frame(self._root, bg=_OVL_BG, padx=10, pady=8)
+            body.pack(side="left", fill="both", expand=True)
+
+            top = tk.Frame(body, bg=_OVL_BG)
+            top.pack(fill="x")
+
+            self._dot = tk.Label(top, text="●", fg=_COL_REC, bg=_OVL_BG,
+                                 font=("Segoe UI", 8))
+            self._dot.pack(side="left")
+
+            self._label = tk.Label(top, text=" REC", fg=_COL_TEXT, bg=_OVL_BG,
+                                   font=("Segoe UI", 10, "bold"))
+            self._label.pack(side="left")
+
+            self._canvas = tk.Canvas(top, width=_CANVAS_W + 4, height=_CANVAS_H,
+                                     bg=_OVL_BG, highlightthickness=0)
+            self._canvas.pack(side="left", padx=(12, 0))
+
+            for i in range(_N_BARS):
+                x0 = 2 + i * (_BAR_W + _BAR_GAP)
+                x1 = x0 + _BAR_W
+                y1 = _CANVAS_H - 2
+                y0 = y1 - _BAR_MIN_H
+                rid = self._canvas.create_rectangle(x0, y0, x1, y1,
+                                                    fill=_COL_REC, outline="")
+                self._bar_ids.append(rid)
+
+            self._preview = tk.Label(body, text="", fg=_COL_PREVIEW, bg=_OVL_BG,
+                                     font=("Segoe UI", 10), anchor="w",
+                                     justify="left", wraplength=360,
+                                     pady=2)
+
+            platform.apply_overlay_no_activate(self._root)
+            for widget in (
+                self._root, self._accent, body, top, self._dot, self._label,
+                self._canvas, self._preview,
+            ):
+                widget.bind("<Button-1>", self._handle_click, add="+")
+        else:
+            self._accent = None
+            self._dot = None
+            self._label = None
+            self._canvas = None
+            self._preview = None
 
         self._visible   = False
         self._editor_win = None
@@ -1008,12 +1020,6 @@ class Overlay:
         self._cmd_queue: queue.Queue = queue.Queue()
         self._root.after(50,  self._poll)
         self._root.after(33,  self._animate)   # 30 fps animation loop
-
-        for widget in (
-            self._root, self._accent, body, top, self._dot, self._label,
-            self._canvas, self._preview,
-        ):
-            widget.bind("<Button-1>", self._handle_click, add="+")
 
     # ── Thread-safe public commands ──────────────────────────────────────
 
@@ -1066,10 +1072,14 @@ class Overlay:
             while True:
                 cmd, preview = self._cmd_queue.get_nowait()
                 if cmd == "quit":
+                    if self._native_surface is not None:
+                        self._native_surface.hide()
                     self._root.destroy()
                     sys.exit(0)
                 elif cmd == "hide":
-                    if self._has_open_or_pending_dialogs():
+                    if self._is_native_surface:
+                        self._native_surface.hide()
+                    elif self._has_open_or_pending_dialogs():
                         self._move_overlay_offscreen()
                     else:
                         self._root.withdraw()
@@ -1088,22 +1098,28 @@ class Overlay:
                         self._open_settings_editor(preview)
                 else:
                     self._state = cmd
-                    col   = _COL_REC  if cmd == "rec" else _COL_PROC
-                    label = " REC"    if cmd == "rec" else " ..."
-                    self._accent.configure(bg=col)
-                    self._dot.configure(fg=col)
-                    self._label.configure(text=label)
-                    for rid in self._bar_ids:
-                        self._canvas.itemconfigure(rid, fill=col)
-                    if preview:
-                        self._preview.configure(text=preview)
-                        self._preview.pack(fill="x")
+                    if self._is_native_surface:
+                        self._native_surface.set_state(cmd, preview)
                     else:
-                        self._preview.pack_forget()
+                        col   = _COL_REC  if cmd == "rec" else _COL_PROC
+                        label = " REC"    if cmd == "rec" else " ..."
+                        self._accent.configure(bg=col)
+                        self._dot.configure(fg=col)
+                        self._label.configure(text=label)
+                        for rid in self._bar_ids:
+                            self._canvas.itemconfigure(rid, fill=col)
+                        if preview:
+                            self._preview.configure(text=preview)
+                            self._preview.pack(fill="x")
+                        else:
+                            self._preview.pack_forget()
                     if not self._visible:
                         self._position()
-                        self._root.attributes("-alpha", 1.0)
-                        self._root.deiconify()
+                        if self._is_native_surface:
+                            self._native_surface.show(self._monitor)
+                        else:
+                            self._root.attributes("-alpha", 1.0)
+                            self._root.deiconify()
                         self._visible = True
                     else:
                         self._reposition()
@@ -1131,6 +1147,9 @@ class Overlay:
         )
 
     def _move_overlay_offscreen(self) -> None:
+        if self._is_native_surface:
+            self._native_surface.move_offscreen()
+            return
         self._root.attributes("-alpha", 0.0)
         self._root.geometry("1x1+-2000+-2000")
 
@@ -1157,10 +1176,13 @@ class Overlay:
                     self._bar_h[i] = self._bar_h[i] * 0.6 + target * 0.4
 
             y_base = _CANVAS_H - 2
-            for i, (rid, h) in enumerate(zip(self._bar_ids, self._bar_h)):
-                x0 = 2 + i * (_BAR_W + _BAR_GAP)
-                x1 = x0 + _BAR_W
-                self._canvas.coords(rid, x0, y_base - int(h), x1, y_base)
+            if self._is_native_surface:
+                self._native_surface.set_bar_heights(self._bar_h)
+            else:
+                for i, (rid, h) in enumerate(zip(self._bar_ids, self._bar_h)):
+                    x0 = 2 + i * (_BAR_W + _BAR_GAP)
+                    x1 = x0 + _BAR_W
+                    self._canvas.coords(rid, x0, y_base - int(h), x1, y_base)
 
         self._root.after(33, self._animate)
 
@@ -1408,6 +1430,9 @@ class Overlay:
         self._do_geometry()
 
     def _do_geometry(self):
+        if self._is_native_surface:
+            self._native_surface.reposition(self._monitor)
+            return
         left, _, right, bottom = self._monitor
         self._root.update_idletasks()
         w = self._root.winfo_reqwidth()
@@ -1932,7 +1957,7 @@ def run():
 
             threading.Thread(target=_warm_formatter_after_startup, daemon=True).start()
         import sys as _sys
-        _hotkey_label = "Right Option" if _sys.platform == "darwin" else "Right Ctrl"
+        _hotkey_label = "F12" if _sys.platform == "darwin" else "Right Ctrl"
         log(f"Ready. Hold {_hotkey_label} to record.")
 
         was_down = False

@@ -4,7 +4,7 @@
 
 Global screenshot hotkey for macOS.
 
-Press `F12` to enter selection capture mode, save the shot to `~/Desktop/Screenshots`,
+Press `F11` to enter selection capture mode, save the shot to `~/Desktop/Screenshots`,
 copy it to the clipboard, and open it in Preview so you can annotate it straight away.
 
 ---
@@ -22,7 +22,7 @@ Then grant permissions in macOS:
 2. Add `Python.app` and turn it on
 3. If macOS asks, also allow Screen Recording
 
-After that, press `F12`.
+After that, press `F11`.
 
 ---
 
@@ -60,6 +60,6 @@ bash tools/mac-screenshot/uninstall-launchagent.sh
 
 ## Notes
 
-- The default hotkey is `F12`
+- The default hotkey is `F11`
 - Change `HOTKEY` or `SAVE_DIR` at the top of `mac-screenshot.py`
 - Logs are written to `~/Library/Logs/mac-screenshot.log`

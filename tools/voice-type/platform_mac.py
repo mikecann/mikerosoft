@@ -17,10 +17,8 @@ _listener_started = False
 # Saved before our overlay can steal focus; re-activated before pasting.
 _target_app: object = None
 
-# Right Option key identifiers
-_VK_RIGHT_OPTION  = 61          # macOS virtual keycode for Right Option
-_NX_DEVALT_RIGHT  = 0x000040    # NX_DEVICERALTKEYMASK — set in CGEvent flags only when
-                                 # right option (not left) is physically held
+# F12 key identifier
+_VK_F12 = 111  # macOS virtual keycode for F12
 
 
 def setup_dll_paths() -> None:
@@ -28,12 +26,10 @@ def setup_dll_paths() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Hotkey — CGEventTap intercepts Right Option at the system level.
+# Hotkey — CGEventTap intercepts F12 at the system level.
 #
 # Using CGEventTapOptionDefault (not ListenOnly) means we can suppress the
-# event by returning None from the callback.  This prevents Right Option from
-# reaching other apps entirely, so Option+letter special characters are never
-# accidentally triggered while push-to-talk is in use.
+# event by returning None from the callback, so macOS won't also handle F12.
 #
 # Falls back to a plain pynput listener (no suppression) if the tap cannot
 # be created — most likely because Accessibility permission hasn't been
@@ -41,7 +37,7 @@ def setup_dll_paths() -> None:
 # ---------------------------------------------------------------------------
 
 def _run_cg_event_tap() -> None:
-    """Block the calling thread running a CGEventTap for Right Option."""
+    """Block the calling thread running a CGEventTap for F12."""
     import Quartz
 
     def _callback(proxy, event_type, event, refcon):
@@ -49,13 +45,11 @@ def _run_cg_event_tap() -> None:
         keycode = int(Quartz.CGEventGetIntegerValueField(
             event, Quartz.kCGKeyboardEventKeycode
         ))
-        if keycode != _VK_RIGHT_OPTION:
+        if keycode != _VK_F12:
             return event  # pass all other keys through untouched
 
-        flags   = int(Quartz.CGEventGetFlags(event))
-        is_down = bool(flags & _NX_DEVALT_RIGHT)
         with _hotkey_lock:
-            if is_down and not _hotkey_down:
+            if event_type == Quartz.kCGEventKeyDown and not _hotkey_down:
                 # Key just went down — snapshot the frontmost app NOW, before
                 # the overlay has any chance to steal focus from it.
                 try:
@@ -63,10 +57,12 @@ def _run_cg_event_tap() -> None:
                     _target_app = NSWorkspace.sharedWorkspace().frontmostApplication()
                 except Exception:
                     _target_app = None
-            _hotkey_down = is_down
-        return None  # suppress: Right Option never reaches any other app
+                _hotkey_down = True
+            elif event_type == Quartz.kCGEventKeyUp:
+                _hotkey_down = False
+        return None  # suppress: F12 never reaches any other app
 
-    mask = 1 << Quartz.kCGEventFlagsChanged
+    mask = (1 << Quartz.kCGEventKeyDown) | (1 << Quartz.kCGEventKeyUp)
     tap  = Quartz.CGEventTapCreate(
         Quartz.kCGSessionEventTap,
         Quartz.kCGHeadInsertEventTap,
@@ -94,7 +90,7 @@ def _run_pynput_fallback() -> None:
 
     def on_press(key):
         global _hotkey_down, _target_app
-        if key == keyboard.Key.alt_r:
+        if key == keyboard.Key.f12:
             with _hotkey_lock:
                 if not _hotkey_down:
                     try:
@@ -106,7 +102,7 @@ def _run_pynput_fallback() -> None:
 
     def on_release(key):
         global _hotkey_down
-        if key == keyboard.Key.alt_r:
+        if key == keyboard.Key.f12:
             with _hotkey_lock:
                 _hotkey_down = False
 
@@ -121,7 +117,7 @@ def _start_hotkey_listener() -> None:
         except Exception as exc:
             print(
                 f"[voice-type] CGEventTap failed ({exc}); "
-                "using pynput fallback (Right Option events will not be suppressed).",
+                "using pynput fallback (F12 events will not be suppressed).",
                 flush=True,
             )
             _run_pynput_fallback()
@@ -138,7 +134,7 @@ def _ensure_listener() -> None:
 
 
 def is_hotkey_down() -> bool:
-    """Return True if Right Option is currently held."""
+    """Return True if F12 is currently held."""
     _ensure_listener()
     with _hotkey_lock:
         return _hotkey_down
@@ -199,14 +195,9 @@ def inject_text(text: str, log: Callable[[str], None] | None = None) -> None:
     import time
 
     # Re-activate the app that had focus when recording started.
-    # The Option key or the overlay appearing may have moved focus away.
-    if _target_app is not None:
-        try:
-            _NSApplicationActivateIgnoringOtherApps = 1 << 1
-            _target_app.activateWithOptions_(_NSApplicationActivateIgnoringOtherApps)
-            time.sleep(0.15)  # wait for the app to actually come to front
-        except Exception:
-            pass
+    # The overlay appearing may have moved focus away.
+    restore_target_app_focus()
+    time.sleep(0.15)  # wait for the app to actually come to front
 
     # Save current clipboard so we can restore it after pasting
     prev = subprocess.run(["pbpaste"], capture_output=True).stdout
@@ -246,6 +237,16 @@ def inject_backspaces(count: int, log: Callable[[str], None] | None = None) -> N
     _post_events(events)
     if log:
         log(f"CGEventPost: {count} backspace(s) injected")
+
+
+def restore_target_app_focus() -> None:
+    if _target_app is None:
+        return
+    try:
+        _NSApplicationActivateIgnoringOtherApps = 1 << 1
+        _target_app.activateWithOptions_(_NSApplicationActivateIgnoringOtherApps)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
