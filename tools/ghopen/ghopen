@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+has_command() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+ensure_git_repo() {
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Not a git repository." >&2
+  return 1
+}
+
+try_open_pr() {
+  if ! has_command gh; then
+    return 1
+  fi
+
+  echo "Checking for PR..."
+  gh pr view --web >/dev/null 2>&1
+}
+
+try_open_repo_with_gh() {
+  if ! has_command gh; then
+    return 1
+  fi
+
+  echo "Opening repo..."
+  gh browse
+}
+
+build_github_url() {
+  local remote="$1"
+  local repo_path=""
+
+  case "$remote" in
+    git@github.com:*)
+      repo_path="${remote#git@github.com:}"
+      ;;
+    ssh://git@github.com/*)
+      repo_path="${remote#ssh://git@github.com/}"
+      ;;
+    https://github.com/*)
+      repo_path="${remote#https://github.com/}"
+      ;;
+    http://github.com/*)
+      repo_path="${remote#http://github.com/}"
+      ;;
+    git://github.com/*)
+      repo_path="${remote#git://github.com/}"
+      ;;
+    *)
+      echo "Not a GitHub remote: $remote" >&2
+      return 1
+      ;;
+  esac
+
+  repo_path="${repo_path%.git}"
+  printf 'https://github.com/%s\n' "$repo_path"
+}
+
+get_open_command() {
+  if [ -n "${GHOPEN_OPEN_COMMAND:-}" ]; then
+    printf '%s\n' "$GHOPEN_OPEN_COMMAND"
+    return 0
+  fi
+
+  if has_command open; then
+    printf 'open\n'
+    return 0
+  fi
+
+  if has_command xdg-open; then
+    printf 'xdg-open\n'
+    return 0
+  fi
+
+  echo "No browser opener found. Install 'open' or 'xdg-open'." >&2
+  return 1
+}
+
+open_remote_url() {
+  local remote=""
+  local url=""
+  local opener=""
+
+  remote="$(git remote get-url origin 2>/dev/null || true)"
+  if [ -z "$remote" ]; then
+    echo "No origin remote found." >&2
+    echo "Tip: install the GitHub CLI (gh) for smarter GitHub navigation." >&2
+    return 1
+  fi
+
+  url="$(build_github_url "$remote")" || return 1
+  opener="$(get_open_command)" || return 1
+
+  echo "Opening repo..."
+  "$opener" "$url" >/dev/null 2>&1
+}
+
+main() {
+  ensure_git_repo || return 1
+
+  if try_open_pr; then
+    return 0
+  fi
+
+  if try_open_repo_with_gh; then
+    return 0
+  fi
+
+  open_remote_url
+}
+
+main "$@"

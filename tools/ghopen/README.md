@@ -18,6 +18,14 @@ ghopen
 ```
 Run from any directory inside a git repo. No arguments needed.
 
+### macOS setup
+
+```bash
+bash tools/ghopen/setup_mac.sh
+```
+
+That installs a `ghopen` symlink into `~/.local/bin`.
+
 **From File Explorer:**
 Right-click any folder (or right-click inside an open folder), then choose **Mike's Tools > Open on GitHub**.
 (On Windows 11, click "Show more options" first to get the classic menu.)
@@ -41,9 +49,16 @@ Install `gh` via winget:
 winget install GitHub.cli
 ```
 
+Or on macOS:
+
+```bash
+brew install gh
+```
+
 Or check `ghopen\deps.ps1` - it will warn if `gh` is missing.
 
 ## Notes
 
 - Works in any git repo, not just repos in this workspace.
 - If there is no `origin` remote and `gh` is not installed, the command exits with an error.
+- On macOS, `ghopen` uses the native `open` command for the fallback browser flow.
