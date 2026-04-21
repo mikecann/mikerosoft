@@ -1,3 +1,22 @@
+/** Where the tool is wired up in this repo today (see root README macOS matrix). */
+export type PlatformId = 'windows' | 'macos';
+
+export const PLATFORM_ORDER: readonly PlatformId[] = ['windows', 'macos'];
+
+export const PLATFORM_LABEL: Record<PlatformId, string> = {
+  windows: 'Windows',
+  macos: 'macOS',
+};
+
+export const PLATFORM_COLOR: Record<PlatformId, string> = {
+  windows: 'blue',
+  macos: 'teal',
+};
+
+export function sortPlatforms(platforms: readonly PlatformId[]): PlatformId[] {
+  return [...platforms].sort((a, b) => PLATFORM_ORDER.indexOf(a) - PLATFORM_ORDER.indexOf(b));
+}
+
 export interface Tool {
   name: string;
   desc: string;
@@ -5,6 +24,7 @@ export interface Tool {
   header?: string;
   screenshots: string[];
   url: string;
+  platforms: readonly PlatformId[];
 }
 
 const base = 'https://cdn.jsdelivr.net/gh/mikecann/mikerosoft@main/tools';
@@ -17,6 +37,7 @@ export const tools: Tool[] = [
     header: `${base}/transcribe/docs/header.png`,
     screenshots: [`${base}/transcribe/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/transcribe',
+    platforms: ['windows'],
   },
   {
     name: 'video-to-markdown',
@@ -28,6 +49,7 @@ export const tools: Tool[] = [
       `${base}/video-to-markdown/docs/ss2.png`,
     ],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/video-to-markdown',
+    platforms: ['windows'],
   },
   {
     name: 'removebg',
@@ -36,6 +58,7 @@ export const tools: Tool[] = [
     header: `${base}/removebg/docs/header.png`,
     screenshots: [`${base}/removebg/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/removebg',
+    platforms: ['windows'],
   },
   {
     name: 'img-upscale',
@@ -44,6 +67,7 @@ export const tools: Tool[] = [
     header: `${base}/img-upscale/docs/header.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/img-upscale',
+    platforms: ['windows'],
   },
   {
     name: 'ghopen',
@@ -52,6 +76,7 @@ export const tools: Tool[] = [
     header: `${base}/ghopen/docs/header.png`,
     screenshots: [`${base}/ghopen/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/ghopen',
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'ctxmenu',
@@ -60,6 +85,7 @@ export const tools: Tool[] = [
     header: `${base}/ctxmenu/docs/header.png`,
     screenshots: [`${base}/ctxmenu/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/ctxmenu',
+    platforms: ['windows'],
   },
   {
     name: 'backup-phone',
@@ -68,6 +94,7 @@ export const tools: Tool[] = [
     header: `${base}/backup-phone/docs/header.png`,
     screenshots: [`${base}/backup-phone/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/backup-phone',
+    platforms: ['windows'],
   },
   {
     name: 'scale-monitor',
@@ -79,6 +106,7 @@ export const tools: Tool[] = [
       `${base}/scale-monitor/docs/ss2.png`,
     ],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/scale-monitor',
+    platforms: ['windows'],
   },
   {
     name: 'task-stats',
@@ -87,6 +115,7 @@ export const tools: Tool[] = [
     header: `${base}/task-stats/docs/header.png`,
     screenshots: [`${base}/task-stats/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/task-stats',
+    platforms: ['windows'],
   },
   {
     name: 'voice-type',
@@ -95,6 +124,7 @@ export const tools: Tool[] = [
     header: `${base}/voice-type/docs/header.png`,
     screenshots: [`${base}/voice-type/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/voice-type',
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'video-titles',
@@ -103,6 +133,7 @@ export const tools: Tool[] = [
     header: `${base}/video-titles/docs/header.png`,
     screenshots: [`${base}/video-titles/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/video-titles',
+    platforms: ['windows'],
   },
   {
     name: 'generate-from-image',
@@ -111,6 +142,7 @@ export const tools: Tool[] = [
     header: `${base}/generate-from-image/docs/header.png`,
     screenshots: [`${base}/generate-from-image/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/generate-from-image',
+    platforms: ['windows'],
   },
   {
     name: 'svg-to-png',
@@ -119,6 +151,7 @@ export const tools: Tool[] = [
     header: `${base}/svg-to-png/docs/header.png`,
     screenshots: [`${base}/svg-to-png/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/svg-to-png',
+    platforms: ['windows'],
   },
   {
     name: 'img-to-svg',
@@ -127,6 +160,7 @@ export const tools: Tool[] = [
     header: `${base}/img-to-svg/docs/header.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/img-to-svg',
+    platforms: ['windows'],
   },
   {
     name: 'video-description',
@@ -135,6 +169,7 @@ export const tools: Tool[] = [
     header: `${base}/video-description/docs/header.png`,
     screenshots: [`${base}/video-description/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/video-description',
+    platforms: ['windows'],
   },
   {
     name: 'copypath',
@@ -143,6 +178,7 @@ export const tools: Tool[] = [
     header: `${base}/copypath/docs/header.png`,
     screenshots: [`${base}/copypath/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/copypath',
+    platforms: ['windows'],
   },
   {
     name: 'worktrees',
@@ -151,6 +187,7 @@ export const tools: Tool[] = [
     header: `${base}/worktrees/docs/header.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/worktrees',
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'img-gen',
@@ -159,6 +196,7 @@ export const tools: Tool[] = [
     header: `${base}/img-gen/docs/header.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/img-gen',
+    platforms: ['windows'],
   },
   {
     name: 'face-swap',
@@ -167,6 +205,7 @@ export const tools: Tool[] = [
     header: `${base}/face-swap/docs/header.png`,
     screenshots: [`${base}/face-swap/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/face-swap',
+    platforms: ['windows'],
   },
   {
     name: 'mac-screenshot',
@@ -175,5 +214,6 @@ export const tools: Tool[] = [
     header: `${base}/mac-screenshot/docs/header.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/mac-screenshot',
+    platforms: ['macos'],
   },
 ];

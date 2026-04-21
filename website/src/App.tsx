@@ -1,9 +1,11 @@
 import '@mantine/core/styles.css';
 import {
   Anchor,
+  Badge,
   Box,
   Container,
   createTheme,
+  Group,
   Image,
   MantineProvider,
   SimpleGrid,
@@ -12,7 +14,7 @@ import {
   Title,
 } from '@mantine/core';
 import { ToolCard } from './ToolCard';
-import { tools } from './tools';
+import { PLATFORM_COLOR, PLATFORM_LABEL, PLATFORM_ORDER, tools } from './tools';
 
 const theme = createTheme({
   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
@@ -56,6 +58,17 @@ export default function App() {
                 View the repository on GitHub
               </Anchor>
             </Text>
+            <Text size="sm" c="dimmed" ta="center" maw={720} lh={1.6}>
+              Badges on each card show where I actually run and maintain the integration today (Explorer
+              and taskbar stubs on Windows, first-class setup scripts on macOS per the repo README).
+            </Text>
+            <Group gap="xs" justify="center" wrap="wrap">
+              {PLATFORM_ORDER.map(id => (
+                <Badge key={id} size="sm" variant="outline" color={PLATFORM_COLOR[id]}>
+                  {PLATFORM_LABEL[id]}
+                </Badge>
+              ))}
+            </Group>
           </Stack>
 
           <SimpleGrid
