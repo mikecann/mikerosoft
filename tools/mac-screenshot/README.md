@@ -1,4 +1,4 @@
-![mac-screenshot](../removebg/icons/picture.png)
+![header](docs/header.png)
 
 # mac-screenshot
 
@@ -57,6 +57,10 @@ bash tools/mac-screenshot/uninstall-launchagent.sh
 ```
 
 ---
+
+## Art
+
+`docs/header.png` is a generated banner for the public site. `icons/mac-screenshot.png` is **`monitor.png`** from the [FamFamFam Silk](https://www.famfamfam.com/lab/icons/silk/) set (Mark James, [CC BY 2.5](https://creativecommons.org/licenses/by/2.5/)).
 
 ## Notes
 

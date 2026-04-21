@@ -156,6 +156,7 @@ export const tools: Tool[] = [
     name: 'img-gen',
     desc: 'Chat-style AI image generation using Gemini via OpenRouter; right-click any folder in Explorer to open; annotate generated images and refine iteratively; drag images out to Explorer to save (requires OpenRouter API key)',
     icon: `${base}/img-gen/icons/img-gen.png`,
+    header: `${base}/img-gen/docs/header.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/img-gen',
   },
@@ -170,7 +171,8 @@ export const tools: Tool[] = [
   {
     name: 'mac-screenshot',
     desc: 'Global macOS screenshot hotkey daemon. Press F12 to capture a selection, save it with a timestamp, copy it to the clipboard, and open it in Preview for annotation',
-    icon: `${base}/removebg/icons/picture.png`,
+    icon: `${base}/mac-screenshot/icons/mac-screenshot.png`,
+    header: `${base}/mac-screenshot/docs/header.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/mac-screenshot',
   },
