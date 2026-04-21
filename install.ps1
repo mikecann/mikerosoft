@@ -177,6 +177,14 @@ bun run "$RepoDir\tools\video-description\index.ts" %*
 "@
 
 # ---------------------------------------------------------------------------
+# worktrees — interactive git worktree cleanup (Bun + inquirer)
+# ---------------------------------------------------------------------------
+Write-BatStub "worktrees" @"
+@echo off
+bun run "$RepoDir\tools\worktrees\index.ts" %*
+"@
+
+# ---------------------------------------------------------------------------
 # svg-to-png — render SVG to PNG, smallest dimension >= 2048px
 # ---------------------------------------------------------------------------
 Write-BatStub "svg-to-png" @"

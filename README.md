@@ -45,6 +45,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/img-gen/icons/img-gen.png" width="220"><br>[img-gen](tools/img-gen/) | GUI + context menu | Chat-style AI image generation using Gemini via OpenRouter; right-click any folder in Explorer; annotate generated images and refine iteratively; drag images out to Explorer to save (requires `OPENROUTER_API_KEY` in `.env`) |
 | <img src="tools/face-swap/docs/header.png" width="220"><br>[face-swap](tools/face-swap/README.md) | GUI + context menu | Swap a face from one image into another locally using InsightFace; right-click any image to pre-load the target, or launch it from Windows Search |
 | [mac-screenshot](tools/mac-screenshot/README.md) | Mac - global hotkey daemon | Press `F11` to capture a screen region, auto-name it, copy it to the clipboard, and open it in Preview for annotation |
+| <img src="tools/worktrees/docs/header.png" width="220"><br>[worktrees](tools/worktrees/README.md) | CLI (Bun) | Interactive `git worktree` cleanup: list linked checkouts, remove a subset, or remove all linked worktrees (macOS + Windows) |
 
 ---
 
@@ -77,6 +78,7 @@ For macOS, set tools up individually where mac support exists:
   `bash tools/mac-screenshot/setup_mac.sh`
 - `ghopen`:
   `bash tools/ghopen/setup_mac.sh`
+- `worktrees` (needs [Bun](https://bun.sh) on your PATH): see [tools/worktrees/README.md](tools/worktrees/README.md) for setup (`install-to-path.sh` plus `~/.local/bin` on `PATH`).
 
 At the moment that is the right shape for the repo. A fake "universal" root
 installer would mostly be a wrapper around platform checks and per-tool scripts,
@@ -89,6 +91,7 @@ while still not covering the Windows-only integrations.
 | `voice-type` | Supported | `bash tools/voice-type/setup_mac.sh` | `bash tools/voice-type/voice-type-mac.sh` | Push-to-talk voice typing on macOS. On Apple Silicon it prefers `MLX Whisper` for supported final models. Settings can be opened with `bash tools/voice-type/open-settings-mac.sh` or via Spotlight `Voice Type` |
 | `mac-screenshot` | Supported | `bash tools/mac-screenshot/setup_mac.sh` | `bash tools/mac-screenshot/restart.sh` | Global screenshot hotkey daemon for macOS. Optional login-item install via `bash tools/mac-screenshot/install-launchagent.sh` |
 | `ghopen` | Supported | `bash tools/ghopen/setup_mac.sh` | `ghopen` | Opens the current repo on GitHub. With `gh` installed it opens the PR page first when the branch has one |
+| `worktrees` | Supported | See [tools/worktrees/README.md](tools/worktrees/README.md) | `worktrees` | Needs `~/.local/bin` on `PATH` (or run `bash tools/worktrees/run.sh`). Uses the checkout you are in to find `tools/worktrees`; run `bun install` in that folder per clone if deps are missing |
 | Everything else | Windows-only for now | Use `install.ps1` on Windows | Varies by tool | Most tools still depend on Windows-specific shell integration, taskbar shortcuts, or Explorer context menus |
 
 ---
