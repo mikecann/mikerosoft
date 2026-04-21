@@ -145,6 +145,14 @@ export const tools: Tool[] = [
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/copypath',
   },
   {
+    name: 'worktrees',
+    desc: 'Interactive git worktree cleanup on macOS and Windows: list primary vs linked checkouts, remove selected linked trees, or remove all linked (Bun + inquirer)',
+    icon: `${base}/worktrees/icons/worktrees.png`,
+    header: `${base}/worktrees/docs/header.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/worktrees',
+  },
+  {
     name: 'img-gen',
     desc: 'Chat-style AI image generation using Gemini via OpenRouter; right-click any folder in Explorer to open; annotate generated images and refine iteratively; drag images out to Explorer to save (requires OpenRouter API key)',
     icon: `${base}/img-gen/icons/img-gen.png`,
