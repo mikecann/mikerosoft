@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "worktrees: not inside a git repository" >&2
+  exit 1
+}
+exec bun run "$root/tools/worktrees/index.ts" "$@"

@@ -142,6 +142,12 @@ mikerosoft.app\
     │   ├── build-and-run.bat      ← kill + build + launch in one step (daily dev command)
     │   ├── kill.bat               ← kills running task-stats by command-line pattern
     │   └── deps.ps1               ← checks nvml.dll present (NVIDIA GPU monitoring)
+    ├── worktrees\
+    │   ├── index.ts               ← Bun + inquirer: interactive git worktree cleanup
+    │   ├── worktrees              ← POSIX launcher (mac): git top-level + bun run
+    │   ├── install-to-path.sh     ← copies launcher to ~/.local/bin
+    │   ├── deps.ps1               ← bun install in this folder (Windows install.ps1)
+    │   └── README.md
     └── transcribe\
         ├── transcribe.bat         ← uses %EXEDIR% for ffmpeg / whisper paths
         └── deps.ps1               ← checks ffmpeg.exe + faster-whisper-xxl.exe exist
