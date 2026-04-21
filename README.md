@@ -76,6 +76,8 @@ For macOS, set tools up individually where mac support exists:
   `bash tools/voice-type/setup_mac.sh`
 - `mac-screenshot`:
   `bash tools/mac-screenshot/setup_mac.sh`
+- `ghopen`:
+  `bash tools/ghopen/setup_mac.sh`
 - `worktrees` (needs [Bun](https://bun.sh) on your PATH): see [tools/worktrees/README.md](tools/worktrees/README.md) for setup (`install-to-path.sh` plus `~/.local/bin` on `PATH`).
 
 At the moment that is the right shape for the repo. A fake "universal" root
@@ -88,6 +90,7 @@ while still not covering the Windows-only integrations.
 | --- | --- | --- | --- | --- |
 | `voice-type` | Supported | `bash tools/voice-type/setup_mac.sh` | `bash tools/voice-type/voice-type-mac.sh` | Push-to-talk voice typing on macOS. On Apple Silicon it prefers `MLX Whisper` for supported final models. Settings can be opened with `bash tools/voice-type/open-settings-mac.sh` or via Spotlight `Voice Type` |
 | `mac-screenshot` | Supported | `bash tools/mac-screenshot/setup_mac.sh` | `bash tools/mac-screenshot/restart.sh` | Global screenshot hotkey daemon for macOS. Optional login-item install via `bash tools/mac-screenshot/install-launchagent.sh` |
+| `ghopen` | Supported | `bash tools/ghopen/setup_mac.sh` | `ghopen` | Opens the current repo on GitHub. With `gh` installed it opens the PR page first when the branch has one |
 | `worktrees` | Supported | See [tools/worktrees/README.md](tools/worktrees/README.md) | `worktrees` | Needs `~/.local/bin` on `PATH` (or run `bash tools/worktrees/run.sh`). Uses the checkout you are in to find `tools/worktrees`; run `bun install` in that folder per clone if deps are missing |
 | Everything else | Windows-only for now | Use `install.ps1` on Windows | Varies by tool | Most tools still depend on Windows-specific shell integration, taskbar shortcuts, or Explorer context menus |
 
