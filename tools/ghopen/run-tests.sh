@@ -108,11 +108,21 @@ EOF
   chmod +x "$TEST_ROOT/bin/open"
 }
 
+# Real gh on PATH breaks tests that expect URL + open fallback; stub it unless a test replaces this file.
+create_fake_gh_disabled() {
+  cat >"$TEST_ROOT/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "$TEST_ROOT/bin/gh"
+}
+
 setup_test_root() {
   TEST_ROOT="$(mktemp -d)"
   mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/repo"
   create_fake_git
   create_fake_open
+  create_fake_gh_disabled
 }
 
 run_ghopen() {
@@ -122,7 +132,7 @@ run_ghopen() {
   set +e
   RUN_OUTPUT="$(
     cd "$repo_dir" &&
-      env PATH="$TEST_ROOT/bin:$PATH" "$@" "$GHOPEN_SCRIPT" 2>&1
+      env -u GHOPEN_OPEN_COMMAND PATH="$TEST_ROOT/bin:$PATH" "$@" "$GHOPEN_SCRIPT" 2>&1
   )"
   RUN_STATUS=$?
   set -e

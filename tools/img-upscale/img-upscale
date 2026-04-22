@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(python3 -c 'import os,sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "${BASH_SOURCE[0]}")"
+export EXEDIR="${EXEDIR:-$SCRIPT_DIR}"
+exec python3 "$SCRIPT_DIR/img-upscale.py" "$@"

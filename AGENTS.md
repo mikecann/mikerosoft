@@ -112,7 +112,9 @@ mikerosoft.app\
 ├── README.md
 ├── install.ps1                ← generates stubs + runs deps.ps1; re-run when adding tools
 ├── .gitignore
-└── tools\
+├── tools\
+    ├── lib\
+    │   └── run-transcribe.ts      ← shared: Windows transcribe.bat vs POSIX transcribe
     ├── ghopen\
     │   ├── ghopen.bat             ← opens GitHub repo or PR page in browser
     │   └── deps.ps1               ← checks gh CLI (optional but recommended)
@@ -149,8 +151,11 @@ mikerosoft.app\
     │   ├── deps.ps1               ← bun install in this folder (Windows install.ps1)
     │   └── README.md
     └── transcribe\
-        ├── transcribe.bat         ← uses %EXEDIR% for ffmpeg / whisper paths
-        └── deps.ps1               ← checks ffmpeg.exe + faster-whisper-xxl.exe exist
+        ├── transcribe.bat         ← Windows: %EXEDIR% ffmpeg.exe + faster-whisper-xxl.exe
+        ├── transcribe             ← macOS/Linux: bash → transcribe.py
+        ├── transcribe.py          ← ffmpeg on PATH + pip faster-whisper
+        ├── deps.ps1               ← Windows: checks C:\\dev\\tools exes + _models
+        └── deps.sh                ← macOS: brew ffmpeg + pip faster-whisper
 ```
 
 ---

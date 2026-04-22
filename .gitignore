@@ -13,6 +13,10 @@ obj/
 voice-type/settings.json
 tools/task-stats/tests/e2e/artifacts/
 
+# Local mux + transcribe outputs (e.g. vid1.mp4 is video-only; narration mux lives here untracked)
+tools/task-stats/screenshots/*_with_audio.mp4
+tools/task-stats/screenshots/*_with_audio.srt
+
 # 3d-viewer transient launch config (written by VBS launcher to %TEMP%, deleted after use)
 # nothing to ignore here - the file lives in %TEMP%
 

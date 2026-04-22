@@ -1,10 +1,13 @@
 #!/usr/bin/env bun
 // AI image generation CLI - right-click any image, pick your settings, describe what you want.
+//
+// Non-interactive:
+//   generate-from-image <image> --prompt "..." [--variations 1] [--aspect auto] [--size auto]
 
 import { select, input } from '@inquirer/prompts';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, extname, basename, dirname, resolve } from 'path';
-import { exec } from 'child_process';
+import { execFileSync } from 'child_process';
 import { configDotenv } from 'dotenv';
 
 const MODELS  = [
@@ -14,6 +17,96 @@ const MODELS  = [
 ];
 const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const SEP     = '  ' + '\u2500'.repeat(58);
+
+const VALID_ASPECTS = new Set([
+  'auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '4:5', '5:4', '21:9',
+]);
+const VALID_SIZES = new Set(['auto', '1K', '2K', '4K']);
+
+type GenCfg = {
+  variations: number;
+  aspectRatio: string;
+  imageSize: string;
+};
+
+function parseCli(argv: string[]): {
+  imagePath: string;
+  prompt: string | null;
+  variations: number;
+  aspect: string;
+  imageSize: string;
+} {
+  let prompt: string | null = null;
+  let variations = 1;
+  let aspect = 'auto';
+  let imageSize = 'auto';
+  const positionals: string[] = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === '--prompt') {
+      const v = argv[++i];
+      if (v === undefined || v.startsWith('-')) {
+        console.error('\n  ERROR: --prompt requires a value.\n');
+        process.exit(1);
+      }
+      prompt = v;
+      continue;
+    }
+    if (a === '--variations') {
+      const raw = argv[++i];
+      const n = parseInt(raw ?? '', 10);
+      if (!Number.isFinite(n) || n < 1 || n > 4) {
+        console.error('\n  ERROR: --variations must be 1, 2, 3, or 4.\n');
+        process.exit(1);
+      }
+      variations = n;
+      continue;
+    }
+    if (a === '--aspect') {
+      const v = argv[++i] ?? 'auto';
+      if (!VALID_ASPECTS.has(v)) {
+        console.error(`\n  ERROR: Invalid --aspect "${v}".\n`);
+        process.exit(1);
+      }
+      aspect = v;
+      continue;
+    }
+    if (a === '--size') {
+      const v = argv[++i] ?? 'auto';
+      if (!VALID_SIZES.has(v)) {
+        console.error(`\n  ERROR: Invalid --size "${v}".\n`);
+        process.exit(1);
+      }
+      imageSize = v;
+      continue;
+    }
+    if (a.startsWith('-')) {
+      console.error(`\n  ERROR: Unknown option: ${a}\n`);
+      process.exit(1);
+    }
+    positionals.push(a);
+  }
+
+  const imagePath = positionals[0] ?? '';
+  return { imagePath, prompt, variations, aspect, imageSize };
+}
+
+function openGeneratedImage(path: string): void {
+  if (process.platform === 'win32') {
+    execFileSync('cmd', ['/c', 'start', '', path], { stdio: 'inherit' });
+    return;
+  }
+  execFileSync('open', [path], { stdio: 'inherit' });
+}
+
+function openImageFolder(dir: string): void {
+  if (process.platform === 'win32') {
+    execFileSync('explorer', [dir], { stdio: 'inherit' });
+    return;
+  }
+  execFileSync('open', [dir], { stdio: 'inherit' });
+}
 
 // ---------------------------------------------------------------------------
 // Load .env from repo root (two levels up: generate-from-image -> tools -> repo)
@@ -28,17 +121,20 @@ if (!apiKey) {
   process.exit(1);
 }
 
-// ---------------------------------------------------------------------------
-// Resolve image path from argv
-// ---------------------------------------------------------------------------
+const { imagePath: rawImage, prompt: batchPrompt, variations: batchVariations, aspect: batchAspect, imageSize: batchSize } =
+  parseCli(process.argv.slice(2));
 
-const rawArg = (process.argv[2] ?? '').replace(/^"|"$/g, '');
-if (!rawArg || !existsSync(rawArg)) {
-  console.error(`\n  ERROR: File not found: ${rawArg || '(no path given)'}\n`);
+if (!rawImage || !existsSync(rawImage)) {
+  console.error(`\n  ERROR: File not found: ${rawImage || '(no path given)'}\n`);
   process.exit(1);
 }
 
-const imagePath = resolve(rawArg);
+if (batchPrompt !== null && !batchPrompt.trim()) {
+  console.error('\n  ERROR: --prompt must not be empty.\n');
+  process.exit(1);
+}
+
+const imagePath = resolve(rawImage);
 const imageDir  = dirname(imagePath);
 const imageName = basename(imagePath, extname(imagePath));
 const imageExt  = extname(imagePath).toLowerCase();
@@ -59,13 +155,9 @@ console.log('\x1b[36m  GENERATE FROM IMAGE\x1b[0m');
 console.log(SEP);
 console.log(`  Input : ${imageName}${imageExt}`);
 console.log(`\x1b[90m  Dir   : ${imageDir}\x1b[0m`);
-  console.log(`\x1b[90m  Model : ${MODELS[0]}\x1b[0m`);
+console.log(`\x1b[90m  Model : ${MODELS[0]}\x1b[0m`);
 console.log(SEP);
 console.log('');
-
-// ---------------------------------------------------------------------------
-// Interactive setup via Inquirer
-// ---------------------------------------------------------------------------
 
 // Ctrl+C during setup should exit cleanly
 process.on('uncaughtException', (err: Error & { name?: string }) => {
@@ -73,57 +165,61 @@ process.on('uncaughtException', (err: Error & { name?: string }) => {
   throw err;
 });
 
-const variationsStr = await select({
-  message: 'Variations per prompt',
-  default: '1',
-  choices: [
-    { name: '1  (single)',           value: '1' },
-    { name: '2  (two variations)',   value: '2' },
-    { name: '3  (three variations)', value: '3' },
-    { name: '4  (four variations)',  value: '4' },
-  ],
-});
+let cfg: GenCfg;
 
-const aspectRatio = await select({
-  message: 'Aspect ratio',
-  default: 'auto',
-  choices: [
-    { name: 'auto    (let the model decide)', value: 'auto' },
-    { name: '1:1     (square)',               value: '1:1'  },
-    { name: '16:9    (widescreen)',           value: '16:9' },
-    { name: '9:16    (portrait / vertical)',  value: '9:16' },
-    { name: '4:3',                            value: '4:3'  },
-    { name: '3:4',                            value: '3:4'  },
-    { name: '3:2',                            value: '3:2'  },
-    { name: '2:3',                            value: '2:3'  },
-    { name: '4:5',                            value: '4:5'  },
-    { name: '5:4',                            value: '5:4'  },
-    { name: '21:9    (ultra-wide)',           value: '21:9' },
-  ],
-});
+if (batchPrompt !== null) {
+  cfg = {
+    variations: batchVariations,
+    aspectRatio: batchAspect,
+    imageSize: batchSize,
+  };
+} else {
+  const variationsStr = await select({
+    message: 'Variations per prompt',
+    default: '1',
+    choices: [
+      { name: '1  (single)',           value: '1' },
+      { name: '2  (two variations)',   value: '2' },
+      { name: '3  (three variations)', value: '3' },
+      { name: '4  (four variations)',  value: '4' },
+    ],
+  });
 
-const imageSize = await select({
-  message: 'Image size',
-  default: 'auto',
-  choices: [
-    { name: 'auto    (let the model decide)', value: 'auto' },
-    { name: '1K      (standard)',             value: '1K'   },
-    { name: '2K',                             value: '2K'   },
-    { name: '4K      (highest resolution)',   value: '4K'   },
-  ],
-});
+  const aspectRatio = await select({
+    message: 'Aspect ratio',
+    default: 'auto',
+    choices: [
+      { name: 'auto    (let the model decide)', value: 'auto' },
+      { name: '1:1     (square)',               value: '1:1'  },
+      { name: '16:9    (widescreen)',           value: '16:9' },
+      { name: '9:16    (portrait / vertical)',  value: '9:16' },
+      { name: '4:3',                            value: '4:3'  },
+      { name: '3:4',                            value: '3:4'  },
+      { name: '3:2',                            value: '3:2'  },
+      { name: '2:3',                            value: '2:3'  },
+      { name: '4:5',                            value: '4:5'  },
+      { name: '5:4',                            value: '5:4'  },
+      { name: '21:9    (ultra-wide)',           value: '21:9' },
+    ],
+  });
 
-const cfg = {
-  variations: parseInt(variationsStr),
-  aspectRatio,
-  imageSize,
-};
+  const imageSize = await select({
+    message: 'Image size',
+    default: 'auto',
+    choices: [
+      { name: 'auto    (let the model decide)', value: 'auto' },
+      { name: '1K      (standard)',             value: '1K'   },
+      { name: '2K',                             value: '2K'   },
+      { name: '4K      (highest resolution)',   value: '4K'   },
+    ],
+  });
 
-console.log('');
-console.log(SEP);
-console.log('\x1b[90m  Type a prompt and press Enter.  open | folder | quit\x1b[0m');
-console.log(SEP);
-console.log('');
+  cfg = {
+    variations: parseInt(variationsStr, 10),
+    aspectRatio,
+    imageSize,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Generation helpers
@@ -229,6 +325,22 @@ async function generate(prompt: string): Promise<void> {
   console.log('');
 }
 
+if (batchPrompt !== null) {
+  console.log('');
+  console.log(SEP);
+  console.log('\x1b[90m  Non-interactive mode (--prompt)\x1b[0m');
+  console.log(SEP);
+  console.log('');
+  await generate(batchPrompt.trim());
+  process.exit(0);
+}
+
+console.log('');
+console.log(SEP);
+console.log('\x1b[90m  Type a prompt and press Enter.  open | folder | quit\x1b[0m');
+console.log(SEP);
+console.log('');
+
 // ---------------------------------------------------------------------------
 // Prompt loop
 // ---------------------------------------------------------------------------
@@ -251,13 +363,13 @@ while (true) {
   }
 
   if (cmd.toLowerCase() === 'open') {
-    if (lastOutPath && existsSync(lastOutPath)) exec(`start "" "${lastOutPath}"`);
+    if (lastOutPath && existsSync(lastOutPath)) openGeneratedImage(lastOutPath);
     else console.log('  No image generated yet.\n');
     continue;
   }
 
   if (cmd.toLowerCase() === 'folder') {
-    exec(`explorer "${imageDir}"`);
+    openImageFolder(imageDir);
     continue;
   }
 
