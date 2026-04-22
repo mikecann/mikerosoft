@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# macOS/Linux: open a GLB in the Electrobun viewer (same env as 3d-viewer.vbs on Windows).
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: 3d-viewer <path-to-model.glb>" >&2
+  exit 1
+fi
+
+SCRIPT_DIR="$(python3 -c 'import os,sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "${BASH_SOURCE[0]}")"
+export GLB_FILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+if [[ ! -f "$GLB_FILE" ]]; then
+  echo "Error: file not found: $1" >&2
+  exit 1
+fi
+
+cd "$SCRIPT_DIR"
+exec bun start
