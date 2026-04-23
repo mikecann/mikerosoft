@@ -269,9 +269,13 @@ def startup_enabled(vbs_path: str = "") -> bool:
 def set_startup(enable: bool, vbs_path: str = "",
                 log: Callable[[str], None] | None = None) -> None:
     plist_path = _launch_agent_path()
+    domain = f"gui/{os.getuid()}"
+    service = f"{domain}/{_LAUNCH_AGENT_LABEL}"
     if enable:
         script_dir = _script_dir()
-        launcher = os.path.join(script_dir, "voice-type-mac.sh")
+        python_bin = os.path.join(script_dir, ".venv", "bin", "python3")
+        app_path = os.path.join(script_dir, "voice-type.py")
+        log_path = os.path.join(script_dir, "voice-type.log")
         plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -281,26 +285,36 @@ def set_startup(enable: bool, vbs_path: str = "",
   <string>{_LAUNCH_AGENT_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>{launcher}</string>
+    <string>{python_bin}</string>
+    <string>{app_path}</string>
   </array>
   <key>WorkingDirectory</key>
   <string>{script_dir}</string>
+  <key>StandardOutPath</key>
+  <string>{log_path}</string>
+  <key>StandardErrorPath</key>
+  <string>{log_path}</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <false/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
 </dict>
 </plist>
 """
         os.makedirs(os.path.dirname(plist_path), exist_ok=True)
         with open(plist_path, "w", encoding="utf-8") as f:
             f.write(plist)
+        subprocess.run(["launchctl", "bootout", service], check=False)
+        subprocess.run(["launchctl", "bootstrap", domain, plist_path], check=False)
+        subprocess.run(["launchctl", "kickstart", "-k", service], check=False)
         if log:
-            log(f"Run on Startup enabled for next login ({plist_path}).")
+            log(f"Run on Startup enabled ({plist_path}).")
     else:
         if os.path.exists(plist_path):
-            subprocess.run(["launchctl", "unload", plist_path], check=False)
+            subprocess.run(["launchctl", "bootout", service], check=False)
             os.remove(plist_path)
         if log:
             log("Run on Startup disabled.")
