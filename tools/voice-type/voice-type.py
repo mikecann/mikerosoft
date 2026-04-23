@@ -47,8 +47,50 @@ platform.setup_dll_paths()
 _LOG_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice-type.log")
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 _CONTROL_SOCKET_PATH = os.path.join(_SCRIPT_DIR, "voice-type-control.sock")
+_INSTANCE_LOCK_PATH = os.path.join(_SCRIPT_DIR, "voice-type.instance.lock")
 _LOG_MAX_MB  = 1       # rotate when log exceeds this size
 _LOG_KEEP    = 200     # lines to keep after rotation
+
+
+_instance_lock_file = None
+
+
+def _acquire_single_instance_lock() -> bool:
+    global _instance_lock_file
+    lock_file = open(_INSTANCE_LOCK_PATH, "a+", encoding="utf-8")
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            lock_file.seek(0)
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                lock_file.close()
+                return False
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                lock_file.close()
+                return False
+        lock_file.seek(0)
+        lock_file.truncate()
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        _instance_lock_file = lock_file
+        return True
+    except Exception:
+        lock_file.close()
+        raise
+
+
+if not _acquire_single_instance_lock():
+    print("voice-type is already running; exiting duplicate instance.", flush=True)
+    sys.exit(0)
+
 
 def _rotate_log():
     """On startup: if log > _LOG_MAX_MB, keep only the last _LOG_KEEP lines."""
