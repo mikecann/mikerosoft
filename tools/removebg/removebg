@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: removebg <image_file>" >&2
+  echo "Example: removebg ~/Pictures/photo.jpg" >&2
+  exit 1
+fi
+
+IMAGE_FILE="$1"
+if [[ ! -f "$IMAGE_FILE" ]]; then
+  echo "Error: File not found: $IMAGE_FILE" >&2
+  exit 1
+fi
+
+dir=$(cd "$(dirname "$IMAGE_FILE")" && pwd)
+base=$(basename "$IMAGE_FILE")
+if [[ "$base" == *.* ]]; then
+  stem="${base%.*}"
+  ext=".${base##*.}"
+else
+  stem="$base"
+  ext=""
+fi
+OUTPUT_FILE="$dir/${stem}_nobg${ext}"
+
+echo "Removing background from image..."
+echo "Input:  $IMAGE_FILE"
+echo "Output: $OUTPUT_FILE"
+echo ""
+
+rembg i -m birefnet-portrait "$IMAGE_FILE" "$OUTPUT_FILE"
+
+echo ""
+echo "Background removal complete!"
+echo "Output saved to: $OUTPUT_FILE"

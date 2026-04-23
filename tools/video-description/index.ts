@@ -11,6 +11,7 @@ import { join, dirname, basename, extname, resolve } from 'path';
 import { execSync, spawnSync } from 'child_process';
 import { configDotenv } from 'dotenv';
 import { statSync } from 'fs';
+import { runTranscribeForVideo } from '../lib/run-transcribe';
 
 const MODEL   = 'google/gemini-3.1-pro-preview';
 const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -21,6 +22,16 @@ const VIDEO_EXTS = new Set([
   '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.webm',
   '.m4v', '.mpg', '.mpeg', '.ts', '.mts', '.m2ts', '.flv', '.f4v',
 ]);
+
+function copyReplyToClipboard(reply: string): boolean {
+  if (process.platform === 'win32') {
+    return spawnSync('clip', [], { input: reply, encoding: 'utf8' }).status === 0;
+  }
+  if (process.platform === 'darwin') {
+    return spawnSync('pbcopy', [], { input: reply, encoding: 'utf8' }).status === 0;
+  }
+  return spawnSync('xclip', ['-selection', 'clipboard'], { input: reply, encoding: 'utf8' }).status === 0;
+}
 
 const SYSTEM_PROMPT = `You help creators turn a video transcript with timestamps into a polished, third-person YouTube description optimized for SEO from a software developer's perspective.
 
@@ -176,7 +187,7 @@ if (existsSync(srtPath)) {
     console.log('');
     console.log(SEP);
     console.log('');
-    execSync(`"C:\\dev\\tools\\transcribe.bat" "${videoPath}"`, { stdio: 'inherit' });
+    runTranscribeForVideo(videoPath);
     console.log('');
     console.log(SEP);
 
@@ -278,8 +289,7 @@ async function sendMessage(userInput: string): Promise<void> {
     console.log(SEP);
     console.log('');
 
-    const clipResult = spawnSync('clip', [], { input: reply, encoding: 'utf8' });
-    if (clipResult.status === 0) {
+    if (copyReplyToClipboard(reply)) {
       console.log('\x1b[90m  Copied to clipboard.\x1b[0m');
     } else {
       console.log('\x1b[33m  Could not copy to clipboard.\x1b[0m');

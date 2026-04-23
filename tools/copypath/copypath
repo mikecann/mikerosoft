@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -eq 0 ]]; then
+  path="."
+else
+  path="$1"
+fi
+
+resolved="$(python3 -c 'import os, sys; print(os.path.abspath(os.path.normpath(sys.argv[1])))' "$path")"
+printf '%s' "$resolved" | pbcopy
+echo "Copied: $resolved"

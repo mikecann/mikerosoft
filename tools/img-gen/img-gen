@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# macOS/Linux: Electrobun image-gen from a folder (same env as img-gen.vbs on Windows).
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: img-gen <folder_path>" >&2
+  exit 1
+fi
+
+SCRIPT_DIR="$(python3 -c 'import os,sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+folder="$1"
+if [[ ! -d "$folder" ]]; then
+  echo "Error: not a folder: $folder" >&2
+  exit 1
+fi
+
+export FOLDER_PATH="$(cd "$folder" && pwd)"
+export TOOL_DIR="$SCRIPT_DIR"
+
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$ROOT/.env"
+  set +a
+fi
+
+cd "$SCRIPT_DIR"
+if [[ ! -d build ]]; then
+  bun run build:dev
+fi
+exec bun run dev

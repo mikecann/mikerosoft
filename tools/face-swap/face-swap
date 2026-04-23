@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# macOS/Linux: Electrobun face-swap UI (optional image or folder path, same idea as face-swap.vbs).
+set -euo pipefail
+
+SCRIPT_DIR="$(python3 -c 'import os,sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "${BASH_SOURCE[0]}")"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+export TOOL_DIR="$SCRIPT_DIR"
+
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$ROOT/.env"
+  set +a
+fi
+
+if [[ $# -ge 1 ]]; then
+  path="$1"
+  if [[ -f "$path" ]]; then
+    export TARGET_IMAGE="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+    export FOLDER_PATH="$(dirname "$TARGET_IMAGE")"
+  elif [[ -d "$path" ]]; then
+    export FOLDER_PATH="$(cd "$path" && pwd)"
+  else
+    echo "Error: not a file or folder: $path" >&2
+    exit 1
+  fi
+fi
+
+cd "$SCRIPT_DIR"
+if [[ ! -d build ]]; then
+  bun run build:dev
+fi
+exec bun run dev

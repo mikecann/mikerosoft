@@ -17,8 +17,34 @@ const SEP     = '  ' + '\u2500'.repeat(58);
 // Helpers
 // ---------------------------------------------------------------------------
 
+function readClipboardText(): string {
+  try {
+    if (process.platform === 'win32') {
+      return execSync('powershell -NoProfile -Command "Get-Clipboard"', { encoding: 'utf8' }).trim();
+    }
+    if (process.platform === 'darwin') {
+      return execSync('pbpaste', { encoding: 'utf8' }).trim();
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
 function setClipboard(text: string): void {
-  execSync('clip', { input: text, stdio: ['pipe', 'ignore', 'ignore'] });
+  if (process.platform === 'win32') {
+    execSync('clip', { input: text, stdio: ['pipe', 'ignore', 'ignore'] });
+    return;
+  }
+  if (process.platform === 'darwin') {
+    execSync('pbcopy', { input: text, stdio: ['pipe', 'ignore', 'ignore'] });
+    return;
+  }
+  try {
+    execSync('xclip', ['-selection', 'clipboard'], { input: text, stdio: ['pipe', 'ignore', 'ignore'] });
+  } catch {
+    throw new Error('Clipboard: install xclip on Linux, or copy from the terminal output.');
+  }
 }
 
 async function convertUrl(url: string): Promise<{ markdown: string; title?: string }> {
@@ -79,10 +105,8 @@ let url: string;
 if (!rawArg) {
   // Interactive mode - pre-fill from clipboard if it already holds a YouTube URL
   let preset = '';
-  try {
-    const clip = execSync('powershell -NoProfile -Command "Get-Clipboard"', { encoding: 'utf8' }).trim();
-    if (/youtube\.com|youtu\.be/i.test(clip)) preset = clip;
-  } catch {}
+  const clip = readClipboardText();
+  if (/youtube\.com|youtu\.be/i.test(clip)) preset = clip;
 
   url = (await input({
     message: 'YouTube URL',

@@ -20,7 +20,9 @@ DEFAULT_SCALE = 2
 VALID_SCALES = {2, 4, 8, 16}
 DEFAULT_BACKEND = "quality"
 VALID_BACKENDS = {"quality", "fast"}
-UPSCALE_BINARY = "realesrgan-ncnn-vulkan.exe"
+FAST_UPSCALE_BINARY = (
+    "realesrgan-ncnn-vulkan.exe" if sys.platform == "win32" else "realesrgan-ncnn-vulkan"
+)
 FAST_MODEL_NAME = "realesrgan-x4plus"
 QUALITY_MODEL_ID = "caidas/swin2SR-lightweight-x2-64"
 DEFAULT_TILE_SIZE = 256
@@ -135,7 +137,7 @@ def build_fast_upscale_command(
     scale: int,
 ) -> list[pathlib.Path | str]:
     return [
-        exe_dir / UPSCALE_BINARY,
+        exe_dir / FAST_UPSCALE_BINARY,
         "-i",
         input_path,
         "-o",
@@ -150,12 +152,17 @@ def build_fast_upscale_command(
 def print_missing_fast_dependency_help(*, exe_dir: pathlib.Path) -> None:
     print("Error: Real-ESRGAN fast backend is not installed.")
     print()
-    print(f"Expected to find: {exe_dir / UPSCALE_BINARY}")
+    print(f"Expected to find: {exe_dir / FAST_UPSCALE_BINARY}")
     print(f"Expected models in: {exe_dir / 'models'}")
     print()
-    print("Install it by extracting the Windows Real-ESRGAN ncnn zip into C:\\dev\\tools")
-    print("so that the exe sits at C:\\dev\\tools\\realesrgan-ncnn-vulkan.exe")
-    print("and the model files sit under C:\\dev\\tools\\models\\.")
+    if sys.platform == "win32":
+        print("Install it by extracting the Windows Real-ESRGAN ncnn zip into C:\\dev\\tools")
+        print("so that the exe sits at C:\\dev\\tools\\realesrgan-ncnn-vulkan.exe")
+        print("and the model files sit under C:\\dev\\tools\\models\\.")
+    else:
+        print("Install a Real-ESRGAN ncnn-vulkan build for this OS and either:")
+        print(f"  - put {FAST_UPSCALE_BINARY} next to this script, or")
+        print("  - set EXEDIR to the folder that contains the binary and models\\")
 
 
 def print_missing_quality_dependency_help() -> None:
@@ -314,7 +321,7 @@ def run_fast_upscale(
     output_path: pathlib.Path,
     scale: int,
 ) -> int:
-    binary_path = exe_dir / UPSCALE_BINARY
+    binary_path = exe_dir / FAST_UPSCALE_BINARY
     if not binary_path.exists():
         print_missing_fast_dependency_help(exe_dir=exe_dir)
         return 1

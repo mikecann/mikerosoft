@@ -27,7 +27,29 @@ The transcript is saved as `<input_basename>.srt` in the same folder as the inpu
 
 ![screenshot](docs/ss1.png)
 
-## Dependencies
+## macOS / Linux (POSIX)
+
+Use the **`transcribe`** launcher in this folder (also linked by `install_mac.sh` into `~/.local/bin`).
+
+1. Install deps once:
+
+```bash
+bash tools/transcribe/deps.sh
+```
+
+2. Run:
+
+```bash
+transcribe /path/to/video.mp4 [--cpu] [--model small]
+```
+
+Uses **`ffmpeg` on PATH** and the **`faster-whisper`** Python package. Default model is **`small`**; override with **`TRANSCRIBE_MODEL`** or **`--model`**.
+
+**Model quality (Mac / pip):** `base` and `small` download quickly and are fine for drafts. For closer parity with large Windows runs, use **`TRANSCRIBE_MODEL=large-v3`** or **`--model large-v3`** (much larger download and slower on CPU).
+
+Windows continues to use **`transcribe.bat`** + **`faster-whisper-xxl.exe`** in `C:\dev\tools`.
+
+## Dependencies (Windows)
 
 Large binaries that must be downloaded manually and placed in `C:\dev\tools`:
 

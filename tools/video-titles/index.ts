@@ -9,6 +9,7 @@ import { readFileSync, appendFileSync, existsSync } from 'fs';
 import { join, dirname, basename, extname, resolve } from 'path';
 import { execSync } from 'child_process';
 import { configDotenv } from 'dotenv';
+import { runTranscribeForVideo } from '../lib/run-transcribe';
 
 const MODEL   = 'google/gemini-3.1-pro-preview';
 const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -146,7 +147,7 @@ if (existsSync(srtPath)) {
     console.log('');
     console.log(SEP);
     console.log('');
-    execSync(`"C:\\dev\\tools\\transcribe.bat" "${videoPath}"`, { stdio: 'inherit' });
+    runTranscribeForVideo(videoPath);
     console.log('');
     console.log(SEP);
 

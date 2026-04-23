@@ -111,8 +111,11 @@ mikerosoft.app\
 ├── AGENTS.md                  ← you are here
 ├── README.md
 ├── install.ps1                ← generates stubs + runs deps.ps1; re-run when adding tools
+├── install_mac.sh             ← symlinks POSIX launchers; optional --with-bun-install
 ├── .gitignore
-└── tools\
+├── tools\
+    ├── lib\
+    │   └── run-transcribe.ts      ← shared: Windows transcribe.bat vs POSIX transcribe
     ├── ghopen\
     │   ├── ghopen.bat             ← opens GitHub repo or PR page in browser
     │   └── deps.ps1               ← checks gh CLI (optional but recommended)
@@ -148,9 +151,15 @@ mikerosoft.app\
     │   ├── install-to-path.sh     ← copies launcher to ~/.local/bin
     │   ├── deps.ps1               ← bun install in this folder (Windows install.ps1)
     │   └── README.md
-    └── transcribe\
-        ├── transcribe.bat         ← uses %EXEDIR% for ffmpeg / whisper paths
-        └── deps.ps1               ← checks ffmpeg.exe + faster-whisper-xxl.exe exist
+    ├── transcribe\
+    │   ├── transcribe.bat         ← Windows: %EXEDIR% ffmpeg.exe + faster-whisper-xxl.exe
+    │   ├── transcribe             ← macOS/Linux: bash → transcribe.py
+    │   ├── transcribe.py          ← ffmpeg on PATH + pip faster-whisper
+    │   ├── deps.ps1               ← Windows: checks C:\\dev\\tools exes + _models
+    │   └── deps.sh                ← macOS: brew ffmpeg + pip faster-whisper
+    ├── 3d-viewer\                 ← Electrobun; 3d-viewer (mac) same as bun start + GLB_FILE
+    ├── face-swap\                 ← Electrobun; face-swap (mac) loads .env + bun dev
+    └── img-gen\                   ← Electrobun; img-gen (mac) loads .env + bun dev
 ```
 
 ---
