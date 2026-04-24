@@ -30,17 +30,20 @@ class PlatformMacStartupTests(unittest.TestCase):
                 agents_dir,
                 "com.mikerosoft.voice-type.plist",
             )
-            expected_script_dir = str(TOOLS_DIR)
+            expected_script_dir = str(pathlib.Path(tmp_home) / "voice-type")
+            os.makedirs(os.path.join(expected_script_dir, ".venv", "bin"))
             expected_python = os.path.join(expected_script_dir, ".venv", "bin", "python3")
+            pathlib.Path(expected_python).touch()
             expected_app = os.path.join(expected_script_dir, "voice-type.py")
-            expected_log = os.path.join(expected_script_dir, "voice-type.log")
+            expected_log = os.path.join(expected_script_dir, "voice-type-launchd.log")
             domain = "gui/501"
             service = "gui/501/com.mikerosoft.voice-type"
 
             with mock.patch.object(self.module.os.path, "expanduser", return_value=agents_dir):
-                with mock.patch.object(self.module.os, "getuid", return_value=501):
-                    with mock.patch.object(self.module.subprocess, "run") as run_mock:
-                        self.module.set_startup(True, log=None)
+                with mock.patch.object(self.module.os, "getuid", return_value=501, create=True):
+                    with mock.patch.object(self.module, "_script_dir", return_value=expected_script_dir):
+                        with mock.patch.object(self.module.subprocess, "run") as run_mock:
+                            self.module.set_startup(True, log=None)
 
             self.assertTrue(os.path.exists(expected_plist))
             with open(expected_plist, "r", encoding="utf-8") as f:
@@ -63,6 +66,22 @@ class PlatformMacStartupTests(unittest.TestCase):
                 any_order=False,
             )
 
+    def test_set_startup_enable_rejects_missing_python_venv(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            agents_dir = os.path.join(tmp_home, "Library", "LaunchAgents")
+            script_dir = str(pathlib.Path(tmp_home) / "voice-type")
+            messages = []
+
+            with mock.patch.object(self.module.os.path, "expanduser", return_value=agents_dir):
+                with mock.patch.object(self.module.os, "getuid", return_value=501, create=True):
+                    with mock.patch.object(self.module, "_script_dir", return_value=script_dir):
+                        with mock.patch.object(self.module.subprocess, "run") as run_mock:
+                            with self.assertRaises(FileNotFoundError):
+                                self.module.set_startup(True, log=messages.append)
+
+            self.assertEqual(0, run_mock.call_count)
+            self.assertIn("Run setup first", messages[0])
+
     def test_set_startup_disable_unloads_and_deletes_plist(self):
         with tempfile.TemporaryDirectory() as tmp_home:
             agents_dir = os.path.join(tmp_home, "Library", "LaunchAgents")
@@ -76,11 +95,23 @@ class PlatformMacStartupTests(unittest.TestCase):
 
             service = "gui/501/com.mikerosoft.voice-type"
             with mock.patch.object(self.module.os.path, "expanduser", return_value=agents_dir):
-                with mock.patch.object(self.module.os, "getuid", return_value=501):
+                with mock.patch.object(self.module.os, "getuid", return_value=501, create=True):
                     with mock.patch.object(self.module.subprocess, "run") as run_mock:
                         self.module.set_startup(False, log=None)
 
             self.assertFalse(os.path.exists(plist_path))
+            run_mock.assert_called_once_with(["launchctl", "bootout", service], check=False)
+
+    def test_set_startup_disable_unloads_even_when_plist_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            agents_dir = os.path.join(tmp_home, "Library", "LaunchAgents")
+            service = "gui/501/com.mikerosoft.voice-type"
+
+            with mock.patch.object(self.module.os.path, "expanduser", return_value=agents_dir):
+                with mock.patch.object(self.module.os, "getuid", return_value=501, create=True):
+                    with mock.patch.object(self.module.subprocess, "run") as run_mock:
+                        self.module.set_startup(False, log=None)
+
             run_mock.assert_called_once_with(["launchctl", "bootout", service], check=False)
 
 

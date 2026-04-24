@@ -8,6 +8,7 @@ import threading
 from typing import Callable
 
 _LAUNCH_AGENT_LABEL = "com.mikerosoft.voice-type"
+_LAUNCHD_LOG_NAME = "voice-type-launchd.log"
 
 _hotkey_down      = False
 _hotkey_lock      = threading.Lock()
@@ -262,6 +263,14 @@ def _script_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def _launchd_domain() -> str:
+    return f"gui/{os.getuid()}"
+
+
+def _launchd_service() -> str:
+    return f"{_launchd_domain()}/{_LAUNCH_AGENT_LABEL}"
+
+
 def startup_enabled(vbs_path: str = "") -> bool:
     return os.path.exists(_launch_agent_path())
 
@@ -269,13 +278,22 @@ def startup_enabled(vbs_path: str = "") -> bool:
 def set_startup(enable: bool, vbs_path: str = "",
                 log: Callable[[str], None] | None = None) -> None:
     plist_path = _launch_agent_path()
-    domain = f"gui/{os.getuid()}"
-    service = f"{domain}/{_LAUNCH_AGENT_LABEL}"
+    domain = _launchd_domain()
+    service = _launchd_service()
     if enable:
         script_dir = _script_dir()
         python_bin = os.path.join(script_dir, ".venv", "bin", "python3")
         app_path = os.path.join(script_dir, "voice-type.py")
-        log_path = os.path.join(script_dir, "voice-type.log")
+        log_path = os.path.join(script_dir, _LAUNCHD_LOG_NAME)
+        if not os.path.exists(python_bin):
+            setup_path = os.path.join(script_dir, "setup_mac.sh")
+            message = (
+                f"voice-type Python interpreter missing at '{python_bin}'. "
+                f"Run setup first: bash {setup_path}"
+            )
+            if log:
+                log(message)
+            raise FileNotFoundError(message)
         plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -313,8 +331,8 @@ def set_startup(enable: bool, vbs_path: str = "",
         if log:
             log(f"Run on Startup enabled ({plist_path}).")
     else:
+        subprocess.run(["launchctl", "bootout", service], check=False)
         if os.path.exists(plist_path):
-            subprocess.run(["launchctl", "bootout", service], check=False)
             os.remove(plist_path)
         if log:
             log("Run on Startup disabled.")
