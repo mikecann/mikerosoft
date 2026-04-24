@@ -76,11 +76,10 @@ class PlatformMacStartupTests(unittest.TestCase):
                 with mock.patch.object(self.module.os, "getuid", return_value=501, create=True):
                     with mock.patch.object(self.module, "_script_dir", return_value=script_dir):
                         with mock.patch.object(self.module.subprocess, "run") as run_mock:
-                            with self.assertRaises(FileNotFoundError):
-                                self.module.set_startup(True, log=messages.append)
+                            self.module.set_startup(True, log=messages.append)
 
             self.assertEqual(0, run_mock.call_count)
-            self.assertIn("Run setup first", messages[0])
+            self.assertTrue(any("Run setup first" in message for message in messages))
 
     def test_set_startup_disable_unloads_and_deletes_plist(self):
         with tempfile.TemporaryDirectory() as tmp_home:

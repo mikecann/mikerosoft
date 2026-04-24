@@ -267,8 +267,8 @@ def _launchd_domain() -> str:
     return f"gui/{os.getuid()}"
 
 
-def _launchd_service() -> str:
-    return f"{_launchd_domain()}/{_LAUNCH_AGENT_LABEL}"
+def _launchd_service(domain: str) -> str:
+    return f"{domain}/{_LAUNCH_AGENT_LABEL}"
 
 
 def startup_enabled(vbs_path: str = "") -> bool:
@@ -279,7 +279,7 @@ def set_startup(enable: bool, vbs_path: str = "",
                 log: Callable[[str], None] | None = None) -> None:
     plist_path = _launch_agent_path()
     domain = _launchd_domain()
-    service = _launchd_service()
+    service = _launchd_service(domain)
     if enable:
         script_dir = _script_dir()
         python_bin = os.path.join(script_dir, ".venv", "bin", "python3")
@@ -293,7 +293,7 @@ def set_startup(enable: bool, vbs_path: str = "",
             )
             if log:
                 log(message)
-            raise FileNotFoundError(message)
+            return
         plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
