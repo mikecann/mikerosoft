@@ -8,6 +8,7 @@
 import { checkbox, confirm, select } from '@inquirer/prompts';
 import { execFileSync } from 'node:child_process';
 
+import { listDirtyWorktrees } from './dirty-worktrees';
 import { isLinkedWorktreeGitDir, parseWorktreePorcelain } from './parse-worktrees';
 
 function exhaustiveCheck(param: never): never {
@@ -133,7 +134,28 @@ async function main(): Promise<void> {
     return;
   }
 
-  const forceNote = force ? 'with --force' : 'without --force';
+  const dirtyWorktrees = listDirtyWorktrees({ paths: targets });
+  if (dirtyWorktrees.length > 0) {
+    console.log('These worktrees have local changes that would be deleted:');
+    for (const worktree of dirtyWorktrees) {
+      console.log(`\n${worktree.path}`);
+      for (const change of worktree.changes) console.log(`  ${change}`);
+    }
+    console.log('');
+
+    const acceptDirtyDelete = await confirm({
+      message: `Delete the changes shown above and force-remove ${dirtyWorktrees.length} dirty worktree(s)?`,
+      default: false,
+    });
+
+    if (!acceptDirtyDelete) {
+      console.log('Cancelled.');
+      return;
+    }
+  }
+
+  const shouldForce = force || dirtyWorktrees.length > 0;
+  const forceNote = shouldForce ? 'with --force' : 'without --force';
   const ok = await confirm({
     message: `Remove ${targets.length} worktree(s) ${forceNote}?\n${targets.join('\n')}`,
     default: false,
@@ -144,7 +166,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  removeWorktrees(targets, topLevel, force);
+  removeWorktrees(targets, topLevel, shouldForce);
   console.log('Done.');
 }
 
