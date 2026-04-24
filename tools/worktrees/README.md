@@ -12,9 +12,9 @@ Interactive helper for cleaning up **git worktrees**. I use it when Cursor leave
 | Detect repo | Uses `git rev-parse --show-toplevel` from your **current directory**, so you must be inside some checkout of that repo (any subfolder is fine). |
 | List | Prints every worktree from `git worktree list --porcelain`, labelled **primary** vs **linked** (linked means the git dir lives under `.git/worktrees/`). |
 | Remove | Only **linked** worktrees are selectable. I never try to remove the primary checkout through this UI. |
-| Confirm | You get a final yes or no before anything is deleted. |
+| Confirm | You get a final yes or no before anything is deleted. If a target worktree is dirty, it shows the modified and untracked files first and asks you to confirm deleting those changes. |
 
-Removals run `git worktree remove`. If a tree has local changes or locked files, git may refuse unless you pass **`--force`** (same as `git worktree remove --force`).
+Removals run `git worktree remove`. If a selected worktree has local changes, the tool now shows what would be deleted and, if you confirm, force-removes it. You can still pass **`--force`** (same as `git worktree remove --force`) if you want force mode from the start.
 
 
 ## Dependencies
