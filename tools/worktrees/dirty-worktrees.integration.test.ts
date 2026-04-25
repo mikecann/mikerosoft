@@ -61,6 +61,18 @@ describe('listDirtyWorktrees integration', () => {
     expect(dirty[0]?.changes.some((line) => line.endsWith('new-untracked.txt'))).toBe(true);
   });
 
+  it('returns untracked files when status config hides them', () => {
+    const { cleanPath, dirtyPath, mainPath } = createRepoWithWorktrees();
+
+    runGit({ cwd: mainPath, args: ['config', 'status.showUntrackedFiles', 'no'] });
+    writeFileSync(join(dirtyPath, 'new-untracked.txt'), 'new file\n');
+
+    const dirty = listDirtyWorktrees({ paths: [cleanPath, dirtyPath] });
+    expect(dirty).toHaveLength(1);
+    expect(dirty[0]?.path).toBe(dirtyPath);
+    expect(dirty[0]?.changes.some((line) => line.endsWith('new-untracked.txt'))).toBe(true);
+  });
+
   it('returns an empty list when every worktree is clean', () => {
     const { cleanPath, dirtyPath } = createRepoWithWorktrees();
     const dirty = listDirtyWorktrees({ paths: [cleanPath, dirtyPath] });

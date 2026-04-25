@@ -33,7 +33,7 @@ Removals run `git worktree remove`. If a selected worktree has local changes, th
    bash tools/worktrees/install-to-path.sh
    ```
 
-   That copies the small `worktrees` script into `~/.local/bin`. If `worktrees` is not found, add this to `~/.zshrc` and open a new terminal:
+   That writes a small `worktrees` launcher into `~/.local/bin` pointing back to this checkout's `tools/worktrees/index.ts`. If `worktrees` is not found, add this to `~/.zshrc` and open a new terminal:
 
    ```bash
    export PATH="$HOME/.local/bin:$PATH"
@@ -45,7 +45,7 @@ Removals run `git worktree remove`. If a selected worktree has local changes, th
    worktrees
    ```
 
-The launcher always runs **`tools/worktrees/index.ts` from the repo root that git reports for your cwd**, so each clone needs its own `bun install` in that path if `node_modules` is missing.
+The launcher always runs this checkout's **`tools/worktrees/index.ts`** against whichever git repo you call it from. Code changes in this checkout take effect immediately; rerun `install-to-path.sh` only if you move this repo.
 
 You can still run **`bash tools/worktrees/run.sh`** from the repo root if you prefer not to use `~/.local/bin`.
 

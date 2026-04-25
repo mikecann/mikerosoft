@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Copy the worktrees launcher into a directory on your PATH (default: ~/.local/bin).
-# Uses cp (not a symlink) so deleting one worktree checkout does not break the command.
+# Install a worktrees launcher into a directory on your PATH (default: ~/.local/bin).
+# The generated launcher points back to this checkout, so code changes here take effect immediately.
 set -euo pipefail
 
 target_dir="${1:-$HOME/.local/bin}"
@@ -15,10 +15,14 @@ fi
 
 mkdir -p "$target_dir"
 rm -f "$dest"
-cp "$src" "$dest"
+{
+  echo '#!/usr/bin/env bash'
+  echo 'set -euo pipefail'
+  printf 'exec bun run %q/index.ts "$@"\n' "$here"
+} > "$dest"
 chmod +x "$src" "$dest"
 
-echo "Installed: $dest (copy of $src)"
+echo "Installed: $dest (points to $here/index.ts)"
 echo ""
 echo "Open a new terminal and run: worktrees"
 echo "If command not found, add this to ~/.zshrc (or ~/.bashrc):"

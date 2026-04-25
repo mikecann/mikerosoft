@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-tool_dir="$(python3 -c 'import os,sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "${BASH_SOURCE[0]}")"
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-  echo "worktrees: not inside a git repository" >&2
-  exit 1
-}
+tool_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exec bun run "$tool_dir/index.ts" "$@"

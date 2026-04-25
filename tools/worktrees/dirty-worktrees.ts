@@ -6,7 +6,7 @@ export type DirtyWorktree = {
 };
 
 function gitStatusPorcelain({ worktreePath }: { worktreePath: string }): string[] {
-  const status = execFileSync('git', ['status', '--short'], {
+  const status = execFileSync('git', ['status', '--short', '--untracked-files=all'], {
     encoding: 'utf8',
     cwd: worktreePath,
   }).trim();
