@@ -137,6 +137,7 @@ from text_formatter import (
     format_for_injection as format_text_for_injection,
     resolve_system_prompt,
 )
+from preview_format import wrap_preview
 from voice_type_control import ControlServer
 
 # ---------------------------------------------------------------------------
@@ -955,31 +956,8 @@ _CANVAS_H  = 28
 _BAR_MAX_H = 20
 _BAR_MIN_H = 3
 
-_MAX_PREVIEW_CHARS = 58
-
-
 def _wrap_preview(text: str) -> str:
-    """Word-wrap text and show the last 2 lines so recent speech is always visible."""
-    if not text:
-        return ""
-    words = text.split()
-    # Build all wrapped lines (no early exit)
-    lines, current = [], ""
-    for w in words:
-        if current and len(current) + 1 + len(w) > _MAX_PREVIEW_CHARS:
-            lines.append(current)
-            current = w
-        else:
-            current = (current + " " + w).lstrip()
-    if current:
-        lines.append(current)
-    if not lines:
-        return ""
-    # Show only the last 2 lines so the display tracks what you're currently saying.
-    # A leading "…" indicates earlier text is scrolled off.
-    visible = lines[-2:]
-    prefix = "…" if len(lines) > 2 else ""
-    return prefix + "\n".join(visible)
+    return wrap_preview(text)
 
 
 class Overlay:
@@ -1037,7 +1015,7 @@ class Overlay:
                 self._bar_ids.append(rid)
 
             self._preview = tk.Label(body, text="", fg=_COL_PREVIEW, bg=_OVL_BG,
-                                     font=("Segoe UI", 10), anchor="w",
+                                     font=("Segoe UI", 12), anchor="w",
                                      justify="left", wraplength=360,
                                      pady=2)
 

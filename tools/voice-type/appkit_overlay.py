@@ -25,7 +25,7 @@ from AppKit import (
 
 _PANEL_WIDTH = 220
 _TOP_ROW_HEIGHT = 26
-_PREVIEW_HEIGHT = 24
+_PREVIEW_HEIGHT = 36
 _PADDING_X = 12
 _PADDING_Y = 8
 _ACCENT_WIDTH = 4
@@ -136,11 +136,16 @@ class AppKitOverlaySurface:
         self._preview.setDrawsBackground_(False)
         self._preview.setEditable_(False)
         self._preview.setSelectable_(False)
-        self._preview.setFont_(NSFont.systemFontOfSize_(10))
+        self._preview.setFont_(NSFont.systemFontOfSize_(12))
         self._preview.setTextColor_(NSColor.colorWithCalibratedWhite_alpha_(0.68, 1.0))
-        self._preview.cell().setWraps_(True)
-        self._preview.cell().setScrollable_(False)
-        self._preview.cell().setLineBreakMode_(NSLineBreakByWordWrapping)
+        preview_cell = self._preview.cell()
+        preview_cell.setWraps_(True)
+        preview_cell.setScrollable_(False)
+        preview_cell.setLineBreakMode_(NSLineBreakByWordWrapping)
+        if hasattr(preview_cell, "setUsesSingleLineMode_"):
+            preview_cell.setUsesSingleLineMode_(False)
+        if hasattr(preview_cell, "setMaximumNumberOfLines_"):
+            preview_cell.setMaximumNumberOfLines_(2)
         self._content.addSubview_(self._preview)
 
         self._is_visible = False
