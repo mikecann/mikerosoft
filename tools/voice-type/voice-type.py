@@ -16,6 +16,7 @@ import time
 import math
 import json
 import signal
+import subprocess
 import threading
 import queue
 import tkinter as tk
@@ -931,11 +932,32 @@ def _apply_settings_changes(*, tray, updates: dict) -> None:
     _set_formatter_model(str(updates.get("formatter_model", _settings.get("formatter_model"))))
 
 
+def _restart_app() -> None:
+    """Last-resort restart: spawn the relauncher detached, so it survives this
+    process being killed, then kill/relaunch voice-type. Used by the settings
+    window's Restart button to recover a wedged overlay."""
+    log("Restart requested from settings window.")
+    if sys.platform == "win32":
+        script = os.path.join(_SCRIPT_DIR, "restart.bat")
+        subprocess.Popen(
+            ["cmd", "/c", script], cwd=_SCRIPT_DIR,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0),
+        )
+    else:
+        script = os.path.join(_SCRIPT_DIR, "voice-type-mac.sh")
+        subprocess.Popen(
+            ["bash", script], cwd=_SCRIPT_DIR, start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
+
 def _show_settings_dialog(overlay: "Overlay", tray) -> None:
     overlay.edit_settings(
         state=_build_control_state(tray),
         on_save=lambda updates: _apply_settings_changes(tray=tray, updates=updates),
         on_open_log=lambda: platform.open_log(_LOG_PATH),
+        on_restart=_restart_app,
         defer_until_hidden=False,
     )
 
@@ -945,6 +967,7 @@ def _queue_settings_dialog_after_hide(overlay: "Overlay", tray) -> None:
         state=_build_control_state(tray),
         on_save=lambda updates: _apply_settings_changes(tray=tray, updates=updates),
         on_open_log=lambda: platform.open_log(_LOG_PATH),
+        on_restart=_restart_app,
         defer_until_hidden=True,
     )
 
@@ -1143,7 +1166,8 @@ class Overlay:
             },
         ))
 
-    def edit_settings(self, state: dict, on_save, on_open_log, defer_until_hidden: bool = False):
+    def edit_settings(self, state: dict, on_save, on_open_log, on_restart=None,
+                      defer_until_hidden: bool = False):
         self._dialog_requested = True
         self._cmd_queue.put((
             "edit_settings",
@@ -1151,6 +1175,7 @@ class Overlay:
                 "state": state,
                 "on_save": on_save,
                 "on_open_log": on_open_log,
+                "on_restart": on_restart,
                 "defer_until_hidden": defer_until_hidden,
             },
         ))
@@ -1373,6 +1398,7 @@ class Overlay:
         state = payload["state"]
         on_save = payload["on_save"]
         on_open_log = payload["on_open_log"]
+        on_restart = payload.get("on_restart")
 
         def _choice_maps(options: list[str], labels: dict[str, str]):
             value_to_label = {value: labels.get(value, value) for value in options}
@@ -1504,7 +1530,32 @@ class Overlay:
         formatter_enabled_var.trace_add("write", lambda *_args: _sync_formatter_state())
         _sync_formatter_state()
 
-        ttk.Button(buttons, text="Open Log", command=on_open_log).grid(row=0, column=0, sticky="w")
+        left_buttons = ttk.Frame(buttons)
+        left_buttons.grid(row=0, column=0, sticky="w")
+        ttk.Button(left_buttons, text="Open Log", command=on_open_log).pack(side="left")
+
+        if on_restart is not None:
+            def _restart():
+                if not messagebox.askyesno(
+                    "voice-type",
+                    "Restart Voice Type now?\n\n"
+                    "This kills the current process — clearing any stuck "
+                    "overlay — and relaunches it. Use this as a last resort "
+                    "if the overlay is frozen.",
+                    parent=win,
+                ):
+                    return
+                try:
+                    on_restart()
+                except Exception as e:
+                    messagebox.showerror(
+                        "voice-type", f"Restart failed: {e}", parent=win
+                    )
+
+            ttk.Button(left_buttons, text="Restart", command=_restart).pack(
+                side="left", padx=(8, 0)
+            )
+
         ttk.Button(buttons, text="Cancel", command=_close).grid(row=0, column=1, sticky="e", padx=(0, 8))
         ttk.Button(buttons, text="Save", command=_save).grid(row=0, column=2, sticky="e")
 
