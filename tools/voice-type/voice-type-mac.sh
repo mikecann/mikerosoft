@@ -17,7 +17,19 @@ fi
 echo "Stopping existing voice-type instances..."
 pkill -f "voice-type.py" 2>/dev/null || true
 pkill -f "voice-type-menubar-mac.py" 2>/dev/null || true
-sleep 0.5
+
+# Wait for the old instance to actually exit before launching a new one.
+# A wedged process (e.g. pegged in transcription) can ignore SIGTERM long
+# enough for a second instance to start; escalate to SIGKILL if it lingers.
+for _ in $(seq 1 20); do
+  pgrep -f "voice-type.py" >/dev/null 2>&1 || break
+  sleep 0.25
+done
+if pgrep -f "voice-type.py" >/dev/null 2>&1; then
+  echo "Existing instance did not exit; force-killing..."
+  pkill -9 -f "voice-type.py" 2>/dev/null || true
+  sleep 0.5
+fi
 
 echo "Launching voice-type..."
 # Discard stdout — the Python script writes its own log to voice-type.log directly.

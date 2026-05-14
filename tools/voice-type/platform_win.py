@@ -74,6 +74,11 @@ def is_hotkey_down() -> bool:
     return bool(_user32.GetAsyncKeyState(_HOTKEY_VK) & 0x8000)
 
 
+def snapshot_target_app() -> None:
+    """No-op on Windows — focus is restored via the foreground window instead."""
+    pass
+
+
 def get_foreground_monitor_work_area() -> tuple[int, int, int, int]:
     """Return (left, top, right, bottom) work area of the monitor containing the focused window."""
     MONITOR_DEFAULTTONEAREST = 2

@@ -42,22 +42,32 @@ def _run_cg_event_tap() -> None:
     import Quartz
 
     def _callback(proxy, event_type, event, refcon):
-        global _hotkey_down, _target_app
+        global _hotkey_down
+        # macOS auto-disables an event tap if its callback is ever judged too
+        # slow, or on certain user-input conditions. When that happens we stop
+        # receiving events entirely — including the F12 KeyUp — which would
+        # leave _hotkey_down stuck True forever. Re-enable the tap and assume
+        # the key was released, since the KeyUp may have been dropped.
+        if event_type in (
+            Quartz.kCGEventTapDisabledByTimeout,
+            Quartz.kCGEventTapDisabledByUserInput,
+        ):
+            Quartz.CGEventTapEnable(tap, True)
+            with _hotkey_lock:
+                _hotkey_down = False
+            return event
+
         keycode = int(Quartz.CGEventGetIntegerValueField(
             event, Quartz.kCGKeyboardEventKeycode
         ))
         if keycode != _VK_F12:
             return event  # pass all other keys through untouched
 
+        # Keep this callback minimal — any slow work here (e.g. AppKit calls)
+        # risks tripping the tap watchdog. The frontmost-app snapshot is taken
+        # by the main worker via snapshot_target_app() instead.
         with _hotkey_lock:
-            if event_type == Quartz.kCGEventKeyDown and not _hotkey_down:
-                # Key just went down — snapshot the frontmost app NOW, before
-                # the overlay has any chance to steal focus from it.
-                try:
-                    from AppKit import NSWorkspace
-                    _target_app = NSWorkspace.sharedWorkspace().frontmostApplication()
-                except Exception:
-                    _target_app = None
+            if event_type == Quartz.kCGEventKeyDown:
                 _hotkey_down = True
             elif event_type == Quartz.kCGEventKeyUp:
                 _hotkey_down = False
@@ -90,15 +100,9 @@ def _run_pynput_fallback() -> None:
     from pynput import keyboard
 
     def on_press(key):
-        global _hotkey_down, _target_app
+        global _hotkey_down
         if key == keyboard.Key.f12:
             with _hotkey_lock:
-                if not _hotkey_down:
-                    try:
-                        from AppKit import NSWorkspace
-                        _target_app = NSWorkspace.sharedWorkspace().frontmostApplication()
-                    except Exception:
-                        _target_app = None
                 _hotkey_down = True
 
     def on_release(key):
@@ -139,6 +143,21 @@ def is_hotkey_down() -> bool:
     _ensure_listener()
     with _hotkey_lock:
         return _hotkey_down
+
+
+def snapshot_target_app() -> None:
+    """Capture the frontmost app at push-to-talk key-down time.
+
+    Called by the main worker on the key-down transition — deliberately off
+    the CGEventTap callback thread, since AppKit calls there are slow enough
+    to trip the tap watchdog and get the whole tap disabled.
+    """
+    global _target_app
+    try:
+        from AppKit import NSWorkspace
+        _target_app = NSWorkspace.sharedWorkspace().frontmostApplication()
+    except Exception:
+        _target_app = None
 
 
 # ---------------------------------------------------------------------------

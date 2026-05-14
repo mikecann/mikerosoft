@@ -145,6 +145,7 @@ from voice_type_control import ControlServer
 # ---------------------------------------------------------------------------
 
 POLL_INTERVAL    = 0.01   # key-state poll rate (100 Hz)
+MAX_RECORDING_SECONDS = 120  # safety cap: force-stop if the hotkey appears stuck down
 STREAM_INTERVAL  = 0.5    # seconds between streaming preview passes
 STREAM_MIN_AUDIO = 0.8    # don't start streaming until this many seconds recorded
 PRECOMP_MIN_AUDIO = 2.5   # only precompute once enough audio has accumulated
@@ -1629,6 +1630,10 @@ class StreamingTranscriber:
         self._last_text = ""
 
     def start(self):
+        if self._active:
+            # Already streaming — a second _loop thread would double every
+            # log line and waste CPU re-transcribing the same buffer.
+            return
         self._active    = True
         self._last_text = ""
         threading.Thread(target=self._loop, daemon=True).start()
@@ -1981,14 +1986,28 @@ def run():
         log(f"Ready. Hold {_hotkey_label} to record.")
 
         was_down = False
+        down_since = 0.0
+        forced_stop = False
         while True:
-            is_down = platform.is_hotkey_down()
+            raw_down = platform.is_hotkey_down()
+            # forced_stop latches a force-stop so we ignore a stuck-down key
+            # until it is genuinely released again.
+            if not raw_down:
+                forced_stop = False
+            is_down = raw_down and not forced_stop
+
+            if is_down and was_down and time.monotonic() - down_since > MAX_RECORDING_SECONDS:
+                log(f"--- Recording exceeded {MAX_RECORDING_SECONDS}s safety cap; force-stopping ---")
+                forced_stop = True
+                is_down = False
 
             if is_down and not was_down:
                 if not tray.enabled:
                     pass  # silently ignore while disabled
                 else:
                     log("--- Key DOWN ---")
+                    down_since = time.monotonic()
+                    platform.snapshot_target_app()
                     tray.set_state("recording")
                     overlay.show_rec()
                     recorder.start()
