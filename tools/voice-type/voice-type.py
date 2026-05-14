@@ -146,6 +146,7 @@ from voice_type_control import ControlServer
 
 POLL_INTERVAL    = 0.01   # key-state poll rate (100 Hz)
 MAX_RECORDING_SECONDS = 120  # safety cap: force-stop if the hotkey appears stuck down
+STREAM_CLOSE_TIMEOUT  = 2.0  # give up on a stream stop/close if CoreAudio deadlocks
 STREAM_INTERVAL  = 0.5    # seconds between streaming preview passes
 STREAM_MIN_AUDIO = 0.8    # don't start streaming until this many seconds recorded
 PRECOMP_MIN_AUDIO = 2.5   # only precompute once enough audio has accumulated
@@ -1499,12 +1500,28 @@ class Recorder:
     def _close_stream(self):
         if self._stream is None:
             return
-        try:
-            self._stream.stop()
-            self._stream.close()
-        except Exception as e:
-            log(f"Stream close error (ignored): {e}")
+        # Stopping a PortAudio stream from a non-callback thread can deadlock
+        # inside CoreAudio's HAL (lock-ordering race against the audio IO
+        # thread). Run it on a throwaway thread with a timeout so a deadlock
+        # leaks one thread instead of wedging the whole app. The next
+        # _ensure_stream() will open a fresh stream.
+        stream = self._stream
         self._stream = None
+
+        def _do_close():
+            try:
+                stream.stop()
+                stream.close()
+            except Exception as e:
+                log(f"Stream close error (ignored): {e}")
+
+        t = threading.Thread(target=_do_close, daemon=True,
+                             name="voice-type-stream-close")
+        t.start()
+        t.join(timeout=STREAM_CLOSE_TIMEOUT)
+        if t.is_alive():
+            log(f"Stream close timed out after {STREAM_CLOSE_TIMEOUT}s "
+                "(CoreAudio deadlock?); abandoning stream, will reopen on next use.")
 
     def _ensure_stream(self):
         """Restart the audio stream if it's dead or errored.
@@ -2021,8 +2038,11 @@ def run():
             elif not is_down and was_down:
                 if tray.enabled:
                     log("--- Key UP ---")
-                    audio = recorder.stop()
+                    # Stop the streaming preview loop FIRST: if recorder.stop()
+                    # deadlocks inside CoreAudio, the streamer is already
+                    # halted so the overlay/CPU don't spin forever.
                     streamer.stop()   # signal stream loop; final pass always runs below
+                    audio = recorder.stop()
                     mode = _effective_output_mode()
                     if mode == "precompute":
                         precomputer.stop(wait=PRECOMP_STOP_WAIT)
