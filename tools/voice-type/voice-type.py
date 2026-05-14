@@ -15,6 +15,7 @@ import sys
 import time
 import math
 import json
+import signal
 import threading
 import queue
 import tkinter as tk
@@ -48,6 +49,9 @@ _LOG_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice-t
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 _CONTROL_SOCKET_PATH = os.path.join(_SCRIPT_DIR, "voice-type-control.sock")
 _INSTANCE_LOCK_PATH = os.path.join(_SCRIPT_DIR, "voice-type.instance.lock")
+_HEARTBEAT_PATH = os.path.join(_SCRIPT_DIR, "voice-type.heartbeat")
+_HEARTBEAT_INTERVAL = 0.5       # how often the hotkey loop refreshes the heartbeat
+_HEARTBEAT_STALE_SECONDS = 10   # older than this => the running instance is wedged
 _LOG_MAX_MB  = 1       # rotate when log exceeds this size
 _LOG_KEEP    = 200     # lines to keep after rotation
 
@@ -55,25 +59,97 @@ _LOG_KEEP    = 200     # lines to keep after rotation
 _instance_lock_file = None
 
 
+def _write_heartbeat() -> None:
+    """Refresh the heartbeat file's mtime so other instances can tell we're alive."""
+    try:
+        with open(_HEARTBEAT_PATH, "w", encoding="utf-8") as f:
+            f.write(str(time.time()))
+    except Exception:
+        pass
+
+
+def _heartbeat_age() -> float | None:
+    """Seconds since the running instance last refreshed its heartbeat, or None."""
+    try:
+        return time.time() - os.path.getmtime(_HEARTBEAT_PATH)
+    except OSError:
+        return None
+
+
+def _flock_nb(lock_file) -> bool:
+    """Try to grab the instance lock without blocking. True on success."""
+    if sys.platform == "win32":
+        import msvcrt
+        lock_file.seek(0)
+        try:
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    import fcntl
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _read_lock_pid(lock_file) -> int | None:
+    try:
+        lock_file.seek(0)
+        return int((lock_file.read() or "").strip())
+    except (ValueError, OSError):
+        return None
+
+
+def _kill_wedged_instance(pid: int) -> None:
+    """SIGTERM, then SIGKILL if it lingers, a wedged instance so we can take over."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except OSError:
+        pass
+    for _ in range(20):  # up to ~2s for a graceful exit
+        time.sleep(0.1)
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return  # gone
+    try:
+        os.kill(pid, signal.SIGKILL)
+        time.sleep(0.3)
+    except OSError:
+        pass
+
+
 def _acquire_single_instance_lock() -> bool:
     global _instance_lock_file
     lock_file = open(_INSTANCE_LOCK_PATH, "a+", encoding="utf-8")
     try:
-        if sys.platform == "win32":
-            import msvcrt
-
-            lock_file.seek(0)
-            try:
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError:
+        if not _flock_nb(lock_file):
+            # Another instance holds the lock. If its heartbeat is fresh it is
+            # healthy and we exit as a duplicate. If the heartbeat is stale (or
+            # absent) the running instance is wedged -- e.g. a CoreAudio
+            # deadlock -- so we kill it and take over.
+            age = _heartbeat_age()
+            healthy = age is not None and age < _HEARTBEAT_STALE_SECONDS
+            if healthy or sys.platform == "win32":
                 lock_file.close()
                 return False
-        else:
-            import fcntl
-
-            try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
+            pid = _read_lock_pid(lock_file)
+            print(
+                f"voice-type: existing instance (pid {pid}) looks wedged "
+                f"(heartbeat age {age}); killing it and taking over.",
+                flush=True,
+            )
+            if pid and pid != os.getpid():
+                _kill_wedged_instance(pid)
+            for _ in range(20):  # wait for the dead instance to release the lock
+                if _flock_nb(lock_file):
+                    break
+                time.sleep(0.1)
+            else:
                 lock_file.close()
                 return False
         lock_file.seek(0)
@@ -81,6 +157,7 @@ def _acquire_single_instance_lock() -> bool:
         lock_file.write(str(os.getpid()))
         lock_file.flush()
         _instance_lock_file = lock_file
+        _write_heartbeat()
         return True
     except Exception:
         lock_file.close()
@@ -1961,6 +2038,9 @@ def _finish_stabilized(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
 # ---------------------------------------------------------------------------
 
 def run():
+    # Keep the heartbeat fresh across the (potentially slow) import + startup
+    # window, before the hotkey loop takes over refreshing it.
+    _write_heartbeat()
     _load_settings()
     log(
         "Settings: "
@@ -2005,7 +2085,17 @@ def run():
         was_down = False
         down_since = 0.0
         forced_stop = False
+        last_heartbeat = 0.0
         while True:
+            # Refresh the heartbeat so a freshly-launched instance can tell
+            # whether we are alive or wedged. This loop stops ticking if a
+            # key-up handler deadlocks (e.g. in CoreAudio), letting the next
+            # launch detect the stale heartbeat and take over.
+            now = time.monotonic()
+            if now - last_heartbeat >= _HEARTBEAT_INTERVAL:
+                _write_heartbeat()
+                last_heartbeat = now
+
             raw_down = platform.is_hotkey_down()
             # forced_stop latches a force-stop so we ignore a stuck-down key
             # until it is genuinely released again.
