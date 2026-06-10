@@ -22,8 +22,8 @@ class RuntimePolicyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.module = load_module()
 
-    def test_windows_keeps_mic_stream_open(self):
-        self.assertTrue(self.module.should_keep_mic_stream_open("win32"))
+    def test_windows_does_not_keep_mic_stream_open(self):
+        self.assertFalse(self.module.should_keep_mic_stream_open("win32"))
 
     def test_macos_does_not_keep_mic_stream_open(self):
         self.assertFalse(self.module.should_keep_mic_stream_open("darwin"))

@@ -4,7 +4,7 @@ import sys
 
 
 def should_keep_mic_stream_open(platform_name: str) -> bool:
-    return platform_name == "win32"
+    return False
 
 
 def should_keep_mic_stream_open_local() -> bool:

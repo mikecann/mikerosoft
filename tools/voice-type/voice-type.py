@@ -1599,9 +1599,8 @@ class Overlay:
 class Recorder:
     """Owns the microphone stream and captures audio while recording.
 
-    Windows keeps the stream open to minimize activation delay. macOS closes
-    it while idle so the system microphone indicator is only shown while
-    actively recording.
+    The microphone stream is opened on key-down and closed on key-up so the
+    system privacy indicator is only shown while actively recording.
     """
 
     def __init__(self):
