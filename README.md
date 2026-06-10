@@ -122,9 +122,11 @@ C:\dev\tools\                    <- on PATH; kept clean
     ...
 ```
 
-`install.ps1` generates the stubs. The stubs point at absolute paths inside
-the repo, so a `git pull` is all you ever need to pick up changes to any tool.
-Re-run `install.ps1` only when **adding a new tool**.
+`install.ps1` generates the stubs. Each CLI gets a `.bat` for PowerShell/cmd
+and an extensionless Git Bash shim that forwards to the `.bat`, so `ghopen`
+works from Git Bash instead of needing `ghopen.bat`. The stubs point at
+absolute paths inside the repo, so a `git pull` is all you ever need to pick up
+changes to any tool. Re-run `install.ps1` only when **adding a new tool**.
 
 ---
 

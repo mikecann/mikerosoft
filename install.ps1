@@ -20,6 +20,8 @@ param(
 $RepoDir  = Split-Path -Parent $MyInvocation.MyCommand.Path   # auto-resolved; move the repo freely
 $ToolsDir = "C:\dev\tools"                                    # directory on your PATH
 
+. (Join-Path $RepoDir "install-lib.ps1")
+
 if (-not (Test-Path $ToolsDir)) {
     New-Item -ItemType Directory -Path $ToolsDir | Out-Null
     Write-Host "Created $ToolsDir" -ForegroundColor Yellow
@@ -76,15 +78,6 @@ if (-not $onPath) {
 Write-Host ""
 Write-Host "Installing mikerosoft.app -> $ToolsDir" -ForegroundColor Cyan
 Write-Host ""
-
-# ---------------------------------------------------------------------------
-# Helper: write a stub .bat that calls a target, preserving all arguments
-# ---------------------------------------------------------------------------
-function Write-BatStub($toolName, $content) {
-    $dest = Join-Path $ToolsDir "$toolName.bat"
-    Set-Content -Path $dest -Value $content -Encoding ASCII
-    Write-Host "  [bat]  $dest" -ForegroundColor Green
-}
 
 # ---------------------------------------------------------------------------
 # transcribe  — needs EXEDIR so the exe files in c:\dev\tools are found
