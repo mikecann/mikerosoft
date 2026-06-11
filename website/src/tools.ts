@@ -70,6 +70,14 @@ export const tools: Tool[] = [
     platforms: ['windows'],
   },
   {
+    name: 'unmultitrack',
+    desc: 'Extract every video stream from an OBS/Aitum multi-track recording into separate editor-friendly files; right-click any video file in Explorer',
+    icon: `${base}/unmultitrack/icons/film.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/unmultitrack',
+    platforms: ['windows'],
+  },
+  {
     name: 'img-upscale',
     desc: 'Upscale an image locally with a quality-first transformer backend; right-click any image file in Explorer, choose 2x, 4x, 8x, or 16x, and keep the original file format',
     icon: `${base}/img-upscale/icons/picture.png`,

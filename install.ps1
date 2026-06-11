@@ -105,6 +105,15 @@ call "$RepoDir\tools\remove-portrait\remove-portrait.bat" %*
 "@
 
 # ---------------------------------------------------------------------------
+# unmultitrack
+# ---------------------------------------------------------------------------
+Write-BatStub "unmultitrack" @"
+@echo off
+set "EXEDIR=%~dp0"
+call "$RepoDir\tools\unmultitrack\unmultitrack.bat" %*
+"@
+
+# ---------------------------------------------------------------------------
 # img-upscale
 # ---------------------------------------------------------------------------
 Write-BatStub "img-upscale" @"
@@ -380,6 +389,7 @@ $imgGenIco      = "$iconsOut\img-gen.ico"
 $videoGenIco    = "$iconsOut\video-gen.ico"
 $faceSwapIco    = "$iconsOut\face-swap.ico"
 $portraitIco    = "$iconsOut\remove-portrait.ico"
+$unmultitrackIco = "$iconsOut\unmultitrack.ico"
 ConvertTo-Ico "$RepoDir\tools\transcribe\icons\wrench.png"                        $wrenchIco
 ConvertTo-Ico "$RepoDir\tools\transcribe\icons\film.png"                          $filmIco
 ConvertTo-Ico "$RepoDir\tools\removebg\icons\picture.png"                         $pictureIco
@@ -395,6 +405,7 @@ ConvertTo-Ico "$RepoDir\tools\img-gen\icons\img-gen.png"                        
 ConvertTo-Ico "$RepoDir\tools\video-gen\icons\video-gen.png"                      $videoGenIco
 ConvertTo-Ico "$RepoDir\tools\face-swap\icons\face-swap.png"                      $faceSwapIco
 ConvertTo-Ico "$RepoDir\tools\remove-portrait\icons\film.png"                     $portraitIco
+ConvertTo-Ico "$RepoDir\tools\unmultitrack\icons\film.png"                        $unmultitrackIco
 Write-Host "  [ico]  Icons written to $iconsOut" -ForegroundColor Green
 
 # --- transcribe + vid2md: video file extensions ---
@@ -406,6 +417,7 @@ foreach ($ext in $videoExts) {
     Add-MikesVerb $root "VideoTitles"      "Video Titles"        $titlesIco      'cmd.exe /k ""C:\dev\tools\video-titles.bat" "%1""'
     Add-MikesVerb $root "VideoDescription" "Video Description"   $descriptionIco 'cmd.exe /k ""C:\dev\tools\video-description.bat" "%1""'
     Add-MikesVerb $root "RemovePortrait"   "Remove Portrait Background" $portraitIco 'cmd.exe /k ""C:\dev\tools\remove-portrait.bat" "%1""'
+    Add-MikesVerb $root "Unmultitrack"     "Un-multi-track Video" $unmultitrackIco 'cmd.exe /k ""C:\dev\tools\unmultitrack.bat" "%1""'
     Add-MikesVerb $root "Vid2md"           "Video to Markdown"   $linkPageIco    'cmd.exe /k ""C:\dev\tools\video-to-markdown.bat" "%1""'
 }
 
