@@ -73,6 +73,7 @@ export const tools: Tool[] = [
     name: 'unmultitrack',
     desc: 'Extract every video stream from an OBS/Aitum multi-track recording into separate editor-friendly files; right-click any video file in Explorer',
     icon: `${base}/unmultitrack/icons/film.png`,
+    header: `${base}/unmultitrack/docs/header.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/unmultitrack',
     platforms: ['windows'],
@@ -123,6 +124,15 @@ export const tools: Tool[] = [
       `${base}/scale-monitor/docs/ss2.png`,
     ],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/scale-monitor',
+    platforms: ['windows'],
+  },
+  {
+    name: 'sleep-monitors',
+    desc: 'Turn off all connected monitors until keyboard or mouse input wakes them',
+    icon: `${base}/sleep-monitors/icons/sleep-monitors.png`,
+    header: `${base}/sleep-monitors/docs/header.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/sleep-monitors',
     platforms: ['windows'],
   },
   {

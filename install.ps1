@@ -175,6 +175,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$RepoDir\tools\copypath\cop
 "@
 
 # ---------------------------------------------------------------------------
+# sleep-monitors - turn off all displays until keyboard/mouse input wakes them
+# ---------------------------------------------------------------------------
+Write-BatStub "sleep-monitors" @"
+@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -File "$RepoDir\tools\sleep-monitors\sleep-monitors.ps1" %*
+"@
+
+$sleepMonitorsVbsPath = "$RepoDir\tools\sleep-monitors\sleep-monitors.vbs"
+$sleepMonitorsShortcutPath = Join-Path $ToolsDir "Sleep Monitors.lnk"
+$sleepMonitorsWsh = New-Object -ComObject WScript.Shell
+$sleepMonitorsSc = $sleepMonitorsWsh.CreateShortcut($sleepMonitorsShortcutPath)
+$sleepMonitorsSc.TargetPath = "wscript.exe"
+$sleepMonitorsSc.Arguments = "`"$sleepMonitorsVbsPath`""
+$sleepMonitorsSc.WorkingDirectory = "$RepoDir\tools\sleep-monitors"
+$sleepMonitorsSc.Description = "Turn off all monitors until keyboard or mouse input wakes them"
+$sleepMonitorsSc.IconLocation = "%SystemRoot%\System32\imageres.dll,109"
+$sleepMonitorsSc.Save()
+Write-Host "  [lnk]  $sleepMonitorsShortcutPath" -ForegroundColor Green
+
+$sleepMonitorsStartMenuPath = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Sleep Monitors.lnk"
+$sleepMonitorsStartSc = $sleepMonitorsWsh.CreateShortcut($sleepMonitorsStartMenuPath)
+$sleepMonitorsStartSc.TargetPath = "wscript.exe"
+$sleepMonitorsStartSc.Arguments = "`"$sleepMonitorsVbsPath`""
+$sleepMonitorsStartSc.WorkingDirectory = "$RepoDir\tools\sleep-monitors"
+$sleepMonitorsStartSc.Description = "Turn off all monitors until keyboard or mouse input wakes them"
+$sleepMonitorsStartSc.IconLocation = "%SystemRoot%\System32\imageres.dll,109"
+$sleepMonitorsStartSc.Save()
+Write-Host "  [lnk]  $sleepMonitorsStartMenuPath" -ForegroundColor Green
+
+# ---------------------------------------------------------------------------
 # video-to-markdown — YouTube URL to markdown clipboard
 # ---------------------------------------------------------------------------
 Write-BatStub "video-to-markdown" @"

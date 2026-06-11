@@ -1,4 +1,6 @@
-# unmultitrack
+![header](docs/header.png)
+
+# ![](icons/film.png) unmultitrack
 
 Right-click a multi-track OBS/Aitum video and extract each video stream into its own normal video file.
 
@@ -52,3 +54,8 @@ Mike's Tools > Un-multi-track Video
 - Optional: `ffprobe.exe` in `C:\dev\tools`, or `ffprobe` on PATH
 
 If `ffprobe` is missing, the tool falls back to parsing `ffmpeg -i` stream output.
+
+## Assets
+
+`docs/header.png` is a generated raster banner for the public site.
+`icons/film.png` is from the repo's shared Silk-style icon set.
