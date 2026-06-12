@@ -443,7 +443,8 @@ $videoExts = @('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.webm', '.m4v', '.mpg', 
 foreach ($ext in $videoExts) {
     $root = "HKCU:\Software\Classes\SystemFileAssociations\$ext\shell\MikesTools"
     Set-MikesToolsRoot $root $wrenchIco
-    Add-MikesVerb $root "Transcribe"        "Transcribe Video"    $filmIco        'cmd.exe /k ""C:\dev\tools\transcribe.bat" "%1""'
+    Add-MikesVerb $root "Transcribe"        "Transcribe Video"          $filmIco        'cmd.exe /k ""C:\dev\tools\transcribe.bat" "%1""'
+    Add-MikesVerb $root "TranscribeSpeakers" "Transcribe with Speakers" $filmIco        'cmd.exe /k ""C:\dev\tools\transcribe.bat" "%1" --diarize --model large-v3"'
     Add-MikesVerb $root "VideoTitles"      "Video Titles"        $titlesIco      'cmd.exe /k ""C:\dev\tools\video-titles.bat" "%1""'
     Add-MikesVerb $root "VideoDescription" "Video Description"   $descriptionIco 'cmd.exe /k ""C:\dev\tools\video-description.bat" "%1""'
     Add-MikesVerb $root "RemovePortrait"   "Remove Portrait Background" $portraitIco 'cmd.exe /k ""C:\dev\tools\remove-portrait.bat" "%1""'

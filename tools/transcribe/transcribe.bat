@@ -2,15 +2,19 @@
 setlocal enabledelayedexpansion
 
 if "%~1"=="" (
-    echo Usage: transcribe ^<video_file^> [--cpu]
+    echo Usage: transcribe ^<video_file^> [--cpu] [--diarize]
     echo Example: transcribe c:/videos/video.mp4
     echo          transcribe c:/videos/video.mp4 --cpu
+    echo          transcribe c:/videos/video.mp4 --diarize --min-speakers 2
     exit /b 1
 )
 
 set "VIDEO_FILE=%~1"
 set "DEVICE=cuda"
-if /i "%~2"=="--cpu" set "DEVICE=cpu"
+for %%a in (%*) do (
+    if /i "%%~a"=="--cpu" set "DEVICE=cpu"
+    if /i "%%~a"=="--diarize" set "USE_PYTHON_DIARIZE=1"
+)
 
 rem EXEDIR is injected by the stub in c:\dev\tools and points to the directory
 rem containing ffmpeg.exe, faster-whisper-xxl.exe and the _models folder.
@@ -20,6 +24,16 @@ if not defined EXEDIR set "EXEDIR=%~dp0"
 if not exist "!VIDEO_FILE!" (
     echo Error: File not found: !VIDEO_FILE!
     exit /b 1
+)
+
+if defined USE_PYTHON_DIARIZE (
+    where python >nul 2>nul
+    if errorlevel 1 (
+        echo Error: --diarize uses the Python transcribe path, but python was not found on PATH.
+        exit /b 1
+    )
+    python "%~dp0transcribe.py" %*
+    exit /b !errorlevel!
 )
 
 echo Extracting audio from video...

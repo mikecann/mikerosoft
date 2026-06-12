@@ -8,11 +8,14 @@ Transcribes a video file to text using [faster-whisper-xxl](https://github.com/P
 
 **From the terminal:**
 ```
-transcribe <video_file> [--cpu]
+transcribe <video_file> [--cpu] [--diarize]
 ```
 
 **From File Explorer:**
 Right-click any video file, then choose **Mike's Tools > Transcribe Video**.
+For speaker labels, choose **Mike's Tools > Transcribe with Speakers**. This uses
+`--diarize --model large-v3` because speaker-labelled transcripts are usually worth
+the slower, higher-quality model.
 (On Windows 11, click "Show more options" first to get the classic menu.)
 `install.ps1` registers this for `.mp4`, `.mkv`, `.avi`, `.mov`, `.wmv`, `.webm`, and other common video formats.
 
@@ -20,8 +23,50 @@ Right-click any video file, then choose **Mike's Tools > Transcribe Video**.
 |---|---|
 | `<video_file>` | Path to the video (or audio) file to transcribe |
 | `--cpu` | Force CPU inference (default is CUDA; falls back to CPU automatically if CUDA fails) |
+| `--diarize` | Add speaker labels such as `[SPEAKER_00]` using pyannote.audio |
+| `--num-speakers <n>` | Tell diarization the exact number of speakers |
+| `--min-speakers <n>` / `--max-speakers <n>` | Give diarization a speaker-count range |
 
 The transcript is saved as `<input_basename>.srt` in the same folder as the input file.
+
+## Speaker diarization
+
+Use `--diarize` when you want speaker-labelled transcript lines:
+
+```powershell
+transcribe C:\videos\meeting.mp4 --diarize --min-speakers 2 --max-speakers 4
+```
+
+This labels speakers as `SPEAKER_00`, `SPEAKER_01`, etc. It does not know real names
+like "Mike" unless a separate voice-identification step is added later.
+
+`--diarize` uses [pyannote.audio](https://huggingface.co/pyannote) with the default
+`pyannote/speaker-diarization-community-1` model. Before first use:
+
+1. Install optional Python deps:
+
+   ```powershell
+   python -m pip install faster-whisper pyannote.audio
+   ```
+
+   On macOS / Linux you can also run:
+
+   ```bash
+   bash tools/transcribe/deps.sh --with-diarize
+   ```
+
+2. Request/accept access to the pyannote model on Hugging Face using the same account as your token.
+3. Create a Hugging Face token at `https://hf.co/settings/tokens`.
+4. Set `HF_TOKEN`, add `HF_TOKEN=...` to the repo-root `.env`, or pass `--hf-token <token>`.
+
+On Windows, the normal path still uses `faster-whisper-xxl.exe`. Only `--diarize`
+switches to the Python path because the standalone EXE does not output speaker
+diarization. The Explorer **Transcribe with Speakers** command also passes
+`--model large-v3`; from the terminal you can choose a faster model yourself:
+
+```powershell
+transcribe C:\videos\meeting.mp4 --diarize --model small
+```
 
 ## Screenshots
 
@@ -40,7 +85,7 @@ bash tools/transcribe/deps.sh
 2. Run:
 
 ```bash
-transcribe /path/to/video.mp4 [--cpu] [--model small]
+transcribe /path/to/video.mp4 [--cpu] [--model small] [--diarize]
 ```
 
 Uses **`ffmpeg` on PATH** and the **`faster-whisper`** Python package. Default model is **`small`**; override with **`TRANSCRIBE_MODEL`** or **`--model`**.
