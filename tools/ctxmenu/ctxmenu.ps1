@@ -137,12 +137,89 @@ function isVerbDisabled([string]$rp, [string]$sh) {
     }
     return $false
 }
-function isShellExDisabled([string]$rp, [string]$sh) {
+$script:SHELL_EXT_BLOCKED_SUBKEY = 'Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked'
+
+function isShellExtensionBlocked([string]$clsId) {
+    if (-not $clsId) { return $false }
+    foreach ($p in @(
+        "HKEY_CURRENT_USER\$script:SHELL_EXT_BLOCKED_SUBKEY",
+        'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked'
+    )) {
+        $k = rOpen $p
+        if ($k) {
+            $blocked = $k.GetValueNames() -icontains $clsId
+            $k.Close()
+            if ($blocked) { return $true }
+        }
+    }
+    return $false
+}
+function setShellExtensionBlocked([string]$clsId, [string]$label, [bool]$blocked) {
+    if (-not $clsId) { return }
+    $hkcu = [Microsoft.Win32.Registry]::CurrentUser
+    $k = $hkcu.OpenSubKey($script:SHELL_EXT_BLOCKED_SUBKEY, $true)
+    if (-not $k -and $blocked) { $k = $hkcu.CreateSubKey($script:SHELL_EXT_BLOCKED_SUBKEY) }
+    if (-not $k) { return }
+    try {
+        if ($blocked) { $k.SetValue($clsId, $label, [Microsoft.Win32.RegistryValueKind]::String) }
+        else { try { $k.DeleteValue($clsId) } catch { } }
+    } finally {
+        $k.Close()
+    }
+}
+function isShellExLegacyDisabled([string]$rp, [string]$sh) {
     foreach ($p in @("HKEY_CURRENT_USER\$sh", $rp)) {
         $k = rOpen $p
         if ($k) { $v = "$($k.GetValue(''))"; $k.Close(); if ($v) { return $v.StartsWith('-') } }
     }
     return $false
+}
+function isShellExDisabled([string]$rp, [string]$sh, [string]$clsId) {
+    if (isShellExtensionBlocked $clsId) { return $true }
+    return (isShellExLegacyDisabled $rp $sh)
+}
+function isOpenWithDisabled([string]$rp, [string]$sh) {
+    foreach ($p in @("HKEY_CURRENT_USER\$sh", $rp)) {
+        $k = rOpen $p
+        if ($k) {
+            $d = $k.GetValueNames() -icontains 'NoOpenWith'
+            $k.Close()
+            if ($d) { return $true }
+        }
+    }
+    return $false
+}
+function trimExeDisplayName([string]$name) {
+    if (-not $name) { return $name }
+    return [System.IO.Path]::GetFileNameWithoutExtension($name.Trim())
+}
+function getAppDisplayName([Microsoft.Win32.RegistryKey]$appKey, [string]$appName) {
+    foreach ($n in @('FriendlyAppName', 'ApplicationName', '')) {
+        $raw = $appKey.GetValue($n)
+        if (-not $raw) { continue }
+        $s = "$raw"
+        if ($s.StartsWith('@')) { $s = [MuiUtil]::Resolve($s) }
+        $s = $s -replace '&', ''
+        if ($s -and -not $s.StartsWith('@')) { return $s }
+    }
+
+    $info = $appKey.OpenSubKey('Application')
+    if ($info) {
+        foreach ($n in @('ApplicationName', 'ApplicationDescription')) {
+            $raw = $info.GetValue($n)
+            if (-not $raw) { continue }
+            $s = "$raw"
+            if ($s.StartsWith('@')) { $s = [MuiUtil]::Resolve($s) }
+            $s = $s -replace '&', ''
+            if ($s -and -not $s.StartsWith('@')) {
+                $info.Close()
+                return $s
+            }
+        }
+        $info.Close()
+    }
+
+    return (trimExeDisplayName $appName)
 }
 
 # Verb names Windows explicitly hides from right-click menus.
@@ -200,7 +277,12 @@ function scanShellEx([string]$hive, [string]$sub, [string]$applies) {
             }
             $e = [CmEntry]::new(); $e.VerbName=$n; $e.Label=$label; $e.AppliesTo=$applies; $e.Source=$hive
             $e.Kind='ShellEx'; $e.ReadPath="$hw\$sub\$n"; $e.ShadowPath="$base\$n"
-            $e.ClsId=$cls; $e.Enabled=-not(isShellExDisabled $e.ReadPath $e.ShadowPath)
+            $e.ClsId=$cls
+            $legacyDisabled = isShellExLegacyDisabled $e.ReadPath $e.ShadowPath
+            if ($legacyDisabled -and -not (isShellExtensionBlocked $cls)) {
+                setShellExtensionBlocked $cls $label $true
+            }
+            $e.Enabled=-not(isShellExDisabled $e.ReadPath $e.ShadowPath $e.ClsId)
             $out.Add($e)
         } catch { }
     }
@@ -279,6 +361,56 @@ function scanProgIdShell([string[]]$exts, [string]$applies) {
     return $out
 }
 
+# Scan apps registered for Windows "Open with ..." suggestions.
+# These live under Applications\<exe>, not under *\shell, so LegacyDisable
+# will not affect them. The reversible user-level switch is NoOpenWith.
+function scanOpenWithApplications {
+    $out = [System.Collections.Generic.List[CmEntry]]::new()
+
+    foreach ($hive in @('HKCU','HKLM')) {
+        $hw  = if ($hive -eq 'HKLM') { 'HKEY_LOCAL_MACHINE' } else { 'HKEY_CURRENT_USER' }
+        $sub = if ($hive -eq 'HKLM') { 'SOFTWARE\Classes\Applications' } else { 'Software\Classes\Applications' }
+        $apps = rOpen "$hw\$sub"; if (-not $apps) { continue }
+        $base = hkuShadow $hive $sub
+
+        foreach ($appName in $apps.GetSubKeyNames()) {
+            try {
+                $appKey = $apps.OpenSubKey($appName); if (-not $appKey) { continue }
+                $openKey = $appKey.OpenSubKey('shell\open')
+                $cmdKey = $appKey.OpenSubKey('shell\open\command')
+                if (-not $openKey -or -not $cmdKey) {
+                    if ($openKey) { $openKey.Close() }
+                    if ($cmdKey) { $cmdKey.Close() }
+                    $appKey.Close()
+                    continue
+                }
+
+                $name = getAppDisplayName $appKey $appName
+                $openKey.Close()
+                $cmdKey.Close()
+                $appKey.Close()
+
+                if (-not $name) { $name = trimExeDisplayName $appName }
+                $e = [CmEntry]::new()
+                $e.VerbName   = "OpenWith:$appName"
+                $e.Label      = "Open with $name"
+                $e.AppliesTo  = 'All Files'
+                $e.Source     = $hive
+                $e.Kind       = 'OpenWith'
+                $e.ReadPath   = "$hw\$sub\$appName"
+                $e.ShadowPath = "$base\$appName"
+                $e.Enabled    = -not (isOpenWithDisabled $e.ReadPath $e.ShadowPath)
+                $e.IsSubmenu  = $false
+                $out.Add($e)
+            } catch { }
+        }
+
+        $apps.Close()
+    }
+
+    return $out
+}
+
 function getAllEntries {
     $all = [System.Collections.Generic.List[CmEntry]]::new()
     $add = { param($c) foreach ($e in $c) { if ($e) { $all.Add($e) } } }
@@ -300,6 +432,7 @@ function getAllEntries {
         @('HKLM','SOFTWARE\Classes\Directory\Background\shellex\ContextMenuHandlers','Folder Background'),
         @('HKCU','Software\Classes\Directory\Background\shellex\ContextMenuHandlers','Folder Background')
     ) | ForEach-Object { & $add (scanShellEx $_[0] $_[1] $_[2]) }
+    & $add (scanOpenWithApplications)
     $videoExts = @('.mp4','.mkv','.avi','.mov','.wmv','.webm','.m4v','.mpg','.mpeg','.ts','.mts','.m2ts','.flv')
     $imageExts = @('.jpg','.jpeg','.png','.webp','.bmp','.tiff','.tif')
     & $add (scanExtGroup $videoExts 'Video Files')
@@ -324,7 +457,19 @@ function getAllEntries {
 # ── Apply enable/disable (HKCU writes only) ───────────────────────────────────
 function applyEntry([CmEntry]$entry, [bool]$enable) {
     $hkcu = [Microsoft.Win32.Registry]::CurrentUser
-    if ($entry.Kind -ne 'ShellEx') {
+    if ($entry.Kind -eq 'OpenWith') {
+        foreach ($sh in ($entry.ShadowPath -split ';')) {
+            try {
+                $k = $hkcu.OpenSubKey($sh, $true)
+                if (-not $k -and -not $enable) { $k = $hkcu.CreateSubKey($sh) }
+                if ($k) {
+                    if ($enable) { try { $k.DeleteValue('NoOpenWith') } catch { } }
+                    else { $k.SetValue('NoOpenWith','', [Microsoft.Win32.RegistryValueKind]::String) }
+                    $k.Close()
+                }
+            } catch { }
+        }
+    } elseif ($entry.Kind -ne 'ShellEx') {
         foreach ($sh in ($entry.ShadowPath -split ';')) {
             try {
                 $k = $hkcu.OpenSubKey($sh, $true)
@@ -338,11 +483,13 @@ function applyEntry([CmEntry]$entry, [bool]$enable) {
         }
     } else {
         try {
+            setShellExtensionBlocked $entry.ClsId $entry.Label (-not $enable)
             $k = $hkcu.OpenSubKey($entry.ShadowPath, $true)
-            if (-not $k) { $k = $hkcu.CreateSubKey($entry.ShadowPath) }
             if ($k) {
-                $k.SetValue('', (if ($enable) { $entry.ClsId } else { "-$($entry.ClsId)" }),
-                    [Microsoft.Win32.RegistryValueKind]::String)
+                $v = "$($k.GetValue(''))"
+                if ($enable -and $v.StartsWith('-')) {
+                    $k.SetValue('', $entry.ClsId, [Microsoft.Win32.RegistryValueKind]::String)
+                }
                 $k.Close()
             }
         } catch { }
@@ -365,6 +512,7 @@ function getFallback([CmEntry]$e) {
     $rel = switch ($e.Kind) {
         'ShellEx'  { '..\task-stats\icons\cog.png' }
         'Submenu'  { '..\task-stats\icons\bullet_go.png' }
+        'OpenWith' { 'icons\application_form.png' }
         default    { '..\transcribe\icons\wrench.png' }
     }
     $p = Join-Path $PSScriptRoot $rel
@@ -373,8 +521,17 @@ function getFallback([CmEntry]$e) {
 }
 function getEntryBitmap([CmEntry]$entry) {
     $spec = $null
-    $vk = rOpen $entry.ReadPath
-    if ($vk) { $spec = $vk.GetValue('Icon'); $vk.Close() }
+    if ($entry.Kind -eq 'OpenWith') {
+        $vk = rOpen "$($entry.ReadPath)\shell\open"
+        if ($vk) { $spec = $vk.GetValue('Icon'); $vk.Close() }
+        if (-not $spec) {
+            $dk = rOpen "$($entry.ReadPath)\DefaultIcon"
+            if ($dk) { $spec = $dk.GetValue(''); $dk.Close() }
+        }
+    } else {
+        $vk = rOpen $entry.ReadPath
+        if ($vk) { $spec = $vk.GetValue('Icon'); $vk.Close() }
+    }
     if (-not $spec -and $entry.Kind -eq 'ShellEx' -and $entry.ClsId) {
         $ck = rOpen "HKEY_CLASSES_ROOT\CLSID\$($entry.ClsId)\InprocServer32"
         if ($ck) { $dll = "$($ck.GetValue(''))"; $ck.Close(); if ($dll) { $spec = "$dll,0" } }
