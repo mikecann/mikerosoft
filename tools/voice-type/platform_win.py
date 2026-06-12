@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import os
+import site
 import sys
 import winreg
 from typing import Callable
@@ -58,15 +59,48 @@ def setup_process() -> None:
     pass
 
 
-def setup_dll_paths() -> None:
-    """Add PyTorch DLL directory so ctranslate2 can find cublas64_12.dll."""
+def _candidate_cuda_dll_dirs() -> list[str]:
+    dirs: list[str] = []
+
     try:
         import torch as _torch
-        _torch_lib = os.path.join(os.path.dirname(_torch.__file__), "lib")
-        if os.path.isdir(_torch_lib):
-            os.add_dll_directory(_torch_lib)
+        dirs.append(os.path.join(os.path.dirname(_torch.__file__), "lib"))
     except Exception:
         pass
+
+    site_roots: list[str] = []
+    try:
+        site_roots.extend(site.getsitepackages())
+    except Exception:
+        pass
+    try:
+        site_roots.append(site.getusersitepackages())
+    except Exception:
+        pass
+
+    for root in site_roots:
+        nvidia_root = os.path.join(root, "nvidia")
+        for package in ("cublas", "cudnn", "cuda_runtime", "cuda_nvrtc"):
+            dirs.append(os.path.join(nvidia_root, package, "bin"))
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for path in dirs:
+        normalized = os.path.normcase(os.path.abspath(path))
+        if normalized in seen or not os.path.isdir(path):
+            continue
+        seen.add(normalized)
+        result.append(path)
+    return result
+
+
+def setup_dll_paths() -> None:
+    """Add CUDA DLL directories so ctranslate2 can find cublas/cudnn."""
+    for dll_dir in _candidate_cuda_dll_dirs():
+        try:
+            os.add_dll_directory(dll_dir)
+        except Exception:
+            pass
 
 
 def is_hotkey_down() -> bool:

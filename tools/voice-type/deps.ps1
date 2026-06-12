@@ -14,6 +14,15 @@ $packages = @(
     @{ import = "llama_cpp";       pip = "llama-cpp-python" }
 )
 
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+    $packages += @(
+        @{ import = "nvidia.cublas";       pip = "nvidia-cublas-cu12" },
+        @{ import = "nvidia.cudnn";        pip = "nvidia-cudnn-cu12" },
+        @{ import = "nvidia.cuda_runtime"; pip = "nvidia-cuda-runtime-cu12" },
+        @{ import = "nvidia.cuda_nvrtc";   pip = "nvidia-cuda-nvrtc-cu12" }
+    )
+}
+
 foreach ($pkg in $packages) {
     $check = python -c "import $($pkg.import)" 2>&1
     if ($LASTEXITCODE -eq 0) {
