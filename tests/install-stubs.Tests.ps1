@@ -36,7 +36,7 @@ try {
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exec "$SCRIPT_DIR/ghopen.bat" "$@"
-'@
+'@.Replace("`r`n", "`n")
     if ($bashText.TrimEnd() -ne $expected.TrimEnd()) {
         throw "Unexpected Git Bash shim content:`n$bashText"
     }
