@@ -25,7 +25,7 @@ FAST_UPSCALE_BINARY = (
 )
 FAST_MODEL_NAME = "realesrgan-x4plus"
 QUALITY_MODEL_ID = "caidas/swin2SR-lightweight-x2-64"
-DEFAULT_TILE_SIZE = 256
+DEFAULT_TILE_SIZE = 512
 DEFAULT_TILE_OVERLAP = 32
 
 
@@ -127,6 +127,24 @@ def build_tile_starts(*, length: int, tile_size: int, tile_overlap: int) -> list
     if starts[-1] != last_start:
         starts.append(last_start)
     return starts
+
+
+def estimate_quality_tile_counts(
+    *,
+    size: tuple[int, int],
+    scale_plan: list[int],
+    tile_size: int,
+    tile_overlap: int,
+) -> list[int]:
+    width, height = size
+    counts = []
+    for step_scale in scale_plan:
+        x_starts = build_tile_starts(length=width, tile_size=tile_size, tile_overlap=tile_overlap)
+        y_starts = build_tile_starts(length=height, tile_size=tile_size, tile_overlap=tile_overlap)
+        counts.append(len(x_starts) * len(y_starts))
+        width *= step_scale
+        height *= step_scale
+    return counts
 
 
 def build_fast_upscale_command(
@@ -382,15 +400,30 @@ def run_quality_upscale(
     scale_plan = build_quality_scale_plan(scale=scale)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     tile_size = tile_size_override or DEFAULT_TILE_SIZE
+    tile_counts = estimate_quality_tile_counts(
+        size=input_image.size,
+        scale_plan=scale_plan,
+        tile_size=tile_size,
+        tile_overlap=DEFAULT_TILE_OVERLAP,
+    )
+    total_tile_count = sum(tile_counts)
+    tile_count_summary = " + ".join(str(count) for count in tile_counts)
 
     print("Upscaling image with progressive Swin2SR quality backend...")
     print(f"  Input:    {input_path}")
     print(f"  Output:   {output_path}")
     print(f"  Scale:    x{scale}")
     print(f"  Device:   {device}")
+    if device == "cpu":
+        print(f"  Threads:  {torch.get_num_threads()} CPU threads")
+        if torch.version.cuda is None:
+            print("  CUDA:     unavailable in this Torch install")
+    elif torch.version.cuda is not None:
+        print(f"  CUDA:     {torch.version.cuda}")
     print(f"  Model:    {model_id}")
     print(f"  Steps:    {' x '.join(['2'] * len(scale_plan))} -> x{scale}")
     print(f"  Tiling:   {tile_size}px tiles with {DEFAULT_TILE_OVERLAP}px overlap")
+    print(f"  Tiles:    {tile_count_summary} = {total_tile_count} model calls")
     print("  Note:     first run downloads the model from Hugging Face")
     print()
 

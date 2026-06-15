@@ -79,6 +79,19 @@ class ImgUpscaleTests(unittest.TestCase):
         self.assertEqual([2, 2, 2], self.module.build_quality_scale_plan(scale=8))
         self.assertEqual([2, 2, 2, 2], self.module.build_quality_scale_plan(scale=16))
 
+    def test_quality_backend_default_tile_size_is_less_conservative(self):
+        self.assertEqual(512, self.module.DEFAULT_TILE_SIZE)
+
+    def test_estimate_quality_tile_counts_accounts_for_progressive_steps(self):
+        counts = self.module.estimate_quality_tile_counts(
+            size=(1672, 941),
+            scale_plan=[2, 2],
+            tile_size=512,
+            tile_overlap=32,
+        )
+
+        self.assertEqual([8, 40], counts)
+
     def test_convert_reconstruction_to_image_handles_inference_tensor(self):
         if importlib.util.find_spec("torch") is None:
             self.skipTest("torch is not installed")
