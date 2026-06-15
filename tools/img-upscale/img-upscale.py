@@ -209,7 +209,7 @@ def convert_reconstruction_to_image(*, reconstruction):
     import numpy as np
     from PIL import Image
 
-    array = reconstruction.data.squeeze().float().cpu().clamp_(0, 1).numpy()
+    array = reconstruction.detach().clone().squeeze().float().cpu().clamp(0, 1).numpy()
     array = (array * 255.0).round().astype(np.uint8)
     array = np.moveaxis(array, 0, 2)
     return Image.fromarray(array)
@@ -220,6 +220,10 @@ def run_quality_step(*, model, processor, device: str, input_image, torch_module
     with torch_module.inference_mode():
         outputs = model(pixel_values)
     output_image = convert_reconstruction_to_image(reconstruction=outputs.reconstruction)
+    expected_size = (input_image.size[0] * 2, input_image.size[1] * 2)
+    if output_image.size != expected_size:
+        # The Swin2SR processor pads on the right/bottom before inference.
+        output_image = output_image.crop((0, 0, expected_size[0], expected_size[1]))
     del outputs
     del pixel_values
     if device == "cuda":

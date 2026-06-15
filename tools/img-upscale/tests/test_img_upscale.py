@@ -79,6 +79,74 @@ class ImgUpscaleTests(unittest.TestCase):
         self.assertEqual([2, 2, 2], self.module.build_quality_scale_plan(scale=8))
         self.assertEqual([2, 2, 2, 2], self.module.build_quality_scale_plan(scale=16))
 
+    def test_convert_reconstruction_to_image_handles_inference_tensor(self):
+        if importlib.util.find_spec("torch") is None:
+            self.skipTest("torch is not installed")
+        if importlib.util.find_spec("numpy") is None:
+            self.skipTest("numpy is not installed")
+        if importlib.util.find_spec("PIL") is None:
+            self.skipTest("Pillow is not installed")
+
+        import torch
+
+        with torch.inference_mode():
+            reconstruction = torch.tensor(
+                [
+                    [
+                        [[1.2, -0.2], [0.5, 0.0]],
+                        [[0.0, 0.5], [1.0, 1.2]],
+                        [[0.25, 0.75], [0.1, 0.9]],
+                    ]
+                ]
+            )
+
+        image = self.module.convert_reconstruction_to_image(reconstruction=reconstruction)
+
+        self.assertEqual("RGB", image.mode)
+        self.assertEqual((2, 2), image.size)
+        self.assertEqual((255, 0, 64), image.getpixel((0, 0)))
+
+    def test_run_quality_step_crops_processor_padding_to_x2_size(self):
+        if importlib.util.find_spec("torch") is None:
+            self.skipTest("torch is not installed")
+        if importlib.util.find_spec("numpy") is None:
+            self.skipTest("numpy is not installed")
+        if importlib.util.find_spec("PIL") is None:
+            self.skipTest("Pillow is not installed")
+
+        import torch
+        from PIL import Image
+
+        class FakePixelValues:
+            def to(self, _device):
+                return self
+
+        class FakeProcessorOutput:
+            pixel_values = FakePixelValues()
+
+        class FakeProcessor:
+            def __call__(self, _image, return_tensors):
+                self.return_tensors = return_tensors
+                return FakeProcessorOutput()
+
+        class FakeModelOutput:
+            def __init__(self):
+                self.reconstruction = torch.ones((1, 3, 6, 8))
+
+        class FakeModel:
+            def __call__(self, _pixel_values):
+                return FakeModelOutput()
+
+        output = self.module.run_quality_step(
+            model=FakeModel(),
+            processor=FakeProcessor(),
+            device="cpu",
+            input_image=Image.new("RGB", (3, 2)),
+            torch_module=torch,
+        )
+
+        self.assertEqual((6, 4), output.size)
+
     def test_normalize_tile_size_accepts_auto_and_multiples_of_eight(self):
         self.assertIsNone(self.module.normalize_tile_size_choice("auto"))
         self.assertIsNone(self.module.normalize_tile_size_choice(""))
