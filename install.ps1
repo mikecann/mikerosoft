@@ -159,6 +159,43 @@ foreach ($ctxName in $ctxStartMenuNames) {
 }
 
 # ---------------------------------------------------------------------------
+# color-picker - Pixie-style screen color picker GUI
+# ---------------------------------------------------------------------------
+Write-BatStub "color-picker" @"
+@echo off
+wscript.exe "$RepoDir\tools\color-picker\color-picker.vbs" %*
+"@
+
+$colorPickerVbsPath = "$RepoDir\tools\color-picker\color-picker.vbs"
+$colorPickerWsh = New-Object -ComObject WScript.Shell
+$colorPickerShortcutPath = Join-Path $ToolsDir "Color Picker.lnk"
+$colorPickerSc = $colorPickerWsh.CreateShortcut($colorPickerShortcutPath)
+$colorPickerSc.TargetPath       = "wscript.exe"
+$colorPickerSc.Arguments        = "`"$colorPickerVbsPath`""
+$colorPickerSc.WorkingDirectory = "$RepoDir\tools\color-picker"
+$colorPickerSc.Description      = "Pick screen colors and copy HEX, RGB, HSL, HLS, HSV, CMYK, or BGR values"
+$colorPickerSc.IconLocation     = "%SystemRoot%\System32\imageres.dll,109"
+$colorPickerSc.Save()
+Write-Host "  [lnk]  $colorPickerShortcutPath" -ForegroundColor Green
+
+$colorPickerStartMenuNames = @(
+    "Color Picker",
+    "Pixie",
+    "picker"
+)
+foreach ($colorPickerName in $colorPickerStartMenuNames) {
+    $colorPickerStartMenuPath = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$colorPickerName.lnk"
+    $colorPickerStartSc = $colorPickerWsh.CreateShortcut($colorPickerStartMenuPath)
+    $colorPickerStartSc.TargetPath       = "wscript.exe"
+    $colorPickerStartSc.Arguments        = "`"$colorPickerVbsPath`""
+    $colorPickerStartSc.WorkingDirectory = "$RepoDir\tools\color-picker"
+    $colorPickerStartSc.Description      = "Pick screen colors and copy HEX, RGB, HSL, HLS, HSV, CMYK, or BGR values"
+    $colorPickerStartSc.IconLocation     = "%SystemRoot%\System32\imageres.dll,109"
+    $colorPickerStartSc.Save()
+    Write-Host "  [lnk]  $colorPickerStartMenuPath" -ForegroundColor Green
+}
+
+# ---------------------------------------------------------------------------
 # backup-phone
 # ---------------------------------------------------------------------------
 Write-BatStub "backup-phone" @"
