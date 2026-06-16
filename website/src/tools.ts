@@ -106,6 +106,15 @@ export const tools: Tool[] = [
     platforms: ['windows'],
   },
   {
+    name: 'color-picker',
+    desc: 'Pixie-style screen color picker: drag over the screen, preview the live color, and copy HEX, RGB, HSL, HLS, HSV, CMYK, or BGR',
+    icon: `${base}/color-picker/icons/color-picker.png`,
+    header: `${base}/color-picker/docs/header.png`,
+    screenshots: [`${base}/color-picker/docs/ss1.png`],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/color-picker',
+    platforms: ['windows'],
+  },
+  {
     name: 'backup-phone',
     desc: 'Back up an iPhone over MTP (USB) to a flat folder on disk',
     icon: `${base}/backup-phone/icons/phone.png`,
