@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { Badge, Button, Card, Group, Image, Text } from '@mantine/core';
 import { PLATFORM_COLOR, PLATFORM_LABEL, sortPlatforms, type Tool } from './tools';
 
-const CDN_ASSET_VERSION = '2026-06-23-headers';
+const CDN_ASSET_REF = import.meta.env.VITE_GITHUB_SHA || 'main';
 
 function versionedAsset(url: string): string {
   if (!url.includes('cdn.jsdelivr.net/gh/mikecann/mikerosoft@main/')) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}v=${CDN_ASSET_VERSION}`;
+  return url.replace('@main/', `@${CDN_ASSET_REF}/`);
 }
 
 function ScreenshotSection({ screenshots, name }: { screenshots: string[]; name: string }) {

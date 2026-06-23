@@ -29,6 +29,8 @@ jobs:
 
       - name: Build
         working-directory: ./website
+        env:
+          VITE_GITHUB_SHA: ${{ github.sha }}
         run: npm run build
 
       - name: Deploy
