@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react';
 import { Badge, Button, Card, Group, Image, Text } from '@mantine/core';
 import { PLATFORM_COLOR, PLATFORM_LABEL, sortPlatforms, type Tool } from './tools';
 
+const CDN_ASSET_VERSION = '2026-06-23-headers';
+
+function versionedAsset(url: string): string {
+  if (!url.includes('cdn.jsdelivr.net/gh/mikecann/mikerosoft@main/')) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}v=${CDN_ASSET_VERSION}`;
+}
+
 function ScreenshotSection({ screenshots, name }: { screenshots: string[]; name: string }) {
   const [idx, setIdx] = useState(0);
 
@@ -14,7 +21,7 @@ function ScreenshotSection({ screenshots, name }: { screenshots: string[]; name:
   return (
     <Card.Section>
       <Image
-        src={screenshots[idx]}
+        src={versionedAsset(screenshots[idx])}
         alt={`${name} screenshot`}
         height={180}
         fit="cover"
@@ -32,7 +39,7 @@ export function ToolCard({ tool }: { tool: Tool }) {
       {tool.header ? (
         <Card.Section>
           <Image
-            src={tool.header}
+            src={versionedAsset(tool.header)}
             alt={`${tool.name} header`}
             height={180}
             fit="cover"
