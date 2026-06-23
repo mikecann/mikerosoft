@@ -1,4 +1,4 @@
-![header](docs/header.png)
+![header](docs/header.webp)
 
 # ![](icons/sleep-monitors.png) sleep-monitors
 
@@ -25,5 +25,5 @@ Get-Content "$env:LOCALAPPDATA\sleep-monitors\sleep-monitors.log" -Tail 20
 
 ## Assets
 
-`docs/header.png` is a generated raster banner for the public site.
+`docs/header.webp` is a generated raster banner for the public site.
 `icons/sleep-monitors.png` is based on the repo's existing monitor icon.

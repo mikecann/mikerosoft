@@ -1,4 +1,4 @@
-![header](docs/header.png)
+![header](docs/header.webp)
 
 # ctxmenu
 

@@ -1,4 +1,4 @@
-![header](docs/header.png)
+![header](docs/header.webp)
 
 # ![](icons/film.png) unmultitrack
 
@@ -57,5 +57,5 @@ If `ffprobe` is missing, the tool falls back to parsing `ffmpeg -i` stream outpu
 
 ## Assets
 
-`docs/header.png` is a generated raster banner for the public site.
+`docs/header.webp` is a generated raster banner for the public site.
 `icons/film.png` is from the repo's shared Silk-style icon set.
