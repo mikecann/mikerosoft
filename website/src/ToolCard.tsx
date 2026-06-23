@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, Card, Group, Image, Text, ThemeIcon } from '@mantine/core';
+import { Badge, Button, Card, Group, Image, Text } from '@mantine/core';
 import { PLATFORM_COLOR, PLATFORM_LABEL, sortPlatforms, type Tool } from './tools';
 
 function ScreenshotSection({ screenshots, name }: { screenshots: string[]; name: string }) {
@@ -51,20 +51,9 @@ export function ToolCard({ tool }: { tool: Tool }) {
         align="flex-start"
         justify="space-between"
       >
-        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, flex: '1 1 auto' }}>
-          <ThemeIcon variant="light" color="blue" size={36} radius="md">
-            <img
-              src={tool.icon}
-              alt=""
-              width={16}
-              height={16}
-              style={{ imageRendering: 'pixelated', display: 'block' }}
-            />
-          </ThemeIcon>
-          <Text fw={700} size="md">
-            {tool.name}
-          </Text>
-        </Group>
+        <Text fw={700} size="md" style={{ minWidth: 0, flex: '1 1 auto' }}>
+          {tool.name}
+        </Text>
         <Group gap={6} wrap="wrap" justify="flex-end" style={{ flex: '0 0 auto' }}>
           {sortPlatforms(tool.platforms).map(id => (
             <Badge key={id} size="xs" variant="light" color={PLATFORM_COLOR[id]}>
