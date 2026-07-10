@@ -14,6 +14,7 @@ It restores automatically four seconds after a display reconfiguration settles. 
 
 - macOS 14 or newer
 - Xcode / Swift for builds
+- a code-signing certificate, such as the Apple Development certificate Xcode creates
 - BetterDisplay installed in `/Applications`
 - BetterDisplay Pro for the display features that require it
 - Accessibility permission for `Display Workspace.app`
@@ -35,6 +36,11 @@ Grant Accessibility permission when macOS asks. If the app is not listed automat
 2. Add `~/Applications/Display Workspace.app`.
 3. Enable it.
 4. Run `bash tools/display-workspace/restart.sh`.
+
+The build deliberately refuses ad-hoc signing because macOS ties Accessibility
+permission to the app's designated code requirement. Rebuilds signed with the
+same certificate keep that identity stable. Set `DISPLAY_WORKSPACE_SIGNING_IDENTITY`
+when you need to select a different certificate explicitly.
 
 ## Save the two setups
 
