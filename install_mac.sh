@@ -86,6 +86,7 @@ link_tool img-to-svg tools/img-to-svg/img-to-svg
 link_tool img-upscale tools/img-upscale/img-upscale
 link_tool copypath tools/copypath/copypath
 link_tool transcribe tools/transcribe/transcribe
+link_tool display-workspace tools/display-workspace/display-workspace
 link_tool 3d-viewer tools/3d-viewer/3d-viewer
 link_tool face-swap tools/face-swap/face-swap
 link_tool img-gen tools/img-gen/img-gen
