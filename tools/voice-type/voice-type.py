@@ -205,6 +205,7 @@ log(f"=== voice-type started === log: {_LOG_PATH}")
 import numpy as np
 import sounddevice as sd
 from faster_whisper import WhisperModel
+from audio_gate import should_skip_short_low_level_audio
 from runtime_policy import should_keep_mic_stream_open_local
 from speech_backends import MlxWhisperModel, resolve_local_mlx_repo
 from text_formatter import (
@@ -2196,6 +2197,25 @@ def run():
                         # Show "processing" with the last streaming preview so the
                         # user sees what was recognised so far while we finalise.
                         mode = _effective_output_mode()
+                        if len(audio) == 0:
+                            duration = rms = peak = 0.0
+                        else:
+                            duration = len(audio) / SAMPLE_RATE
+                            rms = float(np.sqrt(np.mean(audio ** 2)))
+                            peak = float(np.max(np.abs(audio)))
+                        if should_skip_short_low_level_audio(
+                            duration_sec=duration,
+                            rms=rms,
+                            peak=peak,
+                        ):
+                            overlay.hide()
+                            tray.set_state("idle")
+                            log(
+                                "Skipped near-silent clip: "
+                                f"{duration:.2f}s rms={rms:.4f} peak={peak:.4f}"
+                            )
+                            return
+
                         overlay.show_processing(preview)
                         tray.set_state("processing")
                         t0 = time.perf_counter()
