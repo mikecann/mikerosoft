@@ -10,16 +10,94 @@ from typing import Callable
 _LAUNCH_AGENT_LABEL = "com.mikerosoft.voice-type"
 _LAUNCHD_LOG_NAME = "voice-type-launchd.log"
 
-_hotkey_down      = False
-_hotkey_lock      = threading.Lock()
 _listener_started = False
 
 # The app that was frontmost when the push-to-talk key went down.
 # Saved before our overlay can steal focus; re-activated before pasting.
 _target_app: object = None
 
-# F12 key identifier
-_VK_F12 = 111  # macOS virtual keycode for F12
+# macOS virtual keycodes for the two push-to-talk keys.
+_VK_F12 = 111
+_VK_RIGHT_CONTROL = 0x3E
+_DEVICE_RIGHT_CONTROL_MASK = 0x00002000
+
+
+class MacPushToTalkHotkeys:
+    """Track the macOS keys reserved for push-to-talk."""
+
+    def __init__(self) -> None:
+        self._down: set[int] = set()
+        self._lock = threading.Lock()
+
+    def handle_event(
+        self,
+        event_kind: str,
+        keycode: int,
+        physical_down: bool | None = None,
+    ) -> bool:
+        """Update key state and return whether the event was handled."""
+        if keycode == _VK_F12:
+            if event_kind == "key_down":
+                physical_down = True
+            elif event_kind == "key_up":
+                physical_down = False
+            else:
+                return False
+        elif keycode == _VK_RIGHT_CONTROL:
+            if event_kind != "flags_changed" or physical_down is None:
+                return False
+        else:
+            return False
+
+        with self._lock:
+            if physical_down:
+                self._down.add(keycode)
+            else:
+                self._down.discard(keycode)
+        return True
+
+    def is_down(self) -> bool:
+        with self._lock:
+            return bool(self._down)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._down.clear()
+
+
+_hotkeys = MacPushToTalkHotkeys()
+
+
+def handle_quartz_hotkey_event(
+    quartz,
+    event_type: int,
+    event,
+    hotkeys: MacPushToTalkHotkeys | None = None,
+) -> bool:
+    """Apply one Quartz keyboard event and report whether it was handled."""
+    target = hotkeys if hotkeys is not None else _hotkeys
+    keycode = int(quartz.CGEventGetIntegerValueField(
+        event,
+        quartz.kCGKeyboardEventKeycode,
+    ))
+
+    if event_type == quartz.kCGEventKeyDown:
+        event_kind = "key_down"
+        physical_down = None
+    elif event_type == quartz.kCGEventKeyUp:
+        event_kind = "key_up"
+        physical_down = None
+    elif event_type == quartz.kCGEventFlagsChanged:
+        event_kind = "flags_changed"
+        physical_down = None
+        if keycode == _VK_RIGHT_CONTROL:
+            physical_down = bool(
+                quartz.CGEventGetFlags(event) & _DEVICE_RIGHT_CONTROL_MASK
+            )
+    else:
+        return False
+
+    return target.handle_event(event_kind, keycode, physical_down)
 
 
 def setup_dll_paths() -> None:
@@ -27,10 +105,10 @@ def setup_dll_paths() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Hotkey — CGEventTap intercepts F12 at the system level.
+# Hotkey — CGEventTap intercepts F12 and Right Control at the system level.
 #
 # Using CGEventTapOptionDefault (not ListenOnly) means we can suppress the
-# event by returning None from the callback, so macOS won't also handle F12.
+# event by returning None from the callback, so macOS won't also handle it.
 #
 # Falls back to a plain pynput listener (no suppression) if the tap cannot
 # be created — most likely because Accessibility permission hasn't been
@@ -38,42 +116,34 @@ def setup_dll_paths() -> None:
 # ---------------------------------------------------------------------------
 
 def _run_cg_event_tap() -> None:
-    """Block the calling thread running a CGEventTap for F12."""
+    """Block the calling thread running the push-to-talk CGEventTap."""
     import Quartz
 
     def _callback(proxy, event_type, event, refcon):
-        global _hotkey_down
         # macOS auto-disables an event tap if its callback is ever judged too
         # slow, or on certain user-input conditions. When that happens we stop
-        # receiving events entirely — including the F12 KeyUp — which would
-        # leave _hotkey_down stuck True forever. Re-enable the tap and assume
-        # the key was released, since the KeyUp may have been dropped.
+        # receiving events entirely — including key-up events — which could
+        # leave push-to-talk stuck on. Re-enable the tap and clear key state.
         if event_type in (
             Quartz.kCGEventTapDisabledByTimeout,
             Quartz.kCGEventTapDisabledByUserInput,
         ):
             Quartz.CGEventTapEnable(tap, True)
-            with _hotkey_lock:
-                _hotkey_down = False
+            _hotkeys.reset()
             return event
-
-        keycode = int(Quartz.CGEventGetIntegerValueField(
-            event, Quartz.kCGKeyboardEventKeycode
-        ))
-        if keycode != _VK_F12:
-            return event  # pass all other keys through untouched
 
         # Keep this callback minimal — any slow work here (e.g. AppKit calls)
         # risks tripping the tap watchdog. The frontmost-app snapshot is taken
         # by the main worker via snapshot_target_app() instead.
-        with _hotkey_lock:
-            if event_type == Quartz.kCGEventKeyDown:
-                _hotkey_down = True
-            elif event_type == Quartz.kCGEventKeyUp:
-                _hotkey_down = False
-        return None  # suppress: F12 never reaches any other app
+        if handle_quartz_hotkey_event(Quartz, event_type, event):
+            return None
+        return event
 
-    mask = (1 << Quartz.kCGEventKeyDown) | (1 << Quartz.kCGEventKeyUp)
+    mask = (
+        (1 << Quartz.kCGEventKeyDown)
+        | (1 << Quartz.kCGEventKeyUp)
+        | (1 << Quartz.kCGEventFlagsChanged)
+    )
     tap  = Quartz.CGEventTapCreate(
         Quartz.kCGSessionEventTap,
         Quartz.kCGHeadInsertEventTap,
@@ -100,16 +170,16 @@ def _run_pynput_fallback() -> None:
     from pynput import keyboard
 
     def on_press(key):
-        global _hotkey_down
         if key == keyboard.Key.f12:
-            with _hotkey_lock:
-                _hotkey_down = True
+            _hotkeys.handle_event("key_down", _VK_F12)
+        elif key == keyboard.Key.ctrl_r:
+            _hotkeys.handle_event("flags_changed", _VK_RIGHT_CONTROL, True)
 
     def on_release(key):
-        global _hotkey_down
         if key == keyboard.Key.f12:
-            with _hotkey_lock:
-                _hotkey_down = False
+            _hotkeys.handle_event("key_up", _VK_F12)
+        elif key == keyboard.Key.ctrl_r:
+            _hotkeys.handle_event("flags_changed", _VK_RIGHT_CONTROL, False)
 
     with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
         listener.join()
@@ -122,7 +192,7 @@ def _start_hotkey_listener() -> None:
         except Exception as exc:
             print(
                 f"[voice-type] CGEventTap failed ({exc}); "
-                "using pynput fallback (F12 events will not be suppressed).",
+                "using pynput fallback (hotkey events will not be suppressed).",
                 flush=True,
             )
             _run_pynput_fallback()
@@ -139,10 +209,9 @@ def _ensure_listener() -> None:
 
 
 def is_hotkey_down() -> bool:
-    """Return True if F12 is currently held."""
+    """Return True if F12 or Right Control is currently held."""
     _ensure_listener()
-    with _hotkey_lock:
-        return _hotkey_down
+    return _hotkeys.is_down()
 
 
 def snapshot_target_app() -> None:

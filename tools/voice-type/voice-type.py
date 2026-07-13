@@ -2129,7 +2129,9 @@ def run():
 
             threading.Thread(target=_warm_formatter_after_startup, daemon=True).start()
         import sys as _sys
-        _hotkey_label = "F12" if _sys.platform == "darwin" else "Right Ctrl"
+        _hotkey_label = (
+            "F12 or Right Ctrl" if _sys.platform == "darwin" else "Right Ctrl"
+        )
         log(f"Ready. Hold {_hotkey_label} to record.")
 
         was_down = False

@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import pathlib
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -18,6 +19,7 @@ def load_module():
     return module
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows-only platform module")
 class PlatformWinCudaTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

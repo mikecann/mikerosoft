@@ -6,7 +6,7 @@ Push-to-talk voice transcription that types directly into any focused window.
 Runs entirely locally, no cloud, no subscription.
 
 - **Windows**: hold **Right Ctrl**, speak, release to paste
-- **macOS**: hold **F12**, speak, release to paste
+- **macOS**: hold **F12** or **Right Ctrl**, speak, release to paste
 - **Apple Silicon macOS**: uses **MLX Whisper** for the final transcription path when available for much better performance than the old CPU-only path
 
 [![voice type](https://thumbs.video-to-markdown.com/dd2eac67.jpg)](https://youtu.be/lYjgJ8KIh-Y)
@@ -102,7 +102,7 @@ text editors, browsers, chat apps, terminals, etc. Your clipboard is left untouc
 Hotkey by platform:
 
 - **Windows**: Right Ctrl
-- **macOS**: F12
+- **macOS**: F12 or Right Ctrl
 
 ---
 
@@ -167,8 +167,8 @@ macOS does not currently use the Windows tray flow.
 ## How it works
 
 - **Hotkey handling** — Windows polls `GetAsyncKeyState(VK_RCONTROL)` at 100 Hz.
-  macOS uses a native event tap for `F12` and suppresses the key so the
-  system does not also handle it.
+  macOS uses a native event tap for `F12` and Right Ctrl, suppressing whichever
+  key is held so the system does not also handle it. Left Ctrl remains untouched.
 - **Audio capture** — `sounddevice` streams 16 kHz mono float32 from the
   default microphone into a NumPy buffer.
 - **Streaming preview** — while the key is held, a background thread uses
