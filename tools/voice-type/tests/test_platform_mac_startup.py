@@ -32,8 +32,13 @@ class PlatformMacStartupTests(unittest.TestCase):
             )
             expected_script_dir = str(pathlib.Path(tmp_home) / "voice-type")
             os.makedirs(os.path.join(expected_script_dir, ".venv", "bin"))
-            expected_python = os.path.join(expected_script_dir, ".venv", "bin", "python3")
-            pathlib.Path(expected_python).touch()
+            expected_launcher = os.path.join(
+                expected_script_dir,
+                ".venv",
+                "bin",
+                "Voice Type",
+            )
+            pathlib.Path(expected_launcher).touch()
             expected_app = os.path.join(expected_script_dir, "voice-type.py")
             expected_log = os.path.join(expected_script_dir, "voice-type-launchd.log")
             domain = "gui/501"
@@ -49,7 +54,7 @@ class PlatformMacStartupTests(unittest.TestCase):
             with open(expected_plist, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            self.assertIn(f"<string>{expected_python}</string>", content)
+            self.assertIn(f"<string>{expected_launcher}</string>", content)
             self.assertIn(f"<string>{expected_app}</string>", content)
             self.assertIn(f"<string>{expected_log}</string>", content)
             self.assertIn("<key>RunAtLoad</key>", content)
@@ -66,7 +71,7 @@ class PlatformMacStartupTests(unittest.TestCase):
                 any_order=False,
             )
 
-    def test_set_startup_enable_rejects_missing_python_venv(self):
+    def test_set_startup_enable_rejects_missing_native_launcher(self):
         with tempfile.TemporaryDirectory() as tmp_home:
             agents_dir = os.path.join(tmp_home, "Library", "LaunchAgents")
             script_dir = str(pathlib.Path(tmp_home) / "voice-type")

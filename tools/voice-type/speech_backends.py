@@ -66,8 +66,10 @@ class MlxInfo:
 
 class MlxWhisperModel:
     def __init__(self, *, repo_id: str):
+        from mlx import core as mlx_core
         import mlx_whisper
 
+        self._mlx_core = mlx_core
         self._mlx_whisper = mlx_whisper
         self.repo_id = repo_id
         self._is_warmed = False
@@ -86,19 +88,22 @@ class MlxWhisperModel:
         self._is_warmed = True
 
     def transcribe(self, audio, **kwargs):
-        result = self._mlx_whisper.transcribe(
-            np.asarray(audio, dtype=np.float32),
-            path_or_hf_repo=self.repo_id,
-            language=kwargs.get("language", "en"),
-            condition_on_previous_text=kwargs.get("condition_on_previous_text", False),
-            verbose=kwargs.get("verbose", False),
-        )
-        segments = self._segments_from_result(result)
-        info = MlxInfo(
-            language=str(result.get("language") or "en"),
-            language_probability=float(result.get("language_probability") or 1.0),
-        )
-        return segments, info
+        try:
+            result = self._mlx_whisper.transcribe(
+                np.asarray(audio, dtype=np.float32),
+                path_or_hf_repo=self.repo_id,
+                language=kwargs.get("language", "en"),
+                condition_on_previous_text=kwargs.get("condition_on_previous_text", False),
+                verbose=kwargs.get("verbose", False),
+            )
+            segments = self._segments_from_result(result)
+            info = MlxInfo(
+                language=str(result.get("language") or "en"),
+                language_probability=float(result.get("language_probability") or 1.0),
+            )
+            return segments, info
+        finally:
+            self._mlx_core.clear_cache()
 
     def _segments_from_result(self, result: dict) -> list[MlxSegment]:
         parts = [
