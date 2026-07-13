@@ -261,12 +261,4 @@ export const tools: Tool[] = [
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/mac-screenshot',
     platforms: ['macos'],
   },
-  {
-    name: 'display-workspace',
-    desc: 'Save and automatically restore BetterDisplay settings, window layouts, displays, and macOS Desktops when docking or undocking',
-    icon: `${base}/display-workspace/icons/monitor.png`,
-    screenshots: [],
-    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/display-workspace',
-    platforms: ['macos'],
-  },
 ];
