@@ -13,7 +13,8 @@ final class TaskbarModelTests: XCTestCase {
         bounds: CGRect = CGRect(x: 10, y: 20, width: 800, height: 600),
         screenID: UInt32? = 1,
         bundleID: String = "",
-        appPath: String = ""
+        appPath: String = "",
+        accessibilitySignature: String = ""
     ) -> WindowRecord {
         WindowRecord(
             owner: owner,
@@ -25,7 +26,8 @@ final class TaskbarModelTests: XCTestCase {
             bounds: bounds,
             screenID: screenID,
             bundleID: bundleID,
-            appPath: appPath
+            appPath: appPath,
+            accessibilitySignature: accessibilitySignature
         )
     }
 
@@ -53,6 +55,114 @@ final class TaskbarModelTests: XCTestCase {
         let visible = visibleWindows(records, currentPID: 42)
 
         XCTAssertEqual(visible.map(\.title), ["Taskbar Settings", "zsh"])
+    }
+
+    func testVisibleWindowsRejectsDuplicateAccessibilitySurfaces() {
+        let records = [
+            record(
+                owner: "Notion",
+                title: "Convex + AI Quick Tips",
+                pid: 10,
+                windowID: 1,
+                bounds: CGRect(x: 0, y: 31, width: 2560, height: 1379),
+                bundleID: "notion.id",
+                accessibilitySignature: "children:a,b,c,d"
+            ),
+            record(
+                owner: "Notion",
+                title: "Convex + AI Quick Tips",
+                pid: 10,
+                windowID: 2,
+                bounds: CGRect(x: 1218, y: 298, width: 2560, height: 690),
+                bundleID: "notion.id",
+                accessibilitySignature: "children:a,b,c,d"
+            ),
+            record(
+                owner: "Finder",
+                title: "Downloads",
+                pid: 20,
+                windowID: 3
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [1, 3])
+    }
+
+    func testVisibleWindowsKeepsRealSameTitleWindowsWhenAccessibilitySurfacesDiffer() {
+        let records = [
+            record(
+                owner: "Notion",
+                title: "Untitled",
+                pid: 10,
+                windowID: 1,
+                bundleID: "notion.id",
+                accessibilitySignature: "children:a,b,c,d"
+            ),
+            record(
+                owner: "Notion",
+                title: "Untitled",
+                pid: 10,
+                windowID: 2,
+                bundleID: "notion.id",
+                accessibilitySignature: "children:e,f,g,h"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [1, 2])
+    }
+
+    func testVisibleWindowsRejectsOverlappingSameTitleFallbackSurfaces() {
+        let records = [
+            record(
+                owner: "Notion",
+                title: "Convex + AI Quick Tips",
+                pid: 10,
+                windowID: 1,
+                bounds: CGRect(x: 0, y: 31, width: 2560, height: 1379),
+                bundleID: "notion.id"
+            ),
+            record(
+                owner: "Notion",
+                title: "Convex + AI Quick Tips",
+                pid: 10,
+                windowID: 2,
+                bounds: CGRect(x: 1218, y: 298, width: 2560, height: 690),
+                bundleID: "notion.id"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [1])
+    }
+
+    func testVisibleWindowsKeepsSameTitleFallbackWindowsWhenTheyDoNotOverlap() {
+        let records = [
+            record(
+                owner: "Notion",
+                title: "Untitled",
+                pid: 10,
+                windowID: 1,
+                bounds: CGRect(x: 0, y: 31, width: 900, height: 700),
+                bundleID: "notion.id"
+            ),
+            record(
+                owner: "Notion",
+                title: "Untitled",
+                pid: 10,
+                windowID: 2,
+                bounds: CGRect(x: 1000, y: 31, width: 900, height: 700),
+                bundleID: "notion.id"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [1, 2])
     }
 
     func testBuildItemsAlwaysShowsIndividualWindowsEvenIfOldSettingRequestsGrouping() {

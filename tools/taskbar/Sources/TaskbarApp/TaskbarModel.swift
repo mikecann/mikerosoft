@@ -25,6 +25,7 @@ struct WindowRecord: Equatable {
     let screenID: UInt32?
     let bundleID: String
     let appPath: String
+    let accessibilitySignature: String
 }
 
 struct TaskbarItem: Equatable {
@@ -45,7 +46,7 @@ struct TaskbarItem: Equatable {
 }
 
 func visibleWindows(_ records: [WindowRecord], currentPID: pid_t) -> [WindowRecord] {
-    records.filter { record in
+    deduplicatedAccessibilitySurfaces(records.filter { record in
         let owner = record.owner.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !owner.isEmpty, !ignoredOwners.contains(owner) else { return false }
         guard !(record.pid == currentPID && record.title == "mikerosoft taskbar") else { return false }
@@ -54,7 +55,64 @@ func visibleWindows(_ records: [WindowRecord], currentPID: pid_t) -> [WindowReco
         guard record.bounds.width >= minimumWindowWidth else { return false }
         guard record.bounds.height >= minimumWindowHeight else { return false }
         return true
+    })
+}
+
+private func deduplicatedAccessibilitySurfaces(_ records: [WindowRecord]) -> [WindowRecord] {
+    var result: [WindowRecord] = []
+
+    for record in records {
+        guard let existingIndex = result.firstIndex(where: { isDuplicateSurface($0, record) }) else {
+            result.append(record)
+            continue
+        }
+
+        let existing = result[existingIndex]
+        if record.bounds.area > existing.bounds.area {
+            result[existingIndex] = record
+        }
     }
+
+    return result
+}
+
+private func isDuplicateSurface(_ left: WindowRecord, _ right: WindowRecord) -> Bool {
+    if let leftSignature = accessibilityDuplicateSignature(left),
+       let rightSignature = accessibilityDuplicateSignature(right) {
+        return leftSignature == rightSignature
+    }
+
+    guard accessibilityDuplicateSignature(left) == nil,
+          accessibilityDuplicateSignature(right) == nil,
+          fallbackDuplicateKey(left) == fallbackDuplicateKey(right)
+    else {
+        return false
+    }
+
+    return left.bounds.overlapRatio(with: right.bounds) >= 0.5
+}
+
+private func accessibilityDuplicateSignature(_ record: WindowRecord) -> String? {
+    let axSignature = record.accessibilitySignature.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !axSignature.isEmpty else { return nil }
+    return [
+        String(record.pid),
+        record.bundleID,
+        record.appPath,
+        record.owner,
+        record.title,
+        axSignature
+    ].joined(separator: "\u{1f}")
+}
+
+private func fallbackDuplicateKey(_ record: WindowRecord) -> String {
+    [
+        String(record.pid),
+        record.bundleID,
+        record.appPath,
+        record.owner,
+        record.title
+    ].joined(separator: "\u{1f}")
 }
 
 func taskbarItemWidth(textWidth: CGFloat, iconSize: CGFloat, minimumWidth: CGFloat, maximumWidth: CGFloat) -> CGFloat {
@@ -180,6 +238,19 @@ private func identityForTaskbar(bundleID: String, appPath: String) -> String {
         return "bundle:\(bundleID)"
     }
     return "path:\(appPath)"
+}
+
+private extension CGRect {
+    var area: CGFloat {
+        guard !isNull, !isEmpty else { return 0 }
+        return width * height
+    }
+
+    func overlapRatio(with other: CGRect) -> CGFloat {
+        let smallerArea = min(area, other.area)
+        guard smallerArea > 0 else { return 0 }
+        return intersection(other).area / smallerArea
+    }
 }
 
 private extension Array where Element == TaskbarItem {
