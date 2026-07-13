@@ -154,6 +154,18 @@ export const tools: Tool[] = [
     platforms: ['windows'],
   },
   {
+    name: 'taskbar',
+    desc: 'Windows-style taskbar for macOS: one bar per monitor, pinned apps, per-monitor overrides, compact window items, and window avoidance',
+    icon: `${base}/taskbar/icons/taskbar.png`,
+    header: `${base}/taskbar/docs/header.png`,
+    screenshots: [
+      `${base}/taskbar/docs/ss1.png`,
+      `${base}/taskbar/docs/ss2.png`,
+    ],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/taskbar',
+    platforms: ['macos'],
+  },
+  {
     name: 'voice-type',
     desc: 'Push-to-talk local voice transcription for Windows and macOS. On Apple Silicon it uses MLX for faster final transcription',
     icon: `${base}/voice-type/icons/sound.png`,

@@ -28,6 +28,7 @@ tools/task-stats/screenshots/*_with_audio.srt
 # Bun / Node dependencies and generated files
 node_modules/
 tools/*/build/
+tools/*/.build/
 bun.lock
 bun.lockb
 package-lock.json
@@ -39,6 +40,7 @@ __pycache__/
 .venv/
 
 # Editor / OS noise
+.DS_Store
 .vs/
 Thumbs.db
 desktop.ini
