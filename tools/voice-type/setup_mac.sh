@@ -85,16 +85,22 @@ if ! command -v xcrun &>/dev/null; then
   exit 1
 fi
 
-PYTHON_INCLUDE=$("$VENV/bin/python3" -c \
-  'import sysconfig; print(sysconfig.get_config_var("INCLUDEPY"))')
-PYTHON_LIBRARY=$("$VENV/bin/python3" -c \
-  'import os, sys, sysconfig; print(os.path.join(sysconfig.get_config_var("PYTHONFRAMEWORKPREFIX"), "Python.framework", "Versions", f"{sys.version_info.major}.{sys.version_info.minor}", "Python"))')
+PYTHON_CONFIG=$("$VENV/bin/python3" -c \
+  'import os, sys, sysconfig; print(os.path.join(sysconfig.get_config_var("BINDIR"), f"python{sys.version_info.major}.{sys.version_info.minor}-config"))')
+if [ ! -x "$PYTHON_CONFIG" ]; then
+  echo "ERROR: Python embed configuration not found at $PYTHON_CONFIG"
+  exit 1
+fi
+
+# Arrays preserve each compiler/linker argument returned by the selected
+# interpreter. This supports framework and non-framework Python builds.
+PYTHON_CFLAGS=( $("$PYTHON_CONFIG" --embed --cflags) )
+PYTHON_LDFLAGS=( $("$PYTHON_CONFIG" --embed --ldflags) )
 LAUNCHER="$VENV/bin/Voice Type"
 
 xcrun clang "$SCRIPT_DIR/voice-type-launcher.c" \
-  "-I$PYTHON_INCLUDE" \
-  "$PYTHON_LIBRARY" \
-  -framework CoreFoundation \
+  "${PYTHON_CFLAGS[@]}" \
+  "${PYTHON_LDFLAGS[@]}" \
   -o "$LAUNCHER"
 codesign --force --sign - --identifier com.mikerosoft.voice-type "$LAUNCHER"
 

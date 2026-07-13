@@ -83,6 +83,27 @@ class SpeechBackendsTests(unittest.TestCase):
         self.assertEqual(["hello"], [segment.text for segment in segments])
         self.assertEqual([True], cleared)
 
+    def test_mlx_transcribe_releases_cache_when_transcription_fails(self):
+        cleared = []
+
+        def fail_transcription(*_args, **_kwargs):
+            raise RuntimeError("transcription failed")
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "mlx_whisper": SimpleNamespace(transcribe=fail_transcription),
+                "mlx": SimpleNamespace(
+                    core=SimpleNamespace(clear_cache=lambda: cleared.append(True))
+                ),
+            },
+        ):
+            model = self.module.MlxWhisperModel(repo_id="test/repo")
+            with self.assertRaisesRegex(RuntimeError, "transcription failed"):
+                model.transcribe([0.0], language="en")
+
+        self.assertEqual([True], cleared)
+
 
 if __name__ == "__main__":
     unittest.main()
