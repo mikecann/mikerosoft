@@ -65,6 +65,8 @@ bash tools/voice-type/open-settings-mac.sh
 ```
 
 On macOS, Spotlight can also open the settings app by typing `Voice Type`.
+`setup_mac.sh` builds a tiny native host so the worker appears as `Voice Type`,
+not `Python`, in Activity Monitor.
 
 ### Permissions on macOS
 
@@ -214,7 +216,10 @@ Windows auto-detects CUDA (`ctranslate2.get_cuda_device_count()` +
 
 On Apple Silicon, `voice-type` prefers MLX for supported **final** models and
 falls back safely if MLX is unavailable. The streaming preview path remains a
-separate `faster-whisper` model for now.
+separate `faster-whisper` model for now. MLX scratch buffers are released after
+each transcription so memory use returns to the loaded-model baseline instead
+of growing across recordings. Larger final models still have a larger baseline;
+choose a smaller final model in settings when memory matters more than accuracy.
 
 On Intel Macs, expect the fallback path rather than the MLX speedup.
 
@@ -320,6 +325,7 @@ pyobjc-framework-Cocoa native macOS integration
 | `voice-type.ps1`      | PowerShell launcher called by the VBS                    |
 | `deps.ps1`            | Installs Python dependencies                             |
 | `setup_mac.sh`        | Creates the macOS venv and installs Python dependencies  |
+| `voice-type-launcher.c` | Native host so Activity Monitor shows `Voice Type`    |
 | `voice-type-mac.sh`   | macOS restart script                                     |
 | `open-settings-mac.sh`| Opens the macOS settings window                          |
 | `voice-type.log`      | Runtime log (gitignored, auto-rotates at 1 MB)           |

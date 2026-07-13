@@ -7,9 +7,10 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="$SCRIPT_DIR/.venv"
 LOG="$SCRIPT_DIR/voice-type.log"
+LAUNCHER="$VENV/bin/Voice Type"
 
-if [ ! -f "$VENV/bin/python3" ]; then
-  echo "ERROR: venv not found at $VENV"
+if [ ! -x "$LAUNCHER" ]; then
+  echo "ERROR: native launcher not found at $LAUNCHER"
   echo "Run setup first:  bash $SCRIPT_DIR/setup_mac.sh"
   exit 1
 fi
@@ -34,7 +35,7 @@ fi
 echo "Launching voice-type..."
 # Discard stdout — the Python script writes its own log to voice-type.log directly.
 # Only capture stderr (Python warnings / unhandled tracebacks) into the log.
-nohup "$VENV/bin/python3" "$SCRIPT_DIR/voice-type.py" > /dev/null 2>> "$LOG" &
+nohup "$LAUNCHER" "$SCRIPT_DIR/voice-type.py" > /dev/null 2>> "$LOG" &
 MAIN_PID=$!
 echo "Started main pid $MAIN_PID."
 echo "Tail log with:"

@@ -301,13 +301,13 @@ def set_startup(enable: bool, vbs_path: str = "",
     service = _launchd_service(domain)
     if enable:
         script_dir = _script_dir()
-        python_bin = os.path.join(script_dir, ".venv", "bin", "python3")
+        launcher_bin = os.path.join(script_dir, ".venv", "bin", "Voice Type")
         app_path = os.path.join(script_dir, "voice-type.py")
         log_path = os.path.join(script_dir, _LAUNCHD_LOG_NAME)
-        if not os.path.exists(python_bin):
+        if not os.path.exists(launcher_bin):
             setup_path = os.path.join(script_dir, "setup_mac.sh")
             message = (
-                f"voice-type Python interpreter missing at '{python_bin}'. "
+                f"voice-type launcher missing at '{launcher_bin}'. "
                 f"Run setup first: bash {setup_path}"
             )
             if log:
@@ -322,7 +322,7 @@ def set_startup(enable: bool, vbs_path: str = "",
   <string>{_LAUNCH_AGENT_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{python_bin}</string>
+    <string>{launcher_bin}</string>
     <string>{app_path}</string>
   </array>
   <key>WorkingDirectory</key>

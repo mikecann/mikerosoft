@@ -78,6 +78,33 @@ for pkg in "${packages[@]}"; do
 done
 
 echo ""
+echo "==> Building native Voice Type launcher..."
+if ! command -v xcrun &>/dev/null; then
+  echo "ERROR: Xcode Command Line Tools are required to build the launcher."
+  echo "Install them with:  xcode-select --install"
+  exit 1
+fi
+
+PYTHON_CONFIG=$("$VENV/bin/python3" -c \
+  'import os, sys, sysconfig; print(os.path.join(sysconfig.get_config_var("BINDIR"), f"python{sys.version_info.major}.{sys.version_info.minor}-config"))')
+if [ ! -x "$PYTHON_CONFIG" ]; then
+  echo "ERROR: Python embed configuration not found at $PYTHON_CONFIG"
+  exit 1
+fi
+
+# Arrays preserve each compiler/linker argument returned by the selected
+# interpreter. This supports framework and non-framework Python builds.
+PYTHON_CFLAGS=( $("$PYTHON_CONFIG" --embed --cflags) )
+PYTHON_LDFLAGS=( $("$PYTHON_CONFIG" --embed --ldflags) )
+LAUNCHER="$VENV/bin/Voice Type"
+
+xcrun clang "$SCRIPT_DIR/voice-type-launcher.c" \
+  "${PYTHON_CFLAGS[@]}" \
+  "${PYTHON_LDFLAGS[@]}" \
+  -o "$LAUNCHER"
+codesign --force --sign - --identifier com.mikerosoft.voice-type "$LAUNCHER"
+
+echo ""
 echo "==> All packages installed."
 echo ""
 echo "  IMPORTANT: voice-type needs Accessibility permissions to detect"
@@ -93,4 +120,4 @@ echo "  Launch with:"
 echo "    bash $SCRIPT_DIR/voice-type-mac.sh"
 echo ""
 echo "  Or directly:"
-echo "    $VENV/bin/python3 $SCRIPT_DIR/voice-type.py"
+echo "    '$LAUNCHER' $SCRIPT_DIR/voice-type.py"

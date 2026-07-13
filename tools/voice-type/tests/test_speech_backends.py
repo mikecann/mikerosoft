@@ -2,6 +2,8 @@ import importlib.util
 import pathlib
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 
 TOOLS_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -57,6 +59,50 @@ class SpeechBackendsTests(unittest.TestCase):
             has_mlx=True,
         )
         self.assertIsNone(repo)
+
+    def test_mlx_transcribe_releases_cached_working_memory(self):
+        cleared = []
+        fake_mlx_whisper = SimpleNamespace(
+            transcribe=lambda *_args, **_kwargs: {
+                "text": "hello",
+                "language": "en",
+            }
+        )
+        fake_mlx_core = SimpleNamespace(clear_cache=lambda: cleared.append(True))
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "mlx_whisper": fake_mlx_whisper,
+                "mlx": SimpleNamespace(core=fake_mlx_core),
+            },
+        ):
+            model = self.module.MlxWhisperModel(repo_id="test/repo")
+            segments, _info = model.transcribe([0.0], language="en")
+
+        self.assertEqual(["hello"], [segment.text for segment in segments])
+        self.assertEqual([True], cleared)
+
+    def test_mlx_transcribe_releases_cache_when_transcription_fails(self):
+        cleared = []
+
+        def fail_transcription(*_args, **_kwargs):
+            raise RuntimeError("transcription failed")
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "mlx_whisper": SimpleNamespace(transcribe=fail_transcription),
+                "mlx": SimpleNamespace(
+                    core=SimpleNamespace(clear_cache=lambda: cleared.append(True))
+                ),
+            },
+        ):
+            model = self.module.MlxWhisperModel(repo_id="test/repo")
+            with self.assertRaisesRegex(RuntimeError, "transcription failed"):
+                model.transcribe([0.0], language="en")
+
+        self.assertEqual([True], cleared)
 
 
 if __name__ == "__main__":
