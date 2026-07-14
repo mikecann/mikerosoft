@@ -20,7 +20,8 @@ maximising underneath the bar.
 - Pins apps so they stay visible when closed
 - Shrinks item widths when the bar is crowded so every item still fits
 - Ellipsises long labels
-- Shows or hides the clock
+- Supports taskbar widgets, starting with a Date & Time widget
+- Lets widgets own their menu, rendering, and settings surface
 - Auto-hides with configurable animation
 - Controls taskbar size, item width, item spacing, and background opacity
 - Keeps normal windows above the taskbar when apps maximise
@@ -68,11 +69,20 @@ Useful settings:
 - Minimum and maximum item width
 - Horizontal spacing between items
 - Background opacity
-- Clock mode
+- Date & Time widget display
 - Auto-hide and reveal animation
 - Pinned apps
 - Keep windows above bar
 - Start at login
+
+## Widgets
+
+Widgets are built as small AppKit plugins inside the taskbar app. A widget can
+own its rendering, right-click menu, and settings controls, while still using
+the same global-default plus per-monitor override model as the rest of the bar.
+
+The first widget is Date & Time. It uses menu-bar-style text and can show or
+hide the date, day of week, seconds, and 24-hour time independently per monitor.
 
 ## Permissions
 

@@ -51,6 +51,9 @@ final class TaskbarPanel {
         view.onItemMenu = { [weak controller, screenID] item in
             controller?.makeItemMenu(for: item, screenID: screenID)
         }
+        view.onWidgetMenu = { [weak controller, screenID] widgetID in
+            controller?.makeWidgetMenu(for: widgetID, screenID: screenID)
+        }
         view.onMovePinnedItem = { [weak controller, screenID] item, target in
             controller?.movePinnedItem(item, before: target, screenID: screenID)
         }
@@ -147,6 +150,7 @@ final class TaskbarController: NSObject {
     private var autoHideTimer: Timer?
     private var settingsWindowController: SettingsWindowController?
     private var menuItemContext: (screenID: UInt32, item: TaskbarItem)?
+    private var menuWidgetContext: (screenID: UInt32, widgetID: TaskbarWidgetID)?
     private var menuScreenContext: UInt32?
     private let commandFileURL = URL(fileURLWithPath: "/tmp/mikerosoft-taskbar-command")
 
@@ -263,6 +267,7 @@ final class TaskbarController: NSObject {
 
     func makeItemMenu(for item: TaskbarItem, screenID: UInt32) -> NSMenu {
         menuItemContext = (screenID, item)
+        menuScreenContext = screenID
 
         let menu = NSMenu(title: item.owner)
         let pinTitle = item.isPinned ? "Unpin \(item.owner)" : "Pin \(item.owner)"
@@ -283,6 +288,71 @@ final class TaskbarController: NSObject {
         menu.addItem(settingsItem)
 
         return menu
+    }
+
+    func makeWidgetMenu(for widgetID: TaskbarWidgetID, screenID: UInt32) -> NSMenu? {
+        menuWidgetContext = (screenID, widgetID)
+        menuScreenContext = screenID
+
+        switch widgetID {
+        case .dateTime:
+            return makeDateTimeWidgetMenu(screenID: screenID)
+        }
+    }
+
+    private func makeDateTimeWidgetMenu(screenID: UInt32) -> NSMenu {
+        let value = settings.values(for: screenID).dateTimeWidget
+        let menu = NSMenu(title: "Date & Time")
+
+        let showItem = NSMenuItem(title: "Show Date & Time", action: #selector(toggleDateTimeWidgetFromMenu), keyEquivalent: "")
+        showItem.target = self
+        showItem.state = value.isEnabled ? .on : .off
+        menu.addItem(showItem)
+
+        let dateItem = NSMenuItem(title: "Date", action: nil, keyEquivalent: "")
+        let dateMenu = NSMenu(title: "Date")
+        for display in DateTimeDateDisplay.allCases {
+            let item = NSMenuItem(title: display.label, action: #selector(setDateTimeDateDisplayFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = display.rawValue
+            item.state = value.dateDisplay == display ? .on : .off
+            dateMenu.addItem(item)
+        }
+        menu.addItem(dateItem)
+        menu.setSubmenu(dateMenu, for: dateItem)
+
+        addDateTimeToggle(
+            title: "Show Day of Week",
+            state: value.showDayOfWeek,
+            action: #selector(toggleDateTimeDayOfWeekFromMenu),
+            to: menu
+        )
+        addDateTimeToggle(
+            title: "Show Seconds",
+            state: value.showSeconds,
+            action: #selector(toggleDateTimeSecondsFromMenu),
+            to: menu
+        )
+        addDateTimeToggle(
+            title: "24-Hour Time",
+            state: value.use24HourClock,
+            action: #selector(toggleDateTime24HourFromMenu),
+            to: menu
+        )
+
+        menu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Date & Time Settings...", action: #selector(showSettingsFromMenu), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        return menu
+    }
+
+    private func addDateTimeToggle(title: String, state: Bool, action: Selector, to menu: NSMenu) {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.state = state ? .on : .off
+        menu.addItem(item)
     }
 
     @objc func showSettings() {
@@ -339,6 +409,44 @@ final class TaskbarController: NSObject {
     @objc private func forceQuitMenuItem() {
         guard let pid = menuItemContext?.item.pid else { return }
         _ = forceQuitApplication(pid: pid)
+        refresh()
+    }
+
+    @objc private func toggleDateTimeWidgetFromMenu() {
+        updateDateTimeWidgetFromMenu { $0.isEnabled.toggle() }
+    }
+
+    @objc private func setDateTimeDateDisplayFromMenu(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let display = DateTimeDateDisplay(rawValue: rawValue)
+        else {
+            return
+        }
+        updateDateTimeWidgetFromMenu { $0.dateDisplay = display }
+    }
+
+    @objc private func toggleDateTimeDayOfWeekFromMenu() {
+        updateDateTimeWidgetFromMenu { $0.showDayOfWeek.toggle() }
+    }
+
+    @objc private func toggleDateTimeSecondsFromMenu() {
+        updateDateTimeWidgetFromMenu { $0.showSeconds.toggle() }
+    }
+
+    @objc private func toggleDateTime24HourFromMenu() {
+        updateDateTimeWidgetFromMenu { $0.use24HourClock.toggle() }
+    }
+
+    private func updateDateTimeWidgetFromMenu(_ transform: (inout DateTimeWidgetSettings) -> Void) {
+        guard let context = menuWidgetContext, context.widgetID == .dateTime else { return }
+        let current = settings.overrides(for: context.screenID).dateTimeWidget
+            ?? settings.values(for: context.screenID).dateTimeWidget
+        settings.updateOverrides(for: context.screenID) { override in
+            var value = current
+            transform(&value)
+            override.dateTimeWidget = value
+            override.clockMode = nil
+        }
         refresh()
     }
 

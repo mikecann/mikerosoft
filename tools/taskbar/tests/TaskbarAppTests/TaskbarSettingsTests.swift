@@ -6,6 +6,7 @@ final class TaskbarSettingsTests: XCTestCase {
         isVisible: Bool = true,
         groupByApp: Bool = true,
         clockMode: ClockMode = .time,
+        dateTimeWidget: DateTimeWidgetSettings? = nil,
         showWindowCounts: Bool = true,
         taskbarHeight: Double = 54,
         minimumItemWidth: Double = 96,
@@ -22,6 +23,7 @@ final class TaskbarSettingsTests: XCTestCase {
             isVisible: isVisible,
             groupByApp: groupByApp,
             clockMode: clockMode,
+            dateTimeWidget: dateTimeWidget,
             showWindowCounts: showWindowCounts,
             taskbarHeight: taskbarHeight,
             minimumItemWidth: minimumItemWidth,
@@ -49,7 +51,13 @@ final class TaskbarSettingsTests: XCTestCase {
         preferences.monitorOverrides["123"] = TaskbarMonitorOverrides(
             isVisible: false,
             groupByApp: false,
-            clockMode: .dateAndTime,
+            dateTimeWidget: DateTimeWidgetSettings(
+                isEnabled: true,
+                dateDisplay: .always,
+                showDayOfWeek: true,
+                showSeconds: true,
+                use24HourClock: false
+            ),
             showWindowCounts: false,
             taskbarHeight: 72,
             minimumItemWidth: 120,
@@ -69,7 +77,9 @@ final class TaskbarSettingsTests: XCTestCase {
 
         XCTAssertEqual(resolved.isVisible, false)
         XCTAssertEqual(resolved.groupByApp, false)
-        XCTAssertEqual(resolved.clockMode, .dateAndTime)
+        XCTAssertEqual(resolved.dateTimeWidget.dateDisplay, .always)
+        XCTAssertTrue(resolved.dateTimeWidget.showSeconds)
+        XCTAssertFalse(resolved.dateTimeWidget.use24HourClock)
         XCTAssertEqual(resolved.showWindowCounts, false)
         XCTAssertEqual(resolved.taskbarHeight, 72)
         XCTAssertEqual(resolved.minimumItemWidth, 120)
@@ -229,13 +239,68 @@ final class TaskbarSettingsTests: XCTestCase {
         let values = try JSONDecoder().decode(TaskbarSettingValues.self, from: data)
 
         XCTAssertEqual(values.clockMode, .hidden)
+        XCTAssertFalse(values.dateTimeWidget.isEnabled)
     }
 
-    func testClockModeEncodingDoesNotWriteLegacyShowClock() throws {
+    func testLegacyClockModeMigratesToDateTimeWidget() throws {
+        let data = """
+        {
+          "isVisible": true,
+          "groupByApp": true,
+          "clockMode": "dateAndTime",
+          "showWindowCounts": true,
+          "taskbarHeight": 54,
+          "pinnedApps": []
+        }
+        """.data(using: .utf8)!
+
+        let values = try JSONDecoder().decode(TaskbarSettingValues.self, from: data)
+
+        XCTAssertTrue(values.dateTimeWidget.isEnabled)
+        XCTAssertEqual(values.dateTimeWidget.dateDisplay, .always)
+        XCTAssertEqual(values.clockMode, .dateAndTime)
+    }
+
+    func testDateTimeWidgetOverrideReplacesGeneralSettings() {
+        let generalDateTime = DateTimeWidgetSettings(
+            isEnabled: true,
+            dateDisplay: .never,
+            showDayOfWeek: false,
+            showSeconds: false,
+            use24HourClock: true
+        )
+        let monitorDateTime = DateTimeWidgetSettings(
+            isEnabled: true,
+            dateDisplay: .always,
+            showDayOfWeek: true,
+            showSeconds: true,
+            use24HourClock: false
+        )
+        let preferences = TaskbarPreferences(
+            general: values(dateTimeWidget: generalDateTime),
+            monitorOverrides: [
+                "123": TaskbarMonitorOverrides(dateTimeWidget: monitorDateTime)
+            ]
+        )
+
+        let resolved = preferences.resolvedValues(for: 123)
+
+        XCTAssertEqual(resolved.dateTimeWidget, monitorDateTime)
+        XCTAssertEqual(resolved.clockMode, .dateAndTime)
+    }
+
+    func testDateTimeWidgetEncodingDoesNotWriteLegacyClockKeys() throws {
         let values = TaskbarSettingValues(
             isVisible: true,
             groupByApp: true,
             clockMode: .dateAndTime,
+            dateTimeWidget: DateTimeWidgetSettings(
+                isEnabled: true,
+                dateDisplay: .always,
+                showDayOfWeek: true,
+                showSeconds: true,
+                use24HourClock: false
+            ),
             showWindowCounts: true,
             taskbarHeight: 54,
             minimumItemWidth: 96,
@@ -251,10 +316,64 @@ final class TaskbarSettingsTests: XCTestCase {
 
         let data = try JSONEncoder().encode(values)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let dateTimeWidget = object?["dateTimeWidget"] as? [String: Any]
 
-        XCTAssertEqual(object?["clockMode"] as? String, "dateAndTime")
+        XCTAssertNil(object?["clockMode"])
+        XCTAssertEqual(dateTimeWidget?["dateDisplay"] as? String, "always")
+        XCTAssertEqual(dateTimeWidget?["showSeconds"] as? Bool, true)
+        XCTAssertEqual(dateTimeWidget?["use24HourClock"] as? Bool, false)
         XCTAssertNil(object?["backgroundStyle"])
         XCTAssertNil(object?["glassAmount"])
         XCTAssertNil(object?["showClock"])
+    }
+
+    func testDateTimeWidgetFormatsMenuBarLikeTime() {
+        let date = Date(timeIntervalSince1970: 0)
+        let settings = DateTimeWidgetSettings(
+            isEnabled: true,
+            dateDisplay: .never,
+            showDayOfWeek: true,
+            showSeconds: false,
+            use24HourClock: true
+        )
+
+        let text = dateTimeWidgetText(
+            settings: settings,
+            date: date,
+            availableWidth: 80,
+            locale: Locale(identifier: "en_US_POSIX"),
+            timeZone: TimeZone(secondsFromGMT: 0)!
+        )
+
+        XCTAssertEqual(text, "00:00")
+    }
+
+    func testDateTimeWidgetCanShowDateWhenSpaceAllows() {
+        let date = Date(timeIntervalSince1970: 0)
+        let settings = DateTimeWidgetSettings(
+            isEnabled: true,
+            dateDisplay: .whenSpaceAllows,
+            showDayOfWeek: true,
+            showSeconds: false,
+            use24HourClock: true
+        )
+
+        let compact = dateTimeWidgetText(
+            settings: settings,
+            date: date,
+            availableWidth: 58,
+            locale: Locale(identifier: "en_US_POSIX"),
+            timeZone: TimeZone(secondsFromGMT: 0)!
+        )
+        let expanded = dateTimeWidgetText(
+            settings: settings,
+            date: date,
+            availableWidth: 128,
+            locale: Locale(identifier: "en_US_POSIX"),
+            timeZone: TimeZone(secondsFromGMT: 0)!
+        )
+
+        XCTAssertEqual(compact, "00:00")
+        XCTAssertEqual(expanded, "Thu Jan 1 00:00")
     }
 }

@@ -6,9 +6,11 @@ final class TaskbarView: NSView {
     var onActivate: ((TaskbarItem) -> Void)?
     var onMenu: (() -> NSMenu)?
     var onItemMenu: ((TaskbarItem) -> NSMenu?)?
+    var onWidgetMenu: ((TaskbarWidgetID) -> NSMenu?)?
     var onMovePinnedItem: ((TaskbarItem, TaskbarItem?) -> Void)?
 
     private var tileRects: [(NSRect, TaskbarItem)] = []
+    private var widgetRects: [(NSRect, TaskbarWidgetID)] = []
     private var mouseDownItem: TaskbarItem?
     private var didDragPinnedItem = false
     private let leftPadding: CGFloat = 6
@@ -25,19 +27,20 @@ final class TaskbarView: NSView {
     func update(items: [TaskbarItem], settings: TaskbarSettingValues) {
         self.items = items
         self.settings = settings
-        let layout = tileLayout()
-        tileRects = layout
+        tileRects = tileLayout()
+        widgetRects = widgetLayout(after: tileRects)
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
         tileRects = tileLayout()
+        widgetRects = widgetLayout(after: tileRects)
 
         for (rect, item) in tileRects {
             drawTile(item: item, rect: rect)
         }
 
-        drawTrailingChrome(clockMode: settings.clockMode)
+        drawWidgets()
     }
 
     func frontmostTileLayout() -> (rect: NSRect, item: TaskbarItem)? {
@@ -126,6 +129,12 @@ final class TaskbarView: NSView {
             return
         }
 
+        if let widgetID = widgetRects.first(where: { $0.0.contains(point) })?.1,
+           let widgetMenu = onWidgetMenu?(widgetID) {
+            NSMenu.popUpContextMenu(widgetMenu, with: event, for: self)
+            return
+        }
+
         guard let menu = onMenu?() else { return }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
@@ -146,14 +155,49 @@ final class TaskbarView: NSView {
     }
 
     private func trailingWidth() -> CGFloat {
-        switch settings.clockMode {
-        case .hidden:
-            return 8
-        case .time:
-            return 54
-        case .dateAndTime:
-            return 122
+        let widgets = activeTaskbarWidgets(for: settings)
+        guard !widgets.isEmpty else { return 8 }
+
+        let spacing = CGFloat(settings.itemSpacing)
+        let widgetWidths = widgets.reduce(CGFloat(0)) { total, widget in
+            total + widget.minimumWidth(in: settings, height: tileHeight)
         }
+        return widgetWidths + spacing * CGFloat(max(0, widgets.count - 1)) + 12
+    }
+
+    private func widgetLayout(after tileLayout: [(NSRect, TaskbarItem)]) -> [(NSRect, TaskbarWidgetID)] {
+        let widgets = activeTaskbarWidgets(for: settings)
+        guard !widgets.isEmpty else { return [] }
+
+        let lastTileMaxX = tileLayout.map { $0.0.maxX }.max() ?? leftPadding
+        let leftLimit = min(bounds.width - 8, max(lastTileMaxX + 8, leftPadding))
+        var rightX = bounds.width - 8
+        let availableTrailingWidth = max(0, rightX - leftLimit)
+        let y: CGFloat = max(2, (bounds.height - tileHeight) / 2)
+        let spacing = CGFloat(settings.itemSpacing)
+
+        var remainingWidth = availableTrailingWidth
+        var layout: [(NSRect, TaskbarWidgetID)] = []
+        for widget in widgets.reversed() {
+            let minimumWidth = widget.minimumWidth(in: settings, height: tileHeight)
+            let preferredWidth = widget.preferredWidth(
+                in: settings,
+                height: tileHeight,
+                availableWidth: remainingWidth
+            )
+            let width = min(max(minimumWidth, preferredWidth), max(minimumWidth, remainingWidth))
+            let rect = NSRect(
+                x: rightX - width,
+                y: y,
+                width: width,
+                height: tileHeight
+            )
+            layout.append((rect, widget.id))
+            rightX = rect.minX - spacing
+            remainingWidth = max(0, rightX - leftLimit)
+        }
+
+        return layout.reversed()
     }
 
     private func drawTile(item: TaskbarItem, rect: NSRect) {
@@ -202,20 +246,11 @@ final class TaskbarView: NSView {
         )
     }
 
-    private func drawTrailingChrome(clockMode: ClockMode) {
-        guard clockMode != .hidden else { return }
-
-        let textY = max(9, bounds.midY - 9)
-        let formatter = DateFormatter()
-        switch clockMode {
-        case .hidden:
-            return
-        case .time:
-            formatter.dateFormat = "HH:mm"
-            drawTaskbarText(formatter.string(from: Date()), in: NSRect(x: bounds.width - 48, y: textY, width: 40, height: 18), size: 12, bold: false, active: false)
-        case .dateAndTime:
-            formatter.dateFormat = "EEE HH:mm"
-            drawTaskbarText(formatter.string(from: Date()), in: NSRect(x: bounds.width - 116, y: textY, width: 108, height: 18), size: 12, bold: false, active: false)
+    private func drawWidgets() {
+        let widgetsByID = Dictionary(uniqueKeysWithValues: activeTaskbarWidgets(for: settings).map { ($0.id, $0) })
+        let date = Date()
+        for (rect, widgetID) in widgetRects {
+            widgetsByID[widgetID]?.draw(in: rect, values: settings, date: date)
         }
     }
 }

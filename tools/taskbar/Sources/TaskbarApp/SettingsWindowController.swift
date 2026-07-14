@@ -254,9 +254,17 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         ))
         stack.addArrangedSubview(settingRow(
             icon: "clock",
-            title: "Clock",
-            description: "Choose what appears at the right edge of the bar.",
-            control: clockPopup(mode: values.clockMode, enabled: true, action: #selector(setGeneralClockMode(_:)))
+            title: "Date & Time",
+            description: "Configure the Date & Time widget at the right edge.",
+            control: dateTimeWidgetControls(
+                value: values.dateTimeWidget,
+                enabled: true,
+                enabledAction: #selector(setGeneralDateTimeEnabled(_:)),
+                dateDisplayAction: #selector(setGeneralDateTimeDateDisplay(_:)),
+                dayOfWeekAction: #selector(setGeneralDateTimeDayOfWeek(_:)),
+                secondsAction: #selector(setGeneralDateTimeSeconds(_:)),
+                twentyFourHourAction: #selector(setGeneralDateTime24Hour(_:))
+            )
         ))
         stack.addArrangedSubview(settingRow(
             icon: "arrow.up.and.down",
@@ -334,9 +342,9 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             overrideAction: #selector(toggleMonitorVisibleOverride(_:)),
             valueAction: #selector(setMonitorVisible(_:))
         ))
-        stack.addArrangedSubview(overrideClockRow(
-            isOverridden: override.clockMode != nil,
-            value: resolved.clockMode
+        stack.addArrangedSubview(overrideDateTimeWidgetRow(
+            isOverridden: override.dateTimeWidget != nil || override.clockMode != nil,
+            value: resolved.dateTimeWidget
         ))
         stack.addArrangedSubview(overrideHeightRow(
             isOverridden: override.taskbarHeight != nil,
@@ -465,18 +473,54 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         return button
     }
 
-    private func clockPopup(mode: ClockMode, enabled: Bool, action: Selector) -> NSPopUpButton {
+    private func titledCheckbox(_ title: String, state: Bool, enabled: Bool, action: Selector) -> NSButton {
+        let button = NSButton(checkboxWithTitle: title, target: self, action: action)
+        button.state = state ? .on : .off
+        button.isEnabled = enabled
+        return button
+    }
+
+    private func dateTimeWidgetControls(
+        value: DateTimeWidgetSettings,
+        enabled: Bool,
+        enabledAction: Selector,
+        dateDisplayAction: Selector,
+        dayOfWeekAction: Selector,
+        secondsAction: Selector,
+        twentyFourHourAction: Selector
+    ) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+
+        let topRow = horizontalRow()
+        topRow.addArrangedSubview(titledCheckbox("Show", state: value.isEnabled, enabled: enabled, action: enabledAction))
+        topRow.addArrangedSubview(dateDisplayPopup(display: value.dateDisplay, enabled: enabled, action: dateDisplayAction))
+
+        let optionsRow = horizontalRow()
+        optionsRow.spacing = 10
+        optionsRow.addArrangedSubview(titledCheckbox("Day", state: value.showDayOfWeek, enabled: enabled, action: dayOfWeekAction))
+        optionsRow.addArrangedSubview(titledCheckbox("Seconds", state: value.showSeconds, enabled: enabled, action: secondsAction))
+        optionsRow.addArrangedSubview(titledCheckbox("24-hour", state: value.use24HourClock, enabled: enabled, action: twentyFourHourAction))
+
+        stack.addArrangedSubview(topRow)
+        stack.addArrangedSubview(optionsRow)
+        return stack
+    }
+
+    private func dateDisplayPopup(display: DateTimeDateDisplay, enabled: Bool, action: Selector) -> NSPopUpButton {
         let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-        for mode in ClockMode.allCases {
-            popup.addItem(withTitle: mode.label)
+        for display in DateTimeDateDisplay.allCases {
+            popup.addItem(withTitle: display.label)
         }
-        if let index = ClockMode.allCases.firstIndex(of: mode) {
+        if let index = DateTimeDateDisplay.allCases.firstIndex(of: display) {
             popup.selectItem(at: index)
         }
         popup.target = self
         popup.action = action
         popup.isEnabled = enabled
-        popup.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        popup.widthAnchor.constraint(equalToConstant: 170).isActive = true
         return popup
     }
 
@@ -604,19 +648,30 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         return settingRow(icon: icon, title: title, description: description, control: controls)
     }
 
-    private func overrideClockRow(isOverridden: Bool, value: ClockMode) -> NSView {
-        let controls = horizontalRow()
+    private func overrideDateTimeWidgetRow(isOverridden: Bool, value: DateTimeWidgetSettings) -> NSView {
+        let controls = NSStackView()
+        controls.orientation = .vertical
+        controls.alignment = .leading
+        controls.spacing = 6
 
-        let override = NSButton(checkboxWithTitle: "Override", target: self, action: #selector(toggleMonitorClockOverride(_:)))
+        let override = NSButton(checkboxWithTitle: "Override", target: self, action: #selector(toggleMonitorDateTimeOverride(_:)))
         override.state = isOverridden ? .on : .off
         override.widthAnchor.constraint(equalToConstant: 92).isActive = true
 
         controls.addArrangedSubview(override)
-        controls.addArrangedSubview(clockPopup(mode: value, enabled: isOverridden, action: #selector(setMonitorClockMode(_:))))
+        controls.addArrangedSubview(dateTimeWidgetControls(
+            value: value,
+            enabled: isOverridden,
+            enabledAction: #selector(setMonitorDateTimeEnabled(_:)),
+            dateDisplayAction: #selector(setMonitorDateTimeDateDisplay(_:)),
+            dayOfWeekAction: #selector(setMonitorDateTimeDayOfWeek(_:)),
+            secondsAction: #selector(setMonitorDateTimeSeconds(_:)),
+            twentyFourHourAction: #selector(setMonitorDateTime24Hour(_:))
+        ))
         return settingRow(
             icon: "clock",
-            title: "Clock",
-            description: "Choose what appears at the right edge of this bar.",
+            title: "Date & Time",
+            description: "Configure this monitor's Date & Time widget.",
             control: controls
         )
     }
@@ -872,6 +927,12 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         return ClockMode.allCases[index]
     }
 
+    private func selectedDateDisplay(from popup: NSPopUpButton) -> DateTimeDateDisplay? {
+        let index = popup.indexOfSelectedItem
+        guard DateTimeDateDisplay.allCases.indices.contains(index) else { return nil }
+        return DateTimeDateDisplay.allCases[index]
+    }
+
     private func selectedRevealAnimation(from popup: NSPopUpButton) -> RevealAnimation? {
         let index = popup.indexOfSelectedItem
         guard RevealAnimation.allCases.indices.contains(index) else { return nil }
@@ -898,9 +959,25 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         settings.updateGeneral { $0.showWindowCounts = sender.state == .on }
     }
 
-    @objc private func setGeneralClockMode(_ sender: NSPopUpButton) {
-        guard let mode = selectedClockMode(from: sender) else { return }
-        settings.updateGeneral { $0.clockMode = mode }
+    @objc private func setGeneralDateTimeEnabled(_ sender: NSButton) {
+        settings.updateGeneral { $0.dateTimeWidget.isEnabled = sender.state == .on }
+    }
+
+    @objc private func setGeneralDateTimeDateDisplay(_ sender: NSPopUpButton) {
+        guard let display = selectedDateDisplay(from: sender) else { return }
+        settings.updateGeneral { $0.dateTimeWidget.dateDisplay = display }
+    }
+
+    @objc private func setGeneralDateTimeDayOfWeek(_ sender: NSButton) {
+        settings.updateGeneral { $0.dateTimeWidget.showDayOfWeek = sender.state == .on }
+    }
+
+    @objc private func setGeneralDateTimeSeconds(_ sender: NSButton) {
+        settings.updateGeneral { $0.dateTimeWidget.showSeconds = sender.state == .on }
+    }
+
+    @objc private func setGeneralDateTime24Hour(_ sender: NSButton) {
+        settings.updateGeneral { $0.dateTimeWidget.use24HourClock = sender.state == .on }
     }
 
     @objc private func setGeneralHeight(_ sender: NSSlider) {
@@ -967,10 +1044,13 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         renderDetail()
     }
 
-    @objc private func toggleMonitorClockOverride(_ sender: NSButton) {
+    @objc private func toggleMonitorDateTimeOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).clockMode
-        settings.updateOverrides(for: id) { $0.clockMode = sender.state == .on ? value : nil }
+        let value = settings.values(for: id).dateTimeWidget
+        settings.updateOverrides(for: id) {
+            $0.dateTimeWidget = sender.state == .on ? value : nil
+            $0.clockMode = nil
+        }
         renderDetail()
     }
 
@@ -1059,9 +1139,36 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         settings.updateOverrides(for: id) { $0.showWindowCounts = sender.state == .on }
     }
 
-    @objc private func setMonitorClockMode(_ sender: NSPopUpButton) {
-        guard let id = selectedMonitorID, let mode = selectedClockMode(from: sender) else { return }
-        settings.updateOverrides(for: id) { $0.clockMode = mode }
+    private func updateMonitorDateTimeWidget(_ transform: (inout DateTimeWidgetSettings) -> Void) {
+        guard let id = selectedMonitorID else { return }
+        let current = settings.overrides(for: id).dateTimeWidget ?? settings.values(for: id).dateTimeWidget
+        settings.updateOverrides(for: id) { override in
+            var value = current
+            transform(&value)
+            override.dateTimeWidget = value
+            override.clockMode = nil
+        }
+    }
+
+    @objc private func setMonitorDateTimeEnabled(_ sender: NSButton) {
+        updateMonitorDateTimeWidget { $0.isEnabled = sender.state == .on }
+    }
+
+    @objc private func setMonitorDateTimeDateDisplay(_ sender: NSPopUpButton) {
+        guard let display = selectedDateDisplay(from: sender) else { return }
+        updateMonitorDateTimeWidget { $0.dateDisplay = display }
+    }
+
+    @objc private func setMonitorDateTimeDayOfWeek(_ sender: NSButton) {
+        updateMonitorDateTimeWidget { $0.showDayOfWeek = sender.state == .on }
+    }
+
+    @objc private func setMonitorDateTimeSeconds(_ sender: NSButton) {
+        updateMonitorDateTimeWidget { $0.showSeconds = sender.state == .on }
+    }
+
+    @objc private func setMonitorDateTime24Hour(_ sender: NSButton) {
+        updateMonitorDateTimeWidget { $0.use24HourClock = sender.state == .on }
     }
 
     @objc private func setMonitorHeight(_ sender: NSSlider) {
