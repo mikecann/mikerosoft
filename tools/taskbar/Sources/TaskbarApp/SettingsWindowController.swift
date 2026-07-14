@@ -4,6 +4,7 @@ enum SettingsSidebarItem: Equatable {
     case general
     case widgets
     case widget(TaskbarWidgetID)
+    case divider(String)
     case monitor(ScreenInfo)
     case monitorWidget(ScreenInfo, TaskbarWidgetID)
 
@@ -15,6 +16,8 @@ enum SettingsSidebarItem: Equatable {
             return "Widgets"
         case .widget(let widgetID), .monitorWidget(_, let widgetID):
             return taskbarWidgetPlugin(id: widgetID)?.title ?? widgetID.rawValue
+        case .divider(let title):
+            return title
         case .monitor(let screen):
             return screen.name
         }
@@ -28,6 +31,8 @@ enum SettingsSidebarItem: Equatable {
             return "puzzlepiece.extension"
         case .widget(let widgetID), .monitorWidget(_, let widgetID):
             return taskbarWidgetPlugin(id: widgetID)?.symbolName ?? "puzzlepiece.extension"
+        case .divider:
+            return ""
         case .monitor:
             return "display"
         }
@@ -37,8 +42,19 @@ enum SettingsSidebarItem: Equatable {
         switch self {
         case .general, .widgets, .monitor:
             return 0
+        case .divider:
+            return 0
         case .widget, .monitorWidget:
             return 1
+        }
+    }
+
+    var isSelectable: Bool {
+        switch self {
+        case .divider:
+            return false
+        case .general, .widgets, .widget, .monitor, .monitorWidget:
+            return true
         }
     }
 }
@@ -53,6 +69,10 @@ func taskbarSettingsSidebarItems(
     ]
     items.append(contentsOf: widgets.map { .widget($0) })
 
+    if !screens.isEmpty {
+        items.append(.divider("Per Monitor"))
+    }
+
     for screen in screens {
         items.append(.monitor(screen))
         items.append(contentsOf: widgets.map { .monitorWidget(screen, $0) })
@@ -62,6 +82,44 @@ func taskbarSettingsSidebarItems(
 
 private final class SettingsSidebarCell: NSTableCellView {
     var imageLeadingConstraint: NSLayoutConstraint?
+}
+
+private final class SettingsSidebarDividerCell: NSTableCellView {
+    let line = NSBox()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        build()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        build()
+    }
+
+    private func build() {
+        guard textField == nil else { return }
+
+        let label = NSTextField(labelWithString: "")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.boxType = .separator
+
+        addSubview(label)
+        addSubview(line)
+        textField = label
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
+            line.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
+            line.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            line.centerYAnchor.constraint(equalTo: label.centerYAnchor)
+        ])
+    }
 }
 
 private final class PinnedAppButton: NSButton {
@@ -170,6 +228,16 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let item = sidebarItems[row]
+        if case .divider = item {
+            let identifier = NSUserInterfaceItemIdentifier("SettingsSidebarDividerCell")
+            let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? SettingsSidebarDividerCell
+                ?? SettingsSidebarDividerCell(frame: .zero)
+            cell.identifier = identifier
+            cell.textField?.stringValue = item.title
+            return cell
+        }
+
         let identifier = NSUserInterfaceItemIdentifier("SettingsSidebarCell")
         let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? SettingsSidebarCell
             ?? SettingsSidebarCell(frame: .zero)
@@ -206,7 +274,6 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             ])
         }
 
-        let item = sidebarItems[row]
         cell.identifier = identifier
         cell.imageLeadingConstraint?.constant = 12 + CGFloat(item.indentLevel * 18)
         cell.imageView?.image = symbol(item.symbolName)
@@ -215,9 +282,18 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         return cell
     }
 
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        sidebarItems[row].isSelectable ? 34 : 24
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        sidebarItems[row].isSelectable
+    }
+
     func tableViewSelectionDidChange(_ notification: Notification) {
         let row = tableView.selectedRow
         guard sidebarItems.indices.contains(row) else { return }
+        guard sidebarItems[row].isSelectable else { return }
         selectedItem = sidebarItems[row]
         renderDetail()
     }
@@ -300,6 +376,8 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             renderWidgets(in: stack)
         case .widget(let widgetID):
             renderWidget(widgetID, screen: nil, in: stack)
+        case .divider:
+            renderGeneral(in: stack)
         case .monitor(let screen):
             renderMonitor(screen, in: stack)
         case .monitorWidget(let screen, let widgetID):
@@ -1025,7 +1103,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         switch selectedItem {
         case .monitor(let screen), .monitorWidget(let screen, _):
             return screen.id
-        case .general, .widgets, .widget:
+        case .general, .widgets, .widget, .divider:
             return nil
         }
     }

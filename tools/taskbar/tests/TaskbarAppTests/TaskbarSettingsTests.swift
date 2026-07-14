@@ -400,6 +400,7 @@ final class TaskbarSettingsTests: XCTestCase {
             .general,
             .widgets,
             .widget(.dateTime),
+            .divider("Per Monitor"),
             .monitor(first),
             .monitorWidget(first, .dateTime),
             .monitor(second),
@@ -409,11 +410,13 @@ final class TaskbarSettingsTests: XCTestCase {
             "General",
             "Widgets",
             "Date & Time",
+            "Per Monitor",
             "LG Monitor",
             "Date & Time",
             "Built-in Display",
             "Date & Time"
         ])
-        XCTAssertEqual(items.map(\.indentLevel), [0, 0, 1, 0, 1, 0, 1])
+        XCTAssertEqual(items.map(\.indentLevel), [0, 0, 1, 0, 0, 1, 0, 1])
+        XCTAssertEqual(items.map(\.isSelectable), [true, true, true, false, true, true, true, true])
     }
 }
