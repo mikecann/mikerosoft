@@ -94,10 +94,21 @@ struct DateTimeWidgetPlugin: TaskbarWidgetPlugin {
 }
 
 func activeTaskbarWidgets(for values: TaskbarSettingValues) -> [any TaskbarWidgetPlugin] {
-    let widgets: [any TaskbarWidgetPlugin] = [
+    installedTaskbarWidgetPlugins().filter { $0.isEnabled(in: values) }
+}
+
+func installedTaskbarWidgetPlugins() -> [any TaskbarWidgetPlugin] {
+    [
         DateTimeWidgetPlugin()
     ]
-    return widgets.filter { $0.isEnabled(in: values) }
+}
+
+func installedTaskbarWidgetIDs() -> [TaskbarWidgetID] {
+    installedTaskbarWidgetPlugins().map(\.id)
+}
+
+func taskbarWidgetPlugin(id: TaskbarWidgetID) -> (any TaskbarWidgetPlugin)? {
+    installedTaskbarWidgetPlugins().first { $0.id == id }
 }
 
 func dateTimeWidgetText(

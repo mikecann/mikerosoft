@@ -376,4 +376,44 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(compact, "00:00")
         XCTAssertEqual(expanded, "Thu Jan 1 00:00")
     }
+
+    func testSettingsSidebarSeparatesWidgetPagesFromBarPages() {
+        let first = ScreenInfo(
+            id: 1,
+            name: "LG Monitor",
+            appKitFrame: .zero,
+            quartzFrame: .zero
+        )
+        let second = ScreenInfo(
+            id: 2,
+            name: "Built-in Display",
+            appKitFrame: .zero,
+            quartzFrame: .zero
+        )
+
+        let items = taskbarSettingsSidebarItems(
+            screens: [first, second],
+            widgets: [.dateTime]
+        )
+
+        XCTAssertEqual(items, [
+            .general,
+            .widgets,
+            .widget(.dateTime),
+            .monitor(first),
+            .monitorWidget(first, .dateTime),
+            .monitor(second),
+            .monitorWidget(second, .dateTime)
+        ])
+        XCTAssertEqual(items.map(\.title), [
+            "General",
+            "Widgets",
+            "Date & Time",
+            "LG Monitor",
+            "Date & Time",
+            "Built-in Display",
+            "Date & Time"
+        ])
+        XCTAssertEqual(items.map(\.indentLevel), [0, 0, 1, 0, 1, 0, 1])
+    }
 }

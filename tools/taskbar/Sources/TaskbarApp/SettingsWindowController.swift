@@ -1,13 +1,20 @@
 import AppKit
 
-private enum SettingsSidebarItem: Equatable {
+enum SettingsSidebarItem: Equatable {
     case general
+    case widgets
+    case widget(TaskbarWidgetID)
     case monitor(ScreenInfo)
+    case monitorWidget(ScreenInfo, TaskbarWidgetID)
 
     var title: String {
         switch self {
         case .general:
             return "General"
+        case .widgets:
+            return "Widgets"
+        case .widget(let widgetID), .monitorWidget(_, let widgetID):
+            return taskbarWidgetPlugin(id: widgetID)?.title ?? widgetID.rawValue
         case .monitor(let screen):
             return screen.name
         }
@@ -17,10 +24,44 @@ private enum SettingsSidebarItem: Equatable {
         switch self {
         case .general:
             return "gearshape"
+        case .widgets:
+            return "puzzlepiece.extension"
+        case .widget(let widgetID), .monitorWidget(_, let widgetID):
+            return taskbarWidgetPlugin(id: widgetID)?.symbolName ?? "puzzlepiece.extension"
         case .monitor:
             return "display"
         }
     }
+
+    var indentLevel: Int {
+        switch self {
+        case .general, .widgets, .monitor:
+            return 0
+        case .widget, .monitorWidget:
+            return 1
+        }
+    }
+}
+
+func taskbarSettingsSidebarItems(
+    screens: [ScreenInfo],
+    widgets: [TaskbarWidgetID] = installedTaskbarWidgetIDs()
+) -> [SettingsSidebarItem] {
+    var items: [SettingsSidebarItem] = [
+        .general,
+        .widgets
+    ]
+    items.append(contentsOf: widgets.map { .widget($0) })
+
+    for screen in screens {
+        items.append(.monitor(screen))
+        items.append(contentsOf: widgets.map { .monitorWidget(screen, $0) })
+    }
+    return items
+}
+
+private final class SettingsSidebarCell: NSTableCellView {
+    var imageLeadingConstraint: NSLayoutConstraint?
 }
 
 private final class PinnedAppButton: NSButton {
@@ -99,6 +140,25 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         renderDetail()
     }
 
+    func selectWidget(_ widgetID: TaskbarWidgetID, screenID: UInt32? = nil) {
+        guard let row = sidebarItems.firstIndex(where: { item in
+            switch (item, screenID) {
+            case (.widget(let candidateID), nil):
+                return candidateID == widgetID
+            case (.monitorWidget(let screen, let candidateID), .some(let screenID)):
+                return screen.id == screenID && candidateID == widgetID
+            default:
+                return false
+            }
+        }) else {
+            return
+        }
+
+        selectedItem = sidebarItems[row]
+        tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        renderDetail()
+    }
+
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
         window?.makeKeyAndOrderFront(sender)
@@ -111,8 +171,8 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let identifier = NSUserInterfaceItemIdentifier("SettingsSidebarCell")
-        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView
-            ?? NSTableCellView(frame: .zero)
+        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? SettingsSidebarCell
+            ?? SettingsSidebarCell(frame: .zero)
 
         if cell.textField == nil || cell.imageView == nil {
             cell.subviews.forEach { $0.removeFromSuperview() }
@@ -131,8 +191,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             cell.imageView = imageView
             cell.textField = textField
 
+            let imageLeadingConstraint = imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12)
+            cell.imageLeadingConstraint = imageLeadingConstraint
+
             NSLayoutConstraint.activate([
-                imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
+                imageLeadingConstraint,
                 imageView.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                 imageView.widthAnchor.constraint(equalToConstant: 18),
                 imageView.heightAnchor.constraint(equalToConstant: 18),
@@ -145,8 +208,10 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
         let item = sidebarItems[row]
         cell.identifier = identifier
+        cell.imageLeadingConstraint?.constant = 12 + CGFloat(item.indentLevel * 18)
         cell.imageView?.image = symbol(item.symbolName)
         cell.textField?.stringValue = item.title
+        cell.textField?.font = item.indentLevel == 0 ? .systemFont(ofSize: 13, weight: .regular) : .systemFont(ofSize: 12, weight: .regular)
         return cell
     }
 
@@ -158,7 +223,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     private func rebuildSidebarItems() {
-        sidebarItems = [.general] + screens.map { .monitor($0) }
+        sidebarItems = taskbarSettingsSidebarItems(screens: screens)
     }
 
     private func buildWindowContent() {
@@ -231,8 +296,14 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         switch selectedItem {
         case .general:
             renderGeneral(in: stack)
+        case .widgets:
+            renderWidgets(in: stack)
+        case .widget(let widgetID):
+            renderWidget(widgetID, screen: nil, in: stack)
         case .monitor(let screen):
             renderMonitor(screen, in: stack)
+        case .monitorWidget(let screen, let widgetID):
+            renderWidget(widgetID, screen: screen, in: stack)
         }
     }
 
@@ -251,20 +322,6 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             title: "Show taskbar",
             description: "Draw the bar on monitors using these defaults.",
             control: checkbox(state: values.isVisible, action: #selector(setGeneralVisible(_:)))
-        ))
-        stack.addArrangedSubview(settingRow(
-            icon: "clock",
-            title: "Date & Time",
-            description: "Configure the Date & Time widget at the right edge.",
-            control: dateTimeWidgetControls(
-                value: values.dateTimeWidget,
-                enabled: true,
-                enabledAction: #selector(setGeneralDateTimeEnabled(_:)),
-                dateDisplayAction: #selector(setGeneralDateTimeDateDisplay(_:)),
-                dayOfWeekAction: #selector(setGeneralDateTimeDayOfWeek(_:)),
-                secondsAction: #selector(setGeneralDateTimeSeconds(_:)),
-                twentyFourHourAction: #selector(setGeneralDateTime24Hour(_:))
-            )
         ))
         stack.addArrangedSubview(settingRow(
             icon: "arrow.up.and.down",
@@ -342,10 +399,6 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             overrideAction: #selector(toggleMonitorVisibleOverride(_:)),
             valueAction: #selector(setMonitorVisible(_:))
         ))
-        stack.addArrangedSubview(overrideDateTimeWidgetRow(
-            isOverridden: override.dateTimeWidget != nil || override.clockMode != nil,
-            value: resolved.dateTimeWidget
-        ))
         stack.addArrangedSubview(overrideHeightRow(
             isOverridden: override.taskbarHeight != nil,
             value: resolved.taskbarHeight
@@ -415,6 +468,60 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         stack.addArrangedSubview(overridePinnedAppsSection(
             apps: resolved.pinnedApps,
             isOverridden: override.pinnedApps != nil
+        ))
+    }
+
+    private func renderWidgets(in stack: NSStackView) {
+        addHeader("Widgets", subtitle: "Installed taskbar widgets. Choose a widget in the sidebar to configure its defaults or monitor overrides.", to: stack)
+
+        for widget in installedTaskbarWidgetPlugins() {
+            let isEnabled = widget.isEnabled(in: settings.preferences.general)
+            let status = NSTextField(labelWithString: isEnabled ? "Enabled by default" : "Off by default")
+            status.textColor = .secondaryLabelColor
+            status.widthAnchor.constraint(equalToConstant: 130).isActive = true
+            stack.addArrangedSubview(settingRow(
+                icon: widget.symbolName,
+                title: widget.title,
+                description: "Widget settings live on their own page.",
+                control: status
+            ))
+        }
+    }
+
+    private func renderWidget(_ widgetID: TaskbarWidgetID, screen: ScreenInfo?, in stack: NSStackView) {
+        switch widgetID {
+        case .dateTime:
+            renderDateTimeWidget(screen: screen, in: stack)
+        }
+    }
+
+    private func renderDateTimeWidget(screen: ScreenInfo?, in stack: NSStackView) {
+        if let screen {
+            let override = settings.overrides(for: screen.id)
+            let resolved = settings.values(for: screen.id)
+            addHeader("Date & Time", subtitle: "\(screen.name) override for the Date & Time widget.", to: stack)
+            stack.addArrangedSubview(overrideDateTimeWidgetRow(
+                isOverridden: override.dateTimeWidget != nil || override.clockMode != nil,
+                value: resolved.dateTimeWidget
+            ))
+            return
+        }
+
+        let values = settings.preferences.general
+        addHeader("Date & Time", subtitle: "Default Date & Time widget settings used by every monitor unless that monitor has an override.", to: stack)
+        stack.addArrangedSubview(settingRow(
+            icon: "clock",
+            title: "Date & Time",
+            description: "Configure the widget at the right edge of the bar.",
+            control: dateTimeWidgetControls(
+                value: values.dateTimeWidget,
+                enabled: true,
+                enabledAction: #selector(setGeneralDateTimeEnabled(_:)),
+                dateDisplayAction: #selector(setGeneralDateTimeDateDisplay(_:)),
+                dayOfWeekAction: #selector(setGeneralDateTimeDayOfWeek(_:)),
+                secondsAction: #selector(setGeneralDateTimeSeconds(_:)),
+                twentyFourHourAction: #selector(setGeneralDateTime24Hour(_:))
+            )
         ))
     }
 
@@ -915,16 +1022,12 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     private var selectedMonitorID: UInt32? {
-        if case .monitor(let screen) = selectedItem {
+        switch selectedItem {
+        case .monitor(let screen), .monitorWidget(let screen, _):
             return screen.id
+        case .general, .widgets, .widget:
+            return nil
         }
-        return nil
-    }
-
-    private func selectedClockMode(from popup: NSPopUpButton) -> ClockMode? {
-        let index = popup.indexOfSelectedItem
-        guard ClockMode.allCases.indices.contains(index) else { return nil }
-        return ClockMode.allCases[index]
     }
 
     private func selectedDateDisplay(from popup: NSPopUpButton) -> DateTimeDateDisplay? {

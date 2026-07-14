@@ -341,7 +341,7 @@ final class TaskbarController: NSObject {
         )
 
         menu.addItem(.separator())
-        let settingsItem = NSMenuItem(title: "Date & Time Settings...", action: #selector(showSettingsFromMenu), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: "Date & Time Settings...", action: #selector(showWidgetSettingsFromMenu), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
@@ -363,6 +363,14 @@ final class TaskbarController: NSObject {
         showSettings(screenID: menuScreenContext)
     }
 
+    @objc private func showWidgetSettingsFromMenu() {
+        guard let context = menuWidgetContext else {
+            showSettings(screenID: menuScreenContext)
+            return
+        }
+        showSettings(widgetID: context.widgetID, screenID: context.screenID)
+    }
+
     func showSettings(screenID: UInt32?) {
         let screens = collectScreens()
         if settingsWindowController == nil {
@@ -373,6 +381,18 @@ final class TaskbarController: NSObject {
         if let screenID {
             settingsWindowController?.selectMonitor(screenID: screenID)
         }
+        settingsWindowController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func showSettings(widgetID: TaskbarWidgetID, screenID: UInt32?) {
+        let screens = collectScreens()
+        if settingsWindowController == nil {
+            settingsWindowController = SettingsWindowController(settings: settings, screens: screens)
+        } else {
+            settingsWindowController?.updateScreens(screens)
+        }
+        settingsWindowController?.selectWidget(widgetID, screenID: screenID)
         settingsWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

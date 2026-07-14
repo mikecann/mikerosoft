@@ -61,7 +61,8 @@ bash tools/taskbar/kill.sh
 Right-click any taskbar and choose settings.
 
 The General page sets the default values. Each monitor page can inherit those
-defaults or override individual settings for that display.
+defaults or override individual bar settings for that display. Widget settings
+live under the Widgets section instead of being mixed into the bar settings.
 
 Useful settings:
 
@@ -77,9 +78,13 @@ Useful settings:
 
 ## Widgets
 
-Widgets are built as small AppKit plugins inside the taskbar app. A widget can
-own its rendering, right-click menu, and settings controls, while still using
-the same global-default plus per-monitor override model as the rest of the bar.
+Widgets are built as small AppKit plugins inside the taskbar app. A widget owns
+its rendering, right-click menu, and settings controls, while still using the
+same global-default plus per-monitor override model as the rest of the bar.
+
+The settings sidebar lists installed widgets under Widgets, and also shows each
+monitor's widget override pages under that monitor. Disabled widgets remain
+visible in settings so they can be turned back on.
 
 The first widget is Date & Time. It uses menu-bar-style text and can show or
 hide the date, day of week, seconds, and 24-hour time independently per monitor.
