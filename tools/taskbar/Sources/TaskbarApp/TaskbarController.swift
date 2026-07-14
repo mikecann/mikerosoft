@@ -295,9 +295,72 @@ final class TaskbarController: NSObject {
         menuScreenContext = screenID
 
         switch widgetID {
+        case .stats:
+            return makeStatsWidgetMenu(screenID: screenID)
         case .dateTime:
             return makeDateTimeWidgetMenu(screenID: screenID)
         }
+    }
+
+    private func makeStatsWidgetMenu(screenID: UInt32) -> NSMenu {
+        let value = settings.values(for: screenID).statsWidget
+        let snapshot = TaskbarStatsSampler.shared.snapshot()
+        let menu = NSMenu(title: "Stats")
+
+        let summary = NSMenuItem(
+            title: "CPU \(formattedStatsPercent(snapshot.cpuPercent))  RAM \(formattedStatsPercent(snapshot.memoryPercent))",
+            action: nil,
+            keyEquivalent: ""
+        )
+        summary.isEnabled = false
+        menu.addItem(summary)
+
+        let network = NSMenuItem(
+            title: "Net ↑ \(formattedStatsBytesPerSecond(snapshot.networkUploadBytesPerSecond))  ↓ \(formattedStatsBytesPerSecond(snapshot.networkDownloadBytesPerSecond))",
+            action: nil,
+            keyEquivalent: ""
+        )
+        network.isEnabled = false
+        menu.addItem(network)
+        menu.addItem(.separator())
+
+        addWidgetToggle(
+            title: "Show Stats",
+            state: value.isEnabled,
+            action: #selector(toggleStatsWidgetFromMenu),
+            to: menu
+        )
+        addWidgetToggle(
+            title: "CPU",
+            state: value.showCPU,
+            action: #selector(toggleStatsCPUFromMenu),
+            to: menu
+        )
+        addWidgetToggle(
+            title: "RAM",
+            state: value.showMemory,
+            action: #selector(toggleStatsMemoryFromMenu),
+            to: menu
+        )
+        addWidgetToggle(
+            title: "Network",
+            state: value.showNetwork,
+            action: #selector(toggleStatsNetworkFromMenu),
+            to: menu
+        )
+        addWidgetToggle(
+            title: "CPU Graph",
+            state: value.showMiniGraph,
+            action: #selector(toggleStatsMiniGraphFromMenu),
+            to: menu
+        )
+
+        menu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Stats Settings...", action: #selector(showWidgetSettingsFromMenu), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        return menu
     }
 
     private func makeDateTimeWidgetMenu(screenID: UInt32) -> NSMenu {
@@ -321,19 +384,19 @@ final class TaskbarController: NSObject {
         menu.addItem(dateItem)
         menu.setSubmenu(dateMenu, for: dateItem)
 
-        addDateTimeToggle(
+        addWidgetToggle(
             title: "Show Day of Week",
             state: value.showDayOfWeek,
             action: #selector(toggleDateTimeDayOfWeekFromMenu),
             to: menu
         )
-        addDateTimeToggle(
+        addWidgetToggle(
             title: "Show Seconds",
             state: value.showSeconds,
             action: #selector(toggleDateTimeSecondsFromMenu),
             to: menu
         )
-        addDateTimeToggle(
+        addWidgetToggle(
             title: "24-Hour Time",
             state: value.use24HourClock,
             action: #selector(toggleDateTime24HourFromMenu),
@@ -348,7 +411,7 @@ final class TaskbarController: NSObject {
         return menu
     }
 
-    private func addDateTimeToggle(title: String, state: Bool, action: Selector, to menu: NSMenu) {
+    private func addWidgetToggle(title: String, state: Bool, action: Selector, to menu: NSMenu) {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
         item.state = state ? .on : .off
@@ -457,6 +520,26 @@ final class TaskbarController: NSObject {
         updateDateTimeWidgetFromMenu { $0.use24HourClock.toggle() }
     }
 
+    @objc private func toggleStatsWidgetFromMenu() {
+        updateStatsWidgetFromMenu { $0.isEnabled.toggle() }
+    }
+
+    @objc private func toggleStatsCPUFromMenu() {
+        updateStatsWidgetFromMenu { $0.showCPU.toggle() }
+    }
+
+    @objc private func toggleStatsMemoryFromMenu() {
+        updateStatsWidgetFromMenu { $0.showMemory.toggle() }
+    }
+
+    @objc private func toggleStatsNetworkFromMenu() {
+        updateStatsWidgetFromMenu { $0.showNetwork.toggle() }
+    }
+
+    @objc private func toggleStatsMiniGraphFromMenu() {
+        updateStatsWidgetFromMenu { $0.showMiniGraph.toggle() }
+    }
+
     private func updateDateTimeWidgetFromMenu(_ transform: (inout DateTimeWidgetSettings) -> Void) {
         guard let context = menuWidgetContext, context.widgetID == .dateTime else { return }
         let current = settings.overrides(for: context.screenID).dateTimeWidget
@@ -466,6 +549,18 @@ final class TaskbarController: NSObject {
             transform(&value)
             override.dateTimeWidget = value
             override.clockMode = nil
+        }
+        refresh()
+    }
+
+    private func updateStatsWidgetFromMenu(_ transform: (inout StatsWidgetSettings) -> Void) {
+        guard let context = menuWidgetContext, context.widgetID == .stats else { return }
+        let current = settings.overrides(for: context.screenID).statsWidget
+            ?? settings.values(for: context.screenID).statsWidget
+        settings.updateOverrides(for: context.screenID) { override in
+            var value = current
+            transform(&value)
+            override.statsWidget = value
         }
         refresh()
     }

@@ -81,6 +81,28 @@ struct DateTimeWidgetSettings: Codable, Equatable {
     }
 }
 
+struct StatsWidgetSettings: Codable, Equatable {
+    var isEnabled: Bool
+    var showCPU: Bool
+    var showMemory: Bool
+    var showNetwork: Bool
+    var showMiniGraph: Bool
+
+    static var defaults: StatsWidgetSettings {
+        StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: true,
+            showMemory: true,
+            showNetwork: true,
+            showMiniGraph: true
+        )
+    }
+
+    var hasVisibleMetrics: Bool {
+        showCPU || showMemory || showNetwork
+    }
+}
+
 enum RevealAnimation: String, Codable, CaseIterable, Equatable {
     case instant
     case linear
@@ -132,6 +154,7 @@ struct TaskbarSettingValues: Codable, Equatable {
     var isVisible: Bool
     var groupByApp: Bool
     var dateTimeWidget: DateTimeWidgetSettings
+    var statsWidget: StatsWidgetSettings
     var showWindowCounts: Bool
     var taskbarHeight: Double
     var minimumItemWidth: Double
@@ -155,6 +178,7 @@ struct TaskbarSettingValues: Codable, Equatable {
             groupByApp: true,
             clockMode: .time,
             dateTimeWidget: .defaults,
+            statsWidget: .defaults,
             showWindowCounts: true,
             taskbarHeight: defaultTaskbarHeight,
             minimumItemWidth: defaultMinimumItemWidth,
@@ -175,6 +199,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         case showClock
         case clockMode
         case dateTimeWidget
+        case statsWidget
         case showWindowCounts
         case taskbarHeight
         case minimumItemWidth
@@ -193,6 +218,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         groupByApp: Bool,
         clockMode: ClockMode,
         dateTimeWidget: DateTimeWidgetSettings? = nil,
+        statsWidget: StatsWidgetSettings? = nil,
         showWindowCounts: Bool,
         taskbarHeight: Double,
         minimumItemWidth: Double,
@@ -208,6 +234,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         self.isVisible = isVisible
         self.groupByApp = groupByApp
         self.dateTimeWidget = dateTimeWidget ?? DateTimeWidgetSettings.legacy(clockMode: clockMode)
+        self.statsWidget = statsWidget ?? .defaults
         self.showWindowCounts = showWindowCounts
         self.taskbarHeight = taskbarHeight
         self.minimumItemWidth = minimumItemWidth
@@ -233,6 +260,7 @@ struct TaskbarSettingValues: Codable, Equatable {
             let oldShowClock = try container.decodeIfPresent(Bool.self, forKey: .showClock) ?? true
             self.dateTimeWidget = DateTimeWidgetSettings.legacy(clockMode: oldShowClock ? .time : .hidden)
         }
+        statsWidget = try container.decodeIfPresent(StatsWidgetSettings.self, forKey: .statsWidget) ?? .defaults
         showWindowCounts = try container.decodeIfPresent(Bool.self, forKey: .showWindowCounts) ?? true
         taskbarHeight = try container.decodeIfPresent(Double.self, forKey: .taskbarHeight) ?? Self.defaultTaskbarHeight
         minimumItemWidth = try container.decodeIfPresent(Double.self, forKey: .minimumItemWidth) ?? Self.defaultMinimumItemWidth
@@ -252,6 +280,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         try container.encode(isVisible, forKey: .isVisible)
         try container.encode(groupByApp, forKey: .groupByApp)
         try container.encode(dateTimeWidget, forKey: .dateTimeWidget)
+        try container.encode(statsWidget, forKey: .statsWidget)
         try container.encode(showWindowCounts, forKey: .showWindowCounts)
         try container.encode(taskbarHeight, forKey: .taskbarHeight)
         try container.encode(minimumItemWidth, forKey: .minimumItemWidth)
@@ -307,6 +336,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
     var groupByApp: Bool?
     var clockMode: ClockMode?
     var dateTimeWidget: DateTimeWidgetSettings?
+    var statsWidget: StatsWidgetSettings?
     var showWindowCounts: Bool?
     var taskbarHeight: Double?
     var minimumItemWidth: Double?
@@ -324,6 +354,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
             || groupByApp != nil
             || clockMode != nil
             || dateTimeWidget != nil
+            || statsWidget != nil
             || showWindowCounts != nil
             || taskbarHeight != nil
             || minimumItemWidth != nil
@@ -343,6 +374,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         case showClock
         case clockMode
         case dateTimeWidget
+        case statsWidget
         case showWindowCounts
         case taskbarHeight
         case minimumItemWidth
@@ -361,6 +393,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         groupByApp: Bool? = nil,
         clockMode: ClockMode? = nil,
         dateTimeWidget: DateTimeWidgetSettings? = nil,
+        statsWidget: StatsWidgetSettings? = nil,
         showWindowCounts: Bool? = nil,
         taskbarHeight: Double? = nil,
         minimumItemWidth: Double? = nil,
@@ -377,6 +410,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         self.groupByApp = groupByApp
         self.clockMode = clockMode
         self.dateTimeWidget = dateTimeWidget
+        self.statsWidget = statsWidget
         self.showWindowCounts = showWindowCounts
         self.taskbarHeight = taskbarHeight
         self.minimumItemWidth = minimumItemWidth
@@ -402,6 +436,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
             self.clockMode = nil
         }
         dateTimeWidget = try container.decodeIfPresent(DateTimeWidgetSettings.self, forKey: .dateTimeWidget)
+        statsWidget = try container.decodeIfPresent(StatsWidgetSettings.self, forKey: .statsWidget)
         showWindowCounts = try container.decodeIfPresent(Bool.self, forKey: .showWindowCounts)
         taskbarHeight = try container.decodeIfPresent(Double.self, forKey: .taskbarHeight)
         minimumItemWidth = try container.decodeIfPresent(Double.self, forKey: .minimumItemWidth)
@@ -421,6 +456,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         try container.encodeIfPresent(groupByApp, forKey: .groupByApp)
         try container.encodeIfPresent(clockMode, forKey: .clockMode)
         try container.encodeIfPresent(dateTimeWidget, forKey: .dateTimeWidget)
+        try container.encodeIfPresent(statsWidget, forKey: .statsWidget)
         try container.encodeIfPresent(showWindowCounts, forKey: .showWindowCounts)
         try container.encodeIfPresent(taskbarHeight, forKey: .taskbarHeight)
         try container.encodeIfPresent(minimumItemWidth, forKey: .minimumItemWidth)
@@ -486,6 +522,9 @@ struct TaskbarPreferences: Codable, Equatable {
             values.dateTimeWidget = dateTimeWidget
         } else if let clockMode = override.clockMode {
             values.clockMode = clockMode
+        }
+        if let statsWidget = override.statsWidget {
+            values.statsWidget = statsWidget
         }
         if let showWindowCounts = override.showWindowCounts {
             values.showWindowCounts = showWindowCounts

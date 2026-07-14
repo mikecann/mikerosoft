@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import TaskbarApp
 
@@ -7,6 +8,7 @@ final class TaskbarSettingsTests: XCTestCase {
         groupByApp: Bool = true,
         clockMode: ClockMode = .time,
         dateTimeWidget: DateTimeWidgetSettings? = nil,
+        statsWidget: StatsWidgetSettings? = nil,
         showWindowCounts: Bool = true,
         taskbarHeight: Double = 54,
         minimumItemWidth: Double = 96,
@@ -24,6 +26,7 @@ final class TaskbarSettingsTests: XCTestCase {
             groupByApp: groupByApp,
             clockMode: clockMode,
             dateTimeWidget: dateTimeWidget,
+            statsWidget: statsWidget,
             showWindowCounts: showWindowCounts,
             taskbarHeight: taskbarHeight,
             minimumItemWidth: minimumItemWidth,
@@ -58,6 +61,13 @@ final class TaskbarSettingsTests: XCTestCase {
                 showSeconds: true,
                 use24HourClock: false
             ),
+            statsWidget: StatsWidgetSettings(
+                isEnabled: true,
+                showCPU: false,
+                showMemory: true,
+                showNetwork: false,
+                showMiniGraph: false
+            ),
             showWindowCounts: false,
             taskbarHeight: 72,
             minimumItemWidth: 120,
@@ -80,6 +90,10 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(resolved.dateTimeWidget.dateDisplay, .always)
         XCTAssertTrue(resolved.dateTimeWidget.showSeconds)
         XCTAssertFalse(resolved.dateTimeWidget.use24HourClock)
+        XCTAssertFalse(resolved.statsWidget.showCPU)
+        XCTAssertTrue(resolved.statsWidget.showMemory)
+        XCTAssertFalse(resolved.statsWidget.showNetwork)
+        XCTAssertFalse(resolved.statsWidget.showMiniGraph)
         XCTAssertEqual(resolved.showWindowCounts, false)
         XCTAssertEqual(resolved.taskbarHeight, 72)
         XCTAssertEqual(resolved.minimumItemWidth, 120)
@@ -119,6 +133,7 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(resolved.isVisible, true)
         XCTAssertEqual(resolved.groupByApp, false)
         XCTAssertEqual(resolved.clockMode, .hidden)
+        XCTAssertEqual(resolved.statsWidget, .defaults)
         XCTAssertEqual(resolved.showWindowCounts, true)
         XCTAssertEqual(resolved.taskbarHeight, 60)
         XCTAssertEqual(resolved.minimumItemWidth, 110)
@@ -289,6 +304,33 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(resolved.clockMode, .dateAndTime)
     }
 
+    func testStatsWidgetOverrideReplacesGeneralSettings() {
+        let generalStats = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: true,
+            showMemory: true,
+            showNetwork: true,
+            showMiniGraph: true
+        )
+        let monitorStats = StatsWidgetSettings(
+            isEnabled: false,
+            showCPU: false,
+            showMemory: true,
+            showNetwork: false,
+            showMiniGraph: false
+        )
+        let preferences = TaskbarPreferences(
+            general: values(statsWidget: generalStats),
+            monitorOverrides: [
+                "123": TaskbarMonitorOverrides(statsWidget: monitorStats)
+            ]
+        )
+
+        let resolved = preferences.resolvedValues(for: 123)
+
+        XCTAssertEqual(resolved.statsWidget, monitorStats)
+    }
+
     func testDateTimeWidgetEncodingDoesNotWriteLegacyClockKeys() throws {
         let values = TaskbarSettingValues(
             isVisible: true,
@@ -300,6 +342,13 @@ final class TaskbarSettingsTests: XCTestCase {
                 showDayOfWeek: true,
                 showSeconds: true,
                 use24HourClock: false
+            ),
+            statsWidget: StatsWidgetSettings(
+                isEnabled: true,
+                showCPU: true,
+                showMemory: false,
+                showNetwork: true,
+                showMiniGraph: true
             ),
             showWindowCounts: true,
             taskbarHeight: 54,
@@ -317,11 +366,14 @@ final class TaskbarSettingsTests: XCTestCase {
         let data = try JSONEncoder().encode(values)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let dateTimeWidget = object?["dateTimeWidget"] as? [String: Any]
+        let statsWidget = object?["statsWidget"] as? [String: Any]
 
         XCTAssertNil(object?["clockMode"])
         XCTAssertEqual(dateTimeWidget?["dateDisplay"] as? String, "always")
         XCTAssertEqual(dateTimeWidget?["showSeconds"] as? Bool, true)
         XCTAssertEqual(dateTimeWidget?["use24HourClock"] as? Bool, false)
+        XCTAssertEqual(statsWidget?["showMemory"] as? Bool, false)
+        XCTAssertEqual(statsWidget?["showNetwork"] as? Bool, true)
         XCTAssertNil(object?["backgroundStyle"])
         XCTAssertNil(object?["glassAmount"])
         XCTAssertNil(object?["showClock"])
@@ -375,6 +427,36 @@ final class TaskbarSettingsTests: XCTestCase {
 
         XCTAssertEqual(compact, "00:00")
         XCTAssertEqual(expanded, "Thu Jan 1 00:00")
+    }
+
+    func testStatsWidgetFormatsPercentAndNetworkRates() {
+        XCTAssertEqual(formattedStatsPercent(36.4), "36%")
+        XCTAssertEqual(formattedStatsPercent(-12), "0%")
+        XCTAssertEqual(formattedStatsPercent(122), "100%")
+        XCTAssertEqual(formattedStatsBytesPerSecond(512), "512 B/s")
+        XCTAssertEqual(formattedStatsBytesPerSecond(20_480), "20 KB/s")
+        XCTAssertEqual(formattedStatsBytesPerSecond(1_572_864), "1.5 MB/s")
+    }
+
+    func testStatsWidgetModuleRectsFollowEnabledMetrics() {
+        let settings = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: true,
+            showMemory: false,
+            showNetwork: true,
+            showMiniGraph: true
+        )
+
+        let rects = statsWidgetModuleRects(settings: settings, in: NSRect(x: 0, y: 0, width: 180, height: 42))
+
+        XCTAssertEqual(rects.map(\.0), [.cpu, .network])
+        XCTAssertEqual(rects.count, 2)
+        XCTAssertGreaterThan(rects[0].1.width, 40)
+        XCTAssertGreaterThan(rects[1].1.minX, rects[0].1.maxX)
+    }
+
+    func testInstalledWidgetsIncludeStatsBeforeDateTime() {
+        XCTAssertEqual(installedTaskbarWidgetIDs(), [.stats, .dateTime])
     }
 
     func testSettingsSidebarSeparatesWidgetPagesFromBarPages() {

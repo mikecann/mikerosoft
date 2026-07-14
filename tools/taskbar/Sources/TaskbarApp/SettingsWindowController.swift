@@ -568,9 +568,41 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     private func renderWidget(_ widgetID: TaskbarWidgetID, screen: ScreenInfo?, in stack: NSStackView) {
         switch widgetID {
+        case .stats:
+            renderStatsWidget(screen: screen, in: stack)
         case .dateTime:
             renderDateTimeWidget(screen: screen, in: stack)
         }
+    }
+
+    private func renderStatsWidget(screen: ScreenInfo?, in stack: NSStackView) {
+        if let screen {
+            let override = settings.overrides(for: screen.id)
+            let resolved = settings.values(for: screen.id)
+            addHeader("Stats", subtitle: "\(screen.name) override for the Stats widget.", to: stack)
+            stack.addArrangedSubview(overrideStatsWidgetRow(
+                isOverridden: override.statsWidget != nil,
+                value: resolved.statsWidget
+            ))
+            return
+        }
+
+        let values = settings.preferences.general
+        addHeader("Stats", subtitle: "Default Stats widget settings used by every monitor unless that monitor has an override.", to: stack)
+        stack.addArrangedSubview(settingRow(
+            icon: "chart.bar",
+            title: "Stats",
+            description: "Show CPU, memory, and network activity in the taskbar.",
+            control: statsWidgetControls(
+                value: values.statsWidget,
+                enabled: true,
+                enabledAction: #selector(setGeneralStatsEnabled(_:)),
+                cpuAction: #selector(setGeneralStatsCPU(_:)),
+                memoryAction: #selector(setGeneralStatsMemory(_:)),
+                networkAction: #selector(setGeneralStatsNetwork(_:)),
+                graphAction: #selector(setGeneralStatsMiniGraph(_:))
+            )
+        ))
     }
 
     private func renderDateTimeWidget(screen: ScreenInfo?, in stack: NSStackView) {
@@ -688,6 +720,35 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         optionsRow.addArrangedSubview(titledCheckbox("Day", state: value.showDayOfWeek, enabled: enabled, action: dayOfWeekAction))
         optionsRow.addArrangedSubview(titledCheckbox("Seconds", state: value.showSeconds, enabled: enabled, action: secondsAction))
         optionsRow.addArrangedSubview(titledCheckbox("24-hour", state: value.use24HourClock, enabled: enabled, action: twentyFourHourAction))
+
+        stack.addArrangedSubview(topRow)
+        stack.addArrangedSubview(optionsRow)
+        return stack
+    }
+
+    private func statsWidgetControls(
+        value: StatsWidgetSettings,
+        enabled: Bool,
+        enabledAction: Selector,
+        cpuAction: Selector,
+        memoryAction: Selector,
+        networkAction: Selector,
+        graphAction: Selector
+    ) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+
+        let topRow = horizontalRow()
+        topRow.addArrangedSubview(titledCheckbox("Show", state: value.isEnabled, enabled: enabled, action: enabledAction))
+        topRow.addArrangedSubview(titledCheckbox("CPU", state: value.showCPU, enabled: enabled, action: cpuAction))
+        topRow.addArrangedSubview(titledCheckbox("RAM", state: value.showMemory, enabled: enabled, action: memoryAction))
+        topRow.addArrangedSubview(titledCheckbox("Network", state: value.showNetwork, enabled: enabled, action: networkAction))
+
+        let optionsRow = horizontalRow()
+        optionsRow.spacing = 10
+        optionsRow.addArrangedSubview(titledCheckbox("CPU graph", state: value.showMiniGraph, enabled: enabled, action: graphAction))
 
         stack.addArrangedSubview(topRow)
         stack.addArrangedSubview(optionsRow)
@@ -857,6 +918,34 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             icon: "clock",
             title: "Date & Time",
             description: "Configure this monitor's Date & Time widget.",
+            control: controls
+        )
+    }
+
+    private func overrideStatsWidgetRow(isOverridden: Bool, value: StatsWidgetSettings) -> NSView {
+        let controls = NSStackView()
+        controls.orientation = .vertical
+        controls.alignment = .leading
+        controls.spacing = 6
+
+        let override = NSButton(checkboxWithTitle: "Override", target: self, action: #selector(toggleMonitorStatsOverride(_:)))
+        override.state = isOverridden ? .on : .off
+        override.widthAnchor.constraint(equalToConstant: 92).isActive = true
+
+        controls.addArrangedSubview(override)
+        controls.addArrangedSubview(statsWidgetControls(
+            value: value,
+            enabled: isOverridden,
+            enabledAction: #selector(setMonitorStatsEnabled(_:)),
+            cpuAction: #selector(setMonitorStatsCPU(_:)),
+            memoryAction: #selector(setMonitorStatsMemory(_:)),
+            networkAction: #selector(setMonitorStatsNetwork(_:)),
+            graphAction: #selector(setMonitorStatsMiniGraph(_:))
+        ))
+        return settingRow(
+            icon: "chart.bar",
+            title: "Stats",
+            description: "Configure this monitor's Stats widget.",
             control: controls
         )
     }
@@ -1161,6 +1250,26 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         settings.updateGeneral { $0.dateTimeWidget.use24HourClock = sender.state == .on }
     }
 
+    @objc private func setGeneralStatsEnabled(_ sender: NSButton) {
+        settings.updateGeneral { $0.statsWidget.isEnabled = sender.state == .on }
+    }
+
+    @objc private func setGeneralStatsCPU(_ sender: NSButton) {
+        settings.updateGeneral { $0.statsWidget.showCPU = sender.state == .on }
+    }
+
+    @objc private func setGeneralStatsMemory(_ sender: NSButton) {
+        settings.updateGeneral { $0.statsWidget.showMemory = sender.state == .on }
+    }
+
+    @objc private func setGeneralStatsNetwork(_ sender: NSButton) {
+        settings.updateGeneral { $0.statsWidget.showNetwork = sender.state == .on }
+    }
+
+    @objc private func setGeneralStatsMiniGraph(_ sender: NSButton) {
+        settings.updateGeneral { $0.statsWidget.showMiniGraph = sender.state == .on }
+    }
+
     @objc private func setGeneralHeight(_ sender: NSSlider) {
         refreshSliderLabel(sender)
         settings.updateGeneral { $0.taskbarHeight = sender.doubleValue }
@@ -1232,6 +1341,13 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             $0.dateTimeWidget = sender.state == .on ? value : nil
             $0.clockMode = nil
         }
+        renderDetail()
+    }
+
+    @objc private func toggleMonitorStatsOverride(_ sender: NSButton) {
+        guard let id = selectedMonitorID else { return }
+        let value = settings.values(for: id).statsWidget
+        settings.updateOverrides(for: id) { $0.statsWidget = sender.state == .on ? value : nil }
         renderDetail()
     }
 
@@ -1350,6 +1466,36 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     @objc private func setMonitorDateTime24Hour(_ sender: NSButton) {
         updateMonitorDateTimeWidget { $0.use24HourClock = sender.state == .on }
+    }
+
+    private func updateMonitorStatsWidget(_ transform: (inout StatsWidgetSettings) -> Void) {
+        guard let id = selectedMonitorID else { return }
+        let current = settings.overrides(for: id).statsWidget ?? settings.values(for: id).statsWidget
+        settings.updateOverrides(for: id) { override in
+            var value = current
+            transform(&value)
+            override.statsWidget = value
+        }
+    }
+
+    @objc private func setMonitorStatsEnabled(_ sender: NSButton) {
+        updateMonitorStatsWidget { $0.isEnabled = sender.state == .on }
+    }
+
+    @objc private func setMonitorStatsCPU(_ sender: NSButton) {
+        updateMonitorStatsWidget { $0.showCPU = sender.state == .on }
+    }
+
+    @objc private func setMonitorStatsMemory(_ sender: NSButton) {
+        updateMonitorStatsWidget { $0.showMemory = sender.state == .on }
+    }
+
+    @objc private func setMonitorStatsNetwork(_ sender: NSButton) {
+        updateMonitorStatsWidget { $0.showNetwork = sender.state == .on }
+    }
+
+    @objc private func setMonitorStatsMiniGraph(_ sender: NSButton) {
+        updateMonitorStatsWidget { $0.showMiniGraph = sender.state == .on }
     }
 
     @objc private func setMonitorHeight(_ sender: NSSlider) {

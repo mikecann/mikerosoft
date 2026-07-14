@@ -20,7 +20,7 @@ maximising underneath the bar.
 - Pins apps so they stay visible when closed
 - Shrinks item widths when the bar is crowded so every item still fits
 - Ellipsises long labels
-- Supports taskbar widgets, starting with a Date & Time widget
+- Supports taskbar widgets, starting with Date & Time and Stats widgets
 - Lets widgets own their menu, rendering, and settings surface
 - Auto-hides with configurable animation
 - Controls taskbar size, item width, item spacing, and background opacity
@@ -71,6 +71,7 @@ Useful settings:
 - Horizontal spacing between items
 - Background opacity
 - Date & Time widget display
+- Stats widget CPU, RAM, network, and CPU graph display
 - Auto-hide and reveal animation
 - Pinned apps
 - Keep windows above bar
@@ -86,8 +87,13 @@ The settings sidebar lists installed widgets under Widgets, and also shows each
 monitor's widget override pages under that monitor. Disabled widgets remain
 visible in settings so they can be turned back on.
 
-The first widget is Date & Time. It uses menu-bar-style text and can show or
-hide the date, day of week, seconds, and 24-hour time independently per monitor.
+Date & Time uses menu-bar-style text and can show or hide the date, day of week,
+seconds, and 24-hour time independently per monitor.
+
+Stats shows CPU, RAM, and network activity in a compact strip. Its first slice
+uses native macOS sampling APIs and takes design/API inspiration from
+[exelban/stats](https://github.com/exelban/stats), which is MIT licensed, but it
+does not vendor the full Stats app.
 
 ## Permissions
 

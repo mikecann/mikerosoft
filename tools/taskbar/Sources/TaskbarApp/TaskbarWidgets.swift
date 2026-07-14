@@ -1,6 +1,7 @@
 import AppKit
 
 enum TaskbarWidgetID: String, Equatable {
+    case stats
     case dateTime
 }
 
@@ -99,6 +100,7 @@ func activeTaskbarWidgets(for values: TaskbarSettingValues) -> [any TaskbarWidge
 
 func installedTaskbarWidgetPlugins() -> [any TaskbarWidgetPlugin] {
     [
+        StatsWidgetPlugin(),
         DateTimeWidgetPlugin()
     ]
 }
