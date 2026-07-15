@@ -289,6 +289,7 @@ final class TaskbarStatsSampler {
     private let backgroundQueue: DispatchQueue
     private let cpuTickReader: (() -> [UInt32]?)?
     private let memoryReader: (() -> MemoryUsage?)?
+    private let networkCounterReader: () -> [String: NetworkInterfaceCounters]?
     private let totalMemory = Double(ProcessInfo.processInfo.physicalMemory)
     private var cachedSnapshot = StatsSnapshot.empty
     private var lastRefresh = Date.distantPast
@@ -299,7 +300,7 @@ final class TaskbarStatsSampler {
     private var isRefreshingProcesses = false
     private var isRefreshingNetworkProcesses = false
     private var previousCPUTicks: [UInt32]?
-    private var previousNetwork: (totals: NetworkByteTotals, date: Date)?
+    private var previousNetwork: (counters: [String: NetworkInterfaceCounters], date: Date)?
     private var cachedGPU = StatsGPUReading(percent: 0, renderPercent: 0, tilerPercent: 0, model: "GPU", cores: nil)
     private var cachedProcesses: [StatsProcessSample] = []
     private var cachedNetworkProcesses: [StatsNetworkProcessSample] = []
@@ -310,12 +311,14 @@ final class TaskbarStatsSampler {
         },
         backgroundQueue: DispatchQueue = DispatchQueue.global(qos: .utility),
         cpuTickReader: (() -> [UInt32]?)? = nil,
-        memoryReader: (() -> MemoryUsage?)? = nil
+        memoryReader: (() -> MemoryUsage?)? = nil,
+        networkCounterReader: @escaping () -> [String: NetworkInterfaceCounters]? = readNetworkInterfaceCounters64
     ) {
         self.commandOutput = commandOutput
         self.backgroundQueue = backgroundQueue
         self.cpuTickReader = cpuTickReader
         self.memoryReader = memoryReader
+        self.networkCounterReader = networkCounterReader
     }
 
     func snapshot(now: Date = Date()) -> StatsSnapshot {
@@ -483,60 +486,21 @@ final class TaskbarStatsSampler {
     }
 
     private func readNetworkSpeed(now: Date) -> (upload: Double, download: Double) {
-        guard let totals = readNetworkTotals() else {
+        guard let counters = networkCounterReader() else {
             return (cachedSnapshot.networkUploadBytesPerSecond, cachedSnapshot.networkDownloadBytesPerSecond)
         }
 
-        defer { previousNetwork = (totals, now) }
+        defer { previousNetwork = (counters, now) }
         guard let previousNetwork else {
             return (0, 0)
         }
 
-        let elapsed = now.timeIntervalSince(previousNetwork.date)
-        guard elapsed > 0 else {
-            return (cachedSnapshot.networkUploadBytesPerSecond, cachedSnapshot.networkDownloadBytesPerSecond)
-        }
-
-        return (
-            upload: bytesPerSecond(current: totals.upload, previous: previousNetwork.totals.upload, elapsed: elapsed),
-            download: bytesPerSecond(current: totals.download, previous: previousNetwork.totals.download, elapsed: elapsed)
+        let rates = networkTransferRates(
+            previous: previousNetwork.counters,
+            current: counters,
+            elapsed: now.timeIntervalSince(previousNetwork.date)
         )
-    }
-
-    private func readNetworkTotals() -> NetworkByteTotals? {
-        var interfaceAddresses: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&interfaceAddresses) == 0, let firstAddress = interfaceAddresses else {
-            return nil
-        }
-        defer { freeifaddrs(interfaceAddresses) }
-
-        var totals = NetworkByteTotals()
-        var pointer: UnsafeMutablePointer<ifaddrs>? = firstAddress
-
-        while let current = pointer {
-            defer { pointer = current.pointee.ifa_next }
-
-            let flags = current.pointee.ifa_flags
-            guard (flags & UInt32(IFF_UP)) != 0,
-                  (flags & UInt32(IFF_LOOPBACK)) == 0,
-                  let address = current.pointee.ifa_addr,
-                  Int32(address.pointee.sa_family) == AF_LINK,
-                  let data = current.pointee.ifa_data
-            else {
-                continue
-            }
-
-            let interfaceData = data.assumingMemoryBound(to: if_data.self).pointee
-            totals.upload += UInt64(interfaceData.ifi_obytes)
-            totals.download += UInt64(interfaceData.ifi_ibytes)
-        }
-
-        return totals
-    }
-
-    private func bytesPerSecond(current: UInt64, previous: UInt64, elapsed: TimeInterval) -> Double {
-        guard current >= previous else { return 0 }
-        return Double(current - previous) / elapsed
+        return (upload: rates.upload, download: rates.download)
     }
 
     private func readNetworkProcesses(now: Date) -> [StatsNetworkProcessSample] {
@@ -811,11 +775,6 @@ func uniquePositiveProcessLookup<Value>(_ values: [(Int, Value)]) -> [Int: Value
         guard pid > 0, result[pid] == nil else { return }
         result[pid] = value
     }
-}
-
-private struct NetworkByteTotals {
-    var upload: UInt64 = 0
-    var download: UInt64 = 0
 }
 
 func formattedStatsPercent(_ value: Double) -> String {
