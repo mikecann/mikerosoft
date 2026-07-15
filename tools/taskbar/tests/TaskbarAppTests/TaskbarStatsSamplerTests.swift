@@ -3,6 +3,287 @@ import XCTest
 @testable import TaskbarApp
 
 final class TaskbarStatsSamplerTests: XCTestCase {
+    func testNetworkTransferRatesUseSteadyPerInterfaceCounterDeltas() {
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(upload: 1_000, download: 2_000)
+            ],
+            current: [
+                "en0": NetworkInterfaceCounters(upload: 1_300, download: 2_600)
+            ],
+            elapsed: 2
+        )
+
+        XCTAssertEqual(rates.upload, 150, accuracy: 0.001)
+        XCTAssertEqual(rates.download, 300, accuracy: 0.001)
+    }
+
+    func testNetworkTransferRatesIgnoreAnInterfaceThatDisappears() {
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(upload: 9_000, download: 12_000),
+                "en1": NetworkInterfaceCounters(upload: 500, download: 800)
+            ],
+            current: [
+                "en1": NetworkInterfaceCounters(upload: 650, download: 1_100)
+            ],
+            elapsed: 1
+        )
+
+        XCTAssertEqual(rates.upload, 150, accuracy: 0.001)
+        XCTAssertEqual(rates.download, 300, accuracy: 0.001)
+    }
+
+    func testNetworkTransferRatesGiveNewOrReappearedInterfacesAZeroFirstSample() {
+        let rates = networkTransferRates(
+            previous: [:],
+            current: [
+                "en0": NetworkInterfaceCounters(upload: 8_000_000_000, download: 12_000_000_000)
+            ],
+            elapsed: 0.75
+        )
+
+        XCTAssertEqual(rates, .zero)
+    }
+
+    func testNetworkTransferRatesAggregateOnlyComparableInterfacesInAMixedSample() {
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(upload: 1_000, download: 2_000),
+                "gone": NetworkInterfaceCounters(upload: 900_000, download: 800_000)
+            ],
+            current: [
+                "en0": NetworkInterfaceCounters(upload: 1_150, download: 2_300),
+                "new": NetworkInterfaceCounters(upload: 5_000_000, download: 9_000_000)
+            ],
+            elapsed: 0.75
+        )
+
+        XCTAssertEqual(rates.upload, 200, accuracy: 0.001)
+        XCTAssertEqual(rates.download, 400, accuracy: 0.001)
+    }
+
+    func testNetworkTransferRatesRecoverA32BitCounterWrap() {
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(
+                    upload: UInt64(UInt32.max) - 100,
+                    download: UInt64(UInt32.max) - 300,
+                    width: .bits32
+                )
+            ],
+            current: [
+                "en0": NetworkInterfaceCounters(upload: 49, download: 99, width: .bits32)
+            ],
+            elapsed: 1
+        )
+
+        XCTAssertEqual(rates.upload, 150, accuracy: 0.001)
+        XCTAssertEqual(rates.download, 400, accuracy: 0.001)
+    }
+
+    func testNetworkTransferRatesDoNotWrapAcrossCounterWidthChanges() {
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(
+                    upload: UInt64(UInt32.max) - 100,
+                    download: UInt64(UInt32.max) - 100,
+                    width: .bits32
+                )
+            ],
+            current: [
+                "en0": NetworkInterfaceCounters(upload: 49, download: 49, width: .bits64)
+            ],
+            elapsed: 1
+        )
+
+        XCTAssertEqual(rates, .zero)
+    }
+
+    func testNetworkTransferRatesRejectASmall64BitCounterReset() {
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(upload: 1_000, download: 2_000)
+            ],
+            current: [
+                "en0": NetworkInterfaceCounters(upload: 999, download: 1_999)
+            ],
+            elapsed: 0.75
+        )
+
+        XCTAssertEqual(rates, .zero)
+    }
+
+    func testNetworkTransferRatesRejectA64BitCounterResetBefore4GiB() {
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(upload: 2_200_000_000, download: 2_200_000_000)
+            ],
+            current: [
+                "en0": NetworkInterfaceCounters(upload: 0, download: 0)
+            ],
+            elapsed: 0.75
+        )
+
+        XCTAssertEqual(rates, .zero)
+    }
+
+    func testNetworkTransferRatesRejectA64BitCounterRegression() {
+        let over32Bits = UInt64(UInt32.max) + 10_000
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(upload: over32Bits, download: over32Bits + 100)
+            ],
+            current: [
+                "en0": NetworkInterfaceCounters(upload: 49, download: over32Bits + 50)
+            ],
+            elapsed: 1
+        )
+
+        XCTAssertEqual(rates, .zero)
+    }
+
+    func testNetworkTransferRatesReturnZeroWithoutAPositiveElapsedInterval() {
+        let previous = [
+            "en0": NetworkInterfaceCounters(upload: 100, download: 200)
+        ]
+        let current = [
+            "en0": NetworkInterfaceCounters(upload: 150, download: 300)
+        ]
+
+        XCTAssertEqual(
+            networkTransferRates(previous: previous, current: current, elapsed: 0),
+            .zero
+        )
+        XCTAssertEqual(
+            networkTransferRates(previous: previous, current: current, elapsed: -1),
+            .zero
+        )
+    }
+
+    func testNetworkTransferRatesDiscardValuesAbove100GigabitsPerSecond() {
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(upload: 0, download: 0)
+            ],
+            current: [
+                "en0": NetworkInterfaceCounters(
+                    upload: maximumPlausibleNetworkBytesPerSecond + 1,
+                    download: maximumPlausibleNetworkBytesPerSecond
+                )
+            ],
+            elapsed: 1
+        )
+
+        XCTAssertEqual(rates.upload, 0)
+        XCTAssertEqual(rates.download, Double(maximumPlausibleNetworkBytesPerSecond), accuracy: 0.001)
+    }
+
+    func testNetworkTransferRatesDiscardAnAggregateAbove100GigabitsPerSecond() {
+        let perInterfaceDelta = maximumPlausibleNetworkBytesPerSecond / 2 + 1
+        let rates = networkTransferRates(
+            previous: [
+                "en0": NetworkInterfaceCounters(upload: 0, download: 0),
+                "en1": NetworkInterfaceCounters(upload: 0, download: 0)
+            ],
+            current: [
+                "en0": NetworkInterfaceCounters(upload: perInterfaceDelta, download: perInterfaceDelta),
+                "en1": NetworkInterfaceCounters(upload: perInterfaceDelta, download: perInterfaceDelta)
+            ],
+            elapsed: 1
+        )
+
+        XCTAssertEqual(rates, .zero)
+    }
+
+    func testPerInterface64BitAggregationMatchesLegacyGlobalMathBefore32BitWrap() {
+        let previous = [
+            "en0": NetworkInterfaceCounters(upload: 1_000, download: 2_000),
+            "en1": NetworkInterfaceCounters(upload: 3_000, download: 4_000)
+        ]
+        let current = [
+            "en0": NetworkInterfaceCounters(upload: 1_150, download: 2_300),
+            "en1": NetworkInterfaceCounters(upload: 3_225, download: 4_450)
+        ]
+        let elapsed = 0.75
+
+        let rates = networkTransferRates(previous: previous, current: current, elapsed: elapsed)
+        let legacyUpload = Double(
+            current.values.reduce(UInt64(0)) { $0 + $1.upload }
+                - previous.values.reduce(UInt64(0)) { $0 + $1.upload }
+        ) / elapsed
+        let legacyDownload = Double(
+            current.values.reduce(UInt64(0)) { $0 + $1.download }
+                - previous.values.reduce(UInt64(0)) { $0 + $1.download }
+        ) / elapsed
+
+        XCTAssertEqual(rates.upload, legacyUpload, accuracy: 0.001)
+        XCTAssertEqual(rates.download, legacyDownload, accuracy: 0.001)
+    }
+
+    func testSamplerReplacesInterfaceStateAcrossAFlapAndKeepsTheArtifactOutOfHistory() {
+        var readings: [[String: NetworkInterfaceCounters]?] = [
+            ["en0": NetworkInterfaceCounters(upload: 1_000, download: 2_000)],
+            ["en0": NetworkInterfaceCounters(upload: 1_100, download: 2_200)],
+            [:],
+            ["en0": NetworkInterfaceCounters(upload: 9_000_000_000, download: 12_000_000_000)],
+            ["en0": NetworkInterfaceCounters(upload: 9_000_000_075, download: 12_000_000_150)]
+        ]
+        let sampler = TaskbarStatsSampler(
+            commandOutput: { _, _ in nil },
+            backgroundQueue: DispatchQueue(label: "TaskbarStatsSamplerTests.network"),
+            cpuTickReader: { nil },
+            memoryReader: { nil },
+            networkCounterReader: { readings.removeFirst() }
+        )
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        _ = sampler.snapshot(now: start)
+        let moving = sampler.snapshot(now: start.addingTimeInterval(1))
+        let disappeared = sampler.snapshot(now: start.addingTimeInterval(2))
+        let reappeared = sampler.snapshot(now: start.addingTimeInterval(3))
+        let resumed = sampler.snapshot(now: start.addingTimeInterval(4))
+
+        XCTAssertEqual(moving.networkUploadBytesPerSecond, 100, accuracy: 0.001)
+        XCTAssertEqual(moving.networkDownloadBytesPerSecond, 200, accuracy: 0.001)
+        XCTAssertEqual(disappeared.networkUploadBytesPerSecond, 0, accuracy: 0.001)
+        XCTAssertEqual(disappeared.networkDownloadBytesPerSecond, 0, accuracy: 0.001)
+        XCTAssertEqual(reappeared.networkUploadBytesPerSecond, 0, accuracy: 0.001)
+        XCTAssertEqual(reappeared.networkDownloadBytesPerSecond, 0, accuracy: 0.001)
+        XCTAssertEqual(reappeared.networkUploadHistory.max(), 100)
+        XCTAssertEqual(reappeared.networkDownloadHistory.max(), 200)
+        XCTAssertEqual(resumed.networkUploadBytesPerSecond, 75, accuracy: 0.001)
+        XCTAssertEqual(resumed.networkDownloadBytesPerSecond, 150, accuracy: 0.001)
+    }
+
+    func testSamplerStoresZeroInsteadOfAnImplausibleRateArtifact() {
+        var readings: [[String: NetworkInterfaceCounters]?] = [
+            ["en0": NetworkInterfaceCounters(upload: 10, download: 20)],
+            [
+                "en0": NetworkInterfaceCounters(
+                    upload: 11 + maximumPlausibleNetworkBytesPerSecond,
+                    download: 21 + maximumPlausibleNetworkBytesPerSecond
+                )
+            ]
+        ]
+        let sampler = TaskbarStatsSampler(
+            commandOutput: { _, _ in nil },
+            backgroundQueue: DispatchQueue(label: "TaskbarStatsSamplerTests.networkArtifact"),
+            cpuTickReader: { nil },
+            memoryReader: { nil },
+            networkCounterReader: { readings.removeFirst() }
+        )
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        _ = sampler.snapshot(now: start)
+        let snapshot = sampler.snapshot(now: start.addingTimeInterval(1))
+
+        XCTAssertEqual(snapshot.networkUploadBytesPerSecond, 0)
+        XCTAssertEqual(snapshot.networkDownloadBytesPerSecond, 0)
+        XCTAssertEqual(snapshot.networkUploadHistory.max(), 0)
+        XCTAssertEqual(snapshot.networkDownloadHistory.max(), 0)
+    }
+
     func testStatsSnapshotEqualityIncludesMeasuredBreakdowns() {
         var changed = StatsSnapshot.empty
         changed.cpuUserPercent = 1
