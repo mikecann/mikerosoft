@@ -69,11 +69,6 @@ final class TaskbarPanel {
         self.screen = screen
         self.values = values
 
-        guard values.isVisible else {
-            panel.orderOut(nil)
-            return
-        }
-
         let height = CGFloat(values.taskbarHeight)
         let frame = NSRect(
             x: screen.appKitFrame.minX,
@@ -90,6 +85,10 @@ final class TaskbarPanel {
             containerView.frame = contentFrame
             containerView.update(items: items, settings: values)
             currentItems = items
+        }
+        guard values.isVisible else {
+            panel.orderOut(nil)
+            return
         }
         if !panel.isVisible {
             panel.orderFrontRegardless()
@@ -109,6 +108,7 @@ final class TaskbarPanel {
 
     func close() {
         panel.orderOut(nil)
+        panel.contentView = nil
     }
 
     private func shouldReveal(mouseLocation: NSPoint) -> Bool {
