@@ -129,24 +129,32 @@ final class TaskbarLayoutTests: XCTestCase {
 
     func testConditionalDateUsesOnlySpaceLeftAfterOtherWidgetMinimums() throws {
         let items = (0..<3).map { layoutItem(index: $0) }
+        let settings = TaskbarSettingValues.defaults
         let layout = taskbarLayout(
             bounds: NSRect(x: 0, y: 0, width: 600, height: 30),
             items: items,
-            settings: .defaults,
+            settings: settings,
             tileHeight: 22,
             preferredTileWidths: Array(repeating: 120, count: items.count)
         )
         let dateRect = try XCTUnwrap(layout.widgets.first { $0.id == .dateTime }?.rect)
 
-        XCTAssertEqual(dateRect.width, DateTimeWidgetMetrics.compactWidth)
+        XCTAssertEqual(
+            dateRect.width,
+            DateTimeWidgetMetrics.compactWidth(
+                for: settings.dateTimeWidget,
+                fontSize: DateTimeWidgetMetrics.fontSize(forHeight: 22)
+            )
+        )
     }
 
     func testWidgetsReachPreferredWidthsWhenTilesLeaveGenuineFreeSpace() throws {
         let items = [layoutItem(index: 0)]
+        let settings = TaskbarSettingValues.defaults
         let layout = taskbarLayout(
             bounds: NSRect(x: 0, y: 0, width: 1_200, height: 30),
             items: items,
-            settings: .defaults,
+            settings: settings,
             tileHeight: 22,
             preferredTileWidths: [120]
         )
@@ -154,7 +162,13 @@ final class TaskbarLayoutTests: XCTestCase {
         let dateRect = try XCTUnwrap(layout.widgets.first { $0.id == .dateTime }?.rect)
 
         XCTAssertEqual(statsRect.width, StatsWidgetMetrics.preferredWidth(for: .defaults))
-        XCTAssertEqual(dateRect.width, DateTimeWidgetMetrics.expandedWidth)
+        XCTAssertEqual(
+            dateRect.width,
+            DateTimeWidgetMetrics.expandedWidth(
+                for: settings.dateTimeWidget,
+                fontSize: DateTimeWidgetMetrics.fontSize(forHeight: 22)
+            )
+        )
     }
 
     func testNoWidgetLayoutKeepsExistingTrailingPadding() throws {

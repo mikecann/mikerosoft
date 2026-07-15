@@ -473,6 +473,224 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(text, "00:00")
     }
 
+    func testDateTimeWidgetMetricsFitReferenceTextAcrossSettings() throws {
+        let locale = Locale.current
+        let timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let referenceDates = try [10, 22].map { hour in
+            try XCTUnwrap(calendar.date(from: DateComponents(
+                year: 2025,
+                month: 9,
+                day: 24,
+                hour: hour,
+                minute: 45,
+                second: 33
+            )))
+        }
+        let font = NSFont.menuBarFont(ofSize: 13)
+
+        for use24HourClock in [false, true] {
+            for showSeconds in [false, true] {
+                for dateDisplay in DateTimeDateDisplay.allCases {
+                    let settings = DateTimeWidgetSettings(
+                        isEnabled: true,
+                        dateDisplay: dateDisplay,
+                        showDayOfWeek: true,
+                        showSeconds: showSeconds,
+                        use24HourClock: use24HourClock
+                    )
+                    let texts = referenceDates.map { date in
+                        dateTimeWidgetText(
+                            settings: settings,
+                            date: date,
+                            availableWidth: .greatestFiniteMagnitude,
+                            locale: locale,
+                            timeZone: timeZone
+                        )
+                    }
+                    let measuredWidth = texts
+                        .map { ceil(($0 as NSString).size(withAttributes: [.font: font]).width) }
+                        .max() ?? 0
+                    let metricWidth = dateDisplay == .never
+                        ? DateTimeWidgetMetrics.compactWidth(for: settings)
+                        : DateTimeWidgetMetrics.expandedWidth(for: settings)
+                    let context = "24-hour=\(use24HourClock), seconds=\(showSeconds), date=\(dateDisplay)"
+
+                    XCTAssertGreaterThanOrEqual(metricWidth, measuredWidth, context)
+                }
+            }
+        }
+    }
+
+    func testDateTimeWidgetWaitsForMeasuredExpandedWidthBeforeShowingDate() throws {
+        let locale = Locale.current
+        let timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let date = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2025,
+            month: 9,
+            day: 24,
+            hour: 22,
+            minute: 45,
+            second: 33
+        )))
+        let settings = DateTimeWidgetSettings(
+            isEnabled: true,
+            dateDisplay: .whenSpaceAllows,
+            showDayOfWeek: true,
+            showSeconds: true,
+            use24HourClock: false
+        )
+        let compactWidth = DateTimeWidgetMetrics.compactWidth(for: settings)
+        let expandedWidth = DateTimeWidgetMetrics.expandedWidth(for: settings)
+        var compactSettings = settings
+        compactSettings.dateDisplay = .never
+        var expandedSettings = settings
+        expandedSettings.dateDisplay = .always
+        let compactText = dateTimeWidgetText(
+            settings: compactSettings,
+            date: date,
+            availableWidth: .greatestFiniteMagnitude,
+            locale: locale,
+            timeZone: timeZone
+        )
+        let expandedText = dateTimeWidgetText(
+            settings: expandedSettings,
+            date: date,
+            availableWidth: .greatestFiniteMagnitude,
+            locale: locale,
+            timeZone: timeZone
+        )
+        var values = TaskbarSettingValues.defaults
+        values.dateTimeWidget = settings
+        let plugin = DateTimeWidgetPlugin()
+
+        XCTAssertEqual(
+            plugin.preferredWidth(in: values, height: 22, availableWidth: expandedWidth - 1),
+            compactWidth
+        )
+        XCTAssertEqual(
+            dateTimeWidgetText(
+                settings: settings,
+                date: date,
+                availableWidth: expandedWidth - 1,
+                locale: locale,
+                timeZone: timeZone
+            ),
+            compactText
+        )
+        XCTAssertEqual(
+            plugin.preferredWidth(in: values, height: 22, availableWidth: expandedWidth),
+            expandedWidth
+        )
+        XCTAssertEqual(
+            dateTimeWidgetText(
+                settings: settings,
+                date: date,
+                availableWidth: expandedWidth,
+                locale: locale,
+                timeZone: timeZone
+            ),
+            expandedText
+        )
+    }
+
+    func testDateTimeWidgetMetricsKeepCompactConfigurationsTight() {
+        let locale = Locale(identifier: "en_US_POSIX")
+        let compact24Hour = DateTimeWidgetSettings(
+            isEnabled: true,
+            dateDisplay: .never,
+            showDayOfWeek: true,
+            showSeconds: false,
+            use24HourClock: true
+        )
+        var compact12Hour = compact24Hour
+        compact12Hour.use24HourClock = false
+        var compactWithSeconds = compact24Hour
+        compactWithSeconds.showSeconds = true
+        var expanded24Hour = compact24Hour
+        expanded24Hour.dateDisplay = .always
+
+        let compactWidth = DateTimeWidgetMetrics.compactWidth(
+            for: compact24Hour,
+            locale: locale,
+            fontSize: 13
+        )
+
+        XCTAssertLessThan(
+            compactWidth,
+            DateTimeWidgetMetrics.compactWidth(for: compact12Hour, locale: locale, fontSize: 13)
+        )
+        XCTAssertLessThan(
+            compactWidth,
+            DateTimeWidgetMetrics.compactWidth(for: compactWithSeconds, locale: locale, fontSize: 13)
+        )
+        XCTAssertLessThan(
+            compactWidth,
+            DateTimeWidgetMetrics.expandedWidth(for: expanded24Hour, locale: locale, fontSize: 13)
+        )
+
+        var values = TaskbarSettingValues.defaults
+        values.dateTimeWidget = compact12Hour
+        let plugin = DateTimeWidgetPlugin()
+        XCTAssertLessThan(
+            plugin.minimumWidth(in: values, height: 18),
+            plugin.minimumWidth(in: values, height: 22)
+        )
+    }
+
+    func testDateTimeWidgetMetricsMeasureEachLocaleIndependently() throws {
+        let timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let settings = DateTimeWidgetSettings(
+            isEnabled: true,
+            dateDisplay: .always,
+            showDayOfWeek: true,
+            showSeconds: true,
+            use24HourClock: false
+        )
+        let font = NSFont.menuBarFont(ofSize: 13)
+        let regressionCases = [
+            (locale: "bn_BD", month: 10, day: 23),
+            (locale: "my_MM", month: 10, day: 16),
+            (locale: "th_TH", month: 4, day: 20),
+            (locale: "pl_PL", month: 3, day: 23)
+        ]
+
+        for regressionCase in regressionCases {
+            let locale = Locale(identifier: regressionCase.locale)
+            let date = try XCTUnwrap(calendar.date(from: DateComponents(
+                year: 2025,
+                month: regressionCase.month,
+                day: regressionCase.day,
+                hour: 0,
+                minute: 45,
+                second: 33
+            )))
+            let text = dateTimeWidgetText(
+                settings: settings,
+                date: date,
+                availableWidth: .greatestFiniteMagnitude,
+                locale: locale,
+                timeZone: timeZone
+            )
+            let measuredWidth = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+
+            XCTAssertGreaterThanOrEqual(
+                DateTimeWidgetMetrics.expandedWidth(
+                    for: settings,
+                    locale: locale,
+                    fontSize: 13
+                ),
+                measuredWidth,
+                "\(regressionCase.locale), text=\(text)"
+            )
+        }
+    }
+
     func testDateTimeWidgetCanShowDateWhenSpaceAllows() {
         let date = Date(timeIntervalSince1970: 0)
         let settings = DateTimeWidgetSettings(
