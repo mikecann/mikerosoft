@@ -1,15 +1,33 @@
 import AppKit
 import QuartzCore
 
+func shouldRunTaskbarWidgetRepaintTimer(
+    values: TaskbarSettingValues,
+    isAttachedToWindow: Bool,
+    isPanelVisible: Bool
+) -> Bool {
+    isAttachedToWindow
+        && isPanelVisible
+        && (values.dateTimeWidget.isEnabled || values.statsWidget.isEnabled)
+}
+
 final class TaskbarContainerView: NSView {
     let taskbarView: TaskbarView
 
+    private let requestWidgetRepaint: (TaskbarView) -> Void
     private let selectedHighlightLayer = CALayer()
     private var selectedHighlightKey: String?
     private var selectedHighlightTargetFrame: CGRect?
+    private var isPanelVisible = false
+    private var widgetRepaintTimer: Timer?
 
-    init(frame: NSRect, taskbarView: TaskbarView) {
+    init(
+        frame: NSRect,
+        taskbarView: TaskbarView,
+        requestWidgetRepaint: @escaping (TaskbarView) -> Void = { $0.needsDisplay = true }
+    ) {
         self.taskbarView = taskbarView
+        self.requestWidgetRepaint = requestWidgetRepaint
         super.init(frame: frame)
 
         wantsLayer = true
@@ -32,6 +50,15 @@ final class TaskbarContainerView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        widgetRepaintTimer?.invalidate()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateWidgetRepaintTimer()
+    }
+
     override func layout() {
         super.layout()
         taskbarView.frame = bounds
@@ -43,6 +70,39 @@ final class TaskbarContainerView: NSView {
         updateBackground(values: settings)
         taskbarView.update(items: items, settings: settings)
         updateSelectedHighlight(animated: true)
+        updateWidgetRepaintTimer()
+    }
+
+    func setWidgetRepaintVisibility(_ isVisible: Bool) {
+        guard isPanelVisible != isVisible else { return }
+        isPanelVisible = isVisible
+        updateWidgetRepaintTimer()
+    }
+
+    private func updateWidgetRepaintTimer() {
+        let shouldRun = shouldRunTaskbarWidgetRepaintTimer(
+            values: taskbarView.settings,
+            isAttachedToWindow: window != nil,
+            isPanelVisible: isPanelVisible
+        )
+        guard shouldRun else {
+            stopWidgetRepaintTimer()
+            return
+        }
+        guard widgetRepaintTimer == nil else { return }
+
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.requestWidgetRepaint(self.taskbarView)
+        }
+        timer.tolerance = 0.1
+        widgetRepaintTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopWidgetRepaintTimer() {
+        widgetRepaintTimer?.invalidate()
+        widgetRepaintTimer = nil
     }
 
     private func updateBackground(values: TaskbarSettingValues) {
