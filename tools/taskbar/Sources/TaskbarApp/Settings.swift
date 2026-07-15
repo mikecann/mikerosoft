@@ -672,14 +672,34 @@ struct UserDefaultsTaskbarSettingsStore: TaskbarSettingsStoring {
     }
 }
 
+final class TaskbarSettingsChangeObservation {
+    fileprivate let id: UUID
+    private weak var settings: TaskbarSettings?
+
+    fileprivate init(id: UUID, settings: TaskbarSettings) {
+        self.id = id
+        self.settings = settings
+    }
+
+    func cancel() {
+        settings?.removeChangeObserver(id: id)
+        settings = nil
+    }
+
+    deinit {
+        cancel()
+    }
+}
+
 final class TaskbarSettings {
     private let store: TaskbarSettingsStoring
     private let persistenceDelay: TimeInterval
     private let key = "taskbarPreferences.v1"
     private var pendingPersistenceWorkItem: DispatchWorkItem?
     private var persistenceGeneration = 0
+    private var changeObservers: [UUID: () -> Void] = [:]
+    private var suppressedChangeObservers: [UUID: Int] = [:]
 
-    var onChange: (() -> Void)?
     var onStartAtLoginChange: ((Bool) -> Void)?
     private(set) var preferences: TaskbarPreferences
 
@@ -691,6 +711,32 @@ final class TaskbarSettings {
         self.store = store
         self.persistenceDelay = persistenceDelay
         self.preferences = Self.load(from: store, key: key)
+    }
+
+    func observeChanges(_ observer: @escaping () -> Void) -> TaskbarSettingsChangeObservation {
+        let id = UUID()
+        changeObservers[id] = observer
+        return TaskbarSettingsChangeObservation(id: id, settings: self)
+    }
+
+    func performChanges(
+        suppressing observer: TaskbarSettingsChangeObservation,
+        _ changes: () -> Void
+    ) {
+        suppressedChangeObservers[observer.id, default: 0] += 1
+        defer {
+            let remaining = (suppressedChangeObservers[observer.id] ?? 1) - 1
+            if remaining == 0 {
+                suppressedChangeObservers.removeValue(forKey: observer.id)
+            } else {
+                suppressedChangeObservers[observer.id] = remaining
+            }
+        }
+        changes()
+    }
+
+    fileprivate func removeChangeObserver(id: UUID) {
+        changeObservers.removeValue(forKey: id)
     }
 
     func values(for screenID: UInt32) -> TaskbarSettingValues {
@@ -854,7 +900,10 @@ final class TaskbarSettings {
 
     private func settingsDidChange() {
         schedulePersistence()
-        onChange?()
+        changeObservers
+            .filter { suppressedChangeObservers[$0.key] == nil }
+            .map(\.value)
+            .forEach { $0() }
     }
 
     private static func load(from store: TaskbarSettingsStoring, key: String) -> TaskbarPreferences {

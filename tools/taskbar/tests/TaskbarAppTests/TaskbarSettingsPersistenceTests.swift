@@ -54,7 +54,7 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         let store = RecordingTaskbarSettingsStore()
         let settings = TaskbarSettings(store: store)
         var changeCount = 0
-        settings.onChange = { changeCount += 1 }
+        let observation = settings.observeChanges { changeCount += 1 }
 
         settings.updateGeneral { values in
             values.taskbarHeight = 120
@@ -64,32 +64,67 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(changeCount, 1)
         settings.flushPendingPersistence()
         XCTAssertEqual(store.writeCount, 1)
+        withExtendedLifetime(observation) {}
     }
 
     func testUpdateGeneralDoesNotNotifyWhenTransformMakesNoChange() {
         let store = RecordingTaskbarSettingsStore()
         let settings = TaskbarSettings(store: store)
         var changeCount = 0
-        settings.onChange = { changeCount += 1 }
+        let observation = settings.observeChanges { changeCount += 1 }
 
         settings.updateGeneral { _ in }
         settings.flushPendingPersistence()
 
         XCTAssertEqual(changeCount, 0)
         XCTAssertEqual(store.writeCount, 0)
+        withExtendedLifetime(observation) {}
+    }
+
+    func testSettingsChangeObserversAreMulticast() {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        var firstCount = 0
+        var secondCount = 0
+        let first = settings.observeChanges { firstCount += 1 }
+        let second = settings.observeChanges { secondCount += 1 }
+
+        settings.updateGeneral { $0.taskbarHeight = 72 }
+
+        XCTAssertEqual(firstCount, 1)
+        XCTAssertEqual(secondCount, 1)
+        withExtendedLifetime([first, second]) {}
+    }
+
+    func testSettingsMutationCanSuppressOnlyTheOriginatingObserver() {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        var originatingCount = 0
+        var controllerCount = 0
+        let originatingObserver = settings.observeChanges { originatingCount += 1 }
+        let controllerObserver = settings.observeChanges { controllerCount += 1 }
+
+        settings.performChanges(suppressing: originatingObserver) {
+            settings.updateGeneral { $0.taskbarHeight = 72 }
+        }
+
+        XCTAssertEqual(originatingCount, 0)
+        XCTAssertEqual(controllerCount, 1)
+        withExtendedLifetime(controllerObserver) {}
     }
 
     func testUpdateOverridesDoesNotNotifyWhenTransformMakesNoChange() {
         let store = RecordingTaskbarSettingsStore()
         let settings = TaskbarSettings(store: store)
         var changeCount = 0
-        settings.onChange = { changeCount += 1 }
+        let observation = settings.observeChanges { changeCount += 1 }
 
         settings.updateOverrides(for: 123) { _ in }
         settings.flushPendingPersistence()
 
         XCTAssertEqual(changeCount, 0)
         XCTAssertEqual(store.writeCount, 0)
+        withExtendedLifetime(observation) {}
     }
 
     func testSliderLikeBurstUsesOneTrailingPersistenceWrite() {
@@ -183,6 +218,25 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         }
 
         XCTAssertEqual(syncedValues, [false])
+    }
+
+    func testControllerSettingsRefreshRemainsRegisteredWhenAnotherListenerIsAdded() {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        var scheduledRefreshCount = 0
+        var secondListenerCount = 0
+        let controller = TaskbarController(
+            settings: settings,
+            startAtLoginSync: { _ in },
+            scheduleSettingsRefresh: { scheduledRefreshCount += 1 }
+        )
+        let secondObserver = settings.observeChanges { secondListenerCount += 1 }
+
+        settings.updateGeneral { $0.taskbarHeight = 72 }
+
+        XCTAssertEqual(scheduledRefreshCount, 1)
+        XCTAssertEqual(secondListenerCount, 1)
+        withExtendedLifetime((controller, secondObserver)) {}
     }
 
     func testMenuSettingsMutationsEachScheduleOneRefreshWithoutImmediateFullRefresh() throws {

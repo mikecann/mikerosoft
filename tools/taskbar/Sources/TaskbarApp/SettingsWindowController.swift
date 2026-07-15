@@ -57,6 +57,39 @@ enum SettingsSidebarItem: Equatable {
             return true
         }
     }
+
+    fileprivate var selectionIdentity: SettingsSidebarSelectionIdentity {
+        switch self {
+        case .general:
+            return .general
+        case .widgets:
+            return .widgets
+        case .widget(let widgetID):
+            return .widget(widgetID)
+        case .divider(let title):
+            return .divider(title)
+        case .monitor(let screen):
+            return .monitor(screen.id)
+        case .monitorWidget(let screen, let widgetID):
+            return .monitorWidget(screen.id, widgetID)
+        }
+    }
+}
+
+private enum SettingsSidebarSelectionIdentity: Equatable {
+    case general
+    case widgets
+    case widget(TaskbarWidgetID)
+    case divider(String)
+    case monitor(UInt32)
+    case monitorWidget(UInt32, TaskbarWidgetID)
+}
+
+func reconciledSettingsSidebarSelection(
+    _ selection: SettingsSidebarItem,
+    in items: [SettingsSidebarItem]
+) -> SettingsSidebarItem {
+    items.first { $0.isSelectable && $0.selectionIdentity == selection.selectionIdentity } ?? .general
 }
 
 func taskbarSettingsSidebarItems(
@@ -135,8 +168,17 @@ private final class ValueSlider: NSSlider {
     }
 }
 
-final class SettingsWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+protocol TaskbarSettingsWindow: AnyObject {
+    var onClose: (() -> Void)? { get set }
+    func updateScreens(_ screens: [ScreenInfo])
+    func selectMonitor(screenID: UInt32)
+    func selectWidget(_ widgetID: TaskbarWidgetID, screenID: UInt32?)
+    func showWindow(_ sender: Any?)
+}
+
+final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
     private let settings: TaskbarSettings
+    private var settingsChangeObservation: TaskbarSettingsChangeObservation?
     private var screens: [ScreenInfo]
     private var sidebarItems: [SettingsSidebarItem] = []
     private let tableView = NSTableView()
@@ -144,6 +186,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     private var selectedItem: SettingsSidebarItem = .general
     private weak var pinCandidatePopup: NSPopUpButton?
+    var onClose: (() -> Void)?
 
     init(settings: TaskbarSettings, screens: [ScreenInfo]) {
         self.settings = settings
@@ -162,9 +205,13 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         window.center()
 
         super.init(window: window)
+        window.delegate = self
 
         rebuildSidebarItems()
         buildWindowContent()
+        settingsChangeObservation = settings.observeChanges { [weak self] in
+            self?.renderDetail()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -172,14 +219,14 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     func updateScreens(_ screens: [ScreenInfo]) {
+        let previousSelection = selectedItem
         self.screens = screens
         rebuildSidebarItems()
         tableView.reloadData()
 
-        if !sidebarItems.contains(selectedItem) {
-            selectedItem = .general
-            tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        }
+        selectedItem = reconciledSettingsSidebarSelection(previousSelection, in: sidebarItems)
+        let selectedRow = sidebarItems.firstIndex(of: selectedItem) ?? 0
+        tableView.selectRowIndexes(IndexSet(integer: selectedRow), byExtendingSelection: false)
         renderDetail()
     }
 
@@ -221,6 +268,12 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         super.showWindow(sender)
         window?.makeKeyAndOrderFront(sender)
         renderDetail()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        settingsChangeObservation?.cancel()
+        settingsChangeObservation = nil
+        onClose?()
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -1281,144 +1334,181 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         (sender as? ValueSlider)?.refreshValueLabel()
     }
 
+    private func mutateSettings(_ mutation: () -> Void) {
+        guard let settingsChangeObservation else {
+            mutation()
+            return
+        }
+        settings.performChanges(suppressing: settingsChangeObservation, mutation)
+    }
+
+    private func updateGeneral(_ transform: (inout TaskbarSettingValues) -> Void) {
+        mutateSettings {
+            settings.updateGeneral(transform)
+        }
+    }
+
+    private func updateOverrides(
+        for screenID: UInt32,
+        _ transform: (inout TaskbarMonitorOverrides) -> Void
+    ) {
+        mutateSettings {
+            settings.updateOverrides(for: screenID, transform)
+        }
+    }
+
+    private func pin(_ app: PinnedApp, for screenID: UInt32?) {
+        mutateSettings {
+            settings.pin(app, for: screenID)
+        }
+    }
+
+    private func unpin(_ app: PinnedApp, for screenID: UInt32?) {
+        mutateSettings {
+            settings.unpin(app, for: screenID)
+        }
+    }
+
     @objc private func setStartAtLogin(_ sender: NSButton) {
-        settings.setStartAtLogin(sender.state == .on)
+        mutateSettings {
+            settings.setStartAtLogin(sender.state == .on)
+        }
     }
 
     @objc private func setGeneralVisible(_ sender: NSButton) {
-        settings.updateGeneral { $0.isVisible = sender.state == .on }
+        updateGeneral { $0.isVisible = sender.state == .on }
     }
 
     @objc private func setGeneralGroupByApp(_ sender: NSButton) {
-        settings.updateGeneral { $0.groupByApp = sender.state == .on }
+        updateGeneral { $0.groupByApp = sender.state == .on }
     }
 
     @objc private func setGeneralWindowCounts(_ sender: NSButton) {
-        settings.updateGeneral { $0.showWindowCounts = sender.state == .on }
+        updateGeneral { $0.showWindowCounts = sender.state == .on }
     }
 
     @objc private func setGeneralDateTimeEnabled(_ sender: NSButton) {
-        settings.updateGeneral { $0.dateTimeWidget.isEnabled = sender.state == .on }
+        updateGeneral { $0.dateTimeWidget.isEnabled = sender.state == .on }
     }
 
     @objc private func setGeneralDateTimeDateDisplay(_ sender: NSPopUpButton) {
         guard let display = selectedDateDisplay(from: sender) else { return }
-        settings.updateGeneral { $0.dateTimeWidget.dateDisplay = display }
+        updateGeneral { $0.dateTimeWidget.dateDisplay = display }
     }
 
     @objc private func setGeneralDateTimeDayOfWeek(_ sender: NSButton) {
-        settings.updateGeneral { $0.dateTimeWidget.showDayOfWeek = sender.state == .on }
+        updateGeneral { $0.dateTimeWidget.showDayOfWeek = sender.state == .on }
     }
 
     @objc private func setGeneralDateTimeSeconds(_ sender: NSButton) {
-        settings.updateGeneral { $0.dateTimeWidget.showSeconds = sender.state == .on }
+        updateGeneral { $0.dateTimeWidget.showSeconds = sender.state == .on }
     }
 
     @objc private func setGeneralDateTime24Hour(_ sender: NSButton) {
-        settings.updateGeneral { $0.dateTimeWidget.use24HourClock = sender.state == .on }
+        updateGeneral { $0.dateTimeWidget.use24HourClock = sender.state == .on }
     }
 
     @objc private func setGeneralStatsEnabled(_ sender: NSButton) {
-        settings.updateGeneral { $0.statsWidget.isEnabled = sender.state == .on }
+        updateGeneral { $0.statsWidget.isEnabled = sender.state == .on }
     }
 
     @objc private func setGeneralStatsCPU(_ sender: NSButton) {
-        settings.updateGeneral { $0.statsWidget.showCPU = sender.state == .on }
+        updateGeneral { $0.statsWidget.showCPU = sender.state == .on }
     }
 
     @objc private func setGeneralStatsGPU(_ sender: NSButton) {
-        settings.updateGeneral { $0.statsWidget.showGPU = sender.state == .on }
+        updateGeneral { $0.statsWidget.showGPU = sender.state == .on }
     }
 
     @objc private func setGeneralStatsMemory(_ sender: NSButton) {
-        settings.updateGeneral { $0.statsWidget.showMemory = sender.state == .on }
+        updateGeneral { $0.statsWidget.showMemory = sender.state == .on }
     }
 
     @objc private func setGeneralStatsNetwork(_ sender: NSButton) {
-        settings.updateGeneral { $0.statsWidget.showNetwork = sender.state == .on }
+        updateGeneral { $0.statsWidget.showNetwork = sender.state == .on }
     }
 
     @objc private func setGeneralStatsMiniGraph(_ sender: NSButton) {
-        settings.updateGeneral { $0.statsWidget.showMiniGraph = sender.state == .on }
+        updateGeneral { $0.statsWidget.showMiniGraph = sender.state == .on }
     }
 
     @objc private func setGeneralStatsMemoryDisplay(_ sender: NSPopUpButton) {
         guard let display = selectedStatsMemoryDisplay(from: sender) else { return }
-        settings.updateGeneral { $0.statsWidget.memoryDisplay = display }
+        updateGeneral { $0.statsWidget.memoryDisplay = display }
     }
 
     @objc private func setGeneralHeight(_ sender: NSSlider) {
         refreshSliderLabel(sender)
-        settings.updateGeneral { $0.taskbarHeight = sender.doubleValue }
+        updateGeneral { $0.taskbarHeight = sender.doubleValue }
     }
 
     @objc private func setGeneralMinimumItemWidth(_ sender: NSSlider) {
         refreshSliderLabel(sender)
-        settings.updateGeneral { $0.minimumItemWidth = sender.doubleValue }
+        updateGeneral { $0.minimumItemWidth = sender.doubleValue }
     }
 
     @objc private func setGeneralMaximumItemWidth(_ sender: NSSlider) {
         refreshSliderLabel(sender)
-        settings.updateGeneral { $0.maximumItemWidth = sender.doubleValue }
+        updateGeneral { $0.maximumItemWidth = sender.doubleValue }
     }
 
     @objc private func setGeneralItemSpacing(_ sender: NSSlider) {
         refreshSliderLabel(sender)
-        settings.updateGeneral { $0.itemSpacing = sender.doubleValue }
+        updateGeneral { $0.itemSpacing = sender.doubleValue }
     }
 
     @objc private func setGeneralBackgroundOpacity(_ sender: NSSlider) {
         refreshSliderLabel(sender)
-        settings.updateGeneral { $0.backgroundOpacity = sender.doubleValue }
+        updateGeneral { $0.backgroundOpacity = sender.doubleValue }
     }
 
     @objc private func setGeneralAvoidOverlappingWindows(_ sender: NSButton) {
-        settings.updateGeneral { $0.avoidOverlappingWindows = sender.state == .on }
+        updateGeneral { $0.avoidOverlappingWindows = sender.state == .on }
     }
 
     @objc private func setGeneralShowMinimizedWindows(_ sender: NSButton) {
-        settings.updateGeneral { $0.showMinimizedWindows = sender.state == .on }
+        updateGeneral { $0.showMinimizedWindows = sender.state == .on }
     }
 
     @objc private func setGeneralAutoHide(_ sender: NSButton) {
-        settings.updateGeneral { $0.autoHide = sender.state == .on }
+        updateGeneral { $0.autoHide = sender.state == .on }
     }
 
     @objc private func setGeneralRevealAnimation(_ sender: NSPopUpButton) {
         guard let animation = selectedRevealAnimation(from: sender) else { return }
-        settings.updateGeneral { $0.revealAnimation = animation }
+        updateGeneral { $0.revealAnimation = animation }
     }
 
     @objc private func setGeneralRevealDuration(_ sender: NSSlider) {
         refreshSliderLabel(sender)
-        settings.updateGeneral { $0.revealAnimationDuration = sender.doubleValue }
+        updateGeneral { $0.revealAnimationDuration = sender.doubleValue }
     }
 
     @objc private func toggleMonitorVisibleOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).isVisible
-        settings.updateOverrides(for: id) { $0.isVisible = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.isVisible = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorGroupByAppOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).groupByApp
-        settings.updateOverrides(for: id) { $0.groupByApp = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.groupByApp = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorWindowCountsOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).showWindowCounts
-        settings.updateOverrides(for: id) { $0.showWindowCounts = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.showWindowCounts = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorDateTimeOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).dateTimeWidget
-        settings.updateOverrides(for: id) {
+        updateOverrides(for: id) {
             $0.dateTimeWidget = sender.state == .on ? value : nil
             $0.clockMode = nil
         }
@@ -1428,106 +1518,106 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     @objc private func toggleMonitorStatsOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).statsWidget
-        settings.updateOverrides(for: id) { $0.statsWidget = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.statsWidget = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorHeightOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).taskbarHeight
-        settings.updateOverrides(for: id) { $0.taskbarHeight = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.taskbarHeight = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorMinimumItemWidthOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).minimumItemWidth
-        settings.updateOverrides(for: id) { $0.minimumItemWidth = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.minimumItemWidth = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorMaximumItemWidthOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).maximumItemWidth
-        settings.updateOverrides(for: id) { $0.maximumItemWidth = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.maximumItemWidth = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorItemSpacingOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).itemSpacing
-        settings.updateOverrides(for: id) { $0.itemSpacing = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.itemSpacing = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorBackgroundOpacityOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).backgroundOpacity
-        settings.updateOverrides(for: id) { $0.backgroundOpacity = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.backgroundOpacity = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorAvoidOverlappingWindowsOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).avoidOverlappingWindows
-        settings.updateOverrides(for: id) { $0.avoidOverlappingWindows = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.avoidOverlappingWindows = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorShowMinimizedWindowsOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).showMinimizedWindows
-        settings.updateOverrides(for: id) { $0.showMinimizedWindows = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.showMinimizedWindows = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorAutoHideOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).autoHide
-        settings.updateOverrides(for: id) { $0.autoHide = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.autoHide = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorRevealAnimationOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).revealAnimation
-        settings.updateOverrides(for: id) { $0.revealAnimation = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.revealAnimation = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorRevealDurationOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).revealAnimationDuration
-        settings.updateOverrides(for: id) { $0.revealAnimationDuration = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.revealAnimationDuration = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorPinnedAppsOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).pinnedApps
-        settings.updateOverrides(for: id) { $0.pinnedApps = sender.state == .on ? value : nil }
+        updateOverrides(for: id) { $0.pinnedApps = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func setMonitorVisible(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        settings.updateOverrides(for: id) { $0.isVisible = sender.state == .on }
+        updateOverrides(for: id) { $0.isVisible = sender.state == .on }
     }
 
     @objc private func setMonitorGroupByApp(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        settings.updateOverrides(for: id) { $0.groupByApp = sender.state == .on }
+        updateOverrides(for: id) { $0.groupByApp = sender.state == .on }
     }
 
     @objc private func setMonitorWindowCounts(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        settings.updateOverrides(for: id) { $0.showWindowCounts = sender.state == .on }
+        updateOverrides(for: id) { $0.showWindowCounts = sender.state == .on }
     }
 
     private func updateMonitorDateTimeWidget(_ transform: (inout DateTimeWidgetSettings) -> Void) {
         guard let id = selectedMonitorID else { return }
         let current = settings.overrides(for: id).dateTimeWidget ?? settings.values(for: id).dateTimeWidget
-        settings.updateOverrides(for: id) { override in
+        updateOverrides(for: id) { override in
             var value = current
             transform(&value)
             override.dateTimeWidget = value
@@ -1559,7 +1649,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     private func updateMonitorStatsWidget(_ transform: (inout StatsWidgetSettings) -> Void) {
         guard let id = selectedMonitorID else { return }
         let current = settings.overrides(for: id).statsWidget ?? settings.values(for: id).statsWidget
-        settings.updateOverrides(for: id) { override in
+        updateOverrides(for: id) { override in
             var value = current
             transform(&value)
             override.statsWidget = value
@@ -1598,76 +1688,68 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     @objc private func setMonitorHeight(_ sender: NSSlider) {
         guard let id = selectedMonitorID else { return }
         refreshSliderLabel(sender)
-        settings.updateOverrides(for: id) { $0.taskbarHeight = sender.doubleValue }
+        updateOverrides(for: id) { $0.taskbarHeight = sender.doubleValue }
     }
 
     @objc private func setMonitorMinimumItemWidth(_ sender: NSSlider) {
         guard let id = selectedMonitorID else { return }
         refreshSliderLabel(sender)
-        settings.updateOverrides(for: id) { $0.minimumItemWidth = sender.doubleValue }
+        updateOverrides(for: id) { $0.minimumItemWidth = sender.doubleValue }
     }
 
     @objc private func setMonitorMaximumItemWidth(_ sender: NSSlider) {
         guard let id = selectedMonitorID else { return }
         refreshSliderLabel(sender)
-        settings.updateOverrides(for: id) { $0.maximumItemWidth = sender.doubleValue }
+        updateOverrides(for: id) { $0.maximumItemWidth = sender.doubleValue }
     }
 
     @objc private func setMonitorItemSpacing(_ sender: NSSlider) {
         guard let id = selectedMonitorID else { return }
         refreshSliderLabel(sender)
-        settings.updateOverrides(for: id) { $0.itemSpacing = sender.doubleValue }
+        updateOverrides(for: id) { $0.itemSpacing = sender.doubleValue }
     }
 
     @objc private func setMonitorBackgroundOpacity(_ sender: NSSlider) {
         guard let id = selectedMonitorID else { return }
         refreshSliderLabel(sender)
-        settings.updateOverrides(for: id) { $0.backgroundOpacity = sender.doubleValue }
+        updateOverrides(for: id) { $0.backgroundOpacity = sender.doubleValue }
     }
 
     @objc private func setMonitorAvoidOverlappingWindows(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        settings.updateOverrides(for: id) { $0.avoidOverlappingWindows = sender.state == .on }
+        updateOverrides(for: id) { $0.avoidOverlappingWindows = sender.state == .on }
     }
 
     @objc private func setMonitorShowMinimizedWindows(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        settings.updateOverrides(for: id) { $0.showMinimizedWindows = sender.state == .on }
+        updateOverrides(for: id) { $0.showMinimizedWindows = sender.state == .on }
     }
 
     @objc private func setMonitorAutoHide(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        settings.updateOverrides(for: id) { $0.autoHide = sender.state == .on }
+        updateOverrides(for: id) { $0.autoHide = sender.state == .on }
     }
 
     @objc private func setMonitorRevealAnimation(_ sender: NSPopUpButton) {
         guard let id = selectedMonitorID, let animation = selectedRevealAnimation(from: sender) else { return }
-        settings.updateOverrides(for: id) { $0.revealAnimation = animation }
+        updateOverrides(for: id) { $0.revealAnimation = animation }
     }
 
     @objc private func setMonitorRevealDuration(_ sender: NSSlider) {
         guard let id = selectedMonitorID else { return }
         refreshSliderLabel(sender)
-        settings.updateOverrides(for: id) { $0.revealAnimationDuration = sender.doubleValue }
+        updateOverrides(for: id) { $0.revealAnimationDuration = sender.doubleValue }
     }
 
     @objc private func addPinnedApp(_ sender: NSButton) {
         guard let app = pinCandidatePopup?.selectedItem?.representedObject as? PinnedApp else { return }
-        if let id = selectedMonitorID {
-            settings.pin(app, for: id)
-        } else {
-            settings.pin(app)
-        }
+        pin(app, for: selectedMonitorID)
         renderDetail()
     }
 
     @objc private func unpinPinnedApp(_ sender: PinnedAppButton) {
         guard let app = sender.pinnedApp else { return }
-        if let id = selectedMonitorID {
-            settings.unpin(app, for: id)
-        } else {
-            settings.unpin(app)
-        }
+        unpin(app, for: selectedMonitorID)
         renderDetail()
     }
 }
