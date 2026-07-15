@@ -170,7 +170,7 @@ export const tools: Tool[] = [
     desc: 'Native SwiftUI screen and camera recorder with 4K/30 capture, project-aware source folders, system audio, microphone audio, and separate full-resolution outputs',
     icon: `${base}/record-it/icons/record-it.png`,
     header: `${base}/record-it/docs/header.webp`,
-    screenshots: [],
+    screenshots: [`${base}/record-it/docs/ss1.png`],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/record-it',
     platforms: ['macos'],
   },

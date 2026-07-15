@@ -5,6 +5,10 @@
 A small native macOS screen and camera recorder built with SwiftUI,
 ScreenCaptureKit, and AVFoundation.
 
+## Preview
+
+![Record It screen and camera capture](docs/ss1.png)
+
 ## What it records
 
 - Screen, camera, or both
