@@ -84,8 +84,8 @@ func activateApplicationWindowAsync(item: TaskbarItem) {
     }
 }
 
-func unminimizeApplicationWindow(pid: pid_t, title: String) -> Bool {
-    guard AXIsProcessTrusted() else { return false }
+func unminimizeApplicationWindowAndReturnID(pid: pid_t, title: String) -> Int? {
+    guard AXIsProcessTrusted() else { return nil }
 
     let axApp = AXUIElementCreateApplication(pid)
     setTaskbarAccessibilityMessagingTimeout(axApp)
@@ -93,7 +93,7 @@ func unminimizeApplicationWindow(pid: pid_t, title: String) -> Bool {
     guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
           let windows = windowsRef as? [AXUIElement]
     else {
-        return false
+        return nil
     }
 
     let minimizedWindows = windows.filter { window in
@@ -103,15 +103,19 @@ func unminimizeApplicationWindow(pid: pid_t, title: String) -> Bool {
     guard let target = minimizedWindows.first(where: { accessibilityString($0, kAXTitleAttribute) == title })
         ?? minimizedWindows.first
     else {
-        return false
+        return nil
     }
 
-    return AXUIElementSetAttributeValue(target, "AXMinimized" as CFString, kCFBooleanFalse) == .success
+    guard AXUIElementSetAttributeValue(target, "AXMinimized" as CFString, kCFBooleanFalse) == .success else {
+        return nil
+    }
+    return accessibilityWindowID(target)
 }
 
 func unminimizeApplicationWindowAsync(pid: pid_t, title: String) {
     performAccessibilityWindowAction("unminimize AX pid=\(pid)") {
-        _ = unminimizeApplicationWindow(pid: pid, title: title)
+        guard let windowID = unminimizeApplicationWindowAndReturnID(pid: pid, title: title) else { return }
+        MinimizedWindowSampler.shared.invalidate(pid: pid, windowID: windowID, title: title)
     }
 }
 
@@ -217,7 +221,7 @@ func collectWindowRecords(screens: [ScreenInfo], includeMinimized: Bool = false)
     )
 }
 
-private struct AccessibilityWindowKey: Hashable {
+struct AccessibilityWindowKey: Hashable {
     let pid: pid_t
     let title: String
     let x: Int
@@ -501,41 +505,90 @@ func applicationWindowMatchScore(
     return score
 }
 
-private struct RunningApplicationMetadata {
+struct RunningApplicationMetadata {
     let bundleID: String
     let appPath: String
 }
 
-private final class RunningApplicationMetadataSampler {
+final class RunningApplicationMetadataSampler {
     static let shared = RunningApplicationMetadataSampler()
 
+    private let collect: (Set<pid_t>) -> [pid_t: RunningApplicationMetadata]
+    private let schedule: (@escaping () -> Void) -> Void
     private let lock = NSLock()
     private var cachedMetadata: [pid_t: RunningApplicationMetadata] = [:]
+    private var attemptedPIDs = Set<pid_t>()
     private var lastRefresh = Date.distantPast
     private var isRefreshing = false
+    private var hasLoadedInitialSnapshot = false
+    private var pendingRefreshPIDs = Set<pid_t>()
+
+    init(
+        collect: @escaping (Set<pid_t>) -> [pid_t: RunningApplicationMetadata] = collectRunningApplicationMetadata,
+        schedule: @escaping (@escaping () -> Void) -> Void = { work in
+            DispatchQueue.global(qos: .utility).async(execute: work)
+        }
+    ) {
+        self.collect = collect
+        self.schedule = schedule
+    }
 
     func metadata(for pids: Set<pid_t>, now: Date = Date()) -> [pid_t: RunningApplicationMetadata] {
         lock.lock()
         let cached = cachedMetadata.filter { pids.contains($0.key) }
-        let shouldRefresh = now.timeIntervalSince(lastRefresh) >= 2.0 && !isRefreshing
-        if shouldRefresh {
+        let containsUnknownPID = !pids.isSubset(of: attemptedPIDs)
+        if containsUnknownPID, isRefreshing {
+            pendingRefreshPIDs.formUnion(pids)
+        }
+        let shouldLoadSynchronously = (!hasLoadedInitialSnapshot || containsUnknownPID) && !isRefreshing
+        let shouldRefresh = !shouldLoadSynchronously
+            && hasLoadedInitialSnapshot
+            && now.timeIntervalSince(lastRefresh) >= 2.0
+            && !isRefreshing
+        if shouldLoadSynchronously || shouldRefresh {
             isRefreshing = true
             lastRefresh = now
         }
         lock.unlock()
 
-        if shouldRefresh {
-            DispatchQueue.global(qos: .utility).async { [weak self] in
-                guard let self else { return }
-                let metadata = collectRunningApplicationMetadata(for: pids)
-                self.lock.lock()
-                self.cachedMetadata = metadata
-                self.isRefreshing = false
-                self.lock.unlock()
+        if shouldLoadSynchronously {
+            let metadata = collect(pids)
+            lock.lock()
+            cachedMetadata = metadata
+            attemptedPIDs = pids
+            hasLoadedInitialSnapshot = true
+            let pendingPIDs = pendingRefreshPIDs
+            pendingRefreshPIDs.removeAll()
+            isRefreshing = !pendingPIDs.isEmpty
+            lock.unlock()
+            if !pendingPIDs.isEmpty {
+                refreshInBackground(for: pendingPIDs)
             }
+            return metadata.filter { pids.contains($0.key) }
+        }
+
+        if shouldRefresh {
+            refreshInBackground(for: pids)
         }
 
         return cached
+    }
+
+    private func refreshInBackground(for pids: Set<pid_t>) {
+        schedule { [weak self] in
+            guard let self else { return }
+            let metadata = self.collect(pids)
+            self.lock.lock()
+            self.cachedMetadata = metadata
+            self.attemptedPIDs = pids
+            let pendingPIDs = self.pendingRefreshPIDs
+            self.pendingRefreshPIDs.removeAll()
+            self.isRefreshing = !pendingPIDs.isEmpty
+            self.lock.unlock()
+            if !pendingPIDs.isEmpty {
+                self.refreshInBackground(for: pendingPIDs)
+            }
+        }
     }
 }
 
@@ -550,28 +603,49 @@ private func collectRunningApplicationMetadata(for pids: Set<pid_t>) -> [pid_t: 
         }
 }
 
-private final class AccessibilitySurfaceSampler {
+final class AccessibilitySurfaceSampler {
     static let shared = AccessibilitySurfaceSampler()
 
+    private let collect: (Set<pid_t>) -> [AccessibilityWindowSurface]
     private let lock = NSLock()
     private var cachedSurfaces: [AccessibilityWindowSurface] = []
     private var lastRefresh = Date.distantPast
     private var isRefreshing = false
+    private var hasLoadedInitialSnapshot = false
+
+    init(
+        collect: @escaping (Set<pid_t>) -> [AccessibilityWindowSurface] = collectAccessibilitySurfaces
+    ) {
+        self.collect = collect
+    }
 
     func surfaces(for pids: Set<pid_t>, now: Date = Date()) -> [AccessibilityWindowSurface] {
         lock.lock()
         let cached = cachedSurfaces.filter { pids.contains($0.pid) }
-        let shouldRefresh = now.timeIntervalSince(lastRefresh) >= 2.0 && !isRefreshing
-        if shouldRefresh {
+        let shouldLoadSynchronously = !hasLoadedInitialSnapshot && !isRefreshing
+        let shouldRefresh = hasLoadedInitialSnapshot
+            && now.timeIntervalSince(lastRefresh) >= 2.0
+            && !isRefreshing
+        if shouldLoadSynchronously || shouldRefresh {
             isRefreshing = true
             lastRefresh = now
         }
         lock.unlock()
 
+        if shouldLoadSynchronously {
+            let surfaces = collect(pids)
+            lock.lock()
+            cachedSurfaces = surfaces
+            hasLoadedInitialSnapshot = true
+            isRefreshing = false
+            lock.unlock()
+            return surfaces.filter { pids.contains($0.pid) }
+        }
+
         if shouldRefresh {
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 guard let self else { return }
-                let surfaces = collectAccessibilitySurfaces(for: pids)
+                let surfaces = self.collect(pids)
                 self.lock.lock()
                 self.cachedSurfaces = surfaces
                 self.isRefreshing = false
@@ -621,13 +695,40 @@ private func collectAccessibilitySurfaces(for pids: Set<pid_t>) -> [Accessibilit
     return surfaces
 }
 
-private final class MinimizedWindowSampler {
+final class MinimizedWindowSampler {
     static let shared = MinimizedWindowSampler()
 
+    private let collect: ([ScreenInfo]) -> [WindowRecord]
+    private let schedule: (@escaping () -> Void) -> Void
     private let lock = NSLock()
     private var cachedRecords: [WindowRecord] = []
     private var lastRefresh = Date.distantPast
     private var isRefreshing = false
+    private var hasLoadedInitialSnapshot = false
+    private var cacheGeneration = 0
+
+    init(
+        collect: @escaping ([ScreenInfo]) -> [WindowRecord] = collectMinimizedWindowRecords,
+        schedule: @escaping (@escaping () -> Void) -> Void = { work in
+            DispatchQueue.global(qos: .utility).async(execute: work)
+        }
+    ) {
+        self.collect = collect
+        self.schedule = schedule
+    }
+
+    func invalidate(pid: pid_t, windowID: Int, title: String) {
+        lock.lock()
+        cacheGeneration += 1
+        cachedRecords.removeAll { record in
+            guard record.pid == pid else { return false }
+            if windowID > 0, record.windowID > 0 {
+                return record.windowID == windowID
+            }
+            return normalizedWindowTitle(record.title) == normalizedWindowTitle(title)
+        }
+        lock.unlock()
+    }
 
     func records(
         screens: [ScreenInfo],
@@ -636,30 +737,62 @@ private final class MinimizedWindowSampler {
         now: Date = Date()
     ) -> [WindowRecord] {
         lock.lock()
-        let cached = cachedRecords.filter { record in
-            !isStaleCachedMinimizedWindow(windowID: record.windowID, visibleWindowIDs: visibleWindowIDs)
-                && !visibleKeys.contains(AccessibilityWindowKey(pid: record.pid, title: record.title, bounds: record.bounds))
-        }
-        let shouldRefresh = now.timeIntervalSince(lastRefresh) >= 2.0 && !isRefreshing
-        if shouldRefresh {
+        let cached = filteredMinimizedRecords(
+            cachedRecords,
+            excluding: visibleKeys,
+            visibleWindowIDs: visibleWindowIDs
+        )
+        let shouldLoadSynchronously = !hasLoadedInitialSnapshot && !isRefreshing
+        let shouldRefresh = hasLoadedInitialSnapshot
+            && now.timeIntervalSince(lastRefresh) >= 2.0
+            && !isRefreshing
+        if shouldLoadSynchronously || shouldRefresh {
             isRefreshing = true
             lastRefresh = now
         }
+        let refreshGeneration = cacheGeneration
         lock.unlock()
+
+        if shouldLoadSynchronously {
+            let records = collect(screens)
+            lock.lock()
+            cachedRecords = records
+            hasLoadedInitialSnapshot = true
+            isRefreshing = false
+            lock.unlock()
+            return filteredMinimizedRecords(
+                records,
+                excluding: visibleKeys,
+                visibleWindowIDs: visibleWindowIDs
+            )
+        }
 
         if shouldRefresh {
             let screens = screens
-            DispatchQueue.global(qos: .utility).async { [weak self] in
+            schedule { [weak self] in
                 guard let self else { return }
-                let records = collectMinimizedWindowRecords(screens: screens)
+                let records = self.collect(screens)
                 self.lock.lock()
-                self.cachedRecords = records
+                if self.cacheGeneration == refreshGeneration {
+                    self.cachedRecords = records
+                }
                 self.isRefreshing = false
                 self.lock.unlock()
             }
         }
 
         return cached
+    }
+}
+
+private func filteredMinimizedRecords(
+    _ records: [WindowRecord],
+    excluding visibleKeys: Set<AccessibilityWindowKey>,
+    visibleWindowIDs: Set<Int>
+) -> [WindowRecord] {
+    records.filter { record in
+        !isStaleCachedMinimizedWindow(windowID: record.windowID, visibleWindowIDs: visibleWindowIDs)
+            && !visibleKeys.contains(AccessibilityWindowKey(pid: record.pid, title: record.title, bounds: record.bounds))
     }
 }
 
