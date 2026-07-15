@@ -16,7 +16,6 @@ final class TaskbarView: NSView {
     private var mouseDownPoint: NSPoint?
     private var mouseDownWidget: (rect: NSRect, id: TaskbarWidgetID, statsMetric: StatsWidgetMetric?)?
     private var didDragPinnedItem = false
-    private let leftPadding: CGFloat = 6
     private var tileHeight: CGFloat {
         max(18, bounds.height - 8)
     }
@@ -30,15 +29,13 @@ final class TaskbarView: NSView {
     func update(items: [TaskbarItem], settings: TaskbarSettingValues) {
         self.items = items
         self.settings = settings
-        tileRects = tileLayout()
-        widgetRects = widgetLayout(after: tileRects)
+        refreshLayout()
         needsDisplay = true
     }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        tileRects = tileLayout()
-        widgetRects = widgetLayout(after: tileRects)
+        refreshLayout()
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -50,45 +47,25 @@ final class TaskbarView: NSView {
     }
 
     func frontmostTileLayout() -> (rect: NSRect, item: TaskbarItem)? {
-        tileLayout()
+        makeLayout().tiles
             .first { _, item in item.isFrontmost }
             .map { (rect: $0.0, item: $0.1) }
     }
 
-    private func tileLayout() -> [(NSRect, TaskbarItem)] {
-        var layout: [(NSRect, TaskbarItem)] = []
-        guard !items.isEmpty else { return layout }
+    private func refreshLayout() {
+        let layout = makeLayout()
+        tileRects = layout.tiles
+        widgetRects = layout.widgets
+    }
 
-        var x = leftPadding
-        let y: CGFloat = max(2, (bounds.height - tileHeight) / 2)
-        let maxTileX = bounds.width - trailingWidth() - 8
-        let availableWidth = max(0, maxTileX - leftPadding)
-        let itemCount = CGFloat(items.count)
-        let gapCount = max(0, itemCount - 1)
-        let minimumTileWidth: CGFloat = 1
-        let gapBudget = max(0, availableWidth - minimumTileWidth * itemCount)
-        let effectiveItemSpacing: CGFloat
-        if gapCount > 0 {
-            effectiveItemSpacing = min(CGFloat(settings.itemSpacing), gapBudget / gapCount)
-        } else {
-            effectiveItemSpacing = 0
-        }
-        let availableTileWidth = max(0, availableWidth - effectiveItemSpacing * gapCount)
-        let preferredWidths = items.map { preferredTileWidth(for: $0) }
-        let softMinimumWidth = TaskbarItemMetrics.iconOnlyWidth(iconSize: TaskbarItemMetrics.iconSize(for: tileHeight))
-        let fittedWidths = fittedTaskbarItemWidths(
-            preferredWidths: preferredWidths,
-            softMinimumWidth: softMinimumWidth,
-            availableWidth: availableTileWidth
+    private func makeLayout() -> TaskbarLayout {
+        taskbarLayout(
+            bounds: bounds,
+            items: items,
+            settings: settings,
+            tileHeight: tileHeight,
+            preferredTileWidths: items.map { preferredTileWidth(for: $0) }
         )
-
-        for (item, tileWidth) in zip(items, fittedWidths) {
-            let rect = NSRect(x: x, y: y, width: tileWidth, height: tileHeight)
-            layout.append((rect, item))
-            x += tileWidth + effectiveItemSpacing
-        }
-
-        return layout
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -197,52 +174,6 @@ final class TaskbarView: NSView {
         )
     }
 
-    private func trailingWidth() -> CGFloat {
-        let widgets = activeTaskbarWidgets(for: settings)
-        guard !widgets.isEmpty else { return 8 }
-
-        let spacing = taskbarWidgetSpacing(itemSpacing: CGFloat(settings.itemSpacing))
-        let widgetWidths = widgets.reduce(CGFloat(0)) { total, widget in
-            total + widget.minimumWidth(in: settings, height: tileHeight)
-        }
-        return widgetWidths + spacing * CGFloat(max(0, widgets.count - 1)) + 12
-    }
-
-    private func widgetLayout(after tileLayout: [(NSRect, TaskbarItem)]) -> [(NSRect, TaskbarWidgetID)] {
-        let widgets = activeTaskbarWidgets(for: settings)
-        guard !widgets.isEmpty else { return [] }
-
-        let lastTileMaxX = tileLayout.map { $0.0.maxX }.max() ?? leftPadding
-        let leftLimit = min(bounds.width - 8, max(lastTileMaxX + 8, leftPadding))
-        var rightX = bounds.width - 8
-        let availableTrailingWidth = max(0, rightX - leftLimit)
-        let y: CGFloat = max(2, (bounds.height - tileHeight) / 2)
-        let spacing = taskbarWidgetSpacing(itemSpacing: CGFloat(settings.itemSpacing))
-
-        var remainingWidth = availableTrailingWidth
-        var layout: [(NSRect, TaskbarWidgetID)] = []
-        for widget in widgets.reversed() {
-            let minimumWidth = widget.minimumWidth(in: settings, height: tileHeight)
-            let preferredWidth = widget.preferredWidth(
-                in: settings,
-                height: tileHeight,
-                availableWidth: remainingWidth
-            )
-            let width = min(max(minimumWidth, preferredWidth), max(minimumWidth, remainingWidth))
-            let rect = NSRect(
-                x: rightX - width,
-                y: y,
-                width: width,
-                height: tileHeight
-            )
-            layout.append((rect, widget.id))
-            rightX = rect.minX - spacing
-            remainingWidth = max(0, rightX - leftLimit)
-        }
-
-        return layout.reversed()
-    }
-
     private func drawTile(item: TaskbarItem, rect: NSRect) {
         let preferredIconSize = TaskbarItemMetrics.iconSize(for: rect.height)
         let iconSize = min(preferredIconSize, max(0, rect.width - 2))
@@ -307,6 +238,106 @@ final class TaskbarView: NSView {
             widgetsByID[widgetID]?.draw(in: rect, values: settings, date: date)
         }
     }
+}
+
+struct TaskbarLayout {
+    let tiles: [(rect: NSRect, item: TaskbarItem)]
+    let widgets: [(rect: NSRect, id: TaskbarWidgetID)]
+}
+
+func taskbarLayout(
+    bounds: NSRect,
+    items: [TaskbarItem],
+    settings: TaskbarSettingValues,
+    tileHeight: CGFloat,
+    preferredTileWidths: [CGFloat]
+) -> TaskbarLayout {
+    precondition(items.count == preferredTileWidths.count)
+
+    let leftPadding: CGFloat = 6
+    let widgets = activeTaskbarWidgets(for: settings)
+    let widgetSpacing = taskbarWidgetSpacing(itemSpacing: CGFloat(settings.itemSpacing))
+    let trailingWidth: CGFloat
+    if widgets.isEmpty {
+        trailingWidth = 8
+    } else {
+        let minimumWidgetWidths = widgets.reduce(CGFloat(0)) { total, widget in
+            total + widget.minimumWidth(in: settings, height: tileHeight)
+        }
+        trailingWidth = minimumWidgetWidths
+            + widgetSpacing * CGFloat(max(0, widgets.count - 1))
+            + 12
+    }
+
+    var tiles: [(rect: NSRect, item: TaskbarItem)] = []
+    if !items.isEmpty {
+        var x = leftPadding
+        let y: CGFloat = max(2, (bounds.height - tileHeight) / 2)
+        let maxTileX = bounds.width - trailingWidth - 8
+        let availableWidth = max(0, maxTileX - leftPadding)
+        let itemCount = CGFloat(items.count)
+        let gapCount = max(0, itemCount - 1)
+        let minimumTileWidth: CGFloat = 1
+        let gapBudget = max(0, availableWidth - minimumTileWidth * itemCount)
+        let effectiveItemSpacing: CGFloat
+        if gapCount > 0 {
+            effectiveItemSpacing = min(CGFloat(settings.itemSpacing), gapBudget / gapCount)
+        } else {
+            effectiveItemSpacing = 0
+        }
+        let availableTileWidth = max(0, availableWidth - effectiveItemSpacing * gapCount)
+        let softMinimumWidth = TaskbarItemMetrics.iconOnlyWidth(
+            iconSize: TaskbarItemMetrics.iconSize(for: tileHeight)
+        )
+        let fittedWidths = fittedTaskbarItemWidths(
+            preferredWidths: preferredTileWidths,
+            softMinimumWidth: softMinimumWidth,
+            availableWidth: availableTileWidth
+        )
+
+        for (item, tileWidth) in zip(items, fittedWidths) {
+            let rect = NSRect(x: x, y: y, width: tileWidth, height: tileHeight)
+            tiles.append((rect, item))
+            x += tileWidth + effectiveItemSpacing
+        }
+    }
+
+    guard !widgets.isEmpty else {
+        return TaskbarLayout(tiles: tiles, widgets: [])
+    }
+
+    let lastTileMaxX = tiles.map { $0.rect.maxX }.max() ?? leftPadding
+    let leftLimit = min(bounds.width - 8, max(lastTileMaxX + 8, leftPadding))
+    var rightX = bounds.width - 8
+    let availableTrailingWidth = max(0, rightX - leftLimit)
+    let y: CGFloat = max(2, (bounds.height - tileHeight) / 2)
+    let widgetMinimumWidths = widgets.map { widget in
+        widget.minimumWidth(in: settings, height: tileHeight)
+    }
+    let requiredWidth = widgetMinimumWidths.reduce(0, +)
+        + widgetSpacing * CGFloat(max(0, widgets.count - 1))
+    var extraWidth = max(0, availableTrailingWidth - requiredWidth)
+    var widgetRects: [(rect: NSRect, id: TaskbarWidgetID)] = []
+    for (widget, minimumWidth) in zip(widgets, widgetMinimumWidths).reversed() {
+        let availableWidth = minimumWidth + extraWidth
+        let preferredWidth = widget.preferredWidth(
+            in: settings,
+            height: tileHeight,
+            availableWidth: availableWidth
+        )
+        let width = min(max(minimumWidth, preferredWidth), availableWidth)
+        let rect = NSRect(
+            x: rightX - width,
+            y: y,
+            width: width,
+            height: tileHeight
+        )
+        widgetRects.append((rect, widget.id))
+        extraWidth = max(0, extraWidth - (width - minimumWidth))
+        rightX = rect.minX - widgetSpacing
+    }
+
+    return TaskbarLayout(tiles: tiles, widgets: Array(widgetRects.reversed()))
 }
 
 func taskbarInteractionRect(for visualRect: NSRect, in bounds: NSRect) -> NSRect {
