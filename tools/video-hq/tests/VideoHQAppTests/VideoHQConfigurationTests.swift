@@ -12,6 +12,7 @@ final class VideoHQConfigurationTests: XCTestCase {
         # local tool credentials
         SOMETHING_ELSE=ignored
         OPENROUTER_API_KEY="sk-test-value"
+        NOTION_API_KEY='secret-notion-value'
         """.write(
             to: repoRoot.appendingPathComponent(".env"),
             atomically: true,
@@ -20,10 +21,16 @@ final class VideoHQConfigurationTests: XCTestCase {
 
         let configuration = try VideoHQConfiguration.load(
             repoRoot: repoRoot,
+            projectsRoot: repoRoot.appendingPathComponent("Movies/Projects"),
             environment: [:]
         )
 
         XCTAssertEqual(configuration.openRouterAPIKey, "sk-test-value")
+        XCTAssertEqual(configuration.notionAPIKey, "secret-notion-value")
+        XCTAssertEqual(
+            configuration.projectsRoot,
+            repoRoot.appendingPathComponent("Movies/Projects")
+        )
         XCTAssertEqual(
             configuration.transcribeExecutableURL,
             repoRoot.appendingPathComponent("tools/transcribe/transcribe")

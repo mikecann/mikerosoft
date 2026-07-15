@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PRIMARY_REPO_ROOT="$(git -C "$REPO_ROOT" worktree list --porcelain | sed -n 's/^worktree //p' | head -n 1)"
 DOTENV_PATH="${VIDEO_HQ_DOTENV_PATH:-$PRIMARY_REPO_ROOT/.env}"
+PROJECTS_ROOT="${VIDEO_HQ_PROJECTS_ROOT:-$HOME/Movies/Projects}"
 BUILD_CONFIGURATION="${VIDEO_HQ_BUILD_CONFIGURATION:-release}"
 APP_NAME="Video HQ"
 APP_DIR="${VIDEO_HQ_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
@@ -28,6 +29,8 @@ if ! command -v swift >/dev/null 2>&1; then
   echo "ERROR: swift is not on PATH. Install Xcode or Command Line Tools first." >&2
   exit 1
 fi
+
+mkdir -p "$PROJECTS_ROOT"
 
 if [[ ! -x "$REPO_ROOT/tools/transcribe/transcribe" ]]; then
   echo "ERROR: missing executable transcribe launcher at $REPO_ROOT/tools/transcribe/transcribe" >&2
@@ -116,6 +119,8 @@ cat >"$APP_DIR/Contents/Info.plist" <<PLIST
     <string>$REPO_ROOT</string>
     <key>VideoHQDotenvPath</key>
     <string>$DOTENV_PATH</string>
+    <key>VideoHQProjectsRoot</key>
+    <string>$PROJECTS_ROOT</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

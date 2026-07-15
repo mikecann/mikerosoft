@@ -5,57 +5,316 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class VideoHQModel: ObservableObject {
-    enum Tool: String, CaseIterable {
+    enum Panel: String, CaseIterable, Identifiable {
+        case script = "Script"
         case transcript = "Transcribe"
         case description = "Video Description"
 
+        var id: Self { self }
+
         var icon: String {
             switch self {
+            case .script: return "doc.text"
             case .transcript: return "captions.bubble"
             case .description: return "text.quote"
             }
         }
     }
 
+    @Published private(set) var projects: [VideoProject] = []
+    @Published private(set) var selectedProjectID: URL?
+    @Published private(set) var projectScript = ""
     @Published private(set) var videoURL: URL?
     @Published private(set) var player: AVPlayer?
     @Published private(set) var transcript = ""
     @Published private(set) var description = ""
-    @Published var selectedTool: Tool = .transcript
-    @Published private(set) var workingTool: Tool?
-    @Published private(set) var statusMessage = "Choose a video to get started."
+    @Published var selectedPanel: Panel = .script
+    @Published private(set) var workingPanel: Panel?
+    @Published private(set) var statusMessage = "Loading video projects..."
     @Published var errorMessage: String?
+
+    @Published var isNotionImporterPresented = false
+    @Published var notionPageReference = ""
+    @Published var notionSearchQuery = ""
+    @Published private(set) var notionSearchResults: [NotionPageSearchResult] = []
+    @Published private(set) var isNotionWorking = false
+    @Published private(set) var notionStatusMessage = ""
+    @Published private(set) var notionErrorMessage: String?
 
     private let configuration: VideoHQConfiguration?
     private let configurationError: Error?
 
-    init() {
+    convenience init() {
         do {
-            configuration = try VideoHQConfiguration.load()
-            configurationError = nil
+            self.init(configuration: try VideoHQConfiguration.load())
         } catch {
-            configuration = nil
-            configurationError = error
+            self.init(configurationError: error)
         }
     }
 
+    init(configuration: VideoHQConfiguration) {
+        self.configuration = configuration
+        configurationError = nil
+        do {
+            try loadProjects()
+        } catch {
+            statusMessage = "Could not load video projects."
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private init(configurationError: Error) {
+        configuration = nil
+        self.configurationError = configurationError
+        statusMessage = "Video HQ could not load its configuration."
+        errorMessage = configurationError.localizedDescription
+    }
+
+    var selectedProject: VideoProject? {
+        guard let selectedProjectID else { return nil }
+        return projects.first { $0.id == selectedProjectID }
+    }
+
+    var renderedVideos: [URL] {
+        selectedProject?.renderedVideoURLs ?? []
+    }
+
+    var hasProjectScript: Bool {
+        !projectScript.isEmpty
+    }
+
     var activeText: String {
-        selectedTool == .transcript ? transcript : description
+        switch selectedPanel {
+        case .script: return projectScript
+        case .transcript: return transcript
+        case .description: return description
+        }
     }
 
     var isWorking: Bool {
-        workingTool != nil
+        workingPanel != nil
     }
 
-    func hasResult(for tool: Tool) -> Bool {
-        switch tool {
+    var canRunSelectedPanel: Bool {
+        selectedPanel == .script ? selectedProject != nil : videoURL != nil
+    }
+
+    var hasNotionAPIKey: Bool {
+        configuration?.notionAPIKey != nil
+    }
+
+    var notionSetupPath: String {
+        configuration?.credentialDotenvURL.path ?? "your .env file"
+    }
+
+    func hasResult(for panel: Panel) -> Bool {
+        switch panel {
+        case .script: return !projectScript.isEmpty
         case .transcript: return !transcript.isEmpty
         case .description: return !description.isEmpty
         }
     }
 
+    func refreshProjects() {
+        do {
+            try loadProjects(preferredProjectID: selectedProjectID)
+        } catch {
+            errorMessage = error.localizedDescription
+            statusMessage = "Could not refresh video projects."
+        }
+    }
+
+    func selectProject(_ id: URL?) {
+        guard let id, let project = projects.first(where: { $0.id == id }) else { return }
+        selectedProjectID = project.id
+        selectedPanel = .script
+
+        do {
+            projectScript = try project.scriptURL.map {
+                try String(contentsOf: $0, encoding: .utf8)
+            } ?? ""
+        } catch {
+            projectScript = ""
+            errorMessage = error.localizedDescription
+        }
+
+        if let firstRender = project.renderedVideoURLs.first {
+            _ = loadVideo(firstRender, preferredPanel: .script)
+        } else {
+            clearVideo()
+        }
+
+        let scriptStatus = projectScript.isEmpty ? "No script found." : "Script loaded."
+        let renderCount = project.renderedVideoURLs.count
+        let renderStatus = renderCount == 0
+            ? "No root MP4 render found."
+            : "\(renderCount) rendered video\(renderCount == 1 ? "" : "s") found."
+        statusMessage = "\(project.name) loaded. \(scriptStatus) \(renderStatus)"
+    }
+
+    func selectRenderedVideo(_ url: URL?) {
+        guard let url else { return }
+        _ = loadVideo(url, preferredPanel: selectedPanel)
+    }
+
     @discardableResult
     func loadVideo(_ url: URL) -> Bool {
+        loadVideo(url, preferredPanel: nil)
+    }
+
+    func openVideoPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a Video"
+        panel.prompt = "Choose Video"
+        panel.allowedContentTypes = [.movie]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        if let selectedProject {
+            panel.directoryURL = selectedProject.directoryURL
+        }
+        if panel.runModal() == .OK, let url = panel.url {
+            loadVideo(url)
+        }
+    }
+
+    func selectOrRun(_ panel: Panel) {
+        selectedPanel = panel
+        guard panel != .script, !hasResult(for: panel) else { return }
+        run(panel)
+    }
+
+    func run(_ panel: Panel) {
+        guard !isWorking else { return }
+        selectedPanel = panel
+        switch panel {
+        case .script:
+            openNotionImporter()
+        case .transcript:
+            guard videoURL != nil else { return }
+            runTranscription()
+        case .description:
+            guard videoURL != nil else { return }
+            runDescription()
+        }
+    }
+
+    func copyActiveText() {
+        guard !activeText.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(activeText, forType: .string)
+        statusMessage = "Copied \(selectedPanel.rawValue.lowercased()) to the clipboard."
+    }
+
+    func revealActiveFile() {
+        let fileURL: URL?
+        switch selectedPanel {
+        case .script:
+            fileURL = selectedProject?.scriptURL
+        case .transcript:
+            fileURL = videoURL.map(VideoSidecars.transcriptURL(for:))
+        case .description:
+            fileURL = videoURL.map(VideoSidecars.descriptionURL(for:))
+        }
+        guard let fileURL, FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+    }
+
+    func openNotionImporter() {
+        guard selectedProject != nil else {
+            errorMessage = "Choose a video project before downloading a script."
+            return
+        }
+        notionErrorMessage = nil
+        notionStatusMessage = ""
+        isNotionImporterPresented = true
+    }
+
+    func searchNotion() {
+        guard !isNotionWorking else { return }
+        guard let client = notionClient() else { return }
+        isNotionWorking = true
+        notionErrorMessage = nil
+        notionStatusMessage = "Searching Notion..."
+
+        Task {
+            do {
+                notionSearchResults = try await client.searchPages(query: notionSearchQuery)
+                notionStatusMessage = notionSearchResults.isEmpty
+                    ? "No shared Notion pages matched that search."
+                    : "Found \(notionSearchResults.count) page\(notionSearchResults.count == 1 ? "" : "s")."
+            } catch {
+                notionSearchResults = []
+                notionErrorMessage = error.localizedDescription
+                notionStatusMessage = ""
+            }
+            isNotionWorking = false
+        }
+    }
+
+    func downloadScriptFromReference() {
+        guard let pageID = NotionPageReference.pageID(from: notionPageReference) else {
+            notionErrorMessage = NotionClientError.invalidPageReference.localizedDescription
+            return
+        }
+        downloadNotionScript(pageID: pageID)
+    }
+
+    func downloadNotionScript(pageID: String) {
+        guard !isNotionWorking else { return }
+        guard let project = selectedProject, let client = notionClient() else { return }
+        isNotionWorking = true
+        workingPanel = .script
+        notionErrorMessage = nil
+        notionStatusMessage = "Downloading script..."
+
+        Task {
+            do {
+                let result = try await NotionScriptImporter(provider: client).importScript(
+                    pageID: pageID,
+                    into: project.directoryURL
+                )
+                projectScript = try String(contentsOf: result.scriptURL, encoding: .utf8)
+                try reloadProjectMetadata()
+                statusMessage = result.wasTruncated
+                    ? "Downloaded script.md, but Notion reported truncated content."
+                    : "Downloaded script.md to \(project.name)."
+                isNotionImporterPresented = false
+                notionPageReference = ""
+                notionSearchResults = []
+                notionStatusMessage = ""
+            } catch {
+                notionErrorMessage = error.localizedDescription
+                notionStatusMessage = ""
+            }
+            isNotionWorking = false
+            workingPanel = nil
+        }
+    }
+
+    private func loadProjects(preferredProjectID: URL? = nil) throws {
+        guard let configuration else {
+            throw configurationError ?? NotionClientError.invalidResponse
+        }
+        projects = try VideoProjectCatalog(rootURL: configuration.projectsRoot).discover()
+        guard !projects.isEmpty else {
+            selectedProjectID = nil
+            projectScript = ""
+            clearVideo()
+            statusMessage = "No project folders found in \(configuration.projectsRoot.path)."
+            return
+        }
+        let selection = preferredProjectID.flatMap { id in projects.first { $0.id == id } } ?? projects[0]
+        selectProject(selection.id)
+    }
+
+    private func reloadProjectMetadata() throws {
+        guard let configuration, let selectedProjectID else { return }
+        projects = try VideoProjectCatalog(rootURL: configuration.projectsRoot).discover()
+        self.selectedProjectID = projects.first { $0.id == selectedProjectID }?.id
+    }
+
+    @discardableResult
+    private func loadVideo(_ url: URL, preferredPanel: Panel?) -> Bool {
         guard VideoFile.isSupported(url) else {
             errorMessage = "That file is not a supported video. Choose an MP4, MOV, MKV, or another common video format."
             return false
@@ -63,12 +322,21 @@ final class VideoHQModel: ObservableObject {
 
         do {
             player?.pause()
+            if let matchingProject = projects.first(where: {
+                $0.directoryURL.standardizedFileURL == url.deletingLastPathComponent().standardizedFileURL
+            }) {
+                selectedProjectID = matchingProject.id
+                projectScript = try matchingProject.scriptURL.map {
+                    try String(contentsOf: $0, encoding: .utf8)
+                } ?? ""
+            }
+
             let sidecars = try VideoSidecars.load(for: url)
             videoURL = url
             player = AVPlayer(url: url)
             transcript = sidecars.transcript
             description = sidecars.description
-            selectedTool = description.isEmpty ? .transcript : .description
+            selectedPanel = preferredPanel ?? (description.isEmpty ? .transcript : .description)
 
             let loadedCount = [transcript, description].filter { !$0.isEmpty }.count
             statusMessage = loadedCount == 0
@@ -81,50 +349,24 @@ final class VideoHQModel: ObservableObject {
         }
     }
 
-    func openVideoPanel() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose a Video"
-        panel.prompt = "Choose Video"
-        panel.allowedContentTypes = [.movie]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        if panel.runModal() == .OK, let url = panel.url {
-            loadVideo(url)
+    private func clearVideo() {
+        player?.pause()
+        player = nil
+        videoURL = nil
+        transcript = ""
+        description = ""
+    }
+
+    private func notionClient() -> NotionClient? {
+        guard let configuration else {
+            notionErrorMessage = configurationError?.localizedDescription ?? "Video HQ could not load its configuration."
+            return nil
         }
-    }
-
-    func selectOrRun(_ tool: Tool) {
-        selectedTool = tool
-        if !hasResult(for: tool) {
-            run(tool)
+        guard let apiKey = configuration.notionAPIKey else {
+            notionErrorMessage = NotionClientError.missingAPIKey(configuration.credentialDotenvURL).localizedDescription
+            return nil
         }
-    }
-
-    func run(_ tool: Tool) {
-        guard !isWorking, videoURL != nil else { return }
-        selectedTool = tool
-        switch tool {
-        case .transcript:
-            runTranscription()
-        case .description:
-            runDescription()
-        }
-    }
-
-    func copyActiveText() {
-        guard !activeText.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(activeText, forType: .string)
-        statusMessage = "Copied \(selectedTool.rawValue.lowercased()) to the clipboard."
-    }
-
-    func revealActiveSidecar() {
-        guard let videoURL else { return }
-        let sidecarURL = selectedTool == .transcript
-            ? VideoSidecars.transcriptURL(for: videoURL)
-            : VideoSidecars.descriptionURL(for: videoURL)
-        guard FileManager.default.fileExists(atPath: sidecarURL.path) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([sidecarURL])
+        return NotionClient(apiKey: apiKey)
     }
 
     private func runTranscription() {
@@ -134,7 +376,7 @@ final class VideoHQModel: ObservableObject {
             return
         }
 
-        workingTool = .transcript
+        workingPanel = .transcript
         statusMessage = "Transcribing \(videoURL.lastPathComponent)..."
         let executableURL = configuration.transcribeExecutableURL
 
@@ -149,7 +391,7 @@ final class VideoHQModel: ObservableObject {
                 errorMessage = error.localizedDescription
                 statusMessage = "Transcription failed."
             }
-            workingTool = nil
+            workingPanel = nil
         }
     }
 
@@ -160,7 +402,7 @@ final class VideoHQModel: ObservableObject {
             return
         }
 
-        workingTool = .description
+        workingPanel = .description
         Task {
             do {
                 if transcript.isEmpty {
@@ -172,7 +414,7 @@ final class VideoHQModel: ObservableObject {
                 }
 
                 guard let apiKey = configuration.openRouterAPIKey else {
-                    throw VideoHQError.missingOpenRouterAPIKey(configuration.repoRoot.appendingPathComponent(".env"))
+                    throw VideoHQError.missingOpenRouterAPIKey(configuration.credentialDotenvURL)
                 }
 
                 statusMessage = "Generating the video description..."
@@ -184,7 +426,7 @@ final class VideoHQModel: ObservableObject {
                 errorMessage = error.localizedDescription
                 statusMessage = "Video description failed."
             }
-            workingTool = nil
+            workingPanel = nil
         }
     }
 }

@@ -179,7 +179,7 @@ export const tools: Tool[] = [
   },
   {
     name: 'video-hq',
-    desc: 'Native macOS video-production command center: preview a local video, transcribe it, and generate a reloadable YouTube description beside the source file',
+    desc: 'Native macOS video-production hub: browse project folders, import scripts from Notion, preview rendered MP4s, transcribe, and generate YouTube descriptions',
     icon: `${base}/video-hq/icons/video-hq.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/video-hq',

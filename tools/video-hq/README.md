@@ -1,8 +1,13 @@
 # Video HQ
 
-A native macOS command center for Mike's video-production workflows. Choose a
-video in Finder or drag one into the window, preview it, then run the tools it
-needs without leaving the app.
+A native macOS command center for Mike's video-production workflows. Video HQ
+treats each direct folder in `~/Movies/Projects` as one video project, loads its
+script, and previews rendered MP4s from the project root.
+
+If a project contains multiple root MP4 files, use the Render picker to switch
+between them. Videos inside subfolders such as `source/` are deliberately
+ignored by the automatic render picker. You can still choose or drag any video
+manually.
 
 ## Tools
 
@@ -11,6 +16,9 @@ needs without leaving the app.
 - **Video Description** loads that transcript and uses Gemini through OpenRouter
   to save `<video-name>-description.txt` beside the video. If the transcript is
   missing, the app generates it first.
+- **Script** loads `script.md`, or another root Markdown/text file with `script`
+  in its name. It can search shared Notion pages or accept a Notion page link,
+  then download the page as Markdown to `<project>/script.md`.
 
 Existing sidecars are loaded whenever a video is opened. Description files are
 compatible with the existing `video-description` CLI chat-log format, and the
@@ -38,6 +46,12 @@ another macOS app launcher.
 - Swift from Xcode or Command Line Tools
 - `ffmpeg` and `faster-whisper` for transcription
 - `OPENROUTER_API_KEY` in the repo-root `.env` for video descriptions
+- `NOTION_API_KEY` in the repo-root `.env` for Notion search and script download
+
+The Notion integration needs read-content access, and each script page must be
+shared with the integration before it will appear in search or download by URL.
+Set `VIDEO_HQ_PROJECTS_ROOT` before running `setup_mac.sh` if projects live
+somewhere other than `~/Movies/Projects`.
 
 ## Development
 
