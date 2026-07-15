@@ -13,6 +13,7 @@ final class TaskbarView: NSView {
     private var tileRects: [(NSRect, TaskbarItem)] = []
     private var widgetRects: [(NSRect, TaskbarWidgetID)] = []
     private var mouseDownItem: TaskbarItem?
+    private var mouseDownPoint: NSPoint?
     private var mouseDownWidget: (rect: NSRect, id: TaskbarWidgetID, statsMetric: StatsWidgetMetric?)?
     private var didDragPinnedItem = false
     private let leftPadding: CGFloat = 6
@@ -91,30 +92,30 @@ final class TaskbarView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        resetMousePressState()
         let point = convert(event.locationInWindow, from: nil)
         if let widget = widgetHit(at: point) {
             mouseDownWidget = widget
-            mouseDownItem = nil
             return
         }
 
         guard let item = tileRects.first(where: { taskbarInteractionRect(for: $0.0, in: bounds).contains(point) })?.1 else { return }
         mouseDownItem = item
-        mouseDownWidget = nil
-        didDragPinnedItem = false
+        mouseDownPoint = point
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard mouseDownItem?.isPinned == true else { return }
-        didDragPinnedItem = true
+        guard mouseDownItem?.isPinned == true, let mouseDownPoint else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        didDragPinnedItem = updatedTaskbarPinnedDragState(
+            wasDragging: didDragPinnedItem,
+            mouseDownPoint: mouseDownPoint,
+            currentPoint: point
+        )
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer {
-            mouseDownItem = nil
-            mouseDownWidget = nil
-            didDragPinnedItem = false
-        }
+        defer { resetMousePressState() }
 
         let point = convert(event.locationInWindow, from: nil)
         if let widget = mouseDownWidget, taskbarInteractionRect(for: widget.rect, in: bounds).contains(point) {
@@ -122,21 +123,30 @@ final class TaskbarView: NSView {
             return
         }
 
-        guard let item = mouseDownItem else { return }
+        guard let item = mouseDownItem, let mouseDownPoint else { return }
 
-        if didDragPinnedItem, item.isPinned {
-            let target = tileRects
-                .first(where: { rect, targetItem in
-                    taskbarInteractionRect(for: rect, in: bounds).contains(point)
-                        && targetItem.isPinned
-                        && targetItem.identity != item.identity
-                })?
-                .1
+        switch resolveTaskbarMouseUpAction(
+            pressedItem: item,
+            mouseDownPoint: mouseDownPoint,
+            mouseUpPoint: point,
+            didDragPinnedItem: didDragPinnedItem,
+            tileRects: tileRects.map { (rect: $0.0, item: $0.1) },
+            bounds: bounds
+        ) {
+        case .activate:
+            onActivate?(item)
+        case .movePinnedItem(let target):
             onMovePinnedItem?(item, target)
-            return
+        case .none:
+            break
         }
+    }
 
-        onActivate?(item)
+    private func resetMousePressState() {
+        mouseDownItem = nil
+        mouseDownPoint = nil
+        mouseDownWidget = nil
+        didDragPinnedItem = false
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -310,4 +320,64 @@ func taskbarInteractionRect(for visualRect: NSRect, in bounds: NSRect) -> NSRect
 
 func taskbarWidgetSpacing(itemSpacing: CGFloat) -> CGFloat {
     min(max(0, itemSpacing), 2)
+}
+
+enum TaskbarMouseUpAction: Equatable {
+    case activate
+    case movePinnedItem(before: TaskbarItem)
+    case none
+}
+
+let taskbarPinnedDragThreshold: CGFloat = 4
+
+func updatedTaskbarPinnedDragState(
+    wasDragging: Bool,
+    mouseDownPoint: NSPoint,
+    currentPoint: NSPoint,
+    threshold: CGFloat = taskbarPinnedDragThreshold
+) -> Bool {
+    guard !wasDragging else { return true }
+    let deltaX = currentPoint.x - mouseDownPoint.x
+    let deltaY = currentPoint.y - mouseDownPoint.y
+    return deltaX * deltaX + deltaY * deltaY >= threshold * threshold
+}
+
+func resolveTaskbarMouseUpAction(
+    pressedItem: TaskbarItem,
+    mouseDownPoint: NSPoint,
+    mouseUpPoint: NSPoint,
+    didDragPinnedItem: Bool,
+    tileRects: [(rect: NSRect, item: TaskbarItem)],
+    bounds: NSRect,
+    dragThreshold: CGFloat = taskbarPinnedDragThreshold
+) -> TaskbarMouseUpAction {
+    let isPinnedDrag = pressedItem.isPinned
+        && updatedTaskbarPinnedDragState(
+            wasDragging: didDragPinnedItem,
+            mouseDownPoint: mouseDownPoint,
+            currentPoint: mouseUpPoint,
+            threshold: dragThreshold
+        )
+
+    if isPinnedDrag {
+        guard let target = tileRects.first(where: { rect, item in
+            item.isPinned
+                && item.identity != pressedItem.identity
+                && taskbarInteractionRect(for: rect, in: bounds).contains(mouseUpPoint)
+        })?.item else {
+            return .none
+        }
+
+        return .movePinnedItem(before: target)
+    }
+
+    guard let pressedTileRect = tileRects.first(where: { rect, item in
+        item.identity == pressedItem.identity
+            && taskbarInteractionRect(for: rect, in: bounds).contains(mouseDownPoint)
+    })?.rect,
+    taskbarInteractionRect(for: pressedTileRect, in: bounds).contains(mouseUpPoint) else {
+        return .none
+    }
+
+    return .activate
 }
