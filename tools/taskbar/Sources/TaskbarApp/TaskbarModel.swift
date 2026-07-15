@@ -250,6 +250,71 @@ func fittedTaskbarItemWidths(preferredWidths: [CGFloat], softMinimumWidth: CGFlo
     return fittedWidths
 }
 
+func fittedTaskbarItemWidths(
+    preferredWidths: [CGFloat],
+    minimumWidths: [CGFloat],
+    availableWidth: CGFloat
+) -> [CGFloat] {
+    precondition(preferredWidths.count == minimumWidths.count)
+    guard !preferredWidths.isEmpty else { return [] }
+
+    let availableWidth = max(0, availableWidth)
+    let minimumWidths = minimumWidths.map { max(0, $0) }
+    let preferredWidths = zip(preferredWidths, minimumWidths).map { preferredWidth, minimumWidth in
+        max(minimumWidth, preferredWidth)
+    }
+    let totalPreferredWidth = preferredWidths.reduce(0, +)
+
+    guard totalPreferredWidth > availableWidth else {
+        return preferredWidths
+    }
+
+    let totalMinimumWidth = minimumWidths.reduce(0, +)
+    guard availableWidth > totalMinimumWidth else {
+        guard totalMinimumWidth > 0 else {
+            return Array(repeating: 0, count: preferredWidths.count)
+        }
+
+        var fittedWidths = minimumWidths.map { $0 * availableWidth / totalMinimumWidth }
+        fittedWidths[fittedWidths.index(before: fittedWidths.endIndex)] += availableWidth - fittedWidths.reduce(0, +)
+        return fittedWidths
+    }
+
+    var fittedWidths = preferredWidths
+    var remainingOverflow = totalPreferredWidth - availableWidth
+    var shrinkableIndexes = fittedWidths.indices.filter {
+        fittedWidths[$0] > minimumWidths[$0]
+    }
+
+    while remainingOverflow > 0.000_001, !shrinkableIndexes.isEmpty {
+        let shrinkPerItem = remainingOverflow / CGFloat(shrinkableIndexes.count)
+        var stillShrinkable: [Int] = []
+
+        for index in shrinkableIndexes {
+            let availableShrink = fittedWidths[index] - minimumWidths[index]
+            let shrink = min(shrinkPerItem, availableShrink)
+            fittedWidths[index] -= shrink
+            remainingOverflow -= shrink
+
+            if fittedWidths[index] > minimumWidths[index] + 0.000_001 {
+                stillShrinkable.append(index)
+            } else {
+                fittedWidths[index] = minimumWidths[index]
+            }
+        }
+
+        shrinkableIndexes = stillShrinkable
+    }
+
+    if remainingOverflow > 0, let index = fittedWidths.indices.last(where: {
+        fittedWidths[$0] > minimumWidths[$0]
+    }) {
+        fittedWidths[index] -= min(remainingOverflow, fittedWidths[index] - minimumWidths[index])
+    }
+
+    return fittedWidths
+}
+
 func buildTaskbarItems(
     windows: [WindowRecord],
     frontmostPID: pid_t?,
