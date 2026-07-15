@@ -200,6 +200,16 @@ struct RecordItView: View {
                 Text("HEVC · \(display.resolutionLabel) · 30 fps")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if let warning = display.upscalingWarning {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
             }
         }
     }

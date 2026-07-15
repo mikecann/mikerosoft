@@ -11,6 +11,22 @@ final class CaptureSelectionTests: XCTestCase {
         XCTAssertEqual(preferredDisplay(in: displays)?.id, 2)
     }
 
+    func testDisplayWarnsWhenRecordingOutputUpscalesTheActiveFramebuffer() {
+        let display = CaptureDisplay(
+            id: 4,
+            name: "HG584T05",
+            width: 3840,
+            height: 2160,
+            sourceWidth: 2560,
+            sourceHeight: 1440
+        )
+
+        XCTAssertEqual(
+            display.upscalingWarning,
+            "Source 2560 × 1440 → output 3840 × 2160. This recording will be upscaled and may look soft."
+        )
+    }
+
     func testCameraFormatPrefersNative4KThatSupports30FPS() {
         let formats = [
             CameraFormatOption(width: 1920, height: 1080, minimumFrameRate: 1, maximumFrameRate: 60),

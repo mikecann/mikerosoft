@@ -14,6 +14,9 @@ ScreenCaptureKit, and AVFoundation.
 - Screen, camera, or both
 - The selected screen at 30 fps, encoded as HEVC
 - `HG584T05` by default, with a 3840 × 2160 output
+- An orange warning shows the active framebuffer and output sizes whenever the
+  recording would be upscaled, because a 4K-sized file is not necessarily a
+  native-detail 4K capture
 - The selected camera's best format at 30 fps, preferring native 3840 × 2160
 - Selectable screen audio: **System Sound** or **None**. System Sound captures
   playback from music, browsers, videos, and other Mac apps, not a microphone

@@ -26,7 +26,13 @@ struct CaptureDisplay: Identifiable, Hashable {
     }
 
     var resolutionLabel: String { "\(width) × \(height)" }
+    var sourceResolutionLabel: String { "\(sourceWidth) × \(sourceHeight)" }
     var isOutputScaled: Bool { width != sourceWidth || height != sourceHeight }
+
+    var upscalingWarning: String? {
+        guard isOutputScaled else { return nil }
+        return "Source \(sourceResolutionLabel) → output \(resolutionLabel). This recording will be upscaled and may look soft."
+    }
 }
 
 func preferredDisplay(

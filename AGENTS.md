@@ -379,6 +379,8 @@ Camera, and Microphone permissions to the signed app bundle.
 ### Key behaviour
 
 - `HG584T05` is the default display and produces a 3840 × 2160, 30 fps output.
+- If the active display framebuffer is smaller than the recording output, the
+  UI shows the exact source-to-output scaling and warns that the result may look soft.
 - The first 4K/30-capable camera is selected by default. On this machine that is
   `Razer Kiyo Pro Ultra`.
 - The file name field defaults to the timestamp prefix, accepts an override
