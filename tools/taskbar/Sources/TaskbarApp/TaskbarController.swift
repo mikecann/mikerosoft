@@ -11,7 +11,12 @@ final class TaskbarPanel {
     private var currentItems: [TaskbarItem] = []
     private var isShown = true
 
-    init(screen: ScreenInfo, values: TaskbarSettingValues, controller: TaskbarController) {
+    init(
+        screen: ScreenInfo,
+        values: TaskbarSettingValues,
+        controller: TaskbarController,
+        requestWidgetRepaint: @escaping (TaskbarView) -> Void = { $0.needsDisplay = true }
+    ) {
         screenID = screen.id
         self.screen = screen
         self.values = values
@@ -41,7 +46,11 @@ final class TaskbarPanel {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
         view = TaskbarView(frame: NSRect(x: 0, y: 0, width: frame.width, height: frame.height))
-        containerView = TaskbarContainerView(frame: view.frame, taskbarView: view)
+        containerView = TaskbarContainerView(
+            frame: view.frame,
+            taskbarView: view,
+            requestWidgetRepaint: requestWidgetRepaint
+        )
         view.settings = values
         view.onActivate = { [weak controller] item in
             controller?.activate(item: item)
@@ -88,11 +97,13 @@ final class TaskbarPanel {
         }
         guard values.isVisible else {
             panel.orderOut(nil)
+            containerView.setWidgetRepaintVisibility(panel.isVisible)
             return
         }
         if !panel.isVisible {
             panel.orderFrontRegardless()
         }
+        containerView.setWidgetRepaintVisibility(panel.isVisible)
 
         if values.autoHide {
             updateAutoHide(mouseLocation: NSEvent.mouseLocation, animated: false)

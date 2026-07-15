@@ -1,8 +1,14 @@
 import AppKit
 import QuartzCore
 
-func shouldRunTaskbarWidgetRepaintTimer(values: TaskbarSettingValues, isAttachedToWindow: Bool) -> Bool {
-    isAttachedToWindow && (values.dateTimeWidget.isEnabled || values.statsWidget.isEnabled)
+func shouldRunTaskbarWidgetRepaintTimer(
+    values: TaskbarSettingValues,
+    isAttachedToWindow: Bool,
+    isPanelVisible: Bool
+) -> Bool {
+    isAttachedToWindow
+        && isPanelVisible
+        && (values.dateTimeWidget.isEnabled || values.statsWidget.isEnabled)
 }
 
 final class TaskbarContainerView: NSView {
@@ -12,6 +18,7 @@ final class TaskbarContainerView: NSView {
     private let selectedHighlightLayer = CALayer()
     private var selectedHighlightKey: String?
     private var selectedHighlightTargetFrame: CGRect?
+    private var isPanelVisible = false
     private var widgetRepaintTimer: Timer?
 
     init(
@@ -66,10 +73,17 @@ final class TaskbarContainerView: NSView {
         updateWidgetRepaintTimer()
     }
 
+    func setWidgetRepaintVisibility(_ isVisible: Bool) {
+        guard isPanelVisible != isVisible else { return }
+        isPanelVisible = isVisible
+        updateWidgetRepaintTimer()
+    }
+
     private func updateWidgetRepaintTimer() {
         let shouldRun = shouldRunTaskbarWidgetRepaintTimer(
             values: taskbarView.settings,
-            isAttachedToWindow: window != nil
+            isAttachedToWindow: window != nil,
+            isPanelVisible: isPanelVisible
         )
         guard shouldRun else {
             stopWidgetRepaintTimer()
