@@ -178,6 +178,14 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
+    name: 'video-hq',
+    desc: 'Native macOS video-production command center: preview a local video, transcribe it, and generate a reloadable YouTube description beside the source file',
+    icon: `${base}/video-hq/icons/video-hq.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/video-hq',
+    platforms: ['macos'],
+  },
+  {
     name: 'voice-type',
     desc: 'Push-to-talk local voice transcription for Windows and macOS. On Apple Silicon it uses MLX for faster final transcription',
     icon: `${base}/voice-type/icons/sound.png`,

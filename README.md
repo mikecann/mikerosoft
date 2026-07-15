@@ -41,6 +41,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/task-stats/docs/header.webp" width="220"><br>[task-stats](tools/task-stats/README.md) | Taskbar | Real-time NET/CPU/GPU/MEM sparklines overlaid on the taskbar |
 | <img src="tools/taskbar/docs/header.png" width="220"><br>[taskbar](tools/taskbar/README.md) | Mac - taskbar | Windows-style taskbar for macOS with one bar per monitor, pinned apps, widget plugins, per-monitor overrides, and window avoidance |
 | <img src="tools/record-it/docs/header.webp" width="220"><br>[record-it](tools/record-it/README.md) | Mac - GUI | Native SwiftUI screen and camera recorder with 4K/30 capture, project-aware output folders, and separate full-resolution files |
+| <img src="tools/video-hq/icons/video-hq.png" width="220"><br>[video-hq](tools/video-hq/README.md) | Mac - GUI | Video-production command center for previewing a local video, transcribing it, and generating a YouTube description with reloadable sidecars |
 | <img src="tools/voice-type/docs/header.webp" width="220"><br>[voice-type](tools/voice-type/README.md) | Taskbar + macOS daemon | Push-to-talk local voice transcription on Windows and macOS. On Apple Silicon it uses MLX for faster final transcription |
 | <img src="tools/video-titles/docs/header.webp" width="220"><br>[video-titles](tools/video-titles/README.md) | Context menu | Chat with an AI agent to ideate YouTube titles using the Compelling Title Matrix; right-click any video in Explorer (requires `OPENROUTER_API_KEY` in `.env`) |
 | <img src="tools/video-description/docs/header.webp" width="220"><br>[video-description](tools/video-description/README.md) | CLI + context menu | Generate a YouTube description via Gemini; auto-loads or generates a transcript, then drops into an interactive chat for revisions; right-click any video in Explorer (requires `OPENROUTER_API_KEY` in `.env`) |
@@ -90,6 +91,8 @@ For macOS, set tools up individually where mac support exists:
   `bash tools/taskbar/setup_mac.sh`
 - `record-it`:
   `bash tools/record-it/setup_mac.sh`
+- `video-hq`:
+  `bash tools/video-hq/setup_mac.sh`
 
 At the moment that is the right shape for the repo. A fake "universal" root
 installer would mostly be a wrapper around platform checks and per-tool scripts,
@@ -105,7 +108,8 @@ while still not covering the Windows-only integrations.
 | `worktrees` | Supported | See [tools/worktrees/README.md](tools/worktrees/README.md) | `worktrees` | Needs `~/.local/bin` on `PATH` (or run `bash tools/worktrees/run.sh`). Uses the checkout you are in to find `tools/worktrees`; run `bun install` in that folder per clone if deps are missing |
 | `taskbar` | Supported | `bash tools/taskbar/setup_mac.sh` | `taskbar restart` | Swift/AppKit taskbar for macOS. Run `bash install_mac.sh` if you want the `taskbar` launcher on `PATH` |
 | `record-it` | Supported | `bash tools/record-it/setup_mac.sh` | `record-it` | SwiftUI + ScreenCaptureKit + AVFoundation recorder. Saves into the selected project's `source` folder |
-| Everything else | Windows-only for now | Use `install.ps1` on Windows | Varies by tool | Most tools still depend on Windows-specific shell integration, taskbar shortcuts, or Explorer context menus |
+| `video-hq` | Supported | `bash tools/video-hq/setup_mac.sh` | Launch `Video HQ` from Spotlight or run `video-hq` | Native video-production command center with preview, transcription, and OpenRouter-powered descriptions |
+| Everything else | Windows-only for now | Use `install.ps1` on Windows | Varies by tool | Most other tools still depend on Windows-specific shell integration, taskbar shortcuts, or Explorer context menus |
 
 ### Codex worktrees
 
