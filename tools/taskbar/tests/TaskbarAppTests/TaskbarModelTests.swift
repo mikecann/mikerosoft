@@ -322,26 +322,13 @@ final class TaskbarModelTests: XCTestCase {
         XCTAssertEqual(visible.map(\.windowID), [1, 2])
     }
 
-    func testBuildItemsAlwaysShowsIndividualWindowsEvenIfOldSettingRequestsGrouping() {
-        let windows = [
-            record(owner: "Safari", title: "Article", pid: 10, windowID: 1),
-            record(owner: "Safari", title: "Docs", pid: 10, windowID: 2),
-            record(owner: "Terminal", title: "zsh", pid: 20, windowID: 3)
-        ]
-
-        let items = buildTaskbarItems(windows: windows, frontmostPID: nil, groupByApp: true)
-
-        XCTAssertEqual(items.map(\.title), ["Article", "Docs", "zsh"])
-        XCTAssertEqual(items.map(\.windowIDs), [[1], [2], [3]])
-    }
-
     func testBuildItemsCanShowIndividualWindows() {
         let windows = [
             record(owner: "Safari", title: "Article", pid: 10, windowID: 1),
             record(owner: "Safari", title: "Docs", pid: 10, windowID: 2)
         ]
 
-        let items = buildTaskbarItems(windows: windows, frontmostPID: nil, groupByApp: false)
+        let items = buildTaskbarItems(windows: windows, frontmostPID: nil)
 
         XCTAssertEqual(items.map(\.title), ["Article", "Docs"])
         XCTAssertEqual(items.map(\.windowIDs), [[1], [2]])
@@ -353,7 +340,7 @@ final class TaskbarModelTests: XCTestCase {
             record(owner: "Notes", title: "Plan", pid: 20, windowID: 2, isOnScreen: false, isMinimized: true)
         ]
 
-        let items = buildTaskbarItems(windows: windows, frontmostPID: 20, groupByApp: false)
+        let items = buildTaskbarItems(windows: windows, frontmostPID: 20)
 
         XCTAssertEqual(items.map(\.title), ["Plan", "Article"])
         XCTAssertEqual(items.map(\.isMinimized), [true, false])
@@ -367,7 +354,7 @@ final class TaskbarModelTests: XCTestCase {
             record(owner: "Notes", title: "Planning", pid: 30, windowID: 3)
         ]
 
-        let items = buildTaskbarItems(windows: windows, frontmostPID: 20, groupByApp: true)
+        let items = buildTaskbarItems(windows: windows, frontmostPID: 20)
 
         XCTAssertEqual(items.map(\.owner), ["Notes", "Safari", "Terminal"])
         XCTAssertTrue(items[2].isFrontmost)
@@ -382,8 +369,7 @@ final class TaskbarModelTests: XCTestCase {
         let items = buildTaskbarItems(
             windows: windows,
             frontmostPID: 739,
-            frontmostWindowID: 16416,
-            groupByApp: false
+            frontmostWindowID: 16416
         )
 
         XCTAssertEqual(items.map(\.windowIDs), [[578], [16416]])
@@ -411,7 +397,7 @@ final class TaskbarModelTests: XCTestCase {
             PinnedApp(displayName: "Safari", bundleID: "com.apple.Safari", appPath: "/Applications/Safari.app")
         ]
 
-        let items = buildTaskbarItems(windows: windows, frontmostPID: nil, groupByApp: true, pinnedApps: pinned)
+        let items = buildTaskbarItems(windows: windows, frontmostPID: nil, pinnedApps: pinned)
 
         XCTAssertEqual(items.map(\.owner), ["Terminal", "Safari", "Notes"])
         XCTAssertEqual(items.map(\.isPinned), [true, true, false])
@@ -425,7 +411,7 @@ final class TaskbarModelTests: XCTestCase {
             PinnedApp(displayName: "Safari", bundleID: "com.apple.Safari", appPath: "/Applications/Safari.app")
         ]
 
-        let items = buildTaskbarItems(windows: windows, frontmostPID: nil, groupByApp: true, pinnedApps: pinned)
+        let items = buildTaskbarItems(windows: windows, frontmostPID: nil, pinnedApps: pinned)
 
         XCTAssertEqual(items.map(\.owner), ["Safari", "Notes"])
         XCTAssertEqual(items[0].pid, nil)

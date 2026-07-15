@@ -4,17 +4,27 @@ import XCTest
 @testable import TaskbarApp
 
 private final class RecordingTaskbarSettingsStore: TaskbarSettingsStoring {
-    private(set) var data: Data?
-    private(set) var writeCount = 0
+    struct Write {
+        let key: String
+        let data: Data
+    }
+
+    private(set) var dataByKey: [String: Data]
+    private(set) var writes: [Write] = []
+    var writeCount: Int { writes.count }
     var onFirstWrite: (() -> Void)?
 
+    init(dataByKey: [String: Data] = [:]) {
+        self.dataByKey = dataByKey
+    }
+
     func data(forKey key: String) -> Data? {
-        data
+        dataByKey[key]
     }
 
     func set(_ data: Data, forKey key: String) {
-        self.data = data
-        writeCount += 1
+        dataByKey[key] = data
+        writes.append(Write(key: key, data: data))
         if writeCount == 1 {
             onFirstWrite?()
         }
@@ -48,6 +58,25 @@ private func taskbarItem(
 final class TaskbarSettingsPersistenceTests: XCTestCase {
     private func performMenuItem(_ item: NSMenuItem, on controller: TaskbarController) throws {
         _ = controller.perform(try XCTUnwrap(item.action), with: item)
+    }
+
+    func testCorruptSettingsAreBackedUpBeforePrimaryIsOverwritten() {
+        let primaryKey = "taskbarPreferences.v1"
+        let backupKey = "taskbarPreferences.v1.corruptBackup"
+        let corruptData = Data("{not-json".utf8)
+        let store = RecordingTaskbarSettingsStore(dataByKey: [primaryKey: corruptData])
+
+        let settings = TaskbarSettings(store: store)
+
+        XCTAssertEqual(store.writes.map(\.key), [backupKey])
+        XCTAssertEqual(store.dataByKey[backupKey], corruptData)
+
+        settings.updateGeneral { $0.taskbarHeight = 72 }
+        settings.flushPendingPersistence()
+
+        XCTAssertEqual(store.writes.map(\.key), [backupKey, primaryKey])
+        XCTAssertEqual(store.dataByKey[backupKey], corruptData)
+        XCTAssertNotEqual(store.dataByKey[primaryKey], corruptData)
     }
 
     func testUpdateGeneralClampsBeforeSendingOneChangeNotification() {
@@ -283,10 +312,6 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(scheduledRefreshCount, 5)
         XCTAssertEqual(fullRefreshCount, 0)
 
-        XCTAssertTrue(settings.isPinned(
-            PinnedApp(displayName: notes.owner, bundleID: notes.bundleID, appPath: notes.appPath),
-            for: 123
-        ))
         XCTAssertEqual(settings.values(for: 123).pinnedApps.map(\.displayName), ["Safari", "Notes"])
     }
 

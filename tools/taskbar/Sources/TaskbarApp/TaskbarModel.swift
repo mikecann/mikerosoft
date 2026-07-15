@@ -319,10 +319,8 @@ func buildTaskbarItems(
     windows: [WindowRecord],
     frontmostPID: pid_t?,
     frontmostWindowID: Int? = nil,
-    groupByApp: Bool,
     pinnedApps: [PinnedApp] = []
 ) -> [TaskbarItem] {
-    _ = groupByApp
     let pinnedByIdentity = Dictionary(uniqueKeysWithValues: pinnedApps.enumerated().map { index, app in
         (app.identity, index)
     })

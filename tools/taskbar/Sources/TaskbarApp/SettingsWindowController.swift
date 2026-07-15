@@ -1379,14 +1379,6 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         updateGeneral { $0.isVisible = sender.state == .on }
     }
 
-    @objc private func setGeneralGroupByApp(_ sender: NSButton) {
-        updateGeneral { $0.groupByApp = sender.state == .on }
-    }
-
-    @objc private func setGeneralWindowCounts(_ sender: NSButton) {
-        updateGeneral { $0.showWindowCounts = sender.state == .on }
-    }
-
     @objc private func setGeneralDateTimeEnabled(_ sender: NSButton) {
         updateGeneral { $0.dateTimeWidget.isEnabled = sender.state == .on }
     }
@@ -1491,20 +1483,6 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         renderDetail()
     }
 
-    @objc private func toggleMonitorGroupByAppOverride(_ sender: NSButton) {
-        guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).groupByApp
-        updateOverrides(for: id) { $0.groupByApp = sender.state == .on ? value : nil }
-        renderDetail()
-    }
-
-    @objc private func toggleMonitorWindowCountsOverride(_ sender: NSButton) {
-        guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).showWindowCounts
-        updateOverrides(for: id) { $0.showWindowCounts = sender.state == .on ? value : nil }
-        renderDetail()
-    }
-
     @objc private func toggleMonitorDateTimeOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).dateTimeWidget
@@ -1602,16 +1580,6 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
     @objc private func setMonitorVisible(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         updateOverrides(for: id) { $0.isVisible = sender.state == .on }
-    }
-
-    @objc private func setMonitorGroupByApp(_ sender: NSButton) {
-        guard let id = selectedMonitorID else { return }
-        updateOverrides(for: id) { $0.groupByApp = sender.state == .on }
-    }
-
-    @objc private func setMonitorWindowCounts(_ sender: NSButton) {
-        guard let id = selectedMonitorID else { return }
-        updateOverrides(for: id) { $0.showWindowCounts = sender.state == .on }
     }
 
     private func updateMonitorDateTimeWidget(_ transform: (inout DateTimeWidgetSettings) -> Void) {

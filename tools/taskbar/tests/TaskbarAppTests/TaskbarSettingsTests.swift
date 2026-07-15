@@ -5,11 +5,9 @@ import XCTest
 final class TaskbarSettingsTests: XCTestCase {
     func values(
         isVisible: Bool = true,
-        groupByApp: Bool = true,
         clockMode: ClockMode = .time,
         dateTimeWidget: DateTimeWidgetSettings? = nil,
         statsWidget: StatsWidgetSettings? = nil,
-        showWindowCounts: Bool = true,
         taskbarHeight: Double = 54,
         minimumItemWidth: Double = 96,
         maximumItemWidth: Double = 220,
@@ -24,11 +22,9 @@ final class TaskbarSettingsTests: XCTestCase {
     ) -> TaskbarSettingValues {
         TaskbarSettingValues(
             isVisible: isVisible,
-            groupByApp: groupByApp,
             clockMode: clockMode,
             dateTimeWidget: dateTimeWidget,
             statsWidget: statsWidget,
-            showWindowCounts: showWindowCounts,
             taskbarHeight: taskbarHeight,
             minimumItemWidth: minimumItemWidth,
             maximumItemWidth: maximumItemWidth,
@@ -55,7 +51,6 @@ final class TaskbarSettingsTests: XCTestCase {
 
         preferences.monitorOverrides["123"] = TaskbarMonitorOverrides(
             isVisible: false,
-            groupByApp: false,
             dateTimeWidget: DateTimeWidgetSettings(
                 isEnabled: true,
                 dateDisplay: .always,
@@ -71,7 +66,6 @@ final class TaskbarSettingsTests: XCTestCase {
                 showNetwork: false,
                 showMiniGraph: false
             ),
-            showWindowCounts: false,
             taskbarHeight: 72,
             minimumItemWidth: 120,
             maximumItemWidth: 260,
@@ -90,7 +84,6 @@ final class TaskbarSettingsTests: XCTestCase {
         let resolved = preferences.resolvedValues(for: 123)
 
         XCTAssertEqual(resolved.isVisible, false)
-        XCTAssertEqual(resolved.groupByApp, false)
         XCTAssertEqual(resolved.dateTimeWidget.dateDisplay, .always)
         XCTAssertTrue(resolved.dateTimeWidget.showSeconds)
         XCTAssertFalse(resolved.dateTimeWidget.use24HourClock)
@@ -99,7 +92,6 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertTrue(resolved.statsWidget.showMemory)
         XCTAssertFalse(resolved.statsWidget.showNetwork)
         XCTAssertFalse(resolved.statsWidget.showMiniGraph)
-        XCTAssertEqual(resolved.showWindowCounts, false)
         XCTAssertEqual(resolved.taskbarHeight, 72)
         XCTAssertEqual(resolved.minimumItemWidth, 120)
         XCTAssertEqual(resolved.maximumItemWidth, 260)
@@ -116,7 +108,6 @@ final class TaskbarSettingsTests: XCTestCase {
     func testMonitorWithoutOverrideUsesGeneralValues() {
         let preferences = TaskbarPreferences(
             general: values(
-                groupByApp: false,
                 clockMode: .hidden,
                 taskbarHeight: 60,
                 minimumItemWidth: 110,
@@ -138,10 +129,8 @@ final class TaskbarSettingsTests: XCTestCase {
         let resolved = preferences.resolvedValues(for: 999)
 
         XCTAssertEqual(resolved.isVisible, true)
-        XCTAssertEqual(resolved.groupByApp, false)
         XCTAssertEqual(resolved.clockMode, .hidden)
         XCTAssertEqual(resolved.statsWidget, .defaults)
-        XCTAssertEqual(resolved.showWindowCounts, true)
         XCTAssertEqual(resolved.taskbarHeight, 60)
         XCTAssertEqual(resolved.minimumItemWidth, 110)
         XCTAssertEqual(resolved.maximumItemWidth, 240)
@@ -245,6 +234,39 @@ final class TaskbarSettingsTests: XCTestCase {
         let preferences = try JSONDecoder().decode(TaskbarPreferences.self, from: data)
 
         XCTAssertTrue(preferences.startAtLogin)
+    }
+
+    func testRemovedGroupingAndWindowCountKeysAreDecodeToleratedButNotReencoded() throws {
+        let data = """
+        {
+          "general": {
+            "isVisible": true,
+            "groupByApp": false,
+            "showWindowCounts": false
+          },
+          "monitorOverrides": {
+            "123": {
+              "groupByApp": true,
+              "showWindowCounts": true
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        let preferences = try JSONDecoder().decode(TaskbarPreferences.self, from: data)
+
+        XCTAssertFalse(preferences.monitorOverrides["123"]?.hasAnyOverride ?? true)
+
+        let encoded = try JSONEncoder().encode(preferences)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let general = try XCTUnwrap(object["general"] as? [String: Any])
+        let overrides = try XCTUnwrap(object["monitorOverrides"] as? [String: Any])
+        let monitor = try XCTUnwrap(overrides["123"] as? [String: Any])
+
+        XCTAssertNil(general["groupByApp"])
+        XCTAssertNil(general["showWindowCounts"])
+        XCTAssertNil(monitor["groupByApp"])
+        XCTAssertNil(monitor["showWindowCounts"])
     }
 
     func testLegacyShowClockMigratesToClockMode() throws {
@@ -363,7 +385,6 @@ final class TaskbarSettingsTests: XCTestCase {
     func testDateTimeWidgetEncodingDoesNotWriteLegacyClockKeys() throws {
         let values = TaskbarSettingValues(
             isVisible: true,
-            groupByApp: true,
             clockMode: .dateAndTime,
             dateTimeWidget: DateTimeWidgetSettings(
                 isEnabled: true,
@@ -380,7 +401,6 @@ final class TaskbarSettingsTests: XCTestCase {
                 showNetwork: true,
                 showMiniGraph: true
             ),
-            showWindowCounts: true,
             taskbarHeight: 54,
             minimumItemWidth: 96,
             maximumItemWidth: 220,

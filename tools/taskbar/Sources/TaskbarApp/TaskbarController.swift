@@ -312,7 +312,6 @@ final class TaskbarController: NSObject {
                 windows: screenWindows,
                 frontmostPID: currentFrontmostPID,
                 frontmostWindowID: currentFrontmostWindowID,
-                groupByApp: false,
                 pinnedApps: values.pinnedApps
             )
             panels[screen.id]?.update(screen: screen, items: items, values: values)
@@ -528,7 +527,7 @@ final class TaskbarController: NSObject {
 
     private func makeStatsWidgetMenu(screenID: UInt32) -> NSMenu {
         let value = settings.values(for: screenID).statsWidget
-        let snapshot = TaskbarStatsSampler.shared.snapshot()
+        let snapshot = TaskbarStatsSampler.shared.snapshot(demand: .menuSummary)
         let menu = NSMenu(title: "Stats")
 
         let summary = NSMenuItem(

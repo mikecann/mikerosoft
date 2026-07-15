@@ -331,10 +331,47 @@ private func dateTimeWidgetDateFormat(for settings: DateTimeWidgetSettings) -> S
     settings.showDayOfWeek ? "EEE MMM d" : "MMM d"
 }
 
+final class TaskbarDateFormatterCache {
+    private struct Key: Hashable {
+        let format: String
+        let localeIdentifier: String
+        let timeZoneIdentifier: String
+    }
+
+    private let lock = NSLock()
+    private let makeFormatter: () -> DateFormatter
+    private var formatters: [Key: DateFormatter] = [:]
+
+    init(makeFormatter: @escaping () -> DateFormatter = { DateFormatter() }) {
+        self.makeFormatter = makeFormatter
+    }
+
+    func string(from date: Date, format: String, locale: Locale, timeZone: TimeZone) -> String {
+        let key = Key(
+            format: format,
+            localeIdentifier: locale.identifier,
+            timeZoneIdentifier: timeZone.identifier
+        )
+        lock.lock()
+        defer { lock.unlock() }
+
+        let formatter: DateFormatter
+        if let cached = formatters[key] {
+            formatter = cached
+        } else {
+            let created = makeFormatter()
+            created.locale = locale
+            created.timeZone = timeZone
+            created.dateFormat = format
+            formatters[key] = created
+            formatter = created
+        }
+        return formatter.string(from: date)
+    }
+}
+
+private let taskbarDateFormatterCache = TaskbarDateFormatterCache()
+
 private func formattedDate(_ date: Date, format: String, locale: Locale, timeZone: TimeZone) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = locale
-    formatter.timeZone = timeZone
-    formatter.dateFormat = format
-    return formatter.string(from: date)
+    taskbarDateFormatterCache.string(from: date, format: format, locale: locale, timeZone: timeZone)
 }

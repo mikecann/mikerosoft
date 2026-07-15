@@ -47,18 +47,39 @@ private func drawTaskbarIconImage(_ icon: CGImage, in rect: NSRect) {
     context.restoreGState()
 }
 
-private struct TaskbarIconRequest {
+struct TaskbarIconRequest {
     let key: String
     let pid: pid_t?
     let appPath: String
+
+    var retryKey: String {
+        "\(key)|\(pid.map(String.init) ?? "none")|\(appPath)"
+    }
 }
 
-private final class TaskbarIconCache {
+final class TaskbarIconCache {
     static let shared = TaskbarIconCache()
 
     private let lock = NSLock()
+    private let retryInterval: TimeInterval
+    private let now: () -> Date
+    private let queue: DispatchQueue
+    private let iconLoader: (TaskbarIconRequest) -> CGImage?
     private var icons: [String: CGImage] = [:]
     private var loadingKeys: Set<String> = []
+    private var failedAt: [String: Date] = [:]
+
+    init(
+        retryInterval: TimeInterval = 30,
+        now: @escaping () -> Date = { Date() },
+        queue: DispatchQueue = DispatchQueue.global(qos: .utility),
+        iconLoader: @escaping (TaskbarIconRequest) -> CGImage? = TaskbarIconCache.loadIcon
+    ) {
+        self.retryInterval = retryInterval
+        self.now = now
+        self.queue = queue
+        self.iconLoader = iconLoader
+    }
 
     func icon(for item: TaskbarItem) -> CGImage? {
         let request = TaskbarIconRequest(
@@ -72,19 +93,26 @@ private final class TaskbarIconCache {
             lock.unlock()
             return icon
         }
-        let shouldLoad = !loadingKeys.contains(request.key)
+        let retryIsBlocked = failedAt[request.retryKey].map {
+            now().timeIntervalSince($0) < retryInterval
+        } ?? false
+        let shouldLoad = !loadingKeys.contains(request.key) && !retryIsBlocked
         if shouldLoad {
             loadingKeys.insert(request.key)
         }
         lock.unlock()
 
         if shouldLoad {
-            DispatchQueue.global(qos: .utility).async { [weak self] in
+            queue.async { [weak self] in
                 guard let self else { return }
-                let icon = Self.loadIcon(for: request)
+                let icon = self.iconLoader(request)
+                let completedAt = self.now()
                 self.lock.lock()
                 if let icon {
                     self.icons[request.key] = icon
+                    self.failedAt.removeValue(forKey: request.retryKey)
+                } else {
+                    self.failedAt[request.retryKey] = completedAt
                 }
                 self.loadingKeys.remove(request.key)
                 self.lock.unlock()

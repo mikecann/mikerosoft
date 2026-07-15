@@ -127,6 +127,26 @@ final class TaskbarLayoutTests: XCTestCase {
         XCTAssertTrue(activatedWidgets.isEmpty)
     }
 
+    func testFrontmostTileUsesLatestCachedLayoutWithoutRemeasuringTitles() throws {
+        let view = TaskbarView(frame: NSRect(x: 0, y: 0, width: 600, height: 30))
+        var measurementCount = 0
+        view.onMeasurePreferredTileWidth = { measurementCount += 1 }
+        let firstFrontmost = layoutItem(index: 1, isFrontmost: true)
+
+        view.update(items: [layoutItem(index: 0), firstFrontmost], settings: .defaults)
+
+        XCTAssertEqual(measurementCount, 2)
+        XCTAssertEqual(try XCTUnwrap(view.frontmostTileLayout()?.item), firstFrontmost)
+        XCTAssertEqual(measurementCount, 2)
+
+        let latestFrontmost = layoutItem(index: 2, isFrontmost: true)
+        view.update(items: [layoutItem(index: 1), latestFrontmost], settings: .defaults)
+
+        XCTAssertEqual(measurementCount, 4)
+        XCTAssertEqual(try XCTUnwrap(view.frontmostTileLayout()?.item), latestFrontmost)
+        XCTAssertEqual(measurementCount, 4)
+    }
+
     func testConditionalDateUsesOnlySpaceLeftAfterOtherWidgetMinimums() throws {
         let items = (0..<3).map { layoutItem(index: $0) }
         let settings = TaskbarSettingValues.defaults

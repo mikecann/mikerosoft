@@ -77,6 +77,10 @@ Useful settings:
 - Keep windows above bar
 - Start at login
 
+Windows on other Spaces are intentionally not shown. Window discovery uses
+CGWindowList's `.optionOnScreenOnly`, so each taskbar reflects the windows on
+the currently visible Space.
+
 ## Widgets
 
 Widgets are built as small AppKit plugins inside the taskbar app. A widget owns
@@ -97,8 +101,12 @@ does not vendor the full Stats app.
 
 ## Permissions
 
+Window titles need Screen Recording permission. Without it, `kCGWindowName`
+is blank, which degrades taskbar titles and window matching. Grant Screen
+Recording access to the app bundle below.
+
 Keeping windows above the bar uses macOS Accessibility APIs. If that setting is
-enabled, grant Accessibility access to:
+enabled, grant Accessibility access to the same app bundle:
 
 ```text
 ~/Applications/Mikerosoft Taskbar.app
