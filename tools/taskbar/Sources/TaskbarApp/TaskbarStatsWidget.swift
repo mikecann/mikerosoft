@@ -28,6 +28,8 @@ private struct StatsGPUReading {
 
 struct StatsSnapshot: Equatable {
     var cpuPercent: Double
+    var cpuUserPercent: Double
+    var cpuSystemPercent: Double
     var gpuPercent: Double
     var gpuRenderPercent: Double
     var gpuTilerPercent: Double
@@ -35,6 +37,9 @@ struct StatsSnapshot: Equatable {
     var gpuCores: Int?
     var memoryPercent: Double
     var memoryUsedBytes: Double
+    var memoryAppBytes: Double
+    var memoryWiredBytes: Double
+    var memoryCompressedBytes: Double
     var memoryTotalBytes: Double
     var networkUploadBytesPerSecond: Double
     var networkDownloadBytesPerSecond: Double
@@ -48,6 +53,8 @@ struct StatsSnapshot: Equatable {
 
     static let empty = StatsSnapshot(
         cpuPercent: 0,
+        cpuUserPercent: 0,
+        cpuSystemPercent: 0,
         gpuPercent: 0,
         gpuRenderPercent: 0,
         gpuTilerPercent: 0,
@@ -55,6 +62,9 @@ struct StatsSnapshot: Equatable {
         gpuCores: nil,
         memoryPercent: 0,
         memoryUsedBytes: 0,
+        memoryAppBytes: 0,
+        memoryWiredBytes: 0,
+        memoryCompressedBytes: 0,
         memoryTotalBytes: Double(ProcessInfo.processInfo.physicalMemory),
         networkUploadBytesPerSecond: 0,
         networkDownloadBytesPerSecond: 0,
@@ -190,7 +200,44 @@ struct StatsWidgetPlugin: TaskbarWidgetPlugin {
 
 typealias StatsCommandOutput = (_ executable: String, _ arguments: [String]) -> String?
 
-func cpuPercent(currentTicks: [UInt32], previousTicks: [UInt32]?) -> Double? {
+struct CPUUsage: Equatable {
+    var activePercent: Double
+    var userPercent: Double
+    var systemPercent: Double
+    var idlePercent: Double
+}
+
+struct MemoryBreakdown: Equatable {
+    var appBytes: Double
+    var wiredBytes: Double
+    var compressedBytes: Double
+
+    var usedBytes: Double {
+        appBytes + wiredBytes + compressedBytes
+    }
+}
+
+struct MemoryUsage: Equatable {
+    var percent: Double
+    var usedBytes: Double
+    var totalBytes: Double
+    var appBytes: Double
+    var wiredBytes: Double
+    var compressedBytes: Double
+}
+
+func memoryBreakdown(usedBytes: Double, wiredBytes: Double, compressedBytes: Double) -> MemoryBreakdown {
+    let usedBytes = max(0, usedBytes)
+    let wiredBytes = max(0, wiredBytes)
+    let compressedBytes = max(0, compressedBytes)
+    return MemoryBreakdown(
+        appBytes: max(0, usedBytes - wiredBytes - compressedBytes),
+        wiredBytes: wiredBytes,
+        compressedBytes: compressedBytes
+    )
+}
+
+func cpuUsage(currentTicks: [UInt32], previousTicks: [UInt32]?) -> CPUUsage? {
     guard let previousTicks,
           currentTicks.count == Int(CPU_STATE_MAX),
           previousTicks.count == currentTicks.count
@@ -201,10 +248,37 @@ func cpuPercent(currentTicks: [UInt32], previousTicks: [UInt32]?) -> Double? {
     let deltas = zip(currentTicks, previousTicks).map { current, previous in
         UInt64(current &- previous)
     }
+    let user = deltas[Int(CPU_STATE_USER)] + deltas[Int(CPU_STATE_NICE)]
+    let system = deltas[Int(CPU_STATE_SYSTEM)]
     let idle = deltas[Int(CPU_STATE_IDLE)]
     let total = deltas.reduce(UInt64.zero, +)
     guard total > 0 else { return nil }
-    return clampedPercent(Double(total - idle) / Double(total) * 100)
+
+    let percentage = { (ticks: UInt64) in
+        clampedPercent(Double(ticks) / Double(total) * 100)
+    }
+    return CPUUsage(
+        activePercent: percentage(user + system),
+        userPercent: percentage(user),
+        systemPercent: percentage(system),
+        idlePercent: percentage(idle)
+    )
+}
+
+func cpuPercent(currentTicks: [UInt32], previousTicks: [UInt32]?) -> Double? {
+    cpuUsage(currentTicks: currentTicks, previousTicks: previousTicks)?.activePercent
+}
+
+func statsGaugeNeedleEndpoint(percent: Double, center: NSPoint, radius: CGFloat) -> NSPoint {
+    let startAngle: CGFloat = 205
+    let totalAngle: CGFloat = 130
+    let ratio = CGFloat(clampedPercent(percent) / 100)
+    let angle = (startAngle - ratio * totalAngle) * .pi / 180
+    let length = max(0, radius - 14)
+    return NSPoint(
+        x: center.x + cos(angle) * length,
+        y: center.y + sin(angle) * length
+    )
 }
 
 final class TaskbarStatsSampler {
@@ -213,6 +287,8 @@ final class TaskbarStatsSampler {
     private let lock = NSLock()
     private let commandOutput: StatsCommandOutput
     private let backgroundQueue: DispatchQueue
+    private let cpuTickReader: (() -> [UInt32]?)?
+    private let memoryReader: (() -> MemoryUsage?)?
     private let totalMemory = Double(ProcessInfo.processInfo.physicalMemory)
     private var cachedSnapshot = StatsSnapshot.empty
     private var lastRefresh = Date.distantPast
@@ -222,7 +298,7 @@ final class TaskbarStatsSampler {
     private var isRefreshingGPU = false
     private var isRefreshingProcesses = false
     private var isRefreshingNetworkProcesses = false
-    private var previousCPU: host_cpu_load_info?
+    private var previousCPUTicks: [UInt32]?
     private var previousNetwork: (totals: NetworkByteTotals, date: Date)?
     private var cachedGPU = StatsGPUReading(percent: 0, renderPercent: 0, tilerPercent: 0, model: "GPU", cores: nil)
     private var cachedProcesses: [StatsProcessSample] = []
@@ -232,10 +308,14 @@ final class TaskbarStatsSampler {
         commandOutput: @escaping StatsCommandOutput = { executable, arguments in
             runStatsCommandOutput(executable, arguments: arguments)
         },
-        backgroundQueue: DispatchQueue = DispatchQueue.global(qos: .utility)
+        backgroundQueue: DispatchQueue = DispatchQueue.global(qos: .utility),
+        cpuTickReader: (() -> [UInt32]?)? = nil,
+        memoryReader: (() -> MemoryUsage?)? = nil
     ) {
         self.commandOutput = commandOutput
         self.backgroundQueue = backgroundQueue
+        self.cpuTickReader = cpuTickReader
+        self.memoryReader = memoryReader
     }
 
     func snapshot(now: Date = Date()) -> StatsSnapshot {
@@ -246,11 +326,19 @@ final class TaskbarStatsSampler {
             return snapshot
         }
 
-        let cpuPercent = readCPUPercent() ?? cachedSnapshot.cpuPercent
-        let memory = readMemory() ?? (
+        let cpu = readCPUUsage() ?? CPUUsage(
+            activePercent: cachedSnapshot.cpuPercent,
+            userPercent: cachedSnapshot.cpuUserPercent,
+            systemPercent: cachedSnapshot.cpuSystemPercent,
+            idlePercent: max(0, 100 - cachedSnapshot.cpuPercent)
+        )
+        let memory = readMemory() ?? MemoryUsage(
             percent: cachedSnapshot.memoryPercent,
-            used: cachedSnapshot.memoryUsedBytes,
-            total: cachedSnapshot.memoryTotalBytes
+            usedBytes: cachedSnapshot.memoryUsedBytes,
+            totalBytes: cachedSnapshot.memoryTotalBytes,
+            appBytes: cachedSnapshot.memoryAppBytes,
+            wiredBytes: cachedSnapshot.memoryWiredBytes,
+            compressedBytes: cachedSnapshot.memoryCompressedBytes
         )
         let gpu = cachedGPU
         let network = readNetworkSpeed(now: now)
@@ -268,22 +356,27 @@ final class TaskbarStatsSampler {
             lastProcessRefresh = now
         }
 
-        let cpuHistory = appendedHistory(cachedSnapshot.cpuHistory, value: cpuPercent)
+        let cpuHistory = appendedHistory(cachedSnapshot.cpuHistory, value: cpu.activePercent)
         let gpuHistory = appendedHistory(cachedSnapshot.gpuHistory, value: gpu.percent)
         let memoryHistory = appendedHistory(cachedSnapshot.memoryHistory, value: memory.percent)
         let uploadHistory = appendedHistory(cachedSnapshot.networkUploadHistory, value: network.upload)
         let downloadHistory = appendedHistory(cachedSnapshot.networkDownloadHistory, value: network.download)
 
         cachedSnapshot = StatsSnapshot(
-            cpuPercent: cpuPercent,
+            cpuPercent: cpu.activePercent,
+            cpuUserPercent: cpu.userPercent,
+            cpuSystemPercent: cpu.systemPercent,
             gpuPercent: gpu.percent,
             gpuRenderPercent: gpu.renderPercent,
             gpuTilerPercent: gpu.tilerPercent,
             gpuModel: gpu.model,
             gpuCores: gpu.cores,
             memoryPercent: memory.percent,
-            memoryUsedBytes: memory.used,
-            memoryTotalBytes: memory.total,
+            memoryUsedBytes: memory.usedBytes,
+            memoryAppBytes: memory.appBytes,
+            memoryWiredBytes: memory.wiredBytes,
+            memoryCompressedBytes: memory.compressedBytes,
+            memoryTotalBytes: memory.totalBytes,
             networkUploadBytesPerSecond: network.upload,
             networkDownloadBytesPerSecond: network.download,
             cpuHistory: cpuHistory,
@@ -309,14 +402,18 @@ final class TaskbarStatsSampler {
         return snapshot
     }
 
-    private func readCPUPercent() -> Double? {
-        guard let info = readCPULoadInfo() else { return nil }
-        defer { previousCPU = info }
+    private func readCPUUsage() -> CPUUsage? {
+        let currentTicks: [UInt32]
+        if let cpuTickReader {
+            guard let ticks = cpuTickReader() else { return nil }
+            currentTicks = ticks
+        } else {
+            guard let info = readCPULoadInfo() else { return nil }
+            currentTicks = cpuTicks(from: info)
+        }
 
-        return cpuPercent(
-            currentTicks: cpuTicks(from: info),
-            previousTicks: previousCPU.map(cpuTicks(from:))
-        )
+        defer { previousCPUTicks = currentTicks }
+        return cpuUsage(currentTicks: currentTicks, previousTicks: previousCPUTicks)
     }
 
     private func readCPULoadInfo() -> host_cpu_load_info? {
@@ -343,7 +440,10 @@ final class TaskbarStatsSampler {
         ]
     }
 
-    private func readMemory() -> (percent: Double, used: Double, total: Double)? {
+    private func readMemory() -> MemoryUsage? {
+        if let memoryReader {
+            return memoryReader()
+        }
         guard totalMemory > 0 else { return nil }
 
         var stats = vm_statistics64()
@@ -364,9 +464,22 @@ final class TaskbarStatsSampler {
         let compressed = Double(stats.compressor_page_count) * pageSize
         let purgeable = Double(stats.purgeable_count) * pageSize
         let external = Double(stats.external_page_count) * pageSize
-        let used = max(0, active + inactive + speculative + wired + compressed - purgeable - external)
+        let measuredUsed = active + inactive + speculative + wired + compressed - purgeable - external
+        let breakdown = memoryBreakdown(
+            usedBytes: measuredUsed,
+            wiredBytes: wired,
+            compressedBytes: compressed
+        )
+        let used = breakdown.usedBytes
 
-        return (clampedPercent(used / totalMemory * 100), used, totalMemory)
+        return MemoryUsage(
+            percent: clampedPercent(used / totalMemory * 100),
+            usedBytes: used,
+            totalBytes: totalMemory,
+            appBytes: breakdown.appBytes,
+            wiredBytes: breakdown.wiredBytes,
+            compressedBytes: breakdown.compressedBytes
+        )
     }
 
     private func readNetworkSpeed(now: Date) -> (upload: Double, download: Double) {
@@ -1104,11 +1217,11 @@ enum StatsPopoverLayout {
         case .cpu:
             return NSSize(width: 360, height: 860)
         case .gpu:
-            return NSSize(width: 360, height: 840)
+            return NSSize(width: 360, height: 560)
         case .memory:
             return NSSize(width: 360, height: 860)
         case .network:
-            return NSSize(width: 360, height: 900)
+            return NSSize(width: 360, height: 780)
         }
     }
 }
@@ -1194,25 +1307,17 @@ private final class StatsPopoverView: NSView {
             percent: snapshot.cpuPercent,
             title: formattedStatsPercent(snapshot.cpuPercent),
             subtitle: "CPU",
-            center: NSPoint(x: bounds.midX, y: 116),
-            radius: 54,
+            center: NSPoint(x: 110, y: 116),
+            radius: 50,
             color: .systemBlue
         )
         drawRing(
             percent: 100 - snapshot.cpuPercent,
             title: formattedStatsPercent(100 - snapshot.cpuPercent),
             subtitle: "IDLE",
-            center: NSPoint(x: 88, y: 116),
-            radius: 38,
+            center: NSPoint(x: bounds.width - 110, y: 116),
+            radius: 50,
             color: .systemGray
-        )
-        drawRing(
-            percent: min(100, Double(snapshot.cpuHistory.count) / 22 * 100),
-            title: "\(snapshot.cpuHistory.count)",
-            subtitle: "SAMPLES",
-            center: NSPoint(x: bounds.width - 88, y: 116),
-            radius: 38,
-            color: .systemTeal
         )
 
         drawSectionTitle("USAGE HISTORY", y: 188, in: bounds)
@@ -1220,8 +1325,8 @@ private final class StatsPopoverView: NSView {
         drawCoreSampleBars(snapshot.cpuHistory, in: NSRect(x: 18, y: 336, width: bounds.width - 36, height: 52))
 
         drawSectionTitle("DETAILS", y: 410, in: bounds)
-        drawDetailRow(label: "System:", value: formattedStatsPercent(snapshot.cpuPercent * 0.45), color: .systemRed, y: 438, in: bounds)
-        drawDetailRow(label: "User:", value: formattedStatsPercent(snapshot.cpuPercent * 0.55), color: .systemBlue, y: 468, in: bounds)
+        drawDetailRow(label: "System:", value: formattedStatsPercent(snapshot.cpuSystemPercent), color: .systemRed, y: 438, in: bounds)
+        drawDetailRow(label: "User:", value: formattedStatsPercent(snapshot.cpuUserPercent), color: .systemBlue, y: 468, in: bounds)
         drawDetailRow(label: "Idle:", value: formattedStatsPercent(100 - snapshot.cpuPercent), color: .systemGray, y: 498, in: bounds)
         drawPlainDetailRow(label: "Uptime:", value: formattedUptime(ProcessInfo.processInfo.systemUptime), y: 528, in: bounds)
 
@@ -1249,15 +1354,24 @@ private final class StatsPopoverView: NSView {
         drawPercentHistory(snapshot.memoryHistory, in: NSRect(x: 18, y: 230, width: bounds.width - 36, height: 112), color: .systemBlue)
 
         let total = max(0, snapshot.memoryTotalBytes)
-        let used = min(max(0, snapshot.memoryUsedBytes), total)
+        let used = max(0, snapshot.memoryUsedBytes)
+        let app = max(0, snapshot.memoryAppBytes)
+        let wired = max(0, snapshot.memoryWiredBytes)
+        let compressed = max(0, snapshot.memoryCompressedBytes)
         let free = max(0, total - used)
 
         drawSectionTitle("DETAILS", y: 368, in: bounds)
         drawPlainDetailRow(label: "Used:", value: formattedStatsMemoryBytes(used), y: 398, in: bounds)
-        drawMemoryBreakdownBar(used: used, free: free, in: NSRect(x: 24, y: 432, width: bounds.width - 48, height: 13))
-        drawDetailRow(label: "App:", value: formattedStatsMemoryBytes(used * 0.68), color: .systemBlue, y: 462, in: bounds)
-        drawDetailRow(label: "Wired:", value: formattedStatsMemoryBytes(used * 0.13), color: .systemOrange, y: 492, in: bounds)
-        drawDetailRow(label: "Compressed:", value: formattedStatsMemoryBytes(used * 0.19), color: .systemPink, y: 522, in: bounds)
+        drawMemoryBreakdownBar(
+            app: app,
+            wired: wired,
+            compressed: compressed,
+            free: free,
+            in: NSRect(x: 24, y: 432, width: bounds.width - 48, height: 13)
+        )
+        drawDetailRow(label: "App:", value: formattedStatsMemoryBytes(app), color: .systemBlue, y: 462, in: bounds)
+        drawDetailRow(label: "Wired:", value: formattedStatsMemoryBytes(wired), color: .systemOrange, y: 492, in: bounds)
+        drawDetailRow(label: "Compressed:", value: formattedStatsMemoryBytes(compressed), color: .systemPink, y: 522, in: bounds)
         drawDetailRow(label: "Free:", value: formattedStatsMemoryBytes(free), color: .systemGray, y: 552, in: bounds)
 
         drawSectionTitle("TOP PROCESSES", y: 602, in: bounds)
@@ -1299,15 +1413,6 @@ private final class StatsPopoverView: NSView {
         drawPlainDetailRow(label: "Utilisation:", value: formattedStatsPercent(snapshot.gpuPercent), y: 446, in: bounds)
         drawPlainDetailRow(label: "Render utilisation:", value: formattedStatsPercent(snapshot.gpuRenderPercent), y: 476, in: bounds)
         drawPlainDetailRow(label: "Tiler utilisation:", value: formattedStatsPercent(snapshot.gpuTilerPercent), y: 506, in: bounds)
-
-        drawSectionTitle("TOP PROCESSES", y: 562, in: bounds)
-        drawProcessTable(
-            processes: topCPUProcesses(snapshot),
-            valueTitle: "Activity",
-            value: { formattedStatsPercent($0.cpuPercent) },
-            y: 596,
-            in: bounds
-        )
     }
 
     private func drawNetworkPopup(snapshot: StatsSnapshot, in bounds: NSRect) {
@@ -1331,16 +1436,12 @@ private final class StatsPopoverView: NSView {
             in: NSRect(x: 18, y: 214, width: bounds.width - 36, height: 124)
         )
 
-        drawSectionTitle("CONNECTIVITY HISTORY", y: 366, in: bounds)
-        drawConnectivityHistory(in: NSRect(x: 24, y: 398, width: bounds.width - 48, height: 48))
+        drawSectionTitle("CURRENT RATES", y: 366, in: bounds)
+        drawDetailRow(label: "Upload:", value: formattedStatsBytesPerSecond(snapshot.networkUploadBytesPerSecond), color: .systemRed, y: 394, in: bounds)
+        drawDetailRow(label: "Download:", value: formattedStatsBytesPerSecond(snapshot.networkDownloadBytesPerSecond), color: .systemBlue, y: 424, in: bounds)
 
-        drawSectionTitle("INTERFACE", y: 472, in: bounds)
-        drawDetailRow(label: "Total upload:", value: formattedStatsBytesPerSecond(snapshot.networkUploadBytesPerSecond), color: .systemRed, y: 500, in: bounds)
-        drawDetailRow(label: "Total download:", value: formattedStatsBytesPerSecond(snapshot.networkDownloadBytesPerSecond), color: .systemBlue, y: 530, in: bounds)
-        drawPlainDetailRow(label: "Status:", value: "UP", y: 560, in: bounds)
-
-        drawSectionTitle("TOP PROCESSES", y: 616, in: bounds)
-        drawNetworkProcessTable(snapshot.networkProcesses, y: 650, in: bounds)
+        drawSectionTitle("TOP PROCESSES", y: 480, in: bounds)
+        drawNetworkProcessTable(snapshot.networkProcesses, y: 514, in: bounds)
     }
 
     private func topCPUProcesses(_ snapshot: StatsSnapshot) -> [StatsProcessSample] {
@@ -1436,12 +1537,7 @@ private final class StatsPopoverView: NSView {
             path.stroke()
         }
 
-        let ratio = CGFloat(clampedPercent(percent) / 100)
-        let angle = (startAngle - ratio * totalAngle) * .pi / 180
-        let needleEnd = NSPoint(
-            x: center.x + cos(angle) * (radius - 14),
-            y: center.y - sin(angle) * (radius - 14)
-        )
+        let needleEnd = statsGaugeNeedleEndpoint(percent: percent, center: center, radius: radius)
         let needle = NSBezierPath()
         needle.move(to: center)
         needle.line(to: needleEnd)
@@ -1460,12 +1556,18 @@ private final class StatsPopoverView: NSView {
         )
     }
 
-    private func drawMemoryBreakdownBar(used: Double, free: Double, in rect: NSRect) {
-        let total = max(used + free, 1)
+    private func drawMemoryBreakdownBar(
+        app: Double,
+        wired: Double,
+        compressed: Double,
+        free: Double,
+        in rect: NSRect
+    ) {
+        let total = max(app + wired + compressed + free, 1)
         let segments: [(Double, NSColor)] = [
-            (used * 0.68, .systemBlue),
-            (used * 0.13, .systemOrange),
-            (used * 0.19, .systemPink),
+            (app, .systemBlue),
+            (wired, .systemOrange),
+            (compressed, .systemPink),
             (free, .systemGray)
         ]
 
@@ -1484,24 +1586,6 @@ private final class StatsPopoverView: NSView {
                 x += width
             }
             context.restoreGraphicsState()
-        }
-    }
-
-    private func drawConnectivityHistory(in rect: NSRect) {
-        let columns = 28
-        let rows = 3
-        let gap: CGFloat = 3
-        let squareWidth = floor((rect.width - gap * CGFloat(columns - 1)) / CGFloat(columns))
-        let squareHeight = floor((rect.height - gap * CGFloat(rows - 1)) / CGFloat(rows))
-        let side = max(2, min(squareWidth, squareHeight))
-
-        for row in 0..<rows {
-            for column in 0..<columns {
-                let x = rect.minX + CGFloat(column) * (side + gap)
-                let y = rect.minY + CGFloat(row) * (side + gap)
-                NSColor.systemGreen.withAlphaComponent(0.88).setFill()
-                NSBezierPath(roundedRect: NSRect(x: x, y: y, width: side, height: side), xRadius: 2, yRadius: 2).fill()
-            }
         }
     }
 
