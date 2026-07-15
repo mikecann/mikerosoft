@@ -53,6 +53,66 @@ struct TaskbarItem: Equatable {
     }
 }
 
+struct FrontmostWindowExpectation: Equatable {
+    let pid: pid_t
+    let windowID: Int
+    let expiresAt: TimeInterval
+}
+
+struct FrontmostWindowResolution: Equatable {
+    let effectiveWindowID: Int?
+    let remainingExpectation: FrontmostWindowExpectation?
+}
+
+func frontmostWindowExpectation(
+    afterActivating item: TaskbarItem,
+    now: TimeInterval,
+    timeToLive: TimeInterval = 2
+) -> FrontmostWindowExpectation? {
+    guard let pid = item.pid, let windowID = item.windowIDs.first else {
+        return nil
+    }
+
+    return FrontmostWindowExpectation(
+        pid: pid,
+        windowID: windowID,
+        expiresAt: now + timeToLive
+    )
+}
+
+func resolveFrontmostWindow(
+    measuredPID: pid_t?,
+    measuredWindowID: Int?,
+    expectation: FrontmostWindowExpectation?,
+    now: TimeInterval
+) -> FrontmostWindowResolution {
+    guard let expectation, now < expectation.expiresAt else {
+        return FrontmostWindowResolution(
+            effectiveWindowID: measuredWindowID,
+            remainingExpectation: nil
+        )
+    }
+
+    guard measuredPID == expectation.pid else {
+        return FrontmostWindowResolution(
+            effectiveWindowID: measuredWindowID,
+            remainingExpectation: expectation
+        )
+    }
+
+    if measuredWindowID == expectation.windowID {
+        return FrontmostWindowResolution(
+            effectiveWindowID: measuredWindowID,
+            remainingExpectation: nil
+        )
+    }
+
+    return FrontmostWindowResolution(
+        effectiveWindowID: expectation.windowID,
+        remainingExpectation: expectation
+    )
+}
+
 func visibleWindows(_ records: [WindowRecord], currentPID: pid_t, includeMinimized: Bool = false) -> [WindowRecord] {
     deduplicatedAccessibilitySurfaces(records.filter { record in
         let owner = record.owner.trimmingCharacters(in: .whitespacesAndNewlines)
