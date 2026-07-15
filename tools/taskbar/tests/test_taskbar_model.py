@@ -46,6 +46,17 @@ class TaskbarModelTests(unittest.TestCase):
 
         self.assertEqual(["Safari"], [window.owner for window in visible])
 
+    def test_visible_windows_can_include_minimized_windows(self):
+        records = [
+            self.record("Safari", "Article", pid=10, window_id=1),
+            self.record("Notes", "Plan", pid=11, window_id=2, is_on_screen=False, is_minimized=True),
+            self.record("Finder", "Hidden", pid=12, window_id=3, is_on_screen=False),
+        ]
+
+        visible = self.model.visible_windows(records, current_pid=999, include_minimized=True)
+
+        self.assertEqual(["Safari", "Notes"], [window.owner for window in visible])
+
     def test_visible_windows_rejects_the_taskbar_process(self):
         records = [
             self.record("Python", "mikerosoft taskbar", pid=42, window_id=1),

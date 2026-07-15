@@ -23,15 +23,8 @@ func taskbarItemLabel(_ item: TaskbarItem) -> String {
 }
 
 func drawTaskbarIcon(item: TaskbarItem, rect: NSRect) {
-    if let pid = item.pid,
-       let app = NSRunningApplication(processIdentifier: pid),
-       let icon = app.icon {
-        icon.draw(in: rect)
-        return
-    }
-
-    if !item.appPath.isEmpty {
-        NSWorkspace.shared.icon(forFile: item.appPath).draw(in: rect)
+    if let icon = TaskbarIconCache.shared.icon(for: item) {
+        drawTaskbarIconImage(icon, in: rect)
         return
     }
 
@@ -44,6 +37,88 @@ func drawTaskbarIcon(item: TaskbarItem, rect: NSRect) {
         bold: true,
         active: true
     )
+}
+
+private func drawTaskbarIconImage(_ icon: CGImage, in rect: NSRect) {
+    guard let context = NSGraphicsContext.current?.cgContext else { return }
+    context.saveGState()
+    context.interpolationQuality = .high
+    context.draw(icon, in: rect)
+    context.restoreGState()
+}
+
+private struct TaskbarIconRequest {
+    let key: String
+    let pid: pid_t?
+    let appPath: String
+}
+
+private final class TaskbarIconCache {
+    static let shared = TaskbarIconCache()
+
+    private let lock = NSLock()
+    private var icons: [String: CGImage] = [:]
+    private var loadingKeys: Set<String> = []
+
+    func icon(for item: TaskbarItem) -> CGImage? {
+        let request = TaskbarIconRequest(
+            key: iconKey(for: item),
+            pid: item.pid,
+            appPath: item.appPath
+        )
+
+        lock.lock()
+        if let icon = icons[request.key] {
+            lock.unlock()
+            return icon
+        }
+        let shouldLoad = !loadingKeys.contains(request.key)
+        if shouldLoad {
+            loadingKeys.insert(request.key)
+        }
+        lock.unlock()
+
+        if shouldLoad {
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                guard let self else { return }
+                let icon = Self.loadIcon(for: request)
+                self.lock.lock()
+                if let icon {
+                    self.icons[request.key] = icon
+                }
+                self.loadingKeys.remove(request.key)
+                self.lock.unlock()
+            }
+        }
+
+        return nil
+    }
+
+    private func iconKey(for item: TaskbarItem) -> String {
+        if !item.bundleID.isEmpty || !item.appPath.isEmpty {
+            return item.identity
+        }
+        if let pid = item.pid {
+            return "pid:\(pid)"
+        }
+        return "owner:\(item.owner)"
+    }
+
+    private static func loadIcon(for request: TaskbarIconRequest) -> CGImage? {
+        let image: NSImage?
+        if !request.appPath.isEmpty {
+            image = NSWorkspace.shared.icon(forFile: request.appPath)
+        } else if let pid = request.pid,
+                  let app = NSRunningApplication(processIdentifier: pid) {
+            image = app.icon
+        } else {
+            image = nil
+        }
+
+        guard let image else { return nil }
+        var rect = NSRect(origin: .zero, size: NSSize(width: 64, height: 64))
+        return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+    }
 }
 
 func drawTaskbarText(

@@ -81,25 +81,94 @@ struct DateTimeWidgetSettings: Codable, Equatable {
     }
 }
 
+enum StatsMemoryDisplay: String, Codable, CaseIterable, Equatable {
+    case percent
+    case pie
+
+    var label: String {
+        switch self {
+        case .percent:
+            return "Percentage"
+        case .pie:
+            return "Pie chart"
+        }
+    }
+}
+
 struct StatsWidgetSettings: Codable, Equatable {
     var isEnabled: Bool
     var showCPU: Bool
+    var showGPU: Bool
     var showMemory: Bool
     var showNetwork: Bool
     var showMiniGraph: Bool
+    var memoryDisplay: StatsMemoryDisplay
 
     static var defaults: StatsWidgetSettings {
         StatsWidgetSettings(
             isEnabled: true,
             showCPU: true,
+            showGPU: true,
             showMemory: true,
             showNetwork: true,
-            showMiniGraph: true
+            showMiniGraph: true,
+            memoryDisplay: .percent
         )
     }
 
     var hasVisibleMetrics: Bool {
-        showCPU || showMemory || showNetwork
+        showCPU || showGPU || showMemory || showNetwork
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case showCPU
+        case showGPU
+        case showMemory
+        case showNetwork
+        case showMiniGraph
+        case memoryDisplay
+    }
+
+    init(
+        isEnabled: Bool,
+        showCPU: Bool,
+        showGPU: Bool = true,
+        showMemory: Bool,
+        showNetwork: Bool,
+        showMiniGraph: Bool,
+        memoryDisplay: StatsMemoryDisplay = .percent
+    ) {
+        self.isEnabled = isEnabled
+        self.showCPU = showCPU
+        self.showGPU = showGPU
+        self.showMemory = showMemory
+        self.showNetwork = showNetwork
+        self.showMiniGraph = showMiniGraph
+        self.memoryDisplay = memoryDisplay
+    }
+
+    init(from decoder: Decoder) throws {
+        let defaults = Self.defaults
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? defaults.isEnabled
+        showCPU = try container.decodeIfPresent(Bool.self, forKey: .showCPU) ?? defaults.showCPU
+        showGPU = try container.decodeIfPresent(Bool.self, forKey: .showGPU) ?? defaults.showGPU
+        showMemory = try container.decodeIfPresent(Bool.self, forKey: .showMemory) ?? defaults.showMemory
+        showNetwork = try container.decodeIfPresent(Bool.self, forKey: .showNetwork) ?? defaults.showNetwork
+        showMiniGraph = try container.decodeIfPresent(Bool.self, forKey: .showMiniGraph) ?? defaults.showMiniGraph
+        memoryDisplay = try container.decodeIfPresent(StatsMemoryDisplay.self, forKey: .memoryDisplay) ?? defaults.memoryDisplay
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(showCPU, forKey: .showCPU)
+        try container.encode(showGPU, forKey: .showGPU)
+        try container.encode(showMemory, forKey: .showMemory)
+        try container.encode(showNetwork, forKey: .showNetwork)
+        try container.encode(showMiniGraph, forKey: .showMiniGraph)
+        try container.encode(memoryDisplay, forKey: .memoryDisplay)
     }
 }
 
@@ -162,6 +231,7 @@ struct TaskbarSettingValues: Codable, Equatable {
     var itemSpacing: Double
     var backgroundOpacity: Double
     var avoidOverlappingWindows: Bool
+    var showMinimizedWindows: Bool
     var autoHide: Bool
     var revealAnimation: RevealAnimation
     var revealAnimationDuration: Double
@@ -186,6 +256,7 @@ struct TaskbarSettingValues: Codable, Equatable {
             itemSpacing: defaultItemSpacing,
             backgroundOpacity: defaultBackgroundOpacity,
             avoidOverlappingWindows: true,
+            showMinimizedWindows: true,
             autoHide: false,
             revealAnimation: .ease,
             revealAnimationDuration: defaultRevealAnimationDuration,
@@ -207,6 +278,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         case itemSpacing
         case backgroundOpacity
         case avoidOverlappingWindows
+        case showMinimizedWindows
         case autoHide
         case revealAnimation
         case revealAnimationDuration
@@ -226,6 +298,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         itemSpacing: Double,
         backgroundOpacity: Double,
         avoidOverlappingWindows: Bool,
+        showMinimizedWindows: Bool = true,
         autoHide: Bool,
         revealAnimation: RevealAnimation,
         revealAnimationDuration: Double,
@@ -242,6 +315,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         self.itemSpacing = itemSpacing
         self.backgroundOpacity = backgroundOpacity
         self.avoidOverlappingWindows = avoidOverlappingWindows
+        self.showMinimizedWindows = showMinimizedWindows
         self.autoHide = autoHide
         self.revealAnimation = revealAnimation
         self.revealAnimationDuration = revealAnimationDuration
@@ -268,6 +342,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         itemSpacing = try container.decodeIfPresent(Double.self, forKey: .itemSpacing) ?? Self.defaultItemSpacing
         backgroundOpacity = try container.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? Self.defaultBackgroundOpacity
         avoidOverlappingWindows = try container.decodeIfPresent(Bool.self, forKey: .avoidOverlappingWindows) ?? true
+        showMinimizedWindows = try container.decodeIfPresent(Bool.self, forKey: .showMinimizedWindows) ?? true
         autoHide = try container.decodeIfPresent(Bool.self, forKey: .autoHide) ?? false
         revealAnimation = try container.decodeIfPresent(RevealAnimation.self, forKey: .revealAnimation) ?? .ease
         revealAnimationDuration = try container.decodeIfPresent(Double.self, forKey: .revealAnimationDuration) ?? Self.defaultRevealAnimationDuration
@@ -288,6 +363,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         try container.encode(itemSpacing, forKey: .itemSpacing)
         try container.encode(backgroundOpacity, forKey: .backgroundOpacity)
         try container.encode(avoidOverlappingWindows, forKey: .avoidOverlappingWindows)
+        try container.encode(showMinimizedWindows, forKey: .showMinimizedWindows)
         try container.encode(autoHide, forKey: .autoHide)
         try container.encode(revealAnimation, forKey: .revealAnimation)
         try container.encode(revealAnimationDuration, forKey: .revealAnimationDuration)
@@ -344,6 +420,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
     var itemSpacing: Double?
     var backgroundOpacity: Double?
     var avoidOverlappingWindows: Bool?
+    var showMinimizedWindows: Bool?
     var autoHide: Bool?
     var revealAnimation: RevealAnimation?
     var revealAnimationDuration: Double?
@@ -362,6 +439,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
             || itemSpacing != nil
             || backgroundOpacity != nil
             || avoidOverlappingWindows != nil
+            || showMinimizedWindows != nil
             || autoHide != nil
             || revealAnimation != nil
             || revealAnimationDuration != nil
@@ -382,6 +460,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         case itemSpacing
         case backgroundOpacity
         case avoidOverlappingWindows
+        case showMinimizedWindows
         case autoHide
         case revealAnimation
         case revealAnimationDuration
@@ -401,6 +480,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         itemSpacing: Double? = nil,
         backgroundOpacity: Double? = nil,
         avoidOverlappingWindows: Bool? = nil,
+        showMinimizedWindows: Bool? = nil,
         autoHide: Bool? = nil,
         revealAnimation: RevealAnimation? = nil,
         revealAnimationDuration: Double? = nil,
@@ -418,6 +498,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         self.itemSpacing = itemSpacing
         self.backgroundOpacity = backgroundOpacity
         self.avoidOverlappingWindows = avoidOverlappingWindows
+        self.showMinimizedWindows = showMinimizedWindows
         self.autoHide = autoHide
         self.revealAnimation = revealAnimation
         self.revealAnimationDuration = revealAnimationDuration
@@ -444,6 +525,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         itemSpacing = try container.decodeIfPresent(Double.self, forKey: .itemSpacing)
         backgroundOpacity = try container.decodeIfPresent(Double.self, forKey: .backgroundOpacity)
         avoidOverlappingWindows = try container.decodeIfPresent(Bool.self, forKey: .avoidOverlappingWindows)
+        showMinimizedWindows = try container.decodeIfPresent(Bool.self, forKey: .showMinimizedWindows)
         autoHide = try container.decodeIfPresent(Bool.self, forKey: .autoHide)
         revealAnimation = try container.decodeIfPresent(RevealAnimation.self, forKey: .revealAnimation)
         revealAnimationDuration = try container.decodeIfPresent(Double.self, forKey: .revealAnimationDuration)
@@ -464,6 +546,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         try container.encodeIfPresent(itemSpacing, forKey: .itemSpacing)
         try container.encodeIfPresent(backgroundOpacity, forKey: .backgroundOpacity)
         try container.encodeIfPresent(avoidOverlappingWindows, forKey: .avoidOverlappingWindows)
+        try container.encodeIfPresent(showMinimizedWindows, forKey: .showMinimizedWindows)
         try container.encodeIfPresent(autoHide, forKey: .autoHide)
         try container.encodeIfPresent(revealAnimation, forKey: .revealAnimation)
         try container.encodeIfPresent(revealAnimationDuration, forKey: .revealAnimationDuration)
@@ -546,6 +629,9 @@ struct TaskbarPreferences: Codable, Equatable {
         }
         if let avoidOverlappingWindows = override.avoidOverlappingWindows {
             values.avoidOverlappingWindows = avoidOverlappingWindows
+        }
+        if let showMinimizedWindows = override.showMinimizedWindows {
+            values.showMinimizedWindows = showMinimizedWindows
         }
         if let autoHide = override.autoHide {
             values.autoHide = autoHide

@@ -16,6 +16,7 @@ final class TaskbarSettingsTests: XCTestCase {
         itemSpacing: Double = 3,
         backgroundOpacity: Double = 0.72,
         avoidOverlappingWindows: Bool = true,
+        showMinimizedWindows: Bool = true,
         autoHide: Bool = false,
         revealAnimation: RevealAnimation = .ease,
         revealAnimationDuration: Double = 0.18,
@@ -34,6 +35,7 @@ final class TaskbarSettingsTests: XCTestCase {
             itemSpacing: itemSpacing,
             backgroundOpacity: backgroundOpacity,
             avoidOverlappingWindows: avoidOverlappingWindows,
+            showMinimizedWindows: showMinimizedWindows,
             autoHide: autoHide,
             revealAnimation: revealAnimation,
             revealAnimationDuration: revealAnimationDuration,
@@ -64,6 +66,7 @@ final class TaskbarSettingsTests: XCTestCase {
             statsWidget: StatsWidgetSettings(
                 isEnabled: true,
                 showCPU: false,
+                showGPU: false,
                 showMemory: true,
                 showNetwork: false,
                 showMiniGraph: false
@@ -75,6 +78,7 @@ final class TaskbarSettingsTests: XCTestCase {
             itemSpacing: 12,
             backgroundOpacity: 0.5,
             avoidOverlappingWindows: false,
+            showMinimizedWindows: false,
             autoHide: true,
             revealAnimation: .linear,
             revealAnimationDuration: 0.4,
@@ -91,6 +95,7 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertTrue(resolved.dateTimeWidget.showSeconds)
         XCTAssertFalse(resolved.dateTimeWidget.use24HourClock)
         XCTAssertFalse(resolved.statsWidget.showCPU)
+        XCTAssertFalse(resolved.statsWidget.showGPU)
         XCTAssertTrue(resolved.statsWidget.showMemory)
         XCTAssertFalse(resolved.statsWidget.showNetwork)
         XCTAssertFalse(resolved.statsWidget.showMiniGraph)
@@ -101,6 +106,7 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(resolved.itemSpacing, 12)
         XCTAssertEqual(resolved.backgroundOpacity, 0.5)
         XCTAssertEqual(resolved.avoidOverlappingWindows, false)
+        XCTAssertEqual(resolved.showMinimizedWindows, false)
         XCTAssertEqual(resolved.autoHide, true)
         XCTAssertEqual(resolved.revealAnimation, .linear)
         XCTAssertEqual(resolved.revealAnimationDuration, 0.4)
@@ -118,6 +124,7 @@ final class TaskbarSettingsTests: XCTestCase {
                 itemSpacing: 9,
                 backgroundOpacity: 0.6,
                 avoidOverlappingWindows: false,
+                showMinimizedWindows: false,
                 autoHide: true,
                 revealAnimation: .instant,
                 revealAnimationDuration: 0.05,
@@ -141,6 +148,7 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(resolved.itemSpacing, 9)
         XCTAssertEqual(resolved.backgroundOpacity, 0.6)
         XCTAssertEqual(resolved.avoidOverlappingWindows, false)
+        XCTAssertEqual(resolved.showMinimizedWindows, false)
         XCTAssertEqual(resolved.autoHide, true)
         XCTAssertEqual(resolved.revealAnimation, .instant)
         XCTAssertEqual(resolved.revealAnimationDuration, 0.05)
@@ -308,16 +316,20 @@ final class TaskbarSettingsTests: XCTestCase {
         let generalStats = StatsWidgetSettings(
             isEnabled: true,
             showCPU: true,
+            showGPU: true,
             showMemory: true,
             showNetwork: true,
-            showMiniGraph: true
+            showMiniGraph: true,
+            memoryDisplay: .pie
         )
         let monitorStats = StatsWidgetSettings(
             isEnabled: false,
             showCPU: false,
+            showGPU: false,
             showMemory: true,
             showNetwork: false,
-            showMiniGraph: false
+            showMiniGraph: false,
+            memoryDisplay: .percent
         )
         let preferences = TaskbarPreferences(
             general: values(statsWidget: generalStats),
@@ -329,6 +341,23 @@ final class TaskbarSettingsTests: XCTestCase {
         let resolved = preferences.resolvedValues(for: 123)
 
         XCTAssertEqual(resolved.statsWidget, monitorStats)
+    }
+
+    func testStatsWidgetDecodesMissingFieldsAsDefaults() throws {
+        let json = """
+        {
+          "isEnabled": true,
+          "showCPU": true,
+          "showMemory": true,
+          "showNetwork": true,
+          "showMiniGraph": true
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(StatsWidgetSettings.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.memoryDisplay, .percent)
+        XCTAssertTrue(decoded.showGPU)
     }
 
     func testDateTimeWidgetEncodingDoesNotWriteLegacyClockKeys() throws {
@@ -346,6 +375,7 @@ final class TaskbarSettingsTests: XCTestCase {
             statsWidget: StatsWidgetSettings(
                 isEnabled: true,
                 showCPU: true,
+                showGPU: true,
                 showMemory: false,
                 showNetwork: true,
                 showMiniGraph: true
@@ -357,6 +387,7 @@ final class TaskbarSettingsTests: XCTestCase {
             itemSpacing: 3,
             backgroundOpacity: 0.72,
             avoidOverlappingWindows: true,
+            showMinimizedWindows: true,
             autoHide: false,
             revealAnimation: .ease,
             revealAnimationDuration: 0.18,
@@ -372,11 +403,53 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(dateTimeWidget?["dateDisplay"] as? String, "always")
         XCTAssertEqual(dateTimeWidget?["showSeconds"] as? Bool, true)
         XCTAssertEqual(dateTimeWidget?["use24HourClock"] as? Bool, false)
+        XCTAssertEqual(statsWidget?["showGPU"] as? Bool, true)
         XCTAssertEqual(statsWidget?["showMemory"] as? Bool, false)
         XCTAssertEqual(statsWidget?["showNetwork"] as? Bool, true)
+        XCTAssertEqual(statsWidget?["memoryDisplay"] as? String, "percent")
         XCTAssertNil(object?["backgroundStyle"])
         XCTAssertNil(object?["glassAmount"])
         XCTAssertNil(object?["showClock"])
+    }
+
+    func testShowMinimizedWindowsDefaultsTrueWhenMissing() throws {
+        let json = """
+        {
+          "isVisible": true,
+          "groupByApp": true,
+          "dateTimeWidget": {
+            "isEnabled": true,
+            "dateDisplay": "never",
+            "showDayOfWeek": true,
+            "showSeconds": false,
+            "use24HourClock": true
+          },
+          "statsWidget": {
+            "isEnabled": true,
+            "showCPU": true,
+            "showGPU": true,
+            "showMemory": true,
+            "showNetwork": true,
+            "showMiniGraph": true,
+            "memoryDisplay": "percent"
+          },
+          "showWindowCounts": true,
+          "taskbarHeight": 54,
+          "minimumItemWidth": 96,
+          "maximumItemWidth": 220,
+          "itemSpacing": 3,
+          "backgroundOpacity": 0.72,
+          "avoidOverlappingWindows": true,
+          "autoHide": false,
+          "revealAnimation": "ease",
+          "revealAnimationDuration": 0.18,
+          "pinnedApps": []
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(TaskbarSettingValues.self, from: Data(json.utf8))
+
+        XCTAssertTrue(decoded.showMinimizedWindows)
     }
 
     func testDateTimeWidgetFormatsMenuBarLikeTime() {
@@ -442,6 +515,7 @@ final class TaskbarSettingsTests: XCTestCase {
         let settings = StatsWidgetSettings(
             isEnabled: true,
             showCPU: true,
+            showGPU: false,
             showMemory: false,
             showNetwork: true,
             showMiniGraph: true
@@ -453,6 +527,175 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(rects.count, 2)
         XCTAssertGreaterThan(rects[0].1.width, 40)
         XCTAssertGreaterThan(rects[1].1.minX, rects[0].1.maxX)
+    }
+
+    func testStatsWidgetModuleRectsIncludeGPUWhenEnabled() {
+        let settings = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: true,
+            showGPU: true,
+            showMemory: false,
+            showNetwork: false,
+            showMiniGraph: true
+        )
+
+        let rects = statsWidgetModuleRects(settings: settings, in: NSRect(x: 0, y: 0, width: 130, height: 42))
+
+        XCTAssertEqual(rects.map(\.0), [.cpu, .gpu])
+        XCTAssertGreaterThanOrEqual(rects[1].1.width, StatsWidgetMetrics.minimumGPUWidth)
+    }
+
+    func testStatsWidgetModuleSpacingIsCompact() {
+        let settings = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: true,
+            showGPU: true,
+            showMemory: true,
+            showNetwork: true,
+            showMiniGraph: true
+        )
+
+        let rects = statsWidgetModuleRects(settings: settings, in: NSRect(x: 0, y: 0, width: 220, height: 42))
+        let gaps = zip(rects, rects.dropFirst()).map { left, right in
+            right.1.minX - left.1.maxX
+        }
+
+        XCTAssertEqual(gaps, [10, 10, 10])
+        XCTAssertEqual(StatsWidgetMetrics.preferredMemoryWidth, StatsWidgetMetrics.minimumMemoryWidth)
+        XCTAssertLessThanOrEqual(StatsWidgetMetrics.preferredNetworkWidth, 82)
+    }
+
+    func testStatsMiniGraphUsesOnePixelVerticalPadding() {
+        let source = NSRect(x: 12, y: 4, width: 108, height: 22)
+
+        let graph = statsMiniGraphRect(in: source, width: 42)
+
+        XCTAssertEqual(graph.minY, 5)
+        XCTAssertEqual(graph.height, 20)
+    }
+
+    func testStatsMiniGraphAllowsTwoPixelBarsWhenSpaceAllows() {
+        let source = NSRect(x: 0, y: 0, width: 62, height: 22)
+
+        let graphWidth = statsMiniGraphWidth(in: source, isEnabled: true)
+
+        XCTAssertGreaterThanOrEqual(graphWidth, 53)
+    }
+
+    func testStatsMiniGraphBarsStartAtLeftEdge() {
+        let source = NSRect(x: 20, y: 0, width: 62, height: 22)
+
+        let layout = statsMiniGraphBarLayout(in: source, barCount: 18)
+        let lastMaxX = layout.firstX
+            + layout.barWidth * 18
+            + layout.gap * 17
+
+        XCTAssertEqual(layout.firstX, source.minX)
+        XCTAssertEqual(layout.barWidth, 2)
+        XCTAssertEqual(lastMaxX, source.maxX, accuracy: 0.001)
+    }
+
+    func testStatsSideLabelLeavesContentToTheRight() {
+        let source = NSRect(x: 12, y: 4, width: 52, height: 22)
+
+        let rects = statsSideLabelRects(in: source)
+
+        XCTAssertEqual(rects.label.minX, 12)
+        XCTAssertEqual(rects.label.width, 10)
+        XCTAssertGreaterThanOrEqual(statsVerticalLabelFontSize(for: rects.label), 9)
+        XCTAssertGreaterThan(rects.content.minX, rects.label.maxX)
+        XCTAssertEqual(rects.content.height, 22)
+    }
+
+    func testStatsNetworkLinesAreVerticallyStacked() {
+        let source = NSRect(x: 0, y: 0, width: 88, height: 22)
+
+        let lines = statsNetworkLineRects(in: source)
+
+        XCTAssertGreaterThan(lines.upload.minY, lines.download.minY)
+        XCTAssertEqual(lines.upload.width, 88)
+        XCTAssertEqual(lines.download.width, 88)
+    }
+
+    func testStatsMemoryPieRectFitsContent() {
+        let source = NSRect(x: 12, y: 4, width: 32, height: 22)
+
+        let pie = statsMemoryPieRect(in: source)
+
+        XCTAssertEqual(pie.width, 20)
+        XCTAssertEqual(pie.height, 20)
+        XCTAssertGreaterThanOrEqual(pie.minY, source.minY)
+        XCTAssertLessThanOrEqual(pie.maxY, source.maxY)
+    }
+
+    func testStatsPopoverChartLayoutLeavesRoomForAxes() {
+        let source = NSRect(x: 18, y: 196, width: 324, height: 116)
+
+        let layout = statsPopoverChartLayout(in: source)
+
+        XCTAssertEqual(layout.panel, source)
+        XCTAssertGreaterThan(layout.plot.minX, source.minX + 30)
+        XCTAssertLessThanOrEqual(layout.plot.maxX, source.maxX - 8)
+        XCTAssertGreaterThan(layout.xAxis.minY, layout.plot.maxY)
+        XCTAssertLessThan(layout.yAxis.maxX, layout.plot.minX)
+    }
+
+    func testStatsChartPointMapsValuesIntoPlotArea() {
+        let plot = NSRect(x: 50, y: 20, width: 200, height: 80)
+
+        let first = statsChartPoint(index: 0, count: 3, value: 0, maxValue: 100, in: plot)
+        let middle = statsChartPoint(index: 1, count: 3, value: 50, maxValue: 100, in: plot)
+        let last = statsChartPoint(index: 2, count: 3, value: 100, maxValue: 100, in: plot)
+
+        XCTAssertEqual(first.x, plot.minX)
+        XCTAssertEqual(first.y, plot.maxY)
+        XCTAssertEqual(middle.x, plot.midX)
+        XCTAssertEqual(middle.y, plot.midY)
+        XCTAssertEqual(last.x, plot.maxX)
+        XCTAssertEqual(last.y, plot.minY)
+    }
+
+    func testStatsWidgetMetricHitUsesIndividualSlices() {
+        let settings = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: true,
+            showGPU: true,
+            showMemory: true,
+            showNetwork: true,
+            showMiniGraph: true
+        )
+        let widgetRect = NSRect(x: 20, y: 4, width: 240, height: 22)
+        let rects = statsWidgetMetricRects(settings: settings, in: widgetRect)
+
+        for (metric, rect) in rects {
+            let point = NSPoint(x: rect.midX, y: widgetRect.minY - 50)
+
+            XCTAssertEqual(statsWidgetMetric(at: point, in: widgetRect, settings: settings), metric)
+        }
+    }
+
+    func testStatsPopoverLayoutHasGPUSize() {
+        let size = StatsPopoverLayout.size(for: .gpu)
+
+        XCTAssertEqual(size.width, 360)
+        XCTAssertGreaterThanOrEqual(size.height, 520)
+    }
+
+    func testTaskbarInteractionRectUsesFullVerticalSlice() {
+        let visual = NSRect(x: 20, y: 4, width: 90, height: 22)
+        let bounds = NSRect(x: 0, y: 0, width: 320, height: 30)
+
+        let interaction = taskbarInteractionRect(for: visual, in: bounds)
+
+        XCTAssertTrue(interaction.contains(NSPoint(x: 40, y: 1)))
+        XCTAssertTrue(interaction.contains(NSPoint(x: 40, y: 29)))
+        XCTAssertFalse(interaction.contains(NSPoint(x: 19, y: 1)))
+    }
+
+    func testWidgetSpacingIsCappedBelowAppItemSpacing() {
+        XCTAssertEqual(taskbarWidgetSpacing(itemSpacing: 0), 0)
+        XCTAssertEqual(taskbarWidgetSpacing(itemSpacing: 1), 1)
+        XCTAssertEqual(taskbarWidgetSpacing(itemSpacing: 12), 2)
     }
 
     func testInstalledWidgetsIncludeStatsBeforeDateTime() {

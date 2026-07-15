@@ -7,11 +7,13 @@ final class TaskbarView: NSView {
     var onMenu: (() -> NSMenu)?
     var onItemMenu: ((TaskbarItem) -> NSMenu?)?
     var onWidgetMenu: ((TaskbarWidgetID) -> NSMenu?)?
+    var onWidgetActivate: ((TaskbarWidgetID, StatsWidgetMetric?, NSRect, NSView) -> Void)?
     var onMovePinnedItem: ((TaskbarItem, TaskbarItem?) -> Void)?
 
     private var tileRects: [(NSRect, TaskbarItem)] = []
     private var widgetRects: [(NSRect, TaskbarWidgetID)] = []
     private var mouseDownItem: TaskbarItem?
+    private var mouseDownWidget: (rect: NSRect, id: TaskbarWidgetID, statsMetric: StatsWidgetMetric?)?
     private var didDragPinnedItem = false
     private let leftPadding: CGFloat = 6
     private var tileHeight: CGFloat {
@@ -32,10 +34,13 @@ final class TaskbarView: NSView {
         needsDisplay = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
         tileRects = tileLayout()
         widgetRects = widgetLayout(after: tileRects)
+    }
 
+    override func draw(_ dirtyRect: NSRect) {
         for (rect, item) in tileRects {
             drawTile(item: item, rect: rect)
         }
@@ -87,10 +92,15 @@ final class TaskbarView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        guard let item = tileRects.first(where: { $0.0.contains(point) })?.1 else {
+        if let widget = widgetHit(at: point) {
+            mouseDownWidget = widget
+            mouseDownItem = nil
             return
         }
+
+        guard let item = tileRects.first(where: { taskbarInteractionRect(for: $0.0, in: bounds).contains(point) })?.1 else { return }
         mouseDownItem = item
+        mouseDownWidget = nil
         didDragPinnedItem = false
     }
 
@@ -102,16 +112,24 @@ final class TaskbarView: NSView {
     override func mouseUp(with event: NSEvent) {
         defer {
             mouseDownItem = nil
+            mouseDownWidget = nil
             didDragPinnedItem = false
         }
 
         let point = convert(event.locationInWindow, from: nil)
+        if let widget = mouseDownWidget, taskbarInteractionRect(for: widget.rect, in: bounds).contains(point) {
+            onWidgetActivate?(widget.id, widget.statsMetric, widget.rect, self)
+            return
+        }
+
         guard let item = mouseDownItem else { return }
 
         if didDragPinnedItem, item.isPinned {
             let target = tileRects
                 .first(where: { rect, targetItem in
-                    rect.contains(point) && targetItem.isPinned && targetItem.identity != item.identity
+                    taskbarInteractionRect(for: rect, in: bounds).contains(point)
+                        && targetItem.isPinned
+                        && targetItem.identity != item.identity
                 })?
                 .1
             onMovePinnedItem?(item, target)
@@ -123,13 +141,13 @@ final class TaskbarView: NSView {
 
     override func rightMouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if let item = tileRects.first(where: { $0.0.contains(point) })?.1,
+        if let item = tileRects.first(where: { taskbarInteractionRect(for: $0.0, in: bounds).contains(point) })?.1,
            let itemMenu = onItemMenu?(item) {
             NSMenu.popUpContextMenu(itemMenu, with: event, for: self)
             return
         }
 
-        if let widgetID = widgetRects.first(where: { $0.0.contains(point) })?.1,
+        if let widgetID = widgetRects.first(where: { taskbarInteractionRect(for: $0.0, in: bounds).contains(point) })?.1,
            let widgetMenu = onWidgetMenu?(widgetID) {
             NSMenu.popUpContextMenu(widgetMenu, with: event, for: self)
             return
@@ -137,6 +155,21 @@ final class TaskbarView: NSView {
 
         guard let menu = onMenu?() else { return }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    private func widgetHit(at point: NSPoint) -> (rect: NSRect, id: TaskbarWidgetID, statsMetric: StatsWidgetMetric?)? {
+        guard let widget = widgetRects.first(where: { taskbarInteractionRect(for: $0.0, in: bounds).contains(point) }) else {
+            return nil
+        }
+
+        guard widget.1 == .stats,
+              let metric = statsWidgetMetric(at: point, in: widget.0, settings: settings.statsWidget),
+              let metricRect = statsWidgetMetricRect(metric, in: widget.0, settings: settings.statsWidget)
+        else {
+            return (rect: widget.0, id: widget.1, statsMetric: nil)
+        }
+
+        return (rect: metricRect, id: widget.1, statsMetric: metric)
     }
 
     private func preferredTileWidth(for item: TaskbarItem) -> CGFloat {
@@ -158,7 +191,7 @@ final class TaskbarView: NSView {
         let widgets = activeTaskbarWidgets(for: settings)
         guard !widgets.isEmpty else { return 8 }
 
-        let spacing = CGFloat(settings.itemSpacing)
+        let spacing = taskbarWidgetSpacing(itemSpacing: CGFloat(settings.itemSpacing))
         let widgetWidths = widgets.reduce(CGFloat(0)) { total, widget in
             total + widget.minimumWidth(in: settings, height: tileHeight)
         }
@@ -174,7 +207,7 @@ final class TaskbarView: NSView {
         var rightX = bounds.width - 8
         let availableTrailingWidth = max(0, rightX - leftLimit)
         let y: CGFloat = max(2, (bounds.height - tileHeight) / 2)
-        let spacing = CGFloat(settings.itemSpacing)
+        let spacing = taskbarWidgetSpacing(itemSpacing: CGFloat(settings.itemSpacing))
 
         var remainingWidth = availableTrailingWidth
         var layout: [(NSRect, TaskbarWidgetID)] = []
@@ -222,10 +255,20 @@ final class TaskbarView: NSView {
             width: iconSize,
             height: iconSize
         )
-        drawTaskbarIcon(
-            item: item,
-            rect: iconRect
-        )
+        if item.isMinimized, let context = NSGraphicsContext.current {
+            context.saveGraphicsState()
+            context.cgContext.setAlpha(0.45)
+            drawTaskbarIcon(
+                item: item,
+                rect: iconRect
+            )
+            context.restoreGraphicsState()
+        } else {
+            drawTaskbarIcon(
+                item: item,
+                rect: iconRect
+            )
+        }
 
         let label = taskbarItemLabel(item)
         let labelX = iconRect.maxX + TaskbarItemMetrics.iconTextGap
@@ -242,7 +285,8 @@ final class TaskbarView: NSView {
             ),
             size: min(12, max(10, rect.height - 5)),
             bold: true,
-            active: item.isFrontmost
+            active: item.isFrontmost,
+            textColor: item.isMinimized ? NSColor(calibratedWhite: 0.58, alpha: 1.0) : nil
         )
     }
 
@@ -253,4 +297,17 @@ final class TaskbarView: NSView {
             widgetsByID[widgetID]?.draw(in: rect, values: settings, date: date)
         }
     }
+}
+
+func taskbarInteractionRect(for visualRect: NSRect, in bounds: NSRect) -> NSRect {
+    NSRect(
+        x: visualRect.minX,
+        y: bounds.minY,
+        width: visualRect.width,
+        height: bounds.height
+    )
+}
+
+func taskbarWidgetSpacing(itemSpacing: CGFloat) -> CGFloat {
+    min(max(0, itemSpacing), 2)
 }

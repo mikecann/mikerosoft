@@ -8,6 +8,7 @@ final class TaskbarPanel {
     let view: TaskbarView
     private var screen: ScreenInfo
     private var values: TaskbarSettingValues
+    private var currentItems: [TaskbarItem] = []
     private var isShown = true
 
     init(screen: ScreenInfo, values: TaskbarSettingValues, controller: TaskbarController) {
@@ -54,6 +55,9 @@ final class TaskbarPanel {
         view.onWidgetMenu = { [weak controller, screenID] widgetID in
             controller?.makeWidgetMenu(for: widgetID, screenID: screenID)
         }
+        view.onWidgetActivate = { [weak controller, screenID] widgetID, statsMetric, rect, view in
+            controller?.activateWidget(widgetID, statsMetric: statsMetric, screenID: screenID, relativeTo: rect, of: view)
+        }
         view.onMovePinnedItem = { [weak controller, screenID] item, target in
             controller?.movePinnedItem(item, before: target, screenID: screenID)
         }
@@ -61,6 +65,7 @@ final class TaskbarPanel {
     }
 
     func update(screen: ScreenInfo, items: [TaskbarItem], values: TaskbarSettingValues) {
+        let valuesChanged = self.values != values
         self.screen = screen
         self.values = values
 
@@ -76,9 +81,19 @@ final class TaskbarPanel {
             width: screen.appKitFrame.width,
             height: height
         )
-        containerView.frame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height)
-        containerView.update(items: items, settings: values)
-        panel.orderFrontRegardless()
+        let contentFrame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height)
+        let contentChanged = currentItems != items
+            || valuesChanged
+            || containerView.frame != contentFrame
+
+        if contentChanged {
+            containerView.frame = contentFrame
+            containerView.update(items: items, settings: values)
+            currentItems = items
+        }
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
 
         if values.autoHide {
             updateAutoHide(mouseLocation: NSEvent.mouseLocation, animated: false)
@@ -145,16 +160,23 @@ final class TaskbarPanel {
 final class TaskbarController: NSObject {
     private let settings = TaskbarSettings()
     private let windowAvoider = WindowAvoider()
+    private let performanceWatchdog = MainThreadWatchdog()
     private var panels: [UInt32: TaskbarPanel] = [:]
     private var timer: Timer?
     private var autoHideTimer: Timer?
+    private var pendingRefreshWorkItem: DispatchWorkItem?
     private var settingsWindowController: SettingsWindowController?
+    private var statsPopoverPanel: NSPanel?
+    private var statsPopoverMetric: StatsWidgetMetric?
+    private var statsPopoverEventMonitors: [Any] = []
     private var menuItemContext: (screenID: UInt32, item: TaskbarItem)?
     private var menuWidgetContext: (screenID: UInt32, widgetID: TaskbarWidgetID)?
     private var menuScreenContext: UInt32?
     private let commandFileURL = URL(fileURLWithPath: "/tmp/mikerosoft-taskbar-command")
 
     func start() {
+        configureTaskbarAccessibilityMessagingTimeout()
+        performanceWatchdog.start()
         settings.onChange = { [weak self] in
             self?.syncStartAtLogin()
             self?.refresh()
@@ -165,17 +187,28 @@ final class TaskbarController: NSObject {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+        timer?.tolerance = 0.2
         autoHideTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
             self?.updateAutoHide()
         }
+        autoHideTimer?.tolerance = 0.02
         log("taskbar ready")
     }
 
     @objc func refresh() {
+        TaskbarPerformanceDiagnostics.measure("refresh", threshold: 0.25) {
+            refreshNow()
+        }
+    }
+
+    private func refreshNow() {
         processCommandFile()
 
         let screens = collectScreens()
         let screenIDs = Set(screens.map(\.id))
+        let valuesByScreen = screens.reduce(into: [UInt32: TaskbarSettingValues]()) { result, screen in
+            result[screen.id] = settings.values(for: screen.id)
+        }
 
         for staleID in panels.keys where !screenIDs.contains(staleID) {
             panels[staleID]?.close()
@@ -186,39 +219,66 @@ final class TaskbarController: NSObject {
             panels[screen.id] = TaskbarPanel(screen: screen, values: settings.values(for: screen.id), controller: self)
         }
 
-        let records = collectWindowRecords(screens: screens)
-        let visible = visibleWindows(records, currentPID: currentPID())
+        let currentProcessID = currentPID()
+        let shouldIncludeMinimized = screens.contains { screen in
+            valuesByScreen[screen.id]?.showMinimizedWindows ?? TaskbarSettingValues.defaults.showMinimizedWindows
+        }
+        let records = TaskbarPerformanceDiagnostics.measure("collectWindowRecords", threshold: 0.12) {
+            collectWindowRecords(screens: screens, includeMinimized: shouldIncludeMinimized)
+        }
+        let visibleForWindowAvoidance = visibleWindows(records, currentPID: currentProcessID)
         let currentFrontmostPID = frontmostPID()
+        let currentFrontmostWindowID = frontmostWindowID(in: visibleForWindowAvoidance, frontmostPID: currentFrontmostPID)
 
         for screen in screens {
-            let screenWindows = visible.filter { $0.screenID == screen.id }
-            let values = settings.values(for: screen.id)
+            let values = valuesByScreen[screen.id] ?? settings.values(for: screen.id)
+            let taskbarWindows = visibleWindows(
+                records,
+                currentPID: currentProcessID,
+                includeMinimized: values.showMinimizedWindows
+            )
+            let screenWindows = taskbarWindows.filter { $0.screenID == screen.id }
             let items = buildTaskbarItems(
                 windows: screenWindows,
                 frontmostPID: currentFrontmostPID,
+                frontmostWindowID: currentFrontmostWindowID,
                 groupByApp: false,
                 pinnedApps: values.pinnedApps
             )
             panels[screen.id]?.update(screen: screen, items: items, values: values)
         }
 
-        windowAvoider.keepWindowsAboveTaskbars(
-            records: visible,
+        let avoidanceRequests = windowAdjustmentRequests(
+            records: visibleForWindowAvoidance,
             screens: screens,
-            settings: settings,
-            currentPID: currentPID()
+            valuesByScreen: valuesByScreen,
+            currentPID: currentProcessID
         )
+        windowAvoider.keepWindowsAboveTaskbars(adjustments: avoidanceRequests)
     }
 
     func activate(item: TaskbarItem) {
         let pidText = item.pid.map(String.init) ?? "not-running"
         log("activating \(item.owner) pid=\(pidText) windows=\(item.windowIDs)")
         if let pid = item.pid {
-            _ = activateApplication(pid: pid)
+            if item.isMinimized {
+                unminimizeApplicationWindowAsync(pid: pid, title: item.title)
+            }
+            activateApplicationWindowAsync(item: item)
         } else {
             _ = launchApplication(appPath: item.appPath, bundleID: item.bundleID)
         }
-        refresh()
+        scheduleRefreshSoon()
+    }
+
+    private func scheduleRefreshSoon(after delay: TimeInterval = 0.08) {
+        pendingRefreshWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.pendingRefreshWorkItem = nil
+            self?.refresh()
+        }
+        pendingRefreshWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
     private func processCommandFile() {
@@ -302,13 +362,107 @@ final class TaskbarController: NSObject {
         }
     }
 
+    func activateWidget(_ widgetID: TaskbarWidgetID, statsMetric: StatsWidgetMetric?, screenID: UInt32, relativeTo rect: NSRect, of view: NSView) {
+        switch widgetID {
+        case .stats:
+            showStatsPopover(metric: statsMetric ?? .cpu, screenID: screenID, relativeTo: rect, of: view)
+        case .dateTime:
+            break
+        }
+    }
+
+    private func showStatsPopover(metric: StatsWidgetMetric, screenID _: UInt32, relativeTo rect: NSRect, of view: NSView) {
+        if statsPopoverPanel?.isVisible == true, statsPopoverMetric == metric {
+            closeStatsPopover()
+            return
+        }
+
+        guard let window = view.window else { return }
+        closeStatsPopover()
+
+        let windowRect = view.convert(rect, to: nil)
+        let screenRect = window.convertToScreen(windowRect)
+        let screenFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? screenRect
+        let preferredSize = StatsPopoverLayout.size(for: metric)
+        let size = NSSize(
+            width: preferredSize.width,
+            height: min(preferredSize.height, max(320, screenFrame.height - 16))
+        )
+        let x = min(
+            max(screenRect.midX - size.width / 2, screenFrame.minX + 8),
+            screenFrame.maxX - size.width - 8
+        )
+        let y = min(screenRect.maxY + 8, screenFrame.maxY - size.height - 8)
+
+        let panel = NSPanel(
+            contentRect: NSRect(origin: NSPoint(x: x, y: y), size: size),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.contentViewController = StatsPopoverViewController(metric: metric, size: size)
+        statsPopoverMetric = metric
+        statsPopoverPanel = panel
+        installStatsPopoverEventMonitors(for: panel)
+        panel.orderFrontRegardless()
+    }
+
+    private func closeStatsPopover() {
+        statsPopoverPanel?.close()
+        statsPopoverPanel = nil
+        statsPopoverMetric = nil
+        removeStatsPopoverEventMonitors()
+    }
+
+    private func installStatsPopoverEventMonitors(for panel: NSPanel) {
+        removeStatsPopoverEventMonitors()
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+
+        if let localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self, weak panel] event in
+            guard let panel else { return event }
+            if let eventWindow = event.window {
+                let point = eventWindow.convertToScreen(NSRect(origin: event.locationInWindow, size: .zero)).origin
+                if panel.frame.contains(point) {
+                    return event
+                }
+            }
+            self?.closeStatsPopover()
+            return event
+        }) {
+            statsPopoverEventMonitors.append(localMonitor)
+        }
+
+        if let globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self, weak panel] _ in
+            guard let panel else { return }
+            if !panel.frame.contains(NSEvent.mouseLocation) {
+                self?.closeStatsPopover()
+            }
+        }) {
+            statsPopoverEventMonitors.append(globalMonitor)
+        }
+    }
+
+    private func removeStatsPopoverEventMonitors() {
+        for monitor in statsPopoverEventMonitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        statsPopoverEventMonitors.removeAll()
+    }
+
     private func makeStatsWidgetMenu(screenID: UInt32) -> NSMenu {
         let value = settings.values(for: screenID).statsWidget
         let snapshot = TaskbarStatsSampler.shared.snapshot()
         let menu = NSMenu(title: "Stats")
 
         let summary = NSMenuItem(
-            title: "CPU \(formattedStatsPercent(snapshot.cpuPercent))  RAM \(formattedStatsPercent(snapshot.memoryPercent))",
+            title: "CPU \(formattedStatsPercent(snapshot.cpuPercent))  GPU \(formattedStatsPercent(snapshot.gpuPercent))  RAM \(formattedStatsPercent(snapshot.memoryPercent))",
             action: nil,
             keyEquivalent: ""
         )
@@ -337,6 +491,12 @@ final class TaskbarController: NSObject {
             to: menu
         )
         addWidgetToggle(
+            title: "GPU",
+            state: value.showGPU,
+            action: #selector(toggleStatsGPUFromMenu),
+            to: menu
+        )
+        addWidgetToggle(
             title: "RAM",
             state: value.showMemory,
             action: #selector(toggleStatsMemoryFromMenu),
@@ -354,6 +514,18 @@ final class TaskbarController: NSObject {
             action: #selector(toggleStatsMiniGraphFromMenu),
             to: menu
         )
+
+        let memoryDisplayItem = NSMenuItem(title: "RAM Display", action: nil, keyEquivalent: "")
+        let memoryDisplayMenu = NSMenu(title: "RAM Display")
+        for display in StatsMemoryDisplay.allCases {
+            let item = NSMenuItem(title: display.label, action: #selector(setStatsMemoryDisplayFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = display.rawValue
+            item.state = value.memoryDisplay == display ? .on : .off
+            memoryDisplayMenu.addItem(item)
+        }
+        menu.addItem(memoryDisplayItem)
+        menu.setSubmenu(memoryDisplayMenu, for: memoryDisplayItem)
 
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Stats Settings...", action: #selector(showWidgetSettingsFromMenu), keyEquivalent: ",")
@@ -528,6 +700,10 @@ final class TaskbarController: NSObject {
         updateStatsWidgetFromMenu { $0.showCPU.toggle() }
     }
 
+    @objc private func toggleStatsGPUFromMenu() {
+        updateStatsWidgetFromMenu { $0.showGPU.toggle() }
+    }
+
     @objc private func toggleStatsMemoryFromMenu() {
         updateStatsWidgetFromMenu { $0.showMemory.toggle() }
     }
@@ -538,6 +714,15 @@ final class TaskbarController: NSObject {
 
     @objc private func toggleStatsMiniGraphFromMenu() {
         updateStatsWidgetFromMenu { $0.showMiniGraph.toggle() }
+    }
+
+    @objc private func setStatsMemoryDisplayFromMenu(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let display = StatsMemoryDisplay(rawValue: rawValue)
+        else {
+            return
+        }
+        updateStatsWidgetFromMenu { $0.memoryDisplay = display }
     }
 
     private func updateDateTimeWidgetFromMenu(_ transform: (inout DateTimeWidgetSettings) -> Void) {

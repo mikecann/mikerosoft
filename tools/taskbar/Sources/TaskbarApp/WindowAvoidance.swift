@@ -3,6 +3,14 @@ import CoreGraphics
 import Foundation
 
 private let minimumClampedWindowHeight: CGFloat = 120
+private let slowAccessibilityClampThreshold: TimeInterval = 0.15
+
+struct WindowAdjustmentRequest: Equatable {
+    let windowID: Int
+    let pid: pid_t
+    let originalFrame: CGRect
+    let clampedFrame: CGRect
+}
 
 struct AccessibilityTrustState {
     private var hasPrompted = false
@@ -46,16 +54,87 @@ func clampedWindowFrame(_ frame: CGRect, screen: ScreenInfo, reservedBottomHeigh
     return CGRect(x: frame.minX, y: y, width: frame.width, height: height)
 }
 
+func windowAdjustmentRequests(
+    records: [WindowRecord],
+    screens: [ScreenInfo],
+    valuesByScreen: [UInt32: TaskbarSettingValues],
+    currentPID: pid_t
+) -> [WindowAdjustmentRequest] {
+    let screensByID = screens.reduce(into: [UInt32: ScreenInfo]()) { result, screen in
+        result[screen.id] = screen
+    }
+    var adjustedWindowIDs = Set<Int>()
+    var requests: [WindowAdjustmentRequest] = []
+
+    for record in records {
+        guard record.pid != currentPID else { continue }
+        guard record.layer == 0, record.isOnScreen else { continue }
+        guard let screenID = record.screenID,
+              let screen = screensByID[screenID],
+              let values = valuesByScreen[screenID]
+        else {
+            continue
+        }
+
+        guard values.isVisible, values.avoidOverlappingWindows, !values.autoHide else { continue }
+        guard let clamped = clampedWindowFrame(record.bounds, screen: screen, reservedBottomHeight: values.taskbarHeight) else { continue }
+        guard !adjustedWindowIDs.contains(record.windowID) else { continue }
+
+        requests.append(
+            WindowAdjustmentRequest(
+                windowID: record.windowID,
+                pid: record.pid,
+                originalFrame: record.bounds,
+                clampedFrame: clamped
+            )
+        )
+        adjustedWindowIDs.insert(record.windowID)
+    }
+
+    return requests
+}
+
 final class WindowAvoider {
+    private let queue = DispatchQueue(label: "mikerosoft.taskbar.window-avoidance", qos: .userInitiated)
+    private let stateLock = NSLock()
     private var hasLoggedMissingPermission = false
     private var accessibilityTrustState = AccessibilityTrustState()
+    private var pendingRequests: [WindowAdjustmentRequest]?
+    private var isPassRunning = false
 
-    func keepWindowsAboveTaskbars(
-        records: [WindowRecord],
-        screens: [ScreenInfo],
-        settings: TaskbarSettings,
-        currentPID: pid_t
-    ) {
+    func keepWindowsAboveTaskbars(adjustments requests: [WindowAdjustmentRequest]) {
+        stateLock.lock()
+        pendingRequests = requests
+        let shouldStartPass = !isPassRunning
+        if shouldStartPass {
+            isPassRunning = true
+        }
+        stateLock.unlock()
+
+        guard shouldStartPass else { return }
+
+        queue.async { [weak self] in
+            self?.runPendingPasses()
+        }
+    }
+
+    private func runPendingPasses() {
+        while true {
+            stateLock.lock()
+            let requests = pendingRequests
+            pendingRequests = nil
+            if requests == nil {
+                isPassRunning = false
+            }
+            stateLock.unlock()
+
+            guard let requests else { return }
+            guard !requests.isEmpty else { continue }
+            runAdjustmentPass(requests)
+        }
+    }
+
+    private func runAdjustmentPass(_ requests: [WindowAdjustmentRequest]) {
         guard accessibilityTrustState.isTrusted() else {
             if !hasLoggedMissingPermission {
                 hasLoggedMissingPermission = true
@@ -64,27 +143,20 @@ final class WindowAvoider {
             return
         }
 
-        let screensByID = Dictionary(uniqueKeysWithValues: screens.map { ($0.id, $0) })
-        var adjustedWindowIDs = Set<Int>()
-
-        for record in records {
-            guard record.pid != currentPID else { continue }
-            guard record.layer == 0, record.isOnScreen else { continue }
-            guard let screenID = record.screenID, let screen = screensByID[screenID] else { continue }
-
-            let values = settings.values(for: screenID)
-            guard values.isVisible, values.avoidOverlappingWindows, !values.autoHide else { continue }
-            guard let clamped = clampedWindowFrame(record.bounds, screen: screen, reservedBottomHeight: values.taskbarHeight) else { continue }
-            guard !adjustedWindowIDs.contains(record.windowID) else { continue }
-
-            if clampAccessibilityWindow(pid: record.pid, matching: record.bounds, to: clamped) {
-                adjustedWindowIDs.insert(record.windowID)
-            }
+        for request in requests {
+            let startedAt = DispatchTime.now()
+            _ = clampAccessibilityWindow(pid: request.pid, matching: request.originalFrame, to: request.clampedFrame)
+            TaskbarPerformanceDiagnostics.logIfSlow(
+                "window-avoidance AX pid=\(request.pid) window=\(request.windowID)",
+                startedAt: startedAt,
+                threshold: slowAccessibilityClampThreshold
+            )
         }
     }
 
     private func clampAccessibilityWindow(pid: pid_t, matching originalFrame: CGRect, to newFrame: CGRect) -> Bool {
         let app = AXUIElementCreateApplication(pid)
+        setTaskbarAccessibilityMessagingTimeout(app)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
               let windows = value as? [AXUIElement]
@@ -93,6 +165,7 @@ final class WindowAvoider {
         }
 
         for window in windows {
+            setTaskbarAccessibilityMessagingTimeout(window)
             guard let frame = accessibilityFrame(for: window), approximatelyEqual(frame, originalFrame) else {
                 continue
             }

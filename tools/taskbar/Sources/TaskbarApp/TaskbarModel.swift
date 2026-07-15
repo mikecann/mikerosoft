@@ -3,6 +3,8 @@ import Foundation
 
 let minimumWindowWidth: CGFloat = 64
 let minimumWindowHeight: CGFloat = 40
+private let maximumUntitledInternalSurfaceArea: CGFloat = 60_000
+private let internalSurfaceSiblingAreaMultiplier: CGFloat = 8
 
 let ignoredOwners: Set<String> = [
     "Control Center",
@@ -21,10 +23,12 @@ struct WindowRecord: Equatable {
     let windowID: Int
     let layer: Int
     let isOnScreen: Bool
+    let isMinimized: Bool
     let bounds: CGRect
     let screenID: UInt32?
     let bundleID: String
     let appPath: String
+    let accessibilityTitle: String
     let accessibilitySignature: String
 }
 
@@ -34,7 +38,10 @@ struct TaskbarItem: Equatable {
     let title: String
     let windowCount: Int
     let windowIDs: [Int]
+    let windowBounds: CGRect?
+    let accessibilitySignature: String
     let isFrontmost: Bool
+    let isMinimized: Bool
     let bundleID: String
     let appPath: String
     let isPinned: Bool
@@ -45,12 +52,15 @@ struct TaskbarItem: Equatable {
     }
 }
 
-func visibleWindows(_ records: [WindowRecord], currentPID: pid_t) -> [WindowRecord] {
+func visibleWindows(_ records: [WindowRecord], currentPID: pid_t, includeMinimized: Bool = false) -> [WindowRecord] {
     deduplicatedAccessibilitySurfaces(records.filter { record in
         let owner = record.owner.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !owner.isEmpty, !ignoredOwners.contains(owner) else { return false }
         guard !(record.pid == currentPID && record.title == "mikerosoft taskbar") else { return false }
         guard record.layer == 0 else { return false }
+        if record.isMinimized {
+            return includeMinimized
+        }
         guard record.isOnScreen else { return false }
         guard record.bounds.width >= minimumWindowWidth else { return false }
         guard record.bounds.height >= minimumWindowHeight else { return false }
@@ -67,8 +77,7 @@ private func deduplicatedAccessibilitySurfaces(_ records: [WindowRecord]) -> [Wi
             continue
         }
 
-        let existing = result[existingIndex]
-        if record.bounds.area > existing.bounds.area {
+        if shouldReplaceDuplicate(existing: result[existingIndex], with: record) {
             result[existingIndex] = record
         }
     }
@@ -77,19 +86,76 @@ private func deduplicatedAccessibilitySurfaces(_ records: [WindowRecord]) -> [Wi
 }
 
 private func isDuplicateSurface(_ left: WindowRecord, _ right: WindowRecord) -> Bool {
-    if let leftSignature = accessibilityDuplicateSignature(left),
-       let rightSignature = accessibilityDuplicateSignature(right) {
-        return leftSignature == rightSignature
+    let leftSignature = accessibilityDuplicateSignature(left)
+    let rightSignature = accessibilityDuplicateSignature(right)
+
+    if let leftSignature,
+       let rightSignature,
+       leftSignature == rightSignature {
+        return accessibilityTitlesCanRepresentSameSurface(left, right)
     }
 
-    guard accessibilityDuplicateSignature(left) == nil,
-          accessibilityDuplicateSignature(right) == nil,
-          fallbackDuplicateKey(left) == fallbackDuplicateKey(right)
+    guard fallbackDuplicateBaseKey(left) == fallbackDuplicateBaseKey(right),
+          titlesCanRepresentSameSurface(left, right)
     else {
         return false
     }
 
+    if leftSignature != nil || rightSignature != nil {
+        return isUntitledInternalSiblingSurface(left, comparedTo: right)
+            || isUntitledInternalSiblingSurface(right, comparedTo: left)
+    }
+
     return left.bounds.overlapRatio(with: right.bounds) >= 0.5
+}
+
+private func isUntitledInternalSiblingSurface(_ record: WindowRecord, comparedTo sibling: WindowRecord) -> Bool {
+    guard record.accessibilitySignature.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return false
+    }
+
+    let title = normalizedDuplicateTitle(record.title)
+    guard title.isEmpty || title == normalizedDuplicateTitle(record.owner) else {
+        return false
+    }
+
+    guard record.bounds.area <= maximumUntitledInternalSurfaceArea else {
+        return false
+    }
+
+    guard sibling.bounds.area >= record.bounds.area * internalSurfaceSiblingAreaMultiplier else {
+        return false
+    }
+
+    return record.bounds.overlapRatio(with: sibling.bounds) >= 0.5
+}
+
+private func shouldReplaceDuplicate(existing: WindowRecord, with candidate: WindowRecord) -> Bool {
+    let existingTitleScore = duplicateTitleScore(existing)
+    let candidateTitleScore = duplicateTitleScore(candidate)
+    if candidateTitleScore != existingTitleScore {
+        return candidateTitleScore > existingTitleScore
+    }
+    return candidate.bounds.area > existing.bounds.area
+}
+
+private func accessibilityTitlesCanRepresentSameSurface(_ left: WindowRecord, _ right: WindowRecord) -> Bool {
+    let leftTitle = normalizedDuplicateTitle(left.accessibilityTitle)
+    let rightTitle = normalizedDuplicateTitle(right.accessibilityTitle)
+    let ownerTitle = normalizedDuplicateTitle(left.owner)
+
+    if leftTitle.isEmpty, rightTitle.isEmpty {
+        return titlesCanRepresentSameSurface(left, right)
+    }
+
+    if leftTitle == rightTitle {
+        return true
+    }
+
+    return leftTitle.isEmpty
+        || rightTitle.isEmpty
+        || leftTitle == ownerTitle
+        || rightTitle == ownerTitle
 }
 
 private func accessibilityDuplicateSignature(_ record: WindowRecord) -> String? {
@@ -100,19 +166,38 @@ private func accessibilityDuplicateSignature(_ record: WindowRecord) -> String? 
         record.bundleID,
         record.appPath,
         record.owner,
-        record.title,
         axSignature
     ].joined(separator: "\u{1f}")
 }
 
-private func fallbackDuplicateKey(_ record: WindowRecord) -> String {
+private func fallbackDuplicateBaseKey(_ record: WindowRecord) -> String {
     [
         String(record.pid),
         record.bundleID,
         record.appPath,
-        record.owner,
-        record.title
+        record.owner
     ].joined(separator: "\u{1f}")
+}
+
+private func titlesCanRepresentSameSurface(_ left: WindowRecord, _ right: WindowRecord) -> Bool {
+    let leftTitle = normalizedDuplicateTitle(left.title)
+    let rightTitle = normalizedDuplicateTitle(right.title)
+    guard !leftTitle.isEmpty, !rightTitle.isEmpty else {
+        return leftTitle.isEmpty && rightTitle.isEmpty
+    }
+    if leftTitle == rightTitle { return true }
+    return leftTitle == normalizedDuplicateTitle(left.owner)
+        || rightTitle == normalizedDuplicateTitle(right.owner)
+}
+
+private func duplicateTitleScore(_ record: WindowRecord) -> Int {
+    let title = normalizedDuplicateTitle(record.title)
+    guard !title.isEmpty else { return 0 }
+    return title == normalizedDuplicateTitle(record.owner) ? 1 : 2
+}
+
+private func normalizedDuplicateTitle(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 }
 
 func taskbarItemWidth(textWidth: CGFloat, iconSize: CGFloat, minimumWidth: CGFloat, maximumWidth: CGFloat) -> CGFloat {
@@ -168,6 +253,7 @@ func fittedTaskbarItemWidths(preferredWidths: [CGFloat], softMinimumWidth: CGFlo
 func buildTaskbarItems(
     windows: [WindowRecord],
     frontmostPID: pid_t?,
+    frontmostWindowID: Int? = nil,
     groupByApp: Bool,
     pinnedApps: [PinnedApp] = []
 ) -> [TaskbarItem] {
@@ -184,7 +270,10 @@ func buildTaskbarItems(
                 title: window.title.isEmpty ? window.owner : window.title,
                 windowCount: 1,
                 windowIDs: [window.windowID],
-                isFrontmost: frontmostPID == window.pid,
+                windowBounds: window.bounds,
+                accessibilitySignature: window.accessibilitySignature,
+                isFrontmost: isFrontmostWindow(window, frontmostPID: frontmostPID, frontmostWindowID: frontmostWindowID),
+                isMinimized: window.isMinimized,
                 bundleID: window.bundleID,
                 appPath: window.appPath,
                 isPinned: pinOrder != nil,
@@ -264,7 +353,10 @@ private extension Array where Element == TaskbarItem {
                     title: app.displayName,
                     windowCount: 0,
                     windowIDs: [],
+                    windowBounds: nil,
+                    accessibilitySignature: "",
                     isFrontmost: false,
+                    isMinimized: false,
                     bundleID: app.bundleID,
                     appPath: app.appPath,
                     isPinned: true,
@@ -274,4 +366,26 @@ private extension Array where Element == TaskbarItem {
         }
         return items
     }
+}
+
+func frontmostWindowID(in windows: [WindowRecord], frontmostPID: pid_t?) -> Int? {
+    guard let frontmostPID else { return nil }
+    return windows.first { window in
+        window.pid == frontmostPID
+            && !window.isMinimized
+            && window.layer == 0
+            && window.isOnScreen
+    }?.windowID
+}
+
+private func isFrontmostWindow(_ window: WindowRecord, frontmostPID: pid_t?, frontmostWindowID: Int?) -> Bool {
+    guard !window.isMinimized, frontmostPID == window.pid else {
+        return false
+    }
+
+    if let frontmostWindowID {
+        return window.windowID == frontmostWindowID
+    }
+
+    return true
 }

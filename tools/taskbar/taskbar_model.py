@@ -25,6 +25,7 @@ class WindowRecord:
     layer: int
     is_on_screen: bool
     bounds: dict[str, Any]
+    is_minimized: bool = False
     bundle_id: str = ""
     app_path: str = ""
 
@@ -49,7 +50,7 @@ class TaskbarItem:
     app_path: str = ""
 
 
-def visible_windows(records: list[WindowRecord], current_pid: int) -> list[WindowRecord]:
+def visible_windows(records: list[WindowRecord], current_pid: int, include_minimized: bool = False) -> list[WindowRecord]:
     visible = []
     for record in records:
         owner = record.owner.strip()
@@ -58,6 +59,10 @@ def visible_windows(records: list[WindowRecord], current_pid: int) -> list[Windo
         if record.pid == current_pid:
             continue
         if record.layer != 0:
+            continue
+        if record.is_minimized:
+            if include_minimized:
+                visible.append(record)
             continue
         if not record.is_on_screen:
             continue

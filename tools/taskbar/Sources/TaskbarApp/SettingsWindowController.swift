@@ -438,6 +438,12 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             control: checkbox(state: values.avoidOverlappingWindows, action: #selector(setGeneralAvoidOverlappingWindows(_:)))
         ))
         stack.addArrangedSubview(settingRow(
+            icon: "minus.square",
+            title: "Show minimised windows",
+            description: "Keep minimised windows on the bar with a muted appearance.",
+            control: checkbox(state: values.showMinimizedWindows, action: #selector(setGeneralShowMinimizedWindows(_:)))
+        ))
+        stack.addArrangedSubview(settingRow(
             icon: "dock.rectangle",
             title: "Auto-hide",
             description: "Hide the bar until the pointer reaches the screen edge.",
@@ -523,6 +529,15 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             valueAction: #selector(setMonitorAvoidOverlappingWindows(_:))
         ))
         stack.addArrangedSubview(overrideBoolRow(
+            icon: "minus.square",
+            title: "Show minimised windows",
+            description: "Keep minimised windows on this bar with a muted appearance.",
+            isOverridden: override.showMinimizedWindows != nil,
+            value: resolved.showMinimizedWindows,
+            overrideAction: #selector(toggleMonitorShowMinimizedWindowsOverride(_:)),
+            valueAction: #selector(setMonitorShowMinimizedWindows(_:))
+        ))
+        stack.addArrangedSubview(overrideBoolRow(
             icon: "dock.rectangle",
             title: "Auto-hide",
             description: "Hide this bar until the pointer reaches the screen edge.",
@@ -598,9 +613,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
                 enabled: true,
                 enabledAction: #selector(setGeneralStatsEnabled(_:)),
                 cpuAction: #selector(setGeneralStatsCPU(_:)),
+                gpuAction: #selector(setGeneralStatsGPU(_:)),
                 memoryAction: #selector(setGeneralStatsMemory(_:)),
                 networkAction: #selector(setGeneralStatsNetwork(_:)),
-                graphAction: #selector(setGeneralStatsMiniGraph(_:))
+                graphAction: #selector(setGeneralStatsMiniGraph(_:)),
+                memoryDisplayAction: #selector(setGeneralStatsMemoryDisplay(_:))
             )
         ))
     }
@@ -731,27 +748,55 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         enabled: Bool,
         enabledAction: Selector,
         cpuAction: Selector,
+        gpuAction: Selector,
         memoryAction: Selector,
         networkAction: Selector,
-        graphAction: Selector
+        graphAction: Selector,
+        memoryDisplayAction: Selector
     ) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 6
+        stack.spacing = 8
 
         let topRow = horizontalRow()
         topRow.addArrangedSubview(titledCheckbox("Show", state: value.isEnabled, enabled: enabled, action: enabledAction))
-        topRow.addArrangedSubview(titledCheckbox("CPU", state: value.showCPU, enabled: enabled, action: cpuAction))
-        topRow.addArrangedSubview(titledCheckbox("RAM", state: value.showMemory, enabled: enabled, action: memoryAction))
-        topRow.addArrangedSubview(titledCheckbox("Network", state: value.showNetwork, enabled: enabled, action: networkAction))
-
-        let optionsRow = horizontalRow()
-        optionsRow.spacing = 10
-        optionsRow.addArrangedSubview(titledCheckbox("CPU graph", state: value.showMiniGraph, enabled: enabled, action: graphAction))
 
         stack.addArrangedSubview(topRow)
-        stack.addArrangedSubview(optionsRow)
+
+        let cpuRow = horizontalRow()
+        cpuRow.addArrangedSubview(titledCheckbox("CPU", state: value.showCPU, enabled: enabled, action: cpuAction))
+        cpuRow.addArrangedSubview(titledCheckbox("Graph", state: value.showMiniGraph, enabled: enabled, action: graphAction))
+        stack.addArrangedSubview(statsOptionGroup(label: "CPU", control: cpuRow))
+
+        let gpuRow = horizontalRow()
+        gpuRow.addArrangedSubview(titledCheckbox("GPU", state: value.showGPU, enabled: enabled, action: gpuAction))
+        stack.addArrangedSubview(statsOptionGroup(label: "GPU", control: gpuRow))
+
+        let memoryRow = horizontalRow()
+        memoryRow.addArrangedSubview(titledCheckbox("RAM", state: value.showMemory, enabled: enabled, action: memoryAction))
+        memoryRow.addArrangedSubview(statsMemoryDisplayPopup(display: value.memoryDisplay, enabled: enabled, action: memoryDisplayAction))
+        stack.addArrangedSubview(statsOptionGroup(label: "RAM", control: memoryRow))
+
+        let networkRow = horizontalRow()
+        networkRow.addArrangedSubview(titledCheckbox("Network", state: value.showNetwork, enabled: enabled, action: networkAction))
+        stack.addArrangedSubview(statsOptionGroup(label: "Network", control: networkRow))
+
+        return stack
+    }
+
+    private func statsOptionGroup(label: String, control: NSView) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+
+        let title = NSTextField(labelWithString: label)
+        title.font = .systemFont(ofSize: 11, weight: .semibold)
+        title.textColor = .secondaryLabelColor
+
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(control)
         return stack
     }
 
@@ -782,6 +827,21 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         popup.action = action
         popup.isEnabled = enabled
         popup.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        return popup
+    }
+
+    private func statsMemoryDisplayPopup(display: StatsMemoryDisplay, enabled: Bool, action: Selector) -> NSPopUpButton {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        for display in StatsMemoryDisplay.allCases {
+            popup.addItem(withTitle: display.label)
+        }
+        if let index = StatsMemoryDisplay.allCases.firstIndex(of: display) {
+            popup.selectItem(at: index)
+        }
+        popup.target = self
+        popup.action = action
+        popup.isEnabled = enabled
+        popup.widthAnchor.constraint(equalToConstant: 140).isActive = true
         return popup
     }
 
@@ -938,9 +998,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
             enabled: isOverridden,
             enabledAction: #selector(setMonitorStatsEnabled(_:)),
             cpuAction: #selector(setMonitorStatsCPU(_:)),
+            gpuAction: #selector(setMonitorStatsGPU(_:)),
             memoryAction: #selector(setMonitorStatsMemory(_:)),
             networkAction: #selector(setMonitorStatsNetwork(_:)),
-            graphAction: #selector(setMonitorStatsMiniGraph(_:))
+            graphAction: #selector(setMonitorStatsMiniGraph(_:)),
+            memoryDisplayAction: #selector(setMonitorStatsMemoryDisplay(_:))
         ))
         return settingRow(
             icon: "chart.bar",
@@ -1209,6 +1271,12 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         return RevealAnimation.allCases[index]
     }
 
+    private func selectedStatsMemoryDisplay(from popup: NSPopUpButton) -> StatsMemoryDisplay? {
+        let index = popup.indexOfSelectedItem
+        guard StatsMemoryDisplay.allCases.indices.contains(index) else { return nil }
+        return StatsMemoryDisplay.allCases[index]
+    }
+
     private func refreshSliderLabel(_ sender: NSSlider) {
         (sender as? ValueSlider)?.refreshValueLabel()
     }
@@ -1258,6 +1326,10 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         settings.updateGeneral { $0.statsWidget.showCPU = sender.state == .on }
     }
 
+    @objc private func setGeneralStatsGPU(_ sender: NSButton) {
+        settings.updateGeneral { $0.statsWidget.showGPU = sender.state == .on }
+    }
+
     @objc private func setGeneralStatsMemory(_ sender: NSButton) {
         settings.updateGeneral { $0.statsWidget.showMemory = sender.state == .on }
     }
@@ -1268,6 +1340,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     @objc private func setGeneralStatsMiniGraph(_ sender: NSButton) {
         settings.updateGeneral { $0.statsWidget.showMiniGraph = sender.state == .on }
+    }
+
+    @objc private func setGeneralStatsMemoryDisplay(_ sender: NSPopUpButton) {
+        guard let display = selectedStatsMemoryDisplay(from: sender) else { return }
+        settings.updateGeneral { $0.statsWidget.memoryDisplay = display }
     }
 
     @objc private func setGeneralHeight(_ sender: NSSlider) {
@@ -1297,6 +1374,10 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     @objc private func setGeneralAvoidOverlappingWindows(_ sender: NSButton) {
         settings.updateGeneral { $0.avoidOverlappingWindows = sender.state == .on }
+    }
+
+    @objc private func setGeneralShowMinimizedWindows(_ sender: NSButton) {
+        settings.updateGeneral { $0.showMinimizedWindows = sender.state == .on }
     }
 
     @objc private func setGeneralAutoHide(_ sender: NSButton) {
@@ -1393,6 +1474,13 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         renderDetail()
     }
 
+    @objc private func toggleMonitorShowMinimizedWindowsOverride(_ sender: NSButton) {
+        guard let id = selectedMonitorID else { return }
+        let value = settings.values(for: id).showMinimizedWindows
+        settings.updateOverrides(for: id) { $0.showMinimizedWindows = sender.state == .on ? value : nil }
+        renderDetail()
+    }
+
     @objc private func toggleMonitorAutoHideOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).autoHide
@@ -1486,6 +1574,10 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
         updateMonitorStatsWidget { $0.showCPU = sender.state == .on }
     }
 
+    @objc private func setMonitorStatsGPU(_ sender: NSButton) {
+        updateMonitorStatsWidget { $0.showGPU = sender.state == .on }
+    }
+
     @objc private func setMonitorStatsMemory(_ sender: NSButton) {
         updateMonitorStatsWidget { $0.showMemory = sender.state == .on }
     }
@@ -1496,6 +1588,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
 
     @objc private func setMonitorStatsMiniGraph(_ sender: NSButton) {
         updateMonitorStatsWidget { $0.showMiniGraph = sender.state == .on }
+    }
+
+    @objc private func setMonitorStatsMemoryDisplay(_ sender: NSPopUpButton) {
+        guard let display = selectedStatsMemoryDisplay(from: sender) else { return }
+        updateMonitorStatsWidget { $0.memoryDisplay = display }
     }
 
     @objc private func setMonitorHeight(_ sender: NSSlider) {
@@ -1531,6 +1628,11 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
     @objc private func setMonitorAvoidOverlappingWindows(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         settings.updateOverrides(for: id) { $0.avoidOverlappingWindows = sender.state == .on }
+    }
+
+    @objc private func setMonitorShowMinimizedWindows(_ sender: NSButton) {
+        guard let id = selectedMonitorID else { return }
+        settings.updateOverrides(for: id) { $0.showMinimizedWindows = sender.state == .on }
     }
 
     @objc private func setMonitorAutoHide(_ sender: NSButton) {

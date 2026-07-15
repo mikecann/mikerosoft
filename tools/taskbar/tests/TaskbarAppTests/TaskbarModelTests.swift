@@ -10,10 +10,12 @@ final class TaskbarModelTests: XCTestCase {
         windowID: Int = 1,
         layer: Int = 0,
         isOnScreen: Bool = true,
+        isMinimized: Bool = false,
         bounds: CGRect = CGRect(x: 10, y: 20, width: 800, height: 600),
         screenID: UInt32? = 1,
         bundleID: String = "",
         appPath: String = "",
+        accessibilityTitle: String = "",
         accessibilitySignature: String = ""
     ) -> WindowRecord {
         WindowRecord(
@@ -23,10 +25,12 @@ final class TaskbarModelTests: XCTestCase {
             windowID: windowID,
             layer: layer,
             isOnScreen: isOnScreen,
+            isMinimized: isMinimized,
             bounds: bounds,
             screenID: screenID,
             bundleID: bundleID,
             appPath: appPath,
+            accessibilityTitle: accessibilityTitle,
             accessibilitySignature: accessibilitySignature
         )
     }
@@ -43,6 +47,20 @@ final class TaskbarModelTests: XCTestCase {
         let visible = visibleWindows(records, currentPID: 999)
 
         XCTAssertEqual(visible.map(\.owner), ["Safari"])
+    }
+
+    func testVisibleWindowsCanIncludeMinimizedWindowsWhenEnabled() {
+        let records = [
+            record(owner: "Safari", title: "Visible", pid: 10, windowID: 1),
+            record(owner: "Notes", title: "Minimized", pid: 14, windowID: 5, isOnScreen: false, isMinimized: true),
+            record(owner: "Finder", title: "Hidden", pid: 15, windowID: 6, isOnScreen: false)
+        ]
+
+        let hiddenByDefault = visibleWindows(records, currentPID: 999)
+        let visibleWithMinimized = visibleWindows(records, currentPID: 999, includeMinimized: true)
+
+        XCTAssertEqual(hiddenByDefault.map(\.title), ["Visible"])
+        XCTAssertEqual(visibleWithMinimized.map(\.title), ["Visible", "Minimized"])
     }
 
     func testVisibleWindowsRejectsTaskbarPanelsButKeepsSettingsWindow() {
@@ -90,6 +108,34 @@ final class TaskbarModelTests: XCTestCase {
         XCTAssertEqual(visible.map(\.windowID), [1, 3])
     }
 
+    func testVisibleWindowsRejectsDuplicateAccessibilitySurfacesWhenTitlesDiffer() {
+        let records = [
+            record(
+                owner: "Notion",
+                title: "Project Plan",
+                pid: 10,
+                windowID: 1,
+                bounds: CGRect(x: 0, y: 31, width: 2560, height: 1379),
+                bundleID: "notion.id",
+                accessibilitySignature: "children:a,b,c,d"
+            ),
+            record(
+                owner: "Notion",
+                title: "Notion",
+                pid: 10,
+                windowID: 2,
+                bounds: CGRect(x: 1218, y: 298, width: 2560, height: 690),
+                bundleID: "notion.id",
+                accessibilitySignature: "children:a,b,c,d"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [1])
+        XCTAssertEqual(visible.map(\.title), ["Project Plan"])
+    }
+
     func testVisibleWindowsKeepsRealSameTitleWindowsWhenAccessibilitySurfacesDiffer() {
         let records = [
             record(
@@ -115,6 +161,36 @@ final class TaskbarModelTests: XCTestCase {
         XCTAssertEqual(visible.map(\.windowID), [1, 2])
     }
 
+    func testVisibleWindowsKeepsChromeProfileWindowsWithSameStructureAndDifferentAccessibilityTitles() {
+        let bounds = CGRect(x: 0, y: 30, width: 2560, height: 1378)
+        let records = [
+            record(
+                owner: "Google Chrome",
+                title: "New Tab",
+                pid: 739,
+                windowID: 578,
+                bounds: bounds,
+                bundleID: "com.google.Chrome",
+                accessibilityTitle: "New Tab - Google Chrome - Michael",
+                accessibilitySignature: "same-chrome-child-structure"
+            ),
+            record(
+                owner: "Google Chrome",
+                title: "New tab",
+                pid: 739,
+                windowID: 16416,
+                bounds: bounds,
+                bundleID: "com.google.Chrome",
+                accessibilityTitle: "New tab - Google Chrome - Michael (convex.dev)",
+                accessibilitySignature: "same-chrome-child-structure"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [578, 16416])
+    }
+
     func testVisibleWindowsRejectsOverlappingSameTitleFallbackSurfaces() {
         let records = [
             record(
@@ -138,6 +214,87 @@ final class TaskbarModelTests: XCTestCase {
         let visible = visibleWindows(records, currentPID: 999)
 
         XCTAssertEqual(visible.map(\.windowID), [1])
+    }
+
+    func testVisibleWindowsRejectsOverlappingFallbackSurfacesWhenOneTitleIsJustOwner() {
+        let records = [
+            record(
+                owner: "Notion",
+                title: "Project Plan",
+                pid: 10,
+                windowID: 1,
+                bounds: CGRect(x: 0, y: 31, width: 2560, height: 1379),
+                bundleID: "notion.id"
+            ),
+            record(
+                owner: "Notion",
+                title: "Notion",
+                pid: 10,
+                windowID: 2,
+                bounds: CGRect(x: 1218, y: 298, width: 2560, height: 690),
+                bundleID: "notion.id"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [1])
+        XCTAssertEqual(visible.map(\.title), ["Project Plan"])
+    }
+
+    func testVisibleWindowsRejectsTinyUntitledInternalSiblingSurface() {
+        let records = [
+            record(
+                owner: "Wondershare Filmora Mac",
+                title: "",
+                pid: 89910,
+                windowID: 8017,
+                bounds: CGRect(x: 0, y: 0, width: 2560, height: 1408),
+                bundleID: "com.wondershare.filmoramacos",
+                appPath: "/Applications/Wondershare Filmora Mac.app",
+                accessibilitySignature: "main-window-children"
+            ),
+            record(
+                owner: "Wondershare Filmora Mac",
+                title: "",
+                pid: 89910,
+                windowID: 8954,
+                bounds: CGRect(x: 1024, y: 627, width: 113, height: 64),
+                bundleID: "com.wondershare.filmoramacos",
+                appPath: "/Applications/Wondershare Filmora Mac.app"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [8017])
+    }
+
+    func testVisibleWindowsKeepsTinyTitledSiblingWindow() {
+        let records = [
+            record(
+                owner: "Wondershare Filmora Mac",
+                title: "",
+                pid: 89910,
+                windowID: 8017,
+                bounds: CGRect(x: 0, y: 0, width: 2560, height: 1408),
+                bundleID: "com.wondershare.filmoramacos",
+                appPath: "/Applications/Wondershare Filmora Mac.app"
+            ),
+            record(
+                owner: "Wondershare Filmora Mac",
+                title: "Importing files",
+                pid: 89910,
+                windowID: 8500,
+                bounds: CGRect(x: 1030, y: 542, width: 480, height: 245),
+                bundleID: "com.wondershare.filmoramacos",
+                appPath: "/Applications/Wondershare Filmora Mac.app"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [8017, 8500])
     }
 
     func testVisibleWindowsKeepsSameTitleFallbackWindowsWhenTheyDoNotOverlap() {
@@ -190,6 +347,19 @@ final class TaskbarModelTests: XCTestCase {
         XCTAssertEqual(items.map(\.windowIDs), [[1], [2]])
     }
 
+    func testBuildItemsMarksMinimizedWindows() {
+        let windows = [
+            record(owner: "Safari", title: "Article", pid: 10, windowID: 1),
+            record(owner: "Notes", title: "Plan", pid: 20, windowID: 2, isOnScreen: false, isMinimized: true)
+        ]
+
+        let items = buildTaskbarItems(windows: windows, frontmostPID: 20, groupByApp: false)
+
+        XCTAssertEqual(items.map(\.title), ["Plan", "Article"])
+        XCTAssertEqual(items.map(\.isMinimized), [true, false])
+        XCTAssertFalse(items[0].isFrontmost)
+    }
+
     func testBuildItemsMarksFrontmostAppWithoutMovingIt() {
         let windows = [
             record(owner: "Safari", title: "Article", pid: 10, windowID: 1),
@@ -201,6 +371,33 @@ final class TaskbarModelTests: XCTestCase {
 
         XCTAssertEqual(items.map(\.owner), ["Notes", "Safari", "Terminal"])
         XCTAssertTrue(items[2].isFrontmost)
+    }
+
+    func testBuildItemsMarksOnlyTheFrontmostWindowWhenOnePIDHasMultipleWindows() {
+        let windows = [
+            record(owner: "Google Chrome", title: "Inbox", pid: 739, windowID: 578),
+            record(owner: "Google Chrome", title: "New tab", pid: 739, windowID: 16416)
+        ]
+
+        let items = buildTaskbarItems(
+            windows: windows,
+            frontmostPID: 739,
+            frontmostWindowID: 16416,
+            groupByApp: false
+        )
+
+        XCTAssertEqual(items.map(\.windowIDs), [[578], [16416]])
+        XCTAssertEqual(items.map(\.isFrontmost), [false, true])
+    }
+
+    func testFrontmostWindowIDUsesFirstWindowForFrontmostPID() {
+        let windows = [
+            record(owner: "Google Chrome", title: "New tab", pid: 739, windowID: 16416),
+            record(owner: "Google Chrome", title: "Inbox", pid: 739, windowID: 578),
+            record(owner: "Slack", title: "DM", pid: 697, windowID: 49)
+        ]
+
+        XCTAssertEqual(frontmostWindowID(in: windows, frontmostPID: 739), 16416)
     }
 
     func testPinnedAppsStayFirstAndKeepTheirOrder() {
