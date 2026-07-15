@@ -3,6 +3,128 @@ import XCTest
 @testable import TaskbarApp
 
 final class TaskbarStatsSamplerTests: XCTestCase {
+    func testSamplerAcquiresOneMachHostPortAndReleasesItOnDeinit() {
+        var acquisitionCount = 0
+        var releasedPorts: [host_t] = []
+
+        do {
+            let sampler = TaskbarStatsSampler(
+                commandOutput: { _, _ in nil },
+                cpuTickReader: { nil },
+                memoryReader: { nil },
+                hostPortProvider: {
+                    acquisitionCount += 1
+                    return host_t(42)
+                },
+                hostPortReleaser: { releasedPorts.append($0) }
+            )
+
+            _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000))
+            _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_001))
+            XCTAssertEqual(acquisitionCount, 1)
+            XCTAssertTrue(releasedPorts.isEmpty)
+        }
+
+        XCTAssertEqual(acquisitionCount, 1)
+        XCTAssertEqual(releasedPorts, [host_t(42)])
+    }
+
+    func testSamplerDoesNotRunSubprocessesWithoutDemand() {
+        let queue = DispatchQueue(label: "TaskbarStatsSamplerTests.noDemand")
+        var executables: [String] = []
+        let sampler = TaskbarStatsSampler(
+            commandOutput: { executable, _ in
+                executables.append(executable)
+                return nil
+            },
+            backgroundQueue: queue,
+            cpuTickReader: { nil },
+            memoryReader: { nil },
+            networkCounterReader: { nil }
+        )
+
+        _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000), demand: [])
+        queue.sync {}
+
+        XCTAssertTrue(executables.isEmpty)
+    }
+
+    func testSamplingDemandMatchesVisibleTilesAndPopoverDetails() {
+        var settings = StatsWidgetSettings.defaults
+        settings.showCPU = true
+        settings.showGPU = false
+        settings.showMemory = false
+        settings.showNetwork = false
+        XCTAssertEqual(StatsSamplingDemand.visibleMetrics(settings), [])
+
+        settings.showGPU = true
+        XCTAssertEqual(StatsSamplingDemand.visibleMetrics(settings), [.gpu])
+
+        settings.isEnabled = false
+        XCTAssertEqual(StatsSamplingDemand.visibleMetrics(settings), [])
+        XCTAssertEqual(StatsSamplingDemand.popover(.cpu), [.processes])
+        XCTAssertEqual(StatsSamplingDemand.popover(.memory), [.processes])
+        XCTAssertEqual(StatsSamplingDemand.popover(.gpu), [.gpu])
+        XCTAssertEqual(StatsSamplingDemand.popover(.network), [.networkProcesses])
+        XCTAssertEqual(StatsSamplingDemand.menuSummary, [.gpu])
+    }
+
+    func testSamplerRunsOnlyTheRequestedSubprocess() {
+        let scenarios: [(demand: StatsSamplingDemand, executable: String)] = [
+            ([.gpu], "/usr/sbin/ioreg"),
+            ([.processes], "/bin/ps"),
+            ([.networkProcesses], "/usr/bin/nettop")
+        ]
+
+        for (index, scenario) in scenarios.enumerated() {
+            let queue = DispatchQueue(label: "TaskbarStatsSamplerTests.demand.\(index)")
+            var executables: [String] = []
+            let sampler = TaskbarStatsSampler(
+                commandOutput: { executable, _ in
+                    executables.append(executable)
+                    return nil
+                },
+                backgroundQueue: queue,
+                cpuTickReader: { nil },
+                memoryReader: { nil },
+                networkCounterReader: { nil }
+            )
+
+            _ = sampler.snapshot(
+                now: Date(timeIntervalSince1970: 1_000),
+                demand: scenario.demand
+            )
+            queue.sync {}
+
+            XCTAssertEqual(executables, [scenario.executable])
+        }
+    }
+
+    func testNewPopoverDemandIsNotBlockedByFreshSnapshotCache() {
+        let queue = DispatchQueue(label: "TaskbarStatsSamplerTests.freshSnapshotDemand")
+        var executables: [String] = []
+        let sampler = TaskbarStatsSampler(
+            commandOutput: { executable, _ in
+                executables.append(executable)
+                return nil
+            },
+            backgroundQueue: queue,
+            cpuTickReader: { nil },
+            memoryReader: { nil },
+            networkCounterReader: { nil }
+        )
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        _ = sampler.snapshot(now: start, demand: [])
+        _ = sampler.snapshot(
+            now: start.addingTimeInterval(0.1),
+            demand: StatsSamplingDemand.popover(.network)
+        )
+        queue.sync {}
+
+        XCTAssertEqual(executables, ["/usr/bin/nettop"])
+    }
+
     func testNetworkTransferRatesUseSteadyPerInterfaceCounterDeltas() {
         let rates = networkTransferRates(
             previous: [
@@ -479,7 +601,7 @@ final class TaskbarStatsSamplerTests: XCTestCase {
         )
 
         let startedAt = Date()
-        _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000))
+        _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000), demand: [.processes])
 
         XCTAssertLessThan(Date().timeIntervalSince(startedAt), 0.2)
     }
@@ -494,7 +616,7 @@ final class TaskbarStatsSamplerTests: XCTestCase {
             backgroundQueue: queue
         )
 
-        _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000))
+        _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000), demand: [.processes])
         queue.sync {}
         let snapshot = sampler.snapshot(now: Date(timeIntervalSince1970: 1_001))
 

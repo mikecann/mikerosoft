@@ -98,6 +98,31 @@ enum StatsWidgetMetric: Equatable {
     }
 }
 
+struct StatsSamplingDemand: OptionSet, Equatable {
+    let rawValue: UInt8
+
+    static let gpu = StatsSamplingDemand(rawValue: 1 << 0)
+    static let processes = StatsSamplingDemand(rawValue: 1 << 1)
+    static let networkProcesses = StatsSamplingDemand(rawValue: 1 << 2)
+    static let menuSummary: StatsSamplingDemand = [.gpu]
+
+    static func visibleMetrics(_ settings: StatsWidgetSettings) -> StatsSamplingDemand {
+        guard settings.isEnabled else { return [] }
+        return settings.showGPU ? [.gpu] : []
+    }
+
+    static func popover(_ metric: StatsWidgetMetric) -> StatsSamplingDemand {
+        switch metric {
+        case .cpu, .memory:
+            return [.processes]
+        case .gpu:
+            return [.gpu]
+        case .network:
+            return [.networkProcesses]
+        }
+    }
+}
+
 enum StatsWidgetMetrics {
     static let minimumCPUWidth: CGFloat = 46
     static let preferredCPUWidth: CGFloat = 72
@@ -180,7 +205,10 @@ struct StatsWidgetPlugin: TaskbarWidgetPlugin {
         let settings = values.statsWidget
         guard settings.isEnabled else { return }
 
-        let snapshot = TaskbarStatsSampler.shared.snapshot(now: date)
+        let snapshot = TaskbarStatsSampler.shared.snapshot(
+            now: date,
+            demand: .visibleMetrics(settings)
+        )
         let moduleRects = statsWidgetModuleRects(settings: settings, in: rect)
 
         for (metric, metricRect) in moduleRects {
@@ -290,6 +318,8 @@ final class TaskbarStatsSampler {
     private let cpuTickReader: (() -> [UInt32]?)?
     private let memoryReader: (() -> MemoryUsage?)?
     private let networkCounterReader: () -> [String: NetworkInterfaceCounters]?
+    private let hostPort: host_t
+    private let hostPortReleaser: (host_t) -> Void
     private let totalMemory = Double(ProcessInfo.processInfo.physicalMemory)
     private var cachedSnapshot = StatsSnapshot.empty
     private var lastRefresh = Date.distantPast
@@ -312,20 +342,60 @@ final class TaskbarStatsSampler {
         backgroundQueue: DispatchQueue = DispatchQueue.global(qos: .utility),
         cpuTickReader: (() -> [UInt32]?)? = nil,
         memoryReader: (() -> MemoryUsage?)? = nil,
-        networkCounterReader: @escaping () -> [String: NetworkInterfaceCounters]? = readNetworkInterfaceCounters64
+        networkCounterReader: @escaping () -> [String: NetworkInterfaceCounters]? = readNetworkInterfaceCounters64,
+        hostPortProvider: () -> host_t = { mach_host_self() },
+        hostPortReleaser: @escaping (host_t) -> Void = { port in
+            _ = mach_port_deallocate(mach_task_self_, port)
+        }
     ) {
         self.commandOutput = commandOutput
         self.backgroundQueue = backgroundQueue
         self.cpuTickReader = cpuTickReader
         self.memoryReader = memoryReader
         self.networkCounterReader = networkCounterReader
+        self.hostPort = hostPortProvider()
+        self.hostPortReleaser = hostPortReleaser
     }
 
-    func snapshot(now: Date = Date()) -> StatsSnapshot {
+    deinit {
+        hostPortReleaser(hostPort)
+    }
+
+    func snapshot(now: Date = Date(), demand: StatsSamplingDemand = []) -> StatsSnapshot {
         lock.lock()
+        let shouldRefreshGPU = demand.contains(.gpu)
+            && now.timeIntervalSince(lastGPURefresh) >= 2.0
+            && !isRefreshingGPU
+        let shouldRefreshProcesses = demand.contains(.processes)
+            && now.timeIntervalSince(lastProcessRefresh) >= 3.0
+            && !isRefreshingProcesses
+        let shouldRefreshNetworkProcesses = demand.contains(.networkProcesses)
+            && now.timeIntervalSince(lastNetworkProcessRefresh) >= 15.0
+            && !isRefreshingNetworkProcesses
+
+        if shouldRefreshGPU {
+            isRefreshingGPU = true
+            lastGPURefresh = now
+        }
+        if shouldRefreshProcesses {
+            isRefreshingProcesses = true
+            lastProcessRefresh = now
+        }
+        if shouldRefreshNetworkProcesses {
+            isRefreshingNetworkProcesses = true
+            lastNetworkProcessRefresh = now
+        }
+
         if now.timeIntervalSince(lastRefresh) < 0.75 {
             let snapshot = cachedSnapshot
+            let gpuFallback = cachedGPU
             lock.unlock()
+            refreshDemandedSubprocesses(
+                gpu: shouldRefreshGPU,
+                processes: shouldRefreshProcesses,
+                networkProcesses: shouldRefreshNetworkProcesses,
+                gpuFallback: gpuFallback
+            )
             return snapshot
         }
 
@@ -346,18 +416,7 @@ final class TaskbarStatsSampler {
         let gpu = cachedGPU
         let network = readNetworkSpeed(now: now)
         let processes = cachedProcesses
-        let networkProcesses = readNetworkProcesses(now: now)
-        let shouldRefreshGPU = now.timeIntervalSince(lastGPURefresh) >= 2.0 && !isRefreshingGPU
-        let shouldRefreshProcesses = now.timeIntervalSince(lastProcessRefresh) >= 3.0 && !isRefreshingProcesses
-
-        if shouldRefreshGPU {
-            isRefreshingGPU = true
-            lastGPURefresh = now
-        }
-        if shouldRefreshProcesses {
-            isRefreshingProcesses = true
-            lastProcessRefresh = now
-        }
+        let networkProcesses = cachedNetworkProcesses
 
         let cpuHistory = appendedHistory(cachedSnapshot.cpuHistory, value: cpu.activePercent)
         let gpuHistory = appendedHistory(cachedSnapshot.gpuHistory, value: gpu.percent)
@@ -395,14 +454,31 @@ final class TaskbarStatsSampler {
         let gpuFallback = cachedGPU
         lock.unlock()
 
-        if shouldRefreshGPU {
-            refreshGPUInBackground(fallback: gpuFallback)
-        }
-        if shouldRefreshProcesses {
-            refreshProcessesInBackground()
-        }
+        refreshDemandedSubprocesses(
+            gpu: shouldRefreshGPU,
+            processes: shouldRefreshProcesses,
+            networkProcesses: shouldRefreshNetworkProcesses,
+            gpuFallback: gpuFallback
+        )
 
         return snapshot
+    }
+
+    private func refreshDemandedSubprocesses(
+        gpu: Bool,
+        processes: Bool,
+        networkProcesses: Bool,
+        gpuFallback: StatsGPUReading
+    ) {
+        if gpu {
+            refreshGPUInBackground(fallback: gpuFallback)
+        }
+        if processes {
+            refreshProcessesInBackground()
+        }
+        if networkProcesses {
+            refreshNetworkProcessesInBackground()
+        }
     }
 
     private func readCPUUsage() -> CPUUsage? {
@@ -426,7 +502,7 @@ final class TaskbarStatsSampler {
 
         let result: kern_return_t = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: count) {
-                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &size)
+                host_statistics(hostPort, HOST_CPU_LOAD_INFO, $0, &size)
             }
         }
 
@@ -453,7 +529,7 @@ final class TaskbarStatsSampler {
         var count = UInt32(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
         let result: kern_return_t = withUnsafeMutablePointer(to: &stats) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                host_statistics64(hostPort, HOST_VM_INFO64, $0, &count)
             }
         }
 
@@ -503,13 +579,7 @@ final class TaskbarStatsSampler {
         return (upload: rates.upload, download: rates.download)
     }
 
-    private func readNetworkProcesses(now: Date) -> [StatsNetworkProcessSample] {
-        guard now.timeIntervalSince(lastNetworkProcessRefresh) >= 15, !isRefreshingNetworkProcesses else {
-            return cachedNetworkProcesses
-        }
-
-        isRefreshingNetworkProcesses = true
-        lastNetworkProcessRefresh = now
+    private func refreshNetworkProcessesInBackground() {
         backgroundQueue.async { [weak self] in
             guard let self else { return }
             let samples = Self.captureNetworkProcesses(commandOutput: self.commandOutput)
@@ -519,7 +589,6 @@ final class TaskbarStatsSampler {
             self.isRefreshingNetworkProcesses = false
             self.lock.unlock()
         }
-        return cachedNetworkProcesses
     }
 
     private func refreshGPUInBackground(fallback: StatsGPUReading) {
@@ -1242,7 +1311,7 @@ private final class StatsPopoverView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let snapshot = TaskbarStatsSampler.shared.snapshot()
+        let snapshot = TaskbarStatsSampler.shared.snapshot(demand: .popover(metric))
         let bounds = self.bounds
 
         NSColor(calibratedWhite: 0.18, alpha: 0.98).setFill()

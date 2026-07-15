@@ -9,6 +9,7 @@ final class TaskbarView: NSView {
     var onWidgetMenu: ((TaskbarWidgetID) -> NSMenu?)?
     var onWidgetActivate: ((TaskbarWidgetID, StatsWidgetMetric?, NSRect, NSView) -> Void)?
     var onMovePinnedItem: ((TaskbarItem, TaskbarItem?) -> Void)?
+    var onMeasurePreferredTileWidth: (() -> Void)?
 
     private var tileRects: [(NSRect, TaskbarItem)] = []
     private var widgetRects: [(NSRect, TaskbarWidgetID)] = []
@@ -47,7 +48,7 @@ final class TaskbarView: NSView {
     }
 
     func frontmostTileLayout() -> (rect: NSRect, item: TaskbarItem)? {
-        makeLayout().tiles
+        tileRects
             .first { _, item in item.isFrontmost }
             .map { (rect: $0.0, item: $0.1) }
     }
@@ -160,6 +161,7 @@ final class TaskbarView: NSView {
     }
 
     private func preferredTileWidth(for item: TaskbarItem) -> CGFloat {
+        onMeasurePreferredTileWidth?()
         let label = taskbarItemLabel(item)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.boldSystemFont(ofSize: 12)

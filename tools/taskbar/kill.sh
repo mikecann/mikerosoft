@@ -11,6 +11,13 @@ APP_DIR="${TASKBAR_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
 APP_BIN="$APP_DIR/Contents/MacOS/taskbar-swift"
 STOPPED=0
 
+regex_escape() {
+  printf '%s' "$1" | sed 's/[][(){}.^$*+?|\\]/\\&/g'
+}
+
+SCRIPT_DIR_PATTERN="$(regex_escape "$SCRIPT_DIR")"
+APP_BIN_PATTERN="$(regex_escape "$APP_BIN")"
+
 launchctl bootout "$SERVICE" 2>/dev/null && STOPPED=1
 rm -f "$PLIST"
 
@@ -24,9 +31,8 @@ fi
 
 pkill -f "$SCRIPT_DIR/taskbar.py" 2>/dev/null && STOPPED=1
 pkill -f "tools/taskbar/taskbar.py" 2>/dev/null && STOPPED=1
-pkill -f "$APP_BIN" 2>/dev/null && STOPPED=1
-pkill -f "$SCRIPT_DIR/.build/.*/taskbar-swift" 2>/dev/null && STOPPED=1
-pkill -f "taskbar-swift" 2>/dev/null && STOPPED=1
+pkill -f "^${APP_BIN_PATTERN}$" 2>/dev/null && STOPPED=1
+pkill -f "^${SCRIPT_DIR_PATTERN}/\.build/.*/taskbar-swift$" 2>/dev/null && STOPPED=1
 
 if [ "$STOPPED" -eq 1 ]; then
   echo "taskbar stopped."
