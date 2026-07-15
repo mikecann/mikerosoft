@@ -8,35 +8,54 @@ struct ScreenInfo: Equatable {
     let quartzFrame: CGRect
 }
 
-func collectScreens() -> [ScreenInfo] {
-    let screens = NSScreen.screens
-    let desktopMaxY = screens.map { $0.frame.maxY }.max() ?? 0
+struct ScreenSnapshot: Equatable {
+    let id: UInt32
+    let name: String
+    let appKitFrame: CGRect
+    let displayBounds: CGRect?
+}
 
-    return screens.enumerated().map { index, screen in
-        let id = screenID(screen, fallback: UInt32(index + 1))
-        let frame = screen.frame
-        let quartzFrame = CGRect(
+func screenInfos(from snapshots: [ScreenSnapshot]) -> [ScreenInfo] {
+    let primaryMaxY = snapshots.first?.appKitFrame.maxY ?? 0
+
+    return snapshots.map { snapshot in
+        let frame = snapshot.appKitFrame
+        let fallbackQuartzFrame = CGRect(
             x: frame.minX,
-            y: desktopMaxY - frame.maxY,
+            y: primaryMaxY - frame.maxY,
             width: frame.width,
             height: frame.height
         )
 
         return ScreenInfo(
-            id: id,
-            name: screen.localizedName,
+            id: snapshot.id,
+            name: snapshot.name,
             appKitFrame: frame,
-            quartzFrame: quartzFrame
+            quartzFrame: snapshot.displayBounds ?? fallbackQuartzFrame
         )
     }
 }
 
-private func screenID(_ screen: NSScreen, fallback: UInt32) -> UInt32 {
+func collectScreens() -> [ScreenInfo] {
+    let snapshots = NSScreen.screens.enumerated().map { index, screen in
+        let displayID = screenID(screen)
+        return ScreenSnapshot(
+            id: displayID ?? UInt32(index + 1),
+            name: screen.localizedName,
+            appKitFrame: screen.frame,
+            displayBounds: displayID.map(CGDisplayBounds)
+        )
+    }
+
+    return screenInfos(from: snapshots)
+}
+
+private func screenID(_ screen: NSScreen) -> UInt32? {
     let key = NSDeviceDescriptionKey("NSScreenNumber")
     if let number = screen.deviceDescription[key] as? NSNumber {
         return number.uint32Value
     }
-    return fallback
+    return nil
 }
 
 func screenIDForWindow(bounds: CGRect, screens: [ScreenInfo]) -> UInt32? {
