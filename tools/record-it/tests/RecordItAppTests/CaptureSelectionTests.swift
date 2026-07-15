@@ -29,4 +29,22 @@ final class CaptureSelectionTests: XCTestCase {
 
         XCTAssertEqual(preferredCamera(in: cameras)?.id, "razer")
     }
+
+    func testPreferredCameraAudioInputDefaultsToYeti() {
+        let inputs = [
+            CaptureAudioDevice(id: "mac", name: "MacBook Pro Microphone"),
+            CaptureAudioDevice(id: "yeti", name: "Yeti Stereo Microphone")
+        ]
+
+        XCTAssertEqual(preferredAudioDevice(in: inputs)?.id, "yeti")
+    }
+
+    @MainActor
+    func testScreenAudioDefaultsToSystemPlaybackRatherThanNoAudio() {
+        let model = RecordingViewModel()
+
+        XCTAssertEqual(model.screenAudioSource, .systemSound)
+        XCTAssertTrue(model.screenAudioSource.capturesSystemAudio)
+        XCTAssertFalse(ScreenAudioSource.none.capturesSystemAudio)
+    }
 }

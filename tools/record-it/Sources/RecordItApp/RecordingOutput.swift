@@ -12,17 +12,38 @@ enum CaptureSource: Hashable {
     }
 }
 
-func recordingOutputURLs(
-    mode: RecordingMode,
-    directory: URL,
+func normalizedRecordingBaseName(_ candidate: String) -> String? {
+    var name = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+    if name.lowercased().hasSuffix(".mov") {
+        name.removeLast(4)
+        name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    let invalidCharacters = CharacterSet(charactersIn: "/:\0")
+    guard !name.isEmpty, name.rangeOfCharacter(from: invalidCharacters) == nil else {
+        return nil
+    }
+    return name
+}
+
+func defaultRecordingBaseName(
     startedAt: Date,
     timeZone: TimeZone = .current
-) -> [CaptureSource: URL] {
+) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.timeZone = timeZone
     formatter.dateFormat = "yyyy-MM-dd_HHmmss"
-    let prefix = formatter.string(from: startedAt)
+    return formatter.string(from: startedAt)
+}
+
+func recordingOutputURLs(
+    mode: RecordingMode,
+    directory: URL,
+    startedAt: Date,
+    baseName: String? = nil,
+    timeZone: TimeZone = .current
+) -> [CaptureSource: URL] {
+    let prefix = baseName ?? defaultRecordingBaseName(startedAt: startedAt, timeZone: timeZone)
 
     var outputs: [CaptureSource: URL] = [:]
     if mode.capturesScreen {

@@ -381,6 +381,12 @@ Camera, and Microphone permissions to the signed app bundle.
 - `HG584T05` is the default display and produces a 3840 × 2160, 30 fps output.
 - The first 4K/30-capable camera is selected by default. On this machine that is
   `Razer Kiyo Pro Ultra`.
+- The file name field defaults to the timestamp prefix, accepts an override
+  without `.mov`, and resets to a fresh timestamp after every recording.
+- Screen audio defaults to ScreenCaptureKit system playback and can be disabled.
+  It does not use a microphone.
+- Camera audio is independently selectable and defaults to the first microphone
+  whose name contains `Yeti`.
 - Projects come from `~/Movies/Projects`, newest creation date first.
 - Project recordings go to `<project>/source`; No Project goes to
   `~/Movies/record-it-output`.

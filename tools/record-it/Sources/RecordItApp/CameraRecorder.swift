@@ -4,6 +4,7 @@ import CoreVideo
 
 final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let camera: CaptureCamera
+    private let microphone: CaptureAudioDevice?
     private let outputURL: URL
     private let startGate: RecordingStartGate?
     private let captureSession = AVCaptureSession()
@@ -13,8 +14,14 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let writerQueue = DispatchQueue(label: "com.mikerosoft.record-it.camera-output")
     private var movieWriter: MovieWriter?
 
-    init(camera: CaptureCamera, outputURL: URL, startGate: RecordingStartGate? = nil) {
+    init(
+        camera: CaptureCamera,
+        microphone: CaptureAudioDevice?,
+        outputURL: URL,
+        startGate: RecordingStartGate? = nil
+    ) {
         self.camera = camera
+        self.microphone = microphone
         self.outputURL = outputURL
         self.startGate = startGate
     }
@@ -23,12 +30,14 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         guard await requestAccess(for: .video) else {
             throw RecordItError.message("Camera access is required. Enable it in Privacy & Security → Camera.")
         }
-        let microphoneGranted = await requestAccess(for: .audio)
+        if microphone != nil, !(await requestAccess(for: .audio)) {
+            throw RecordItError.message("Microphone access is required for the selected camera audio input. Enable it in Privacy & Security → Microphone.")
+        }
 
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async { [self] in
                 do {
-                    try configureSession(includesMicrophone: microphoneGranted)
+                    try configureSession()
                     captureSession.startRunning()
                     continuation.resume()
                 } catch {
@@ -65,7 +74,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
     }
 
-    private func configureSession(includesMicrophone: Bool) throws {
+    private func configureSession() throws {
         guard let device = CaptureDeviceCatalog.camera(withID: camera.id) else {
             throw RecordItError.message("The selected camera is no longer available.")
         }
@@ -104,14 +113,18 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         captureSession.addOutput(videoOutput)
 
         var microphoneAttached = false
-        if includesMicrophone, let microphone = AVCaptureDevice.default(for: .audio) {
-            let audioInput = try AVCaptureDeviceInput(device: microphone)
-            audioOutput.setSampleBufferDelegate(self, queue: writerQueue)
-            if captureSession.canAddInput(audioInput), captureSession.canAddOutput(audioOutput) {
-                captureSession.addInput(audioInput)
-                captureSession.addOutput(audioOutput)
-                microphoneAttached = true
+        if let microphone {
+            guard let microphoneDevice = CaptureDeviceCatalog.audioDevice(withID: microphone.id) else {
+                throw RecordItError.message("The selected microphone is no longer available.")
             }
+            let audioInput = try AVCaptureDeviceInput(device: microphoneDevice)
+            audioOutput.setSampleBufferDelegate(self, queue: writerQueue)
+            guard captureSession.canAddInput(audioInput), captureSession.canAddOutput(audioOutput) else {
+                throw RecordItError.message("The selected microphone could not be added to the camera recording.")
+            }
+            captureSession.addInput(audioInput)
+            captureSession.addOutput(audioOutput)
+            microphoneAttached = true
         }
 
         let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)

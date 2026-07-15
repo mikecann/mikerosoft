@@ -45,6 +45,21 @@ enum CaptureDeviceCatalog {
         cameraDiscoverySession().devices.first { $0.uniqueID == id }
     }
 
+    static func microphones() -> [CaptureAudioDevice] {
+        let defaultDeviceID = AVCaptureDevice.default(for: .audio)?.uniqueID
+        return audioDiscoverySession().devices
+            .sorted { left, right in
+                if left.uniqueID == defaultDeviceID { return true }
+                if right.uniqueID == defaultDeviceID { return false }
+                return left.localizedName.localizedCaseInsensitiveCompare(right.localizedName) == .orderedAscending
+            }
+            .map { CaptureAudioDevice(id: $0.uniqueID, name: $0.localizedName) }
+    }
+
+    static func audioDevice(withID id: String) -> AVCaptureDevice? {
+        audioDiscoverySession().devices.first { $0.uniqueID == id }
+    }
+
     static func preferredDeviceFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
         let options = device.formats.map(cameraFormatOption)
         guard let preferred = preferredCameraFormat(in: options) else { return nil }
@@ -55,6 +70,14 @@ enum CaptureDeviceCatalog {
         AVCaptureDevice.DiscoverySession(
             deviceTypes: [.external, .builtInWideAngleCamera, .continuityCamera],
             mediaType: .video,
+            position: .unspecified
+        )
+    }
+
+    private static func audioDiscoverySession() -> AVCaptureDevice.DiscoverySession {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone],
+            mediaType: .audio,
             position: .unspecified
         )
     }

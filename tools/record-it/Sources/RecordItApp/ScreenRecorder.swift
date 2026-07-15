@@ -5,6 +5,7 @@ import ScreenCaptureKit
 
 final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let display: CaptureDisplay
+    private let audioSource: ScreenAudioSource
     private let outputURL: URL
     private let startGate: RecordingStartGate?
     private let outputQueue = DispatchQueue(label: "com.mikerosoft.record-it.screen-output")
@@ -12,8 +13,14 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private var movieWriter: MovieWriter?
     private var streamError: Error?
 
-    init(display: CaptureDisplay, outputURL: URL, startGate: RecordingStartGate? = nil) {
+    init(
+        display: CaptureDisplay,
+        audioSource: ScreenAudioSource,
+        outputURL: URL,
+        startGate: RecordingStartGate? = nil
+    ) {
         self.display = display
+        self.audioSource = audioSource
         self.outputURL = outputURL
         self.startGate = startGate
     }
@@ -36,7 +43,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             outputURL: outputURL,
             width: display.width,
             height: display.height,
-            includesAudio: true,
+            includesAudio: audioSource.capturesSystemAudio,
             startGate: startGate
         )
         let filter = SCContentFilter(
@@ -51,14 +58,16 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         configuration.queueDepth = 8
         configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         configuration.showsCursor = true
-        configuration.capturesAudio = true
+        configuration.capturesAudio = audioSource.capturesSystemAudio
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
         configuration.excludesCurrentProcessAudio = true
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: outputQueue)
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: outputQueue)
+        if audioSource.capturesSystemAudio {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: outputQueue)
+        }
 
         movieWriter = writer
         self.stream = stream

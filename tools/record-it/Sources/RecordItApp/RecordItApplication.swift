@@ -36,7 +36,7 @@ struct RecordItApplication: App {
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 }
         }
-        .defaultSize(width: 580, height: 570)
+        .defaultSize(width: 580, height: 720)
         .windowResizability(.contentSize)
     }
 }
@@ -126,10 +126,20 @@ struct RecordItView: View {
                 projectPicker
             }
 
+            GridRow {
+                rowLabel("File name", systemImage: "doc")
+                fileNameEditor
+            }
+
             if model.mode.capturesScreen {
                 GridRow {
                     rowLabel("Screen", systemImage: "display")
                     displayPicker
+                }
+
+                GridRow {
+                    rowLabel("Screen audio", systemImage: "speaker.wave.2")
+                    screenAudioPicker
                 }
             }
 
@@ -137,6 +147,11 @@ struct RecordItView: View {
                 GridRow {
                     rowLabel("Camera", systemImage: "video")
                     cameraPicker
+                }
+
+                GridRow {
+                    rowLabel("Camera audio", systemImage: "mic")
+                    microphonePicker
                 }
             }
 
@@ -182,10 +197,60 @@ struct RecordItView: View {
             .disabled(model.isRecording || model.isBusy)
 
             if let display = model.selectedDisplay {
-                Text("HEVC · \(display.resolutionLabel) · 30 fps · system audio")
+                Text("HEVC · \(display.resolutionLabel) · 30 fps")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var fileNameEditor: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            TextField("File name", text: $model.fileName)
+                .textFieldStyle(.roundedBorder)
+                .disabled(model.isRecording || model.isBusy)
+
+            if let preview = outputNamePreview {
+                Text(preview)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                Text("Enter a file name without / or :")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var outputNamePreview: String? {
+        guard let baseName = model.resolvedFileName else { return nil }
+        switch model.mode {
+        case .screen:
+            return "\(baseName)-screen.mov"
+        case .camera:
+            return "\(baseName)-camera.mov"
+        case .both:
+            return "\(baseName)-screen.mov + \(baseName)-camera.mov"
+        }
+    }
+
+    private var screenAudioPicker: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Picker("Screen Audio", selection: $model.screenAudioSource) {
+                ForEach(ScreenAudioSource.allCases) { source in
+                    Text(source.displayName).tag(source)
+                }
+            }
+            .labelsHidden()
+            .disabled(model.isRecording || model.isBusy)
+
+            Text(model.screenAudioSource.capturesSystemAudio
+                 ? "Captures music, videos, and other Mac playback, not a microphone"
+                 : "The screen recording will have no audio track")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -203,12 +268,31 @@ struct RecordItView: View {
                 HStack(spacing: 5) {
                     Image(systemName: camera.recordsNative4K ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                     Text(camera.recordsNative4K
-                         ? "Native 4K · HEVC · 30 fps · microphone"
+                         ? "Native 4K · HEVC · 30 fps"
                          : "This camera cannot supply native 4K at 30 fps")
                 }
                 .font(.caption)
                 .foregroundStyle(camera.recordsNative4K ? Color.secondary : Color.orange)
             }
+        }
+    }
+
+    private var microphonePicker: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Picker("Camera Audio", selection: $model.selectedMicrophoneID) {
+                Text("None").tag("")
+                ForEach(model.microphones) { microphone in
+                    Text(microphone.name).tag(microphone.id)
+                }
+            }
+            .labelsHidden()
+            .disabled(model.isRecording || model.isBusy)
+
+            Text(model.selectedMicrophone.map {
+                "Records microphone audio from \($0.name)"
+            } ?? "The camera recording will have no audio track")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

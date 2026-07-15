@@ -11,6 +11,10 @@ final class RecordingViewModel: ObservableObject {
     @Published var selectedDisplayID: CGDirectDisplayID = 0
     @Published private(set) var cameras: [CaptureCamera] = []
     @Published var selectedCameraID = ""
+    @Published private(set) var microphones: [CaptureAudioDevice] = []
+    @Published var selectedMicrophoneID = ""
+    @Published var fileName = defaultRecordingBaseName(startedAt: Date())
+    @Published var screenAudioSource: ScreenAudioSource = .systemSound
     @Published private(set) var isRecording = false
     @Published private(set) var isBusy = false
     @Published private(set) var recordingStartedAt: Date?
@@ -46,8 +50,16 @@ final class RecordingViewModel: ObservableObject {
         cameras.first { $0.id == selectedCameraID }
     }
 
+    var selectedMicrophone: CaptureAudioDevice? {
+        microphones.first { $0.id == selectedMicrophoneID }
+    }
+
+    var resolvedFileName: String? {
+        normalizedRecordingBaseName(fileName)
+    }
+
     var canRecord: Bool {
-        guard selectedDestination != nil, !isBusy else { return false }
+        guard selectedDestination != nil, resolvedFileName != nil, !isBusy else { return false }
         if mode.capturesScreen && selectedDisplay == nil { return false }
         if mode.capturesCamera && selectedCamera == nil { return false }
         return true
@@ -67,6 +79,9 @@ final class RecordingViewModel: ObservableObject {
         cameras = CaptureDeviceCatalog.cameras()
         selectedCameraID = preferredCamera(in: cameras)?.id ?? ""
 
+        microphones = CaptureDeviceCatalog.microphones()
+        selectedMicrophoneID = preferredAudioDevice(in: microphones)?.id ?? ""
+
         displays = CaptureDeviceCatalog.displays()
         selectedDisplayID = preferredDisplay(in: displays)?.id ?? 0
         statusMessage = displays.isEmpty ? "No displays found" : "Ready to record"
@@ -80,18 +95,28 @@ final class RecordingViewModel: ObservableObject {
         }
     }
 
+    func resetFileName(at date: Date = Date(), timeZone: TimeZone = .current) {
+        fileName = defaultRecordingBaseName(startedAt: date, timeZone: timeZone)
+    }
+
     func startRecording() async {
-        guard canRecord, let destination = selectedDestination else { return }
+        guard
+            canRecord,
+            let destination = selectedDestination,
+            let outputBaseName = resolvedFileName
+        else { return }
         isBusy = true
         statusMessage = "Starting…"
         let startedAt = Date()
+        fileName = outputBaseName
 
         do {
             let outputDirectory = try prepareOutputDirectory(for: destination)
             let outputs = recordingOutputURLs(
                 mode: mode,
                 directory: outputDirectory,
-                startedAt: startedAt
+                startedAt: startedAt,
+                baseName: outputBaseName
             )
             var recorders: [any CaptureRecording] = []
             let startGate = mode == .both ? RecordingStartGate() : nil
@@ -101,7 +126,12 @@ final class RecordingViewModel: ObservableObject {
                     throw RecordItError.message("Choose a display before recording.")
                 }
                 recorders.append(
-                    ScreenRecorder(display: display, outputURL: outputURL, startGate: startGate)
+                    ScreenRecorder(
+                        display: display,
+                        audioSource: screenAudioSource,
+                        outputURL: outputURL,
+                        startGate: startGate
+                    )
                 )
             }
             if mode.capturesCamera {
@@ -109,7 +139,12 @@ final class RecordingViewModel: ObservableObject {
                     throw RecordItError.message("Choose a camera before recording.")
                 }
                 recorders.append(
-                    CameraRecorder(camera: camera, outputURL: outputURL, startGate: startGate)
+                    CameraRecorder(
+                        camera: camera,
+                        microphone: selectedMicrophone,
+                        outputURL: outputURL,
+                        startGate: startGate
+                    )
                 )
             }
 
@@ -138,12 +173,14 @@ final class RecordingViewModel: ObservableObject {
             try await activeSession.stop()
             let completedURLs = activeOutputURLs
             resetActiveRecording()
+            resetFileName()
             statusMessage = "Saved \(completedURLs.count == 1 ? "recording" : "recordings")"
             if revealInFinder && preferences.openFinderAfterRecording {
                 NSWorkspace.shared.activateFileViewerSelecting(completedURLs)
             }
         } catch {
             resetActiveRecording()
+            resetFileName()
             statusMessage = "Recording stopped with an error"
             presentedError = error.localizedDescription
         }

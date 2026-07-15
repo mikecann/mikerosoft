@@ -15,9 +15,24 @@ ScreenCaptureKit, and AVFoundation.
 - The selected screen at 30 fps, encoded as HEVC
 - `HG584T05` by default, with a 3840 × 2160 output
 - The selected camera's best format at 30 fps, preferring native 3840 × 2160
-- System audio in screen recordings
-- The default microphone in camera recordings when permission is granted
+- Selectable screen audio: **System Sound** or **None**. System Sound captures
+  playback from music, browsers, videos, and other Mac apps, not a microphone
+- Selectable camera microphone, defaulting to the first input with `Yeti` in its
+  name. Choose **None** for a silent camera file
 - Separate `screen.mov` and `camera.mov` files when recording both, preserving each source's full resolution
+
+## File names
+
+The file name field defaults to the existing timestamp format, without a file
+extension:
+
+```text
+2026-07-15_115705
+```
+
+You can replace it before recording. Record It adds `-screen.mov` and/or
+`-camera.mov` automatically, strips an accidentally entered `.mov` extension,
+and resets the field to a fresh timestamp after every recording.
 
 ## Output folders
 

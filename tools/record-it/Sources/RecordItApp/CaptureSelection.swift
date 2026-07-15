@@ -75,3 +75,17 @@ struct CaptureCamera: Identifiable, Hashable {
 func preferredCamera(in cameras: [CaptureCamera]) -> CaptureCamera? {
     cameras.first(where: \.recordsNative4K) ?? cameras.first
 }
+
+struct CaptureAudioDevice: Identifiable, Hashable {
+    let id: String
+    let name: String
+}
+
+func preferredAudioDevice(
+    in devices: [CaptureAudioDevice],
+    preferredName: String = "Yeti"
+) -> CaptureAudioDevice? {
+    devices.first {
+        $0.name.range(of: preferredName, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    } ?? devices.first
+}
