@@ -3,6 +3,123 @@ import XCTest
 @testable import TaskbarApp
 
 final class TaskbarStatsSamplerTests: XCTestCase {
+    func testStatsSnapshotEqualityIncludesMeasuredBreakdowns() {
+        var changed = StatsSnapshot.empty
+        changed.cpuUserPercent = 1
+        XCTAssertNotEqual(changed, .empty)
+
+        changed = .empty
+        changed.memoryCompressedBytes = 1
+        XCTAssertNotEqual(changed, .empty)
+    }
+
+    func testCPUUsageSplitsRealTickDeltasAndFoldsNiceIntoUser() throws {
+        let usage = try XCTUnwrap(
+            cpuUsage(
+                currentTicks: [130, 220, 350, 410],
+                previousTicks: [100, 200, 300, 400]
+            )
+        )
+
+        XCTAssertEqual(usage.userPercent, 40.0 / 110.0 * 100, accuracy: 0.001)
+        XCTAssertEqual(usage.systemPercent, 20.0 / 110.0 * 100, accuracy: 0.001)
+        XCTAssertEqual(usage.idlePercent, 50.0 / 110.0 * 100, accuracy: 0.001)
+        XCTAssertEqual(usage.activePercent, 60.0 / 110.0 * 100, accuracy: 0.001)
+        XCTAssertEqual(usage.userPercent + usage.systemPercent, usage.activePercent, accuracy: 0.001)
+    }
+
+    func testCPUUsageRejectsSamplesWithoutAnInterval() {
+        let ticks: [UInt32] = [100, 200, 300, 400]
+
+        XCTAssertNil(cpuUsage(currentTicks: ticks, previousTicks: nil))
+        XCTAssertNil(cpuUsage(currentTicks: ticks, previousTicks: ticks))
+    }
+
+    func testSnapshotPublishesAndPreservesRealCPUSplit() {
+        var readings: [[UInt32]?] = [
+            [100, 200, 300, 400],
+            [140, 220, 330, 410],
+            nil
+        ]
+        let sampler = TaskbarStatsSampler(
+            commandOutput: { _, _ in nil },
+            backgroundQueue: DispatchQueue(label: "TaskbarStatsSamplerTests.cpu"),
+            cpuTickReader: { readings.removeFirst() }
+        )
+
+        _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000))
+        let measured = sampler.snapshot(now: Date(timeIntervalSince1970: 1_001))
+        let cached = sampler.snapshot(now: Date(timeIntervalSince1970: 1_002))
+
+        XCTAssertEqual(measured.cpuPercent, 70, accuracy: 0.001)
+        XCTAssertEqual(measured.cpuUserPercent, 50, accuracy: 0.001)
+        XCTAssertEqual(measured.cpuSystemPercent, 20, accuracy: 0.001)
+        XCTAssertEqual(cached.cpuPercent, measured.cpuPercent, accuracy: 0.001)
+        XCTAssertEqual(cached.cpuUserPercent, measured.cpuUserPercent, accuracy: 0.001)
+        XCTAssertEqual(cached.cpuSystemPercent, measured.cpuSystemPercent, accuracy: 0.001)
+    }
+
+    func testMemoryBreakdownUsesMeasuredComponentsAndAccountsForUsedBytes() {
+        let breakdown = memoryBreakdown(
+            usedBytes: 16_000,
+            wiredBytes: 3_000,
+            compressedBytes: 2_000
+        )
+
+        XCTAssertEqual(breakdown.appBytes, 11_000, accuracy: 0.001)
+        XCTAssertEqual(breakdown.wiredBytes, 3_000, accuracy: 0.001)
+        XCTAssertEqual(breakdown.compressedBytes, 2_000, accuracy: 0.001)
+        XCTAssertGreaterThanOrEqual(breakdown.appBytes, 0)
+        XCTAssertGreaterThanOrEqual(breakdown.wiredBytes, 0)
+        XCTAssertGreaterThanOrEqual(breakdown.compressedBytes, 0)
+        XCTAssertEqual(
+            breakdown.appBytes + breakdown.wiredBytes + breakdown.compressedBytes,
+            16_000,
+            accuracy: 0.001
+        )
+    }
+
+    func testMemoryBreakdownClampsOnlyAppAndPreservesMeasuredComponents() {
+        let breakdown = memoryBreakdown(
+            usedBytes: 10_000,
+            wiredBytes: 8_000,
+            compressedBytes: 4_000
+        )
+
+        XCTAssertEqual(breakdown.appBytes, 0, accuracy: 0.001)
+        XCTAssertEqual(breakdown.wiredBytes, 8_000, accuracy: 0.001)
+        XCTAssertEqual(breakdown.compressedBytes, 4_000, accuracy: 0.001)
+        XCTAssertEqual(breakdown.usedBytes, 12_000, accuracy: 0.001)
+    }
+
+    func testSnapshotPublishesAndPreservesMeasuredMemoryBreakdown() {
+        let measuredUsage = MemoryUsage(
+            percent: 60,
+            usedBytes: 6_000,
+            totalBytes: 10_000,
+            appBytes: 3_000,
+            wiredBytes: 2_000,
+            compressedBytes: 1_000
+        )
+        var readings: [MemoryUsage?] = [measuredUsage, nil]
+        let sampler = TaskbarStatsSampler(
+            commandOutput: { _, _ in nil },
+            backgroundQueue: DispatchQueue(label: "TaskbarStatsSamplerTests.memory"),
+            memoryReader: { readings.removeFirst() }
+        )
+
+        let measured = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000))
+        let cached = sampler.snapshot(now: Date(timeIntervalSince1970: 1_001))
+
+        XCTAssertEqual(measured.memoryAppBytes, 3_000, accuracy: 0.001)
+        XCTAssertEqual(measured.memoryWiredBytes, 2_000, accuracy: 0.001)
+        XCTAssertEqual(measured.memoryCompressedBytes, 1_000, accuracy: 0.001)
+        XCTAssertEqual(cached.memoryUsedBytes, measured.memoryUsedBytes, accuracy: 0.001)
+        XCTAssertEqual(cached.memoryAppBytes, measured.memoryAppBytes, accuracy: 0.001)
+        XCTAssertEqual(cached.memoryWiredBytes, measured.memoryWiredBytes, accuracy: 0.001)
+        XCTAssertEqual(cached.memoryCompressedBytes, measured.memoryCompressedBytes, accuracy: 0.001)
+    }
+
     func testCPUPercentUsesOnlySampleDeltasWithoutOverflowing() throws {
         let sinceBootTicks: [UInt32] = [
             2_500_000_000,
@@ -40,6 +157,14 @@ final class TaskbarStatsSamplerTests: XCTestCase {
             )
         )
         XCTAssertEqual(wrappedCounterPercent, 46.0 / 76.0 * 100, accuracy: 0.001)
+
+        let allCountersWrapped = try XCTUnwrap(
+            cpuUsage(
+                currentTicks: [4, 5, 6, 7],
+                previousTicks: [UInt32.max - 5, UInt32.max - 4, UInt32.max - 3, UInt32.max - 2]
+            )
+        )
+        XCTAssertEqual(allCountersWrapped.activePercent, 75, accuracy: 0.001)
     }
 
     func testCommandOutputDrainsLargeOutputBeforeWaitingForExit() {
