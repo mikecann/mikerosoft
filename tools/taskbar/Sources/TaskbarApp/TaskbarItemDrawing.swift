@@ -93,9 +93,8 @@ final class TaskbarIconCache {
             lock.unlock()
             return icon
         }
-        let retryIsBlocked = failedAt[request.retryKey].map {
-            now().timeIntervalSince($0) < retryInterval
-        } ?? false
+        purgeExpiredFailures(at: now())
+        let retryIsBlocked = failedAt[request.retryKey] != nil
         let shouldLoad = !loadingKeys.contains(request.key) && !retryIsBlocked
         if shouldLoad {
             loadingKeys.insert(request.key)
@@ -120,6 +119,13 @@ final class TaskbarIconCache {
         }
 
         return nil
+    }
+
+    private func purgeExpiredFailures(at time: Date) {
+        guard failedAt.values.contains(where: { time.timeIntervalSince($0) >= retryInterval }) else {
+            return
+        }
+        failedAt = failedAt.filter { time.timeIntervalSince($0.value) < retryInterval }
     }
 
     private func iconKey(for item: TaskbarItem) -> String {
