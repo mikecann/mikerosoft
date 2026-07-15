@@ -3,10 +3,23 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: TaskbarController?
     private var statusItem: NSStatusItem?
+    private var terminationLifecycle: AppTerminationLifecycle?
+    private var terminationSignalBridge: TerminationSignalBridge?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        controller = TaskbarController()
-        controller?.start()
+        let controller = TaskbarController()
+        self.controller = controller
+        let terminationLifecycle = AppTerminationLifecycle(
+            prepareForTermination: { controller.prepareForTermination() },
+            requestApplicationTermination: { NSApp.terminate(nil) }
+        )
+        self.terminationLifecycle = terminationLifecycle
+        let terminationSignalBridge = TerminationSignalBridge(
+            onSignal: { terminationLifecycle.requestTerminationFromSignal() }
+        )
+        self.terminationSignalBridge = terminationSignalBridge
+        terminationSignalBridge.start()
+        controller.start()
         installStatusItem()
     }
 
@@ -15,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        controller?.prepareForTermination()
+        terminationLifecycle?.applicationWillTerminate()
         log("taskbar event loop exited")
     }
 

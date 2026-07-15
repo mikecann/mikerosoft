@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import XCTest
 @testable import TaskbarApp
@@ -18,6 +19,30 @@ private final class RecordingTaskbarSettingsStore: TaskbarSettingsStoring {
             onFirstWrite?()
         }
     }
+}
+
+private func taskbarItem(
+    owner: String,
+    bundleID: String,
+    appPath: String,
+    isPinned: Bool = false,
+    pinOrder: Int? = nil
+) -> TaskbarItem {
+    TaskbarItem(
+        owner: owner,
+        pid: nil,
+        title: "",
+        windowCount: 0,
+        windowIDs: [],
+        windowBounds: nil,
+        accessibilitySignature: "",
+        isFrontmost: false,
+        isMinimized: false,
+        bundleID: bundleID,
+        appPath: appPath,
+        isPinned: isPinned,
+        pinOrder: pinOrder
+    )
 }
 
 final class TaskbarSettingsPersistenceTests: XCTestCase {
@@ -154,5 +179,61 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         }
 
         XCTAssertEqual(syncedValues, [false])
+    }
+
+    func testMenuSettingsMutationsEachScheduleOneRefreshWithoutImmediateFullRefresh() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        var scheduledRefreshCount = 0
+        var fullRefreshCount = 0
+        let controller = TaskbarController(
+            settings: settings,
+            startAtLoginSync: { _ in },
+            scheduleSettingsRefresh: { scheduledRefreshCount += 1 },
+            performFullRefresh: { fullRefreshCount += 1 }
+        )
+        let notes = taskbarItem(
+            owner: "Notes",
+            bundleID: "com.apple.Notes",
+            appPath: "/System/Applications/Notes.app"
+        )
+        let safari = taskbarItem(
+            owner: "Safari",
+            bundleID: "com.apple.Safari",
+            appPath: "/Applications/Safari.app"
+        )
+
+        func perform(_ item: NSMenuItem) throws {
+            let action = try XCTUnwrap(item.action)
+            _ = controller.perform(action, with: item)
+        }
+
+        try perform(XCTUnwrap(controller.makeItemMenu(for: notes, screenID: 123).items.first))
+        XCTAssertEqual(scheduledRefreshCount, 1)
+        XCTAssertEqual(fullRefreshCount, 0)
+
+        try perform(XCTUnwrap(controller.makeItemMenu(for: safari, screenID: 123).items.first))
+        XCTAssertEqual(scheduledRefreshCount, 2)
+        XCTAssertEqual(fullRefreshCount, 0)
+
+        controller.movePinnedItem(safari, before: notes, screenID: 123)
+        XCTAssertEqual(scheduledRefreshCount, 3)
+        XCTAssertEqual(fullRefreshCount, 0)
+
+        let dateTimeMenu = try XCTUnwrap(controller.makeWidgetMenu(for: .dateTime, screenID: 123))
+        try perform(XCTUnwrap(dateTimeMenu.items.first))
+        XCTAssertEqual(scheduledRefreshCount, 4)
+        XCTAssertEqual(fullRefreshCount, 0)
+
+        let statsMenu = try XCTUnwrap(controller.makeWidgetMenu(for: .stats, screenID: 123))
+        try perform(XCTUnwrap(statsMenu.items.first(where: { $0.title == "Show Stats" })))
+        XCTAssertEqual(scheduledRefreshCount, 5)
+        XCTAssertEqual(fullRefreshCount, 0)
+
+        XCTAssertTrue(settings.isPinned(
+            PinnedApp(displayName: notes.owner, bundleID: notes.bundleID, appPath: notes.appPath),
+            for: 123
+        ))
+        XCTAssertEqual(settings.values(for: 123).pinnedApps.map(\.displayName), ["Safari", "Notes"])
     }
 }

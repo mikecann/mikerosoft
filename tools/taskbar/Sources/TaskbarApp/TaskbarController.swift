@@ -171,6 +171,7 @@ final class TaskbarPanel {
 final class TaskbarController: NSObject {
     private let settings: TaskbarSettings
     private let startAtLoginSync: (Bool) -> Void
+    private let performFullRefreshOverride: (() -> Void)?
     private let windowAvoider = WindowAvoider()
     private let performanceWatchdog = MainThreadWatchdog()
     private var panels: [UInt32: TaskbarPanel] = [:]
@@ -188,22 +189,29 @@ final class TaskbarController: NSObject {
 
     init(
         settings: TaskbarSettings = TaskbarSettings(),
-        startAtLoginSync: @escaping (Bool) -> Void = { StartupManager.setEnabled($0) }
+        startAtLoginSync: @escaping (Bool) -> Void = { StartupManager.setEnabled($0) },
+        scheduleSettingsRefresh: (() -> Void)? = nil,
+        performFullRefresh: (() -> Void)? = nil
     ) {
         self.settings = settings
         self.startAtLoginSync = startAtLoginSync
+        self.performFullRefreshOverride = performFullRefresh
         super.init()
         settings.onStartAtLoginChange = { [weak self] enabled in
             self?.startAtLoginSync(enabled)
+        }
+        if let scheduleSettingsRefresh {
+            settings.onChange = scheduleSettingsRefresh
+        } else {
+            settings.onChange = { [weak self] in
+                self?.scheduleRefreshSoon()
+            }
         }
     }
 
     func start() {
         configureTaskbarAccessibilityMessagingTimeout()
         performanceWatchdog.start()
-        settings.onChange = { [weak self] in
-            self?.scheduleRefreshSoon()
-        }
         startAtLoginSync(settings.preferences.startAtLogin)
         log("screens=\(collectScreens().map { "\($0.name):\($0.appKitFrame)" }.joined(separator: " | "))")
         refresh()
@@ -224,6 +232,10 @@ final class TaskbarController: NSObject {
     }
 
     @objc func refresh() {
+        if let performFullRefreshOverride {
+            performFullRefreshOverride()
+            return
+        }
         TaskbarPerformanceDiagnostics.measure("refresh", threshold: 0.25) {
             refreshNow()
         }
@@ -677,7 +689,6 @@ final class TaskbarController: NSObject {
         } else {
             settings.pin(app, for: context.screenID)
         }
-        refresh()
     }
 
     func movePinnedItem(_ item: TaskbarItem, before target: TaskbarItem?, screenID: UInt32) {
@@ -686,7 +697,6 @@ final class TaskbarController: NSObject {
             beforeIdentity: target?.identity,
             for: screenID
         )
-        refresh()
     }
 
     @objc private func forceQuitMenuItem() {
@@ -763,7 +773,6 @@ final class TaskbarController: NSObject {
             override.dateTimeWidget = value
             override.clockMode = nil
         }
-        refresh()
     }
 
     private func updateStatsWidgetFromMenu(_ transform: (inout StatsWidgetSettings) -> Void) {
@@ -775,7 +784,6 @@ final class TaskbarController: NSObject {
             transform(&value)
             override.statsWidget = value
         }
-        refresh()
     }
 
     @objc private func quit() {
