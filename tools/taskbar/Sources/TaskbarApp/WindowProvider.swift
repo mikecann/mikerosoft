@@ -174,6 +174,11 @@ func collectWindowRecords(screens: [ScreenInfo], includeMinimized: Bool = false)
         let bounds = rect(from: window[kCGWindowBounds as String] as? [String: Any])
         let owner = window[kCGWindowOwnerName as String] as? String ?? ""
         let cgTitle = window[kCGWindowName as String] as? String ?? ""
+        let windowID = (window[kCGWindowNumber as String] as? NSNumber)?.intValue ?? 0
+        let matchedAccessibilityWindowID = accessibilitySurface?.windowID ?? 0
+        let accessibilityWindowID = windowID > 0 && matchedAccessibilityWindowID == windowID
+            ? matchedAccessibilityWindowID
+            : 0
         let title = resolvedWindowTitle(
             cgTitle: cgTitle,
             owner: owner,
@@ -185,7 +190,8 @@ func collectWindowRecords(screens: [ScreenInfo], includeMinimized: Bool = false)
             owner: owner,
             title: title,
             pid: pid,
-            windowID: (window[kCGWindowNumber as String] as? NSNumber)?.intValue ?? 0,
+            windowID: windowID,
+            accessibilityWindowID: accessibilityWindowID,
             layer: (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0,
             isOnScreen: (window[kCGWindowIsOnscreen as String] as? Bool) ?? true,
             isMinimized: false,
@@ -667,7 +673,8 @@ private func collectMinimizedWindowRecords(screens: [ScreenInfo]) -> [WindowReco
 
             let title = accessibilityString(window, kAXTitleAttribute)
             guard let bounds = accessibilityBounds(window) else { continue }
-            let windowID = resolvedMinimizedWindowID(accessibilityWindowID(window)) {
+            let resolvedAccessibilityWindowID = accessibilityWindowID(window)
+            let windowID = resolvedMinimizedWindowID(resolvedAccessibilityWindowID) {
                 syntheticWindowID(pid: pid, title: title, bounds: bounds)
             }
             records.append(
@@ -676,6 +683,7 @@ private func collectMinimizedWindowRecords(screens: [ScreenInfo]) -> [WindowReco
                     title: title,
                     pid: pid,
                     windowID: windowID,
+                    accessibilityWindowID: resolvedAccessibilityWindowID,
                     layer: 0,
                     isOnScreen: false,
                     isMinimized: true,

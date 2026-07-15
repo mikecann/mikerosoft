@@ -8,6 +8,7 @@ final class TaskbarModelTests: XCTestCase {
         title: String,
         pid: pid_t = 100,
         windowID: Int = 1,
+        accessibilityWindowID: Int = 0,
         layer: Int = 0,
         isOnScreen: Bool = true,
         isMinimized: Bool = false,
@@ -23,6 +24,7 @@ final class TaskbarModelTests: XCTestCase {
             title: title,
             pid: pid,
             windowID: windowID,
+            accessibilityWindowID: accessibilityWindowID,
             layer: layer,
             isOnScreen: isOnScreen,
             isMinimized: isMinimized,
@@ -191,6 +193,34 @@ final class TaskbarModelTests: XCTestCase {
         XCTAssertEqual(visible.map(\.windowID), [578, 16416])
     }
 
+    func testVisibleWindowsKeepsDifferentProvenAccessibilityWindowIDs() {
+        let bounds = CGRect(x: 0, y: 30, width: 2560, height: 1378)
+        let records = [
+            record(
+                owner: "Google Chrome",
+                title: "Issue 25 - GitHub",
+                pid: 739,
+                windowID: 578,
+                accessibilityWindowID: 578,
+                bounds: bounds,
+                bundleID: "com.google.Chrome"
+            ),
+            record(
+                owner: "Google Chrome",
+                title: "Issue 25 - GitHub",
+                pid: 739,
+                windowID: 16416,
+                accessibilityWindowID: 16416,
+                bounds: bounds,
+                bundleID: "com.google.Chrome"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [578, 16416])
+    }
+
     func testVisibleWindowsRejectsOverlappingSameTitleFallbackSurfaces() {
         let records = [
             record(
@@ -268,6 +298,32 @@ final class TaskbarModelTests: XCTestCase {
         let visible = visibleWindows(records, currentPID: 999)
 
         XCTAssertEqual(visible.map(\.windowID), [8017])
+    }
+
+    func testVisibleWindowsKeepsUntitledInternalSizedSurfaceFromDifferentApp() {
+        let records = [
+            record(
+                owner: "Wondershare Filmora Mac",
+                title: "",
+                pid: 89910,
+                windowID: 8017,
+                accessibilityWindowID: 8017,
+                bounds: CGRect(x: 0, y: 0, width: 2560, height: 1408),
+                bundleID: "com.wondershare.filmoramacos"
+            ),
+            record(
+                owner: "Preview",
+                title: "",
+                pid: 455,
+                windowID: 9000,
+                bounds: CGRect(x: 1024, y: 627, width: 113, height: 64),
+                bundleID: "com.apple.Preview"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [8017, 9000])
     }
 
     func testVisibleWindowsKeepsTinyTitledSiblingWindow() {

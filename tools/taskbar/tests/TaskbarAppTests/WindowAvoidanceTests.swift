@@ -18,6 +18,7 @@ final class WindowAvoidanceTests: XCTestCase {
             title: title,
             pid: pid,
             windowID: windowID,
+            accessibilityWindowID: 0,
             layer: layer,
             isOnScreen: isOnScreen,
             isMinimized: false,
