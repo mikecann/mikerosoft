@@ -421,15 +421,23 @@ private func matchingApplicationWindow(
         let role = accessibilityString(window, kAXRoleAttribute)
         return role.isEmpty || role == "AXWindow"
     }
+    let candidateWindowIDs = eligibleWindows.map(accessibilityWindowID)
 
     if let matchIndex = exactApplicationWindowMatchIndex(
         itemWindowIDs: windowIDs,
-        candidateWindowIDs: eligibleWindows.map(accessibilityWindowID)
+        candidateWindowIDs: candidateWindowIDs
     ) {
         return eligibleWindows[matchIndex]
     }
 
-    let scoredCandidates = eligibleWindows.compactMap { window -> (window: AXUIElement, score: Int)? in
+    let scoredCandidates = zip(eligibleWindows, candidateWindowIDs).compactMap {
+        window, candidateWindowID -> (window: AXUIElement, score: Int)? in
+        guard canHeuristicallyMatchApplicationWindow(
+            itemWindowIDs: windowIDs,
+            candidateWindowID: candidateWindowID
+        ) else {
+            return nil
+        }
         let candidateTitle = accessibilityString(window, kAXTitleAttribute)
         let candidateBounds = accessibilityBounds(window)
         let candidateSignature = resolvedAccessibilitySignature(windowIDBridgeAvailable: axGetWindow != nil) {
@@ -456,6 +464,12 @@ func exactApplicationWindowMatchIndex(itemWindowIDs: [Int], candidateWindowIDs: 
     let knownItemWindowIDs = Set(itemWindowIDs.filter { $0 > 0 })
     guard !knownItemWindowIDs.isEmpty else { return nil }
     return candidateWindowIDs.firstIndex(where: knownItemWindowIDs.contains)
+}
+
+func canHeuristicallyMatchApplicationWindow(itemWindowIDs: [Int], candidateWindowID: Int) -> Bool {
+    let knownItemWindowIDs = Set(itemWindowIDs.filter { $0 > 0 })
+    guard !knownItemWindowIDs.isEmpty, candidateWindowID > 0 else { return true }
+    return knownItemWindowIDs.contains(candidateWindowID)
 }
 
 func applicationWindowMatchScore(

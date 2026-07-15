@@ -152,6 +152,32 @@ final class WindowProviderTests: XCTestCase {
         )
     }
 
+    func testApplicationWindowHeuristicRefusesKnownWindowIDMismatch() {
+        let itemWindowIDs = [101]
+        let staleCandidateWindowIDs = [202, 303]
+
+        XCTAssertNil(
+            exactApplicationWindowMatchIndex(
+                itemWindowIDs: itemWindowIDs,
+                candidateWindowIDs: staleCandidateWindowIDs
+            )
+        )
+        XCTAssertTrue(
+            staleCandidateWindowIDs.allSatisfy {
+                !canHeuristicallyMatchApplicationWindow(
+                    itemWindowIDs: itemWindowIDs,
+                    candidateWindowID: $0
+                )
+            }
+        )
+        XCTAssertTrue(
+            canHeuristicallyMatchApplicationWindow(
+                itemWindowIDs: itemWindowIDs,
+                candidateWindowID: 0
+            )
+        )
+    }
+
     func testAccessibilitySignatureSkipsAddressFallbackWhenWindowIDBridgeIsAvailable() {
         var fallbackWasRead = false
 
