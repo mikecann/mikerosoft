@@ -106,16 +106,22 @@ func unminimizeApplicationWindowAndReturnID(pid: pid_t, title: String) -> Int? {
         return nil
     }
 
+    let targetTitle = accessibilityString(target, kAXTitleAttribute)
+    let targetBounds = accessibilityBounds(target)
+    let windowID = resolvedMinimizedWindowID(accessibilityWindowID(target)) {
+        guard let targetBounds else { return 0 }
+        return syntheticWindowID(pid: pid, title: targetTitle, bounds: targetBounds)
+    }
     guard AXUIElementSetAttributeValue(target, "AXMinimized" as CFString, kCFBooleanFalse) == .success else {
         return nil
     }
-    return accessibilityWindowID(target)
+    return windowID
 }
 
 func unminimizeApplicationWindowAsync(pid: pid_t, title: String) {
     performAccessibilityWindowAction("unminimize AX pid=\(pid)") {
         guard let windowID = unminimizeApplicationWindowAndReturnID(pid: pid, title: title) else { return }
-        MinimizedWindowSampler.shared.invalidate(pid: pid, windowID: windowID, title: title)
+        MinimizedWindowSampler.shared.invalidate(pid: pid, windowID: windowID)
     }
 }
 
@@ -719,15 +725,13 @@ final class MinimizedWindowSampler {
         self.schedule = schedule
     }
 
-    func invalidate(pid: pid_t, windowID: Int, title: String) {
+    func invalidate(pid: pid_t, windowID: Int) {
         lock.lock()
         cacheGeneration += 1
-        cachedRecords.removeAll { record in
-            guard record.pid == pid else { return false }
-            if windowID > 0, record.windowID > 0 {
-                return record.windowID == windowID
+        if windowID != 0 {
+            cachedRecords.removeAll { record in
+                record.pid == pid && record.windowID == windowID
             }
-            return normalizedWindowTitle(record.title) == normalizedWindowTitle(title)
         }
         lock.unlock()
     }
@@ -758,12 +762,18 @@ final class MinimizedWindowSampler {
         if shouldLoadSynchronously {
             let records = collect(screens)
             lock.lock()
-            cachedRecords = records
+            let currentRecords: [WindowRecord]
+            if cacheGeneration == refreshGeneration {
+                cachedRecords = records
+                currentRecords = records
+            } else {
+                currentRecords = cachedRecords
+            }
             hasLoadedInitialSnapshot = true
             isRefreshing = false
             lock.unlock()
             return filteredMinimizedRecords(
-                records,
+                currentRecords,
                 excluding: visibleKeys,
                 visibleWindowIDs: visibleWindowIDs
             )

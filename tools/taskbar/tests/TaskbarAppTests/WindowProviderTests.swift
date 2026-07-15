@@ -207,7 +207,7 @@ final class WindowProviderTests: XCTestCase {
             now: Date(timeIntervalSince1970: 100)
         )
 
-        sampler.invalidate(pid: record.pid, windowID: record.windowID, title: record.title)
+        sampler.invalidate(pid: record.pid, windowID: record.windowID)
 
         XCTAssertEqual(
             sampler.records(
@@ -218,6 +218,138 @@ final class WindowProviderTests: XCTestCase {
             ),
             []
         )
+    }
+
+    func testMinimizedSamplerUsesOnlyExactWindowIdentityForSameTitleWindows() {
+        let first = WindowRecord(
+            owner: "Editor",
+            title: "Untitled",
+            pid: 321,
+            windowID: -101,
+            accessibilityWindowID: 0,
+            layer: 0,
+            isOnScreen: false,
+            isMinimized: true,
+            bounds: CGRect(x: 10, y: 20, width: 800, height: 600),
+            screenID: 1,
+            bundleID: "com.example.Editor",
+            appPath: "/Applications/Editor.app",
+            accessibilityTitle: "Untitled",
+            accessibilitySignature: ""
+        )
+        let second = WindowRecord(
+            owner: "Editor",
+            title: "Untitled",
+            pid: 321,
+            windowID: -202,
+            accessibilityWindowID: 0,
+            layer: 0,
+            isOnScreen: false,
+            isMinimized: true,
+            bounds: CGRect(x: 30, y: 40, width: 800, height: 600),
+            screenID: 1,
+            bundleID: "com.example.Editor",
+            appPath: "/Applications/Editor.app",
+            accessibilityTitle: "Untitled",
+            accessibilitySignature: ""
+        )
+        let exactSampler = MinimizedWindowSampler(collect: { _ in [second, first] })
+        _ = exactSampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+
+        exactSampler.invalidate(pid: first.pid, windowID: first.windowID)
+
+        XCTAssertEqual(
+            exactSampler.records(
+                screens: [],
+                excluding: [],
+                visibleWindowIDs: [],
+                now: Date(timeIntervalSince1970: 100.5)
+            ).map(\.windowID),
+            [second.windowID]
+        )
+
+        let unavailableIDSampler = MinimizedWindowSampler(collect: { _ in [first, second] })
+        _ = unavailableIDSampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+        unavailableIDSampler.invalidate(pid: first.pid, windowID: 0)
+
+        XCTAssertEqual(
+            unavailableIDSampler.records(
+                screens: [],
+                excluding: [],
+                visibleWindowIDs: [],
+                now: Date(timeIntervalSince1970: 100.5)
+            ).map(\.windowID),
+            [first.windowID, second.windowID]
+        )
+
+        let missingPositiveIDSampler = MinimizedWindowSampler(collect: { _ in [first, second] })
+        _ = missingPositiveIDSampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+        missingPositiveIDSampler.invalidate(pid: first.pid, windowID: 999)
+
+        XCTAssertEqual(
+            missingPositiveIDSampler.records(
+                screens: [],
+                excluding: [],
+                visibleWindowIDs: [],
+                now: Date(timeIntervalSince1970: 100.5)
+            ).map(\.windowID),
+            [first.windowID, second.windowID]
+        )
+    }
+
+    func testMinimizedSamplerInvalidationWinsAgainstInitialSynchronousScan() {
+        let record = WindowRecord(
+            owner: "Editor",
+            title: "Draft",
+            pid: 321,
+            windowID: 987,
+            accessibilityWindowID: 987,
+            layer: 0,
+            isOnScreen: false,
+            isMinimized: true,
+            bounds: CGRect(x: 10, y: 20, width: 800, height: 600),
+            screenID: 1,
+            bundleID: "com.example.Editor",
+            appPath: "/Applications/Editor.app",
+            accessibilityTitle: "Draft",
+            accessibilitySignature: ""
+        )
+        var sampler: MinimizedWindowSampler!
+        sampler = MinimizedWindowSampler(collect: { _ in
+            sampler.invalidate(pid: record.pid, windowID: record.windowID)
+            return [record]
+        })
+
+        let initial = sampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+        let nextTick = sampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100.5)
+        )
+
+        XCTAssertEqual(initial, [])
+        XCTAssertEqual(nextTick, [])
     }
 
     func testMinimizedSamplerDoesNotRestoreInvalidatedWindowFromInFlightRefresh() throws {
@@ -255,7 +387,7 @@ final class WindowProviderTests: XCTestCase {
             now: Date(timeIntervalSince1970: 102.1)
         )
 
-        sampler.invalidate(pid: record.pid, windowID: record.windowID, title: record.title)
+        sampler.invalidate(pid: record.pid, windowID: record.windowID)
         try XCTUnwrap(scheduledRefresh)()
 
         XCTAssertEqual(
