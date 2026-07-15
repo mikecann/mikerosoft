@@ -103,6 +103,21 @@ while still not covering the Windows-only integrations.
 | `taskbar` | Supported | `bash tools/taskbar/setup_mac.sh` | `taskbar restart` | Swift/AppKit taskbar for macOS. Run `bash install_mac.sh` if you want the `taskbar` launcher on `PATH` |
 | Everything else | Windows-only for now | Use `install.ps1` on Windows | Varies by tool | Most tools still depend on Windows-specific shell integration, taskbar shortcuts, or Explorer context menus |
 
+### Codex worktrees
+
+The checked-in local environment at `.codex/environments/environment.toml`
+bootstraps new Codex worktrees without changing global PATH entries, registering
+daemons, or installing heavyweight per-tool runtime dependencies. It installs
+the Bun packages under `tools/` and the website's npm dependencies.
+
+Select the `mikerosoft` local environment once in Codex project settings. Codex
+will then run `.codex/setup.sh` whenever it creates a worktree. Run the same
+script manually to refresh dependencies in an existing worktree:
+
+```bash
+bash .codex/setup.sh
+```
+
 ---
 
 ## How it works
