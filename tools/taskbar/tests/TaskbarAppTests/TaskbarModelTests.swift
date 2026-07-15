@@ -322,6 +322,35 @@ final class TaskbarModelTests: XCTestCase {
         XCTAssertEqual(visible.map(\.windowID), [1, 2])
     }
 
+    func testVisibleWindowsRejectsRecordsWithTheSamePositiveWindowID() {
+        let records = [
+            record(
+                owner: "Google Chrome",
+                title: "Inbox",
+                pid: 739,
+                windowID: 16416,
+                bounds: CGRect(x: 0, y: 30, width: 1200, height: 900),
+                bundleID: "com.google.Chrome",
+                accessibilityTitle: "Inbox - Google Chrome",
+                accessibilitySignature: "profile-a-window"
+            ),
+            record(
+                owner: "Google Chrome",
+                title: "New tab",
+                pid: 739,
+                windowID: 16416,
+                bounds: CGRect(x: 1300, y: 30, width: 1200, height: 900),
+                bundleID: "com.google.Chrome",
+                accessibilityTitle: "New tab - Google Chrome",
+                accessibilitySignature: "profile-b-window"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [16416])
+    }
+
     func testBuildItemsCanShowIndividualWindows() {
         let windows = [
             record(owner: "Safari", title: "Article", pid: 10, windowID: 1),

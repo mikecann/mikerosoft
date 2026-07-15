@@ -86,6 +86,10 @@ private func deduplicatedAccessibilitySurfaces(_ records: [WindowRecord]) -> [Wi
 }
 
 private func isDuplicateSurface(_ left: WindowRecord, _ right: WindowRecord) -> Bool {
+    if left.windowID > 0, left.windowID == right.windowID {
+        return true
+    }
+
     let leftSignature = accessibilityDuplicateSignature(left)
     let rightSignature = accessibilityDuplicateSignature(right)
 
