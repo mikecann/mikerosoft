@@ -197,6 +197,7 @@ final class TaskbarController: NSObject {
     private var timer: Timer?
     private var autoHideTimer: Timer?
     private var pendingRefreshWorkItem: DispatchWorkItem?
+    private var pendingFrontmostWindowExpectation: FrontmostWindowExpectation?
     private var settingsChangeObservation: TaskbarSettingsChangeObservation?
     private var screenParametersObservation: NSObjectProtocol?
     private var settingsWindowController: TaskbarSettingsWindow?
@@ -298,7 +299,17 @@ final class TaskbarController: NSObject {
         }
         let visibleForWindowAvoidance = visibleWindows(records, currentPID: currentProcessID)
         let currentFrontmostPID = frontmostPID()
-        let currentFrontmostWindowID = frontmostWindowID(in: visibleForWindowAvoidance, frontmostPID: currentFrontmostPID)
+        let measuredFrontmostWindowID = frontmostWindowID(
+            in: visibleForWindowAvoidance,
+            frontmostPID: currentFrontmostPID
+        )
+        let frontmostWindowResolution = resolveFrontmostWindow(
+            measuredPID: currentFrontmostPID,
+            measuredWindowID: measuredFrontmostWindowID,
+            expectation: pendingFrontmostWindowExpectation,
+            now: ProcessInfo.processInfo.systemUptime
+        )
+        pendingFrontmostWindowExpectation = frontmostWindowResolution.remainingExpectation
 
         for screen in screens {
             let values = valuesByScreen[screen.id] ?? settings.values(for: screen.id)
@@ -311,7 +322,7 @@ final class TaskbarController: NSObject {
             let items = buildTaskbarItems(
                 windows: screenWindows,
                 frontmostPID: currentFrontmostPID,
-                frontmostWindowID: currentFrontmostWindowID,
+                frontmostWindowID: frontmostWindowResolution.effectiveWindowID,
                 pinnedApps: values.pinnedApps
             )
             panels[screen.id]?.update(screen: screen, items: items, values: values)
@@ -329,6 +340,10 @@ final class TaskbarController: NSObject {
     func activate(item: TaskbarItem) {
         let pidText = item.pid.map(String.init) ?? "not-running"
         log("activating \(item.owner) pid=\(pidText) windows=\(item.windowIDs)")
+        pendingFrontmostWindowExpectation = frontmostWindowExpectation(
+            afterActivating: item,
+            now: ProcessInfo.processInfo.systemUptime
+        )
         if let pid = item.pid {
             if item.isMinimized {
                 unminimizeApplicationWindowAsync(pid: pid, title: item.title)
