@@ -31,14 +31,14 @@ struct NetworkTransferRates: Equatable {
 func readNetworkInterfaceCounters64() -> [String: NetworkInterfaceCounters]? {
     var mib = [
         Int32(CTL_NET),
-        Int32(PF_ROUTE),
+        Int32(PF_LINK),
+        Int32(NETLINK_GENERIC),
+        Int32(IFMIB_IFALLDATA),
         0,
-        Int32(AF_UNSPEC),
-        Int32(NET_RT_IFLIST2),
-        0
+        Int32(IFDATA_GENERAL)
     ]
 
-    // The routing table can grow between the size query and the read.
+    // The interface table can grow between the size query and the read.
     for _ in 0..<3 {
         var requiredLength = 0
         let sizeResult = mib.withUnsafeMutableBufferPointer { mibBuffer in
@@ -72,10 +72,7 @@ func readNetworkInterfaceCounters64() -> [String: NetworkInterfaceCounters]? {
         if readResult == 0 {
             guard actualLength <= data.count else { return nil }
             data.removeSubrange(actualLength..<data.count)
-            return parseNetworkInterfaceCounters(
-                data,
-                interfaceNameAtIndex: networkInterfaceName(at:)
-            )
+            return parseNetworkInterfaceCounters(data)
         }
 
         guard errno == ENOMEM else { return nil }
@@ -84,57 +81,39 @@ func readNetworkInterfaceCounters64() -> [String: NetworkInterfaceCounters]? {
     return nil
 }
 
-private func networkInterfaceName(at index: UInt32) -> String? {
-    guard index > 0 else { return nil }
-    var buffer = [CChar](repeating: 0, count: Int(IF_NAMESIZE))
+func parseNetworkInterfaceCounters(_ data: Data) -> [String: NetworkInterfaceCounters]? {
+    let recordSize = MemoryLayout<ifmibdata>.stride
+    guard data.count.isMultiple(of: recordSize) else { return nil }
 
-    return buffer.withUnsafeMutableBufferPointer { nameBuffer in
-        guard let baseAddress = nameBuffer.baseAddress,
-              if_indextoname(index, baseAddress) != nil
-        else {
-            return nil
-        }
-        return String(cString: baseAddress)
-    }
-}
-
-func parseNetworkInterfaceCounters(
-    _ data: Data,
-    interfaceNameAtIndex: (UInt32) -> String?
-) -> [String: NetworkInterfaceCounters]? {
-    data.withUnsafeBytes { bytes -> [String: NetworkInterfaceCounters]? in
+    return data.withUnsafeBytes { bytes in
         var counters: [String: NetworkInterfaceCounters] = [:]
-        var offset = 0
 
-        while offset < bytes.count {
-            let remaining = bytes.count - offset
-            guard remaining >= 4 else { return nil }
-
-            let messageLength = Int(bytes.loadUnaligned(fromByteOffset: offset, as: UInt16.self))
-            guard messageLength >= 4, messageLength <= remaining else { return nil }
-
-            let messageType = bytes.loadUnaligned(fromByteOffset: offset + 3, as: UInt8.self)
-            if messageType == UInt8(RTM_IFINFO2) {
-                guard messageLength >= MemoryLayout<if_msghdr2>.size else { return nil }
-                let message = bytes.loadUnaligned(fromByteOffset: offset, as: if_msghdr2.self)
-                let flags = message.ifm_flags
-
-                if (flags & Int32(IFF_UP)) != 0,
-                   (flags & Int32(IFF_LOOPBACK)) == 0,
-                   let name = interfaceNameAtIndex(UInt32(message.ifm_index)),
-                   !name.isEmpty {
-                    counters[name] = NetworkInterfaceCounters(
-                        upload: message.ifm_data.ifi_obytes,
-                        download: message.ifm_data.ifi_ibytes,
-                        width: .bits64
-                    )
-                }
+        for offset in stride(from: 0, to: bytes.count, by: recordSize) {
+            let record = bytes.loadUnaligned(fromByteOffset: offset, as: ifmibdata.self)
+            let flags = record.ifmd_flags
+            guard (flags & UInt32(IFF_UP)) != 0,
+                  (flags & UInt32(IFF_LOOPBACK)) == 0,
+                  let name = networkInterfaceName(from: record)
+            else {
+                continue
             }
 
-            offset += messageLength
+            counters[name] = NetworkInterfaceCounters(
+                upload: record.ifmd_data.ifi_obytes,
+                download: record.ifmd_data.ifi_ibytes,
+                width: .bits64
+            )
         }
 
         return counters
+    }
+}
+
+private func networkInterfaceName(from record: ifmibdata) -> String? {
+    var nameBytes = record.ifmd_name
+    return withUnsafeBytes(of: &nameBytes) { bytes in
+        guard let terminator = bytes.firstIndex(of: 0), terminator > 0 else { return nil }
+        return String(bytes: bytes[..<terminator], encoding: .utf8)
     }
 }
 
