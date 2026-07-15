@@ -188,13 +188,18 @@ final class TaskbarController: NSObject {
     private let settings: TaskbarSettings
     private let startAtLoginSync: (Bool) -> Void
     private let performFullRefreshOverride: (() -> Void)?
+    private let screenCollector: () -> [ScreenInfo]
+    private let screenNotificationCenter: NotificationCenter
+    private let settingsWindowFactory: (TaskbarSettings, [ScreenInfo]) -> TaskbarSettingsWindow
     private let windowAvoider = WindowAvoider()
     private let performanceWatchdog = MainThreadWatchdog()
     private var panels: [UInt32: TaskbarPanel] = [:]
     private var timer: Timer?
     private var autoHideTimer: Timer?
     private var pendingRefreshWorkItem: DispatchWorkItem?
-    private var settingsWindowController: SettingsWindowController?
+    private var settingsChangeObservation: TaskbarSettingsChangeObservation?
+    private var screenParametersObservation: NSObjectProtocol?
+    private var settingsWindowController: TaskbarSettingsWindow?
     private var statsPopoverPanel: NSPanel?
     private var statsPopoverMetric: StatsWidgetMetric?
     private var statsPopoverEventMonitors: [Any] = []
@@ -207,19 +212,27 @@ final class TaskbarController: NSObject {
         settings: TaskbarSettings = TaskbarSettings(),
         startAtLoginSync: @escaping (Bool) -> Void = { StartupManager.setEnabled($0) },
         scheduleSettingsRefresh: (() -> Void)? = nil,
-        performFullRefresh: (() -> Void)? = nil
+        performFullRefresh: (() -> Void)? = nil,
+        screenCollector: @escaping () -> [ScreenInfo] = collectScreens,
+        screenNotificationCenter: NotificationCenter = .default,
+        settingsWindowFactory: @escaping (TaskbarSettings, [ScreenInfo]) -> TaskbarSettingsWindow = {
+            SettingsWindowController(settings: $0, screens: $1)
+        }
     ) {
         self.settings = settings
         self.startAtLoginSync = startAtLoginSync
         self.performFullRefreshOverride = performFullRefresh
+        self.screenCollector = screenCollector
+        self.screenNotificationCenter = screenNotificationCenter
+        self.settingsWindowFactory = settingsWindowFactory
         super.init()
         settings.onStartAtLoginChange = { [weak self] enabled in
             self?.startAtLoginSync(enabled)
         }
         if let scheduleSettingsRefresh {
-            settings.onChange = scheduleSettingsRefresh
+            settingsChangeObservation = settings.observeChanges(scheduleSettingsRefresh)
         } else {
-            settings.onChange = { [weak self] in
+            settingsChangeObservation = settings.observeChanges { [weak self] in
                 self?.scheduleRefreshSoon()
             }
         }
@@ -229,7 +242,7 @@ final class TaskbarController: NSObject {
         configureTaskbarAccessibilityMessagingTimeout()
         performanceWatchdog.start()
         startAtLoginSync(settings.preferences.startAtLogin)
-        log("screens=\(collectScreens().map { "\($0.name):\($0.appKitFrame)" }.joined(separator: " | "))")
+        log("screens=\(screenCollector().map { "\($0.name):\($0.appKitFrame)" }.joined(separator: " | "))")
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -244,6 +257,7 @@ final class TaskbarController: NSObject {
 
     func prepareForTermination() {
         pendingRefreshWorkItem?.cancel()
+        stopObservingScreenChanges()
         settings.flushPendingPersistence()
     }
 
@@ -260,7 +274,7 @@ final class TaskbarController: NSObject {
     private func refreshNow() {
         processCommandFile()
 
-        let screens = collectScreens()
+        let screens = screenCollector()
         let screenIDs = Set(screens.map(\.id))
         let valuesByScreen = screens.reduce(into: [UInt32: TaskbarSettingValues]()) { result, screen in
             result[screen.id] = settings.values(for: screen.id)
@@ -663,29 +677,66 @@ final class TaskbarController: NSObject {
     }
 
     func showSettings(screenID: UInt32?) {
-        let screens = collectScreens()
-        if settingsWindowController == nil {
-            settingsWindowController = SettingsWindowController(settings: settings, screens: screens)
-        } else {
-            settingsWindowController?.updateScreens(screens)
-        }
+        let screens = screenCollector()
+        let settingsWindowController = settingsWindow(for: screens)
         if let screenID {
-            settingsWindowController?.selectMonitor(screenID: screenID)
+            settingsWindowController.selectMonitor(screenID: screenID)
         }
-        settingsWindowController?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        settingsWindowController.showWindow(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     func showSettings(widgetID: TaskbarWidgetID, screenID: UInt32?) {
-        let screens = collectScreens()
-        if settingsWindowController == nil {
-            settingsWindowController = SettingsWindowController(settings: settings, screens: screens)
-        } else {
-            settingsWindowController?.updateScreens(screens)
+        let screens = screenCollector()
+        let settingsWindowController = settingsWindow(for: screens)
+        settingsWindowController.selectWidget(widgetID, screenID: screenID)
+        settingsWindowController.showWindow(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func settingsWindow(for screens: [ScreenInfo]) -> TaskbarSettingsWindow {
+        if let settingsWindowController {
+            settingsWindowController.updateScreens(screens)
+            return settingsWindowController
         }
-        settingsWindowController?.selectWidget(widgetID, screenID: screenID)
-        settingsWindowController?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+
+        let settingsWindowController = settingsWindowFactory(settings, screens)
+        settingsWindowController.onClose = { [weak self] in
+            self?.settingsWindowDidClose()
+        }
+        self.settingsWindowController = settingsWindowController
+        startObservingScreenChanges()
+        return settingsWindowController
+    }
+
+    private func startObservingScreenChanges() {
+        guard screenParametersObservation == nil else { return }
+        screenParametersObservation = screenNotificationCenter.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.screenParametersDidChange()
+        }
+    }
+
+    private func screenParametersDidChange() {
+        guard let settingsWindowController else { return }
+        settingsWindowController.updateScreens(screenCollector())
+        refresh()
+    }
+
+    private func settingsWindowDidClose() {
+        settingsWindowController?.onClose = nil
+        settingsWindowController = nil
+        stopObservingScreenChanges()
+    }
+
+    private func stopObservingScreenChanges() {
+        if let screenParametersObservation {
+            screenNotificationCenter.removeObserver(screenParametersObservation)
+            self.screenParametersObservation = nil
+        }
     }
 
     @objc private func refreshFromMenu() {

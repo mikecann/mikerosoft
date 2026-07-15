@@ -1101,4 +1101,25 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(items.map(\.indentLevel), [0, 0, 1, 0, 0, 1, 0, 1])
         XCTAssertEqual(items.map(\.isSelectable), [true, true, true, false, true, true, true, true])
     }
+
+    func testReconciledSidebarSelectionKeepsMonitorByIDWhenScreenGeometryChanges() {
+        let original = ScreenInfo(
+            id: 7,
+            name: "Studio Display",
+            appKitFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            quartzFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        )
+        let resized = ScreenInfo(
+            id: 7,
+            name: "Studio Display",
+            appKitFrame: CGRect(x: 0, y: 0, width: 2560, height: 1440),
+            quartzFrame: CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        )
+        let refreshedItems = taskbarSettingsSidebarItems(screens: [resized], widgets: [.stats])
+
+        XCTAssertEqual(
+            reconciledSettingsSidebarSelection(.monitor(original), in: refreshedItems),
+            .monitor(resized)
+        )
+    }
 }
