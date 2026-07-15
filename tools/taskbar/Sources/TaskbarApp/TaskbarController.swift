@@ -765,25 +765,12 @@ final class TaskbarController: NSObject {
 
     private func updateDateTimeWidgetFromMenu(_ transform: (inout DateTimeWidgetSettings) -> Void) {
         guard let context = menuWidgetContext, context.widgetID == .dateTime else { return }
-        let current = settings.overrides(for: context.screenID).dateTimeWidget
-            ?? settings.values(for: context.screenID).dateTimeWidget
-        settings.updateOverrides(for: context.screenID) { override in
-            var value = current
-            transform(&value)
-            override.dateTimeWidget = value
-            override.clockMode = nil
-        }
+        settings.updateDateTimeWidget(for: context.screenID, transform)
     }
 
     private func updateStatsWidgetFromMenu(_ transform: (inout StatsWidgetSettings) -> Void) {
         guard let context = menuWidgetContext, context.widgetID == .stats else { return }
-        let current = settings.overrides(for: context.screenID).statsWidget
-            ?? settings.values(for: context.screenID).statsWidget
-        settings.updateOverrides(for: context.screenID) { override in
-            var value = current
-            transform(&value)
-            override.statsWidget = value
-        }
+        settings.updateStatsWidget(for: context.screenID, transform)
     }
 
     @objc private func quit() {
