@@ -46,6 +46,10 @@ private func taskbarItem(
 }
 
 final class TaskbarSettingsPersistenceTests: XCTestCase {
+    private func performMenuItem(_ item: NSMenuItem, on controller: TaskbarController) throws {
+        _ = controller.perform(try XCTUnwrap(item.action), with: item)
+    }
+
     func testUpdateGeneralClampsBeforeSendingOneChangeNotification() {
         let store = RecordingTaskbarSettingsStore()
         let settings = TaskbarSettings(store: store)
@@ -203,16 +207,11 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
             appPath: "/Applications/Safari.app"
         )
 
-        func perform(_ item: NSMenuItem) throws {
-            let action = try XCTUnwrap(item.action)
-            _ = controller.perform(action, with: item)
-        }
-
-        try perform(XCTUnwrap(controller.makeItemMenu(for: notes, screenID: 123).items.first))
+        try performMenuItem(XCTUnwrap(controller.makeItemMenu(for: notes, screenID: 123).items.first), on: controller)
         XCTAssertEqual(scheduledRefreshCount, 1)
         XCTAssertEqual(fullRefreshCount, 0)
 
-        try perform(XCTUnwrap(controller.makeItemMenu(for: safari, screenID: 123).items.first))
+        try performMenuItem(XCTUnwrap(controller.makeItemMenu(for: safari, screenID: 123).items.first), on: controller)
         XCTAssertEqual(scheduledRefreshCount, 2)
         XCTAssertEqual(fullRefreshCount, 0)
 
@@ -221,12 +220,12 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(fullRefreshCount, 0)
 
         let dateTimeMenu = try XCTUnwrap(controller.makeWidgetMenu(for: .dateTime, screenID: 123))
-        try perform(XCTUnwrap(dateTimeMenu.items.first))
+        try performMenuItem(XCTUnwrap(dateTimeMenu.items.first), on: controller)
         XCTAssertEqual(scheduledRefreshCount, 4)
         XCTAssertEqual(fullRefreshCount, 0)
 
         let statsMenu = try XCTUnwrap(controller.makeWidgetMenu(for: .stats, screenID: 123))
-        try perform(XCTUnwrap(statsMenu.items.first(where: { $0.title == "Show Stats" })))
+        try performMenuItem(XCTUnwrap(statsMenu.items.first(where: { $0.title == "Show Stats" })), on: controller)
         XCTAssertEqual(scheduledRefreshCount, 5)
         XCTAssertEqual(fullRefreshCount, 0)
 
@@ -235,5 +234,267 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
             for: 123
         ))
         XCTAssertEqual(settings.values(for: 123).pinnedApps.map(\.displayName), ["Safari", "Notes"])
+    }
+
+    func testScreenScopedPinWithoutOverrideUpdatesGeneral() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        let notes = taskbarItem(
+            owner: "Notes",
+            bundleID: "com.apple.Notes",
+            appPath: "/System/Applications/Notes.app"
+        )
+
+        let pinItem = try XCTUnwrap(controller.makeItemMenu(for: notes, screenID: 123).items.first)
+        try performMenuItem(pinItem, on: controller)
+
+        XCTAssertEqual(settings.preferences.general.pinnedApps.map(\.displayName), ["Notes"])
+        XCTAssertTrue(settings.preferences.monitorOverrides.isEmpty)
+    }
+
+    func testScreenScopedUnpinWithoutOverrideUpdatesGeneral() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        let notes = taskbarItem(
+            owner: "Notes",
+            bundleID: "com.apple.Notes",
+            appPath: "/System/Applications/Notes.app",
+            isPinned: true
+        )
+        settings.pin(PinnedApp(displayName: notes.owner, bundleID: notes.bundleID, appPath: notes.appPath))
+
+        let unpinItem = try XCTUnwrap(controller.makeItemMenu(for: notes, screenID: 123).items.first)
+        try performMenuItem(unpinItem, on: controller)
+
+        XCTAssertTrue(settings.preferences.general.pinnedApps.isEmpty)
+        XCTAssertTrue(settings.preferences.monitorOverrides.isEmpty)
+    }
+
+    func testScreenScopedReorderWithoutOverrideUpdatesGeneral() {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        let notes = taskbarItem(
+            owner: "Notes",
+            bundleID: "com.apple.Notes",
+            appPath: "/System/Applications/Notes.app",
+            isPinned: true,
+            pinOrder: 0
+        )
+        let safari = taskbarItem(
+            owner: "Safari",
+            bundleID: "com.apple.Safari",
+            appPath: "/Applications/Safari.app",
+            isPinned: true,
+            pinOrder: 1
+        )
+        settings.pin(PinnedApp(displayName: notes.owner, bundleID: notes.bundleID, appPath: notes.appPath))
+        settings.pin(PinnedApp(displayName: safari.owner, bundleID: safari.bundleID, appPath: safari.appPath))
+
+        controller.movePinnedItem(safari, before: notes, screenID: 123)
+
+        XCTAssertEqual(settings.preferences.general.pinnedApps.map(\.displayName), ["Safari", "Notes"])
+        XCTAssertTrue(settings.preferences.monitorOverrides.isEmpty)
+    }
+
+    func testScreenScopedPinnedAppActionsUpdateExistingOverrideOnly() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        let notes = PinnedApp(
+            displayName: "Notes",
+            bundleID: "com.apple.Notes",
+            appPath: "/System/Applications/Notes.app"
+        )
+        let calendar = taskbarItem(
+            owner: "Calendar",
+            bundleID: "com.apple.iCal",
+            appPath: "/System/Applications/Calendar.app"
+        )
+        let safari = taskbarItem(
+            owner: "Safari",
+            bundleID: "com.apple.Safari",
+            appPath: "/Applications/Safari.app"
+        )
+        settings.pin(notes)
+        settings.updateOverrides(for: 123) { $0.pinnedApps = [] }
+
+        let pinCalendarItem = try XCTUnwrap(controller.makeItemMenu(for: calendar, screenID: 123).items.first)
+        try performMenuItem(pinCalendarItem, on: controller)
+        let pinSafariItem = try XCTUnwrap(controller.makeItemMenu(for: safari, screenID: 123).items.first)
+        try performMenuItem(pinSafariItem, on: controller)
+
+        let pinnedCalendar = taskbarItem(
+            owner: calendar.owner,
+            bundleID: calendar.bundleID,
+            appPath: calendar.appPath,
+            isPinned: true,
+            pinOrder: 0
+        )
+        let pinnedSafari = taskbarItem(
+            owner: safari.owner,
+            bundleID: safari.bundleID,
+            appPath: safari.appPath,
+            isPinned: true,
+            pinOrder: 1
+        )
+        controller.movePinnedItem(pinnedSafari, before: pinnedCalendar, screenID: 123)
+
+        let unpinCalendarItem = try XCTUnwrap(controller.makeItemMenu(for: pinnedCalendar, screenID: 123).items.first)
+        try performMenuItem(unpinCalendarItem, on: controller)
+
+        XCTAssertEqual(settings.preferences.general.pinnedApps.map(\.displayName), ["Notes"])
+        XCTAssertEqual(
+            settings.preferences.monitorOverrides["123"]?.pinnedApps?.map(\.displayName),
+            ["Safari"]
+        )
+    }
+
+    func testScreenScopedPinnedAppActionsUpdateExistingNonemptyOverrideOnly() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        let finder = taskbarItem(
+            owner: "Finder",
+            bundleID: "com.apple.finder",
+            appPath: "/System/Library/CoreServices/Finder.app",
+            isPinned: true,
+            pinOrder: 0
+        )
+        settings.updateOverrides(for: 123) {
+            $0.pinnedApps = [PinnedApp(displayName: finder.owner, bundleID: finder.bundleID, appPath: finder.appPath)]
+        }
+
+        let unpinFinderItem = try XCTUnwrap(controller.makeItemMenu(for: finder, screenID: 123).items.first)
+        try performMenuItem(unpinFinderItem, on: controller)
+
+        XCTAssertTrue(settings.preferences.general.pinnedApps.isEmpty)
+        XCTAssertEqual(settings.preferences.monitorOverrides["123"]?.pinnedApps, [])
+    }
+
+    func testDateTimeMenuWithoutOverrideUpdatesGeneral() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+
+        let menu = try XCTUnwrap(controller.makeWidgetMenu(for: .dateTime, screenID: 123))
+        let showDateTimeItem = try XCTUnwrap(menu.items.first)
+        try performMenuItem(showDateTimeItem, on: controller)
+
+        XCTAssertFalse(settings.preferences.general.dateTimeWidget.isEnabled)
+        XCTAssertTrue(settings.preferences.monitorOverrides.isEmpty)
+    }
+
+    func testDateTimeMenuWithOverrideUpdatesOverrideOnly() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        let monitorValue = DateTimeWidgetSettings(
+            isEnabled: true,
+            dateDisplay: .always,
+            showDayOfWeek: false,
+            showSeconds: false,
+            use24HourClock: false
+        )
+        settings.updateOverrides(for: 123) { $0.dateTimeWidget = monitorValue }
+
+        let menu = try XCTUnwrap(controller.makeWidgetMenu(for: .dateTime, screenID: 123))
+        let showSecondsItem = try XCTUnwrap(menu.items.first(where: { $0.title == "Show Seconds" }))
+        try performMenuItem(showSecondsItem, on: controller)
+
+        var expected = monitorValue
+        expected.showSeconds = true
+        XCTAssertEqual(settings.preferences.general.dateTimeWidget, .defaults)
+        XCTAssertEqual(settings.preferences.monitorOverrides["123"]?.dateTimeWidget, expected)
+    }
+
+    func testDateTimeMenuMigratesLegacyClockModeOverride() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        settings.updateGeneral { values in
+            values.dateTimeWidget.showDayOfWeek = false
+            values.dateTimeWidget.showSeconds = true
+            values.dateTimeWidget.use24HourClock = false
+        }
+        let generalValue = settings.preferences.general.dateTimeWidget
+        settings.updateOverrides(for: 123) { $0.clockMode = .time }
+
+        let menu = try XCTUnwrap(controller.makeWidgetMenu(for: .dateTime, screenID: 123))
+        let showSecondsItem = try XCTUnwrap(menu.items.first(where: { $0.title == "Show Seconds" }))
+        try performMenuItem(showSecondsItem, on: controller)
+
+        var expected = generalValue
+        expected.applyLegacyClockMode(.time)
+        expected.showSeconds.toggle()
+        XCTAssertEqual(settings.preferences.general.dateTimeWidget, generalValue)
+        XCTAssertNil(settings.preferences.monitorOverrides["123"]?.clockMode)
+        XCTAssertEqual(settings.preferences.monitorOverrides["123"]?.dateTimeWidget, expected)
+    }
+
+    func testStatsMenuWithoutOverrideUpdatesGeneral() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+
+        let menu = try XCTUnwrap(controller.makeWidgetMenu(for: .stats, screenID: 123))
+        let showStatsItem = try XCTUnwrap(menu.items.first(where: { $0.title == "Show Stats" }))
+        try performMenuItem(showStatsItem, on: controller)
+
+        XCTAssertFalse(settings.preferences.general.statsWidget.isEnabled)
+        XCTAssertTrue(settings.preferences.monitorOverrides.isEmpty)
+    }
+
+    func testStatsMenuWithOverrideUpdatesOverrideOnly() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        let monitorValue = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: false,
+            showGPU: false,
+            showMemory: true,
+            showNetwork: false,
+            showMiniGraph: false,
+            memoryDisplay: .pie
+        )
+        settings.updateOverrides(for: 123) { $0.statsWidget = monitorValue }
+
+        let menu = try XCTUnwrap(controller.makeWidgetMenu(for: .stats, screenID: 123))
+        let cpuItem = try XCTUnwrap(menu.items.first(where: { $0.title == "CPU" }))
+        try performMenuItem(cpuItem, on: controller)
+
+        var expected = monitorValue
+        expected.showCPU = true
+        XCTAssertEqual(settings.preferences.general.statsWidget, .defaults)
+        XCTAssertEqual(settings.preferences.monitorOverrides["123"]?.statsWidget, expected)
+    }
+
+    func testMenuActionsUpdateGeneralWhenMonitorOnlyOverridesOtherFields() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        let notes = taskbarItem(
+            owner: "Notes",
+            bundleID: "com.apple.Notes",
+            appPath: "/System/Applications/Notes.app"
+        )
+        settings.updateOverrides(for: 123) { $0.itemSpacing = 8 }
+
+        try performMenuItem(
+            XCTUnwrap(controller.makeItemMenu(for: notes, screenID: 123).items.first),
+            on: controller
+        )
+        let dateTimeMenu = try XCTUnwrap(controller.makeWidgetMenu(for: .dateTime, screenID: 123))
+        try performMenuItem(XCTUnwrap(dateTimeMenu.items.first), on: controller)
+        let statsMenu = try XCTUnwrap(controller.makeWidgetMenu(for: .stats, screenID: 123))
+        try performMenuItem(XCTUnwrap(statsMenu.items.first(where: { $0.title == "Show Stats" })), on: controller)
+
+        XCTAssertEqual(settings.preferences.general.pinnedApps.map(\.displayName), ["Notes"])
+        XCTAssertFalse(settings.preferences.general.dateTimeWidget.isEnabled)
+        XCTAssertFalse(settings.preferences.general.statsWidget.isEnabled)
+        XCTAssertEqual(settings.preferences.monitorOverrides["123"], TaskbarMonitorOverrides(itemSpacing: 8))
     }
 }

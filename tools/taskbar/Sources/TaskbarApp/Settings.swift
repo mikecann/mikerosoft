@@ -747,50 +747,70 @@ final class TaskbarSettings {
         settingsDidChange()
     }
 
+    func updateDateTimeWidget(for screenID: UInt32, _ transform: (inout DateTimeWidgetSettings) -> Void) {
+        let override = overrides(for: screenID)
+        if override.dateTimeWidget != nil || override.clockMode != nil {
+            var value = values(for: screenID).dateTimeWidget
+            transform(&value)
+            updateOverrides(for: screenID) { override in
+                override.dateTimeWidget = value
+                override.clockMode = nil
+            }
+        } else {
+            updateGeneral { values in
+                transform(&values.dateTimeWidget)
+            }
+        }
+    }
+
+    func updateStatsWidget(for screenID: UInt32, _ transform: (inout StatsWidgetSettings) -> Void) {
+        if overrides(for: screenID).statsWidget != nil {
+            updateOverrides(for: screenID) { override in
+                var value = override.statsWidget ?? .defaults
+                transform(&value)
+                override.statsWidget = value
+            }
+        } else {
+            updateGeneral { values in
+                transform(&values.statsWidget)
+            }
+        }
+    }
+
     func isPinned(_ app: PinnedApp, for screenID: UInt32? = nil) -> Bool {
         let apps = screenID.map { values(for: $0).pinnedApps } ?? preferences.general.pinnedApps
         return apps.contains(where: { $0.identity == app.identity })
     }
 
     func pin(_ app: PinnedApp, for screenID: UInt32? = nil) {
-        if let screenID {
-            updateOverrides(for: screenID) { override in
-                var apps = override.pinnedApps ?? values(for: screenID).pinnedApps
-                guard !apps.contains(where: { $0.identity == app.identity }) else { return }
-                apps.append(app)
-                override.pinnedApps = apps
-            }
-        } else {
-            updateGeneral { values in
-                guard !values.pinnedApps.contains(where: { $0.identity == app.identity }) else { return }
-                values.pinnedApps.append(app)
-            }
+        updatePinnedApps(for: screenID) { apps in
+            guard !apps.contains(where: { $0.identity == app.identity }) else { return }
+            apps.append(app)
         }
     }
 
     func unpin(_ app: PinnedApp, for screenID: UInt32? = nil) {
-        if let screenID {
-            updateOverrides(for: screenID) { override in
-                var apps = override.pinnedApps ?? values(for: screenID).pinnedApps
-                apps.removeAll { $0.identity == app.identity }
-                override.pinnedApps = apps
-            }
-        } else {
-            updateGeneral { values in
-                values.pinnedApps.removeAll { $0.identity == app.identity }
-            }
+        updatePinnedApps(for: screenID) { apps in
+            apps.removeAll { $0.identity == app.identity }
         }
     }
 
     func movePinnedApp(movingIdentity: String, beforeIdentity: String?, for screenID: UInt32? = nil) {
-        if let screenID {
+        updatePinnedApps(for: screenID) { apps in
+            apps = movedPinnedApps(apps, movingIdentity: movingIdentity, beforeIdentity: beforeIdentity)
+        }
+    }
+
+    private func updatePinnedApps(for screenID: UInt32?, _ transform: (inout [PinnedApp]) -> Void) {
+        if let screenID, overrides(for: screenID).pinnedApps != nil {
             updateOverrides(for: screenID) { override in
-                let apps = override.pinnedApps ?? values(for: screenID).pinnedApps
-                override.pinnedApps = movedPinnedApps(apps, movingIdentity: movingIdentity, beforeIdentity: beforeIdentity)
+                var apps = override.pinnedApps ?? []
+                transform(&apps)
+                override.pinnedApps = apps
             }
         } else {
             updateGeneral { values in
-                values.pinnedApps = movedPinnedApps(values.pinnedApps, movingIdentity: movingIdentity, beforeIdentity: beforeIdentity)
+                transform(&values.pinnedApps)
             }
         }
     }
