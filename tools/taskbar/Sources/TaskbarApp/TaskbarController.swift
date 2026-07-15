@@ -184,11 +184,18 @@ final class TaskbarPanel {
     }
 }
 
+typealias InitialWindowProviderWarmup = (
+    _ screens: [ScreenInfo],
+    _ includeMinimized: Bool,
+    _ completion: @escaping () -> Void
+) -> Void
+
 final class TaskbarController: NSObject {
     private let settings: TaskbarSettings
     private let startAtLoginSync: (Bool) -> Void
     private let performFullRefreshOverride: (() -> Void)?
     private let screenCollector: () -> [ScreenInfo]
+    private let initialWindowProviderWarmup: InitialWindowProviderWarmup
     private let screenNotificationCenter: NotificationCenter
     private let settingsWindowFactory: (TaskbarSettings, [ScreenInfo]) -> TaskbarSettingsWindow
     private let windowAvoider = WindowAvoider()
@@ -197,6 +204,7 @@ final class TaskbarController: NSObject {
     private var timer: Timer?
     private var autoHideTimer: Timer?
     private var pendingRefreshWorkItem: DispatchWorkItem?
+    private var isWaitingForInitialWindowProviderWarmup = false
     private var pendingFrontmostWindowExpectation: FrontmostWindowExpectation?
     private var settingsChangeObservation: TaskbarSettingsChangeObservation?
     private var screenParametersObservation: NSObjectProtocol?
@@ -215,6 +223,12 @@ final class TaskbarController: NSObject {
         scheduleSettingsRefresh: (() -> Void)? = nil,
         performFullRefresh: (() -> Void)? = nil,
         screenCollector: @escaping () -> [ScreenInfo] = collectScreens,
+        initialWindowProviderWarmup: @escaping InitialWindowProviderWarmup = { screens, includeMinimized, completion in
+            DispatchQueue.global(qos: .utility).async {
+                _ = collectWindowRecords(screens: screens, includeMinimized: includeMinimized)
+                DispatchQueue.main.async(execute: completion)
+            }
+        },
         screenNotificationCenter: NotificationCenter = .default,
         settingsWindowFactory: @escaping (TaskbarSettings, [ScreenInfo]) -> TaskbarSettingsWindow = {
             SettingsWindowController(settings: $0, screens: $1)
@@ -224,6 +238,7 @@ final class TaskbarController: NSObject {
         self.startAtLoginSync = startAtLoginSync
         self.performFullRefreshOverride = performFullRefresh
         self.screenCollector = screenCollector
+        self.initialWindowProviderWarmup = initialWindowProviderWarmup
         self.screenNotificationCenter = screenNotificationCenter
         self.settingsWindowFactory = settingsWindowFactory
         super.init()
@@ -243,7 +258,29 @@ final class TaskbarController: NSObject {
         configureTaskbarAccessibilityMessagingTimeout()
         performanceWatchdog.start()
         startAtLoginSync(settings.preferences.startAtLogin)
-        log("screens=\(screenCollector().map { "\($0.name):\($0.appKitFrame)" }.joined(separator: " | "))")
+        let screens = screenCollector()
+        let includeMinimized = screens.contains { settings.values(for: $0.id).showMinimizedWindows }
+        log("screens=\(screens.map { "\($0.name):\($0.appKitFrame)" }.joined(separator: " | "))")
+        isWaitingForInitialWindowProviderWarmup = true
+        initialWindowProviderWarmup(screens, includeMinimized) { [weak self] in
+            guard let self else { return }
+            if Thread.isMainThread {
+                self.completeInitialWindowProviderWarmup()
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.completeInitialWindowProviderWarmup()
+                }
+            }
+        }
+    }
+
+    private func completeInitialWindowProviderWarmup() {
+        guard isWaitingForInitialWindowProviderWarmup else { return }
+        isWaitingForInitialWindowProviderWarmup = false
+        finishStarting()
+    }
+
+    private func finishStarting() {
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -257,12 +294,14 @@ final class TaskbarController: NSObject {
     }
 
     func prepareForTermination() {
+        isWaitingForInitialWindowProviderWarmup = false
         pendingRefreshWorkItem?.cancel()
         stopObservingScreenChanges()
         settings.flushPendingPersistence()
     }
 
     @objc func refresh() {
+        guard !isWaitingForInitialWindowProviderWarmup else { return }
         if let performFullRefreshOverride {
             performFullRefreshOverride()
             return

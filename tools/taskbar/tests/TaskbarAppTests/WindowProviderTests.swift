@@ -108,6 +108,12 @@ final class WindowProviderTests: XCTestCase {
         XCTAssertNil(whileRefreshing[browserPID])
         try XCTUnwrap(scheduledRefreshes.first)()
         scheduledRefreshes.removeFirst()
+
+        _ = sampler.metadata(
+            for: [editorPID, browserPID],
+            now: Date(timeIntervalSince1970: 102.3)
+        )
+
         try XCTUnwrap(scheduledRefreshes.first)()
         scheduledRefreshes.removeFirst()
 

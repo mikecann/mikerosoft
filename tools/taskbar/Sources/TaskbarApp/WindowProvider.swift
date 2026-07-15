@@ -559,6 +559,7 @@ final class RunningApplicationMetadataSampler {
             hasLoadedInitialSnapshot = true
             let pendingPIDs = pendingRefreshPIDs
             pendingRefreshPIDs.removeAll()
+            attemptedPIDs.formUnion(pendingPIDs)
             isRefreshing = !pendingPIDs.isEmpty
             lock.unlock()
             if !pendingPIDs.isEmpty {
@@ -583,6 +584,7 @@ final class RunningApplicationMetadataSampler {
             self.attemptedPIDs = pids
             let pendingPIDs = self.pendingRefreshPIDs
             self.pendingRefreshPIDs.removeAll()
+            self.attemptedPIDs.formUnion(pendingPIDs)
             self.isRefreshing = !pendingPIDs.isEmpty
             self.lock.unlock()
             if !pendingPIDs.isEmpty {
