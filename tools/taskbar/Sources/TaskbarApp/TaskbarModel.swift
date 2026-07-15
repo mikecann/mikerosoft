@@ -93,6 +93,15 @@ private func isDuplicateSurface(_ left: WindowRecord, _ right: WindowRecord) -> 
     let leftSignature = accessibilityDuplicateSignature(left)
     let rightSignature = accessibilityDuplicateSignature(right)
 
+    if left.windowID > 0,
+       right.windowID > 0,
+       left.windowID != right.windowID,
+       leftSignature == nil,
+       rightSignature == nil {
+        return isUntitledInternalSiblingSurface(left, comparedTo: right)
+            || isUntitledInternalSiblingSurface(right, comparedTo: left)
+    }
+
     if let leftSignature,
        let rightSignature,
        leftSignature == rightSignature {

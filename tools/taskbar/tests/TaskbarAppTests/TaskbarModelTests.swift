@@ -191,13 +191,41 @@ final class TaskbarModelTests: XCTestCase {
         XCTAssertEqual(visible.map(\.windowID), [578, 16416])
     }
 
+    func testVisibleWindowsKeepsDistinctPositiveWindowIDsWhenBridgeSignaturesAreBlank() {
+        let bounds = CGRect(x: 0, y: 30, width: 2560, height: 1378)
+        let records = [
+            record(
+                owner: "Google Chrome",
+                title: "Issue 25 - GitHub",
+                pid: 739,
+                windowID: 578,
+                bounds: bounds,
+                bundleID: "com.google.Chrome",
+                accessibilityTitle: "Issue 25 - GitHub - Google Chrome"
+            ),
+            record(
+                owner: "Google Chrome",
+                title: "Issue 25 - GitHub",
+                pid: 739,
+                windowID: 16416,
+                bounds: bounds,
+                bundleID: "com.google.Chrome",
+                accessibilityTitle: "Issue 25 - GitHub - Google Chrome"
+            )
+        ]
+
+        let visible = visibleWindows(records, currentPID: 999)
+
+        XCTAssertEqual(visible.map(\.windowID), [578, 16416])
+    }
+
     func testVisibleWindowsRejectsOverlappingSameTitleFallbackSurfaces() {
         let records = [
             record(
                 owner: "Notion",
                 title: "Convex + AI Quick Tips",
                 pid: 10,
-                windowID: 1,
+                windowID: -1,
                 bounds: CGRect(x: 0, y: 31, width: 2560, height: 1379),
                 bundleID: "notion.id"
             ),
@@ -205,7 +233,7 @@ final class TaskbarModelTests: XCTestCase {
                 owner: "Notion",
                 title: "Convex + AI Quick Tips",
                 pid: 10,
-                windowID: 2,
+                windowID: -2,
                 bounds: CGRect(x: 1218, y: 298, width: 2560, height: 690),
                 bundleID: "notion.id"
             )
@@ -213,7 +241,7 @@ final class TaskbarModelTests: XCTestCase {
 
         let visible = visibleWindows(records, currentPID: 999)
 
-        XCTAssertEqual(visible.map(\.windowID), [1])
+        XCTAssertEqual(visible.map(\.windowID), [-1])
     }
 
     func testVisibleWindowsRejectsOverlappingFallbackSurfacesWhenOneTitleIsJustOwner() {
@@ -222,7 +250,7 @@ final class TaskbarModelTests: XCTestCase {
                 owner: "Notion",
                 title: "Project Plan",
                 pid: 10,
-                windowID: 1,
+                windowID: -1,
                 bounds: CGRect(x: 0, y: 31, width: 2560, height: 1379),
                 bundleID: "notion.id"
             ),
@@ -230,7 +258,7 @@ final class TaskbarModelTests: XCTestCase {
                 owner: "Notion",
                 title: "Notion",
                 pid: 10,
-                windowID: 2,
+                windowID: -2,
                 bounds: CGRect(x: 1218, y: 298, width: 2560, height: 690),
                 bundleID: "notion.id"
             )
@@ -238,7 +266,7 @@ final class TaskbarModelTests: XCTestCase {
 
         let visible = visibleWindows(records, currentPID: 999)
 
-        XCTAssertEqual(visible.map(\.windowID), [1])
+        XCTAssertEqual(visible.map(\.windowID), [-1])
         XCTAssertEqual(visible.map(\.title), ["Project Plan"])
     }
 
@@ -251,8 +279,7 @@ final class TaskbarModelTests: XCTestCase {
                 windowID: 8017,
                 bounds: CGRect(x: 0, y: 0, width: 2560, height: 1408),
                 bundleID: "com.wondershare.filmoramacos",
-                appPath: "/Applications/Wondershare Filmora Mac.app",
-                accessibilitySignature: "main-window-children"
+                appPath: "/Applications/Wondershare Filmora Mac.app"
             ),
             record(
                 owner: "Wondershare Filmora Mac",
@@ -303,7 +330,7 @@ final class TaskbarModelTests: XCTestCase {
                 owner: "Notion",
                 title: "Untitled",
                 pid: 10,
-                windowID: 1,
+                windowID: -1,
                 bounds: CGRect(x: 0, y: 31, width: 900, height: 700),
                 bundleID: "notion.id"
             ),
@@ -311,7 +338,7 @@ final class TaskbarModelTests: XCTestCase {
                 owner: "Notion",
                 title: "Untitled",
                 pid: 10,
-                windowID: 2,
+                windowID: -2,
                 bounds: CGRect(x: 1000, y: 31, width: 900, height: 700),
                 bundleID: "notion.id"
             )
@@ -319,7 +346,7 @@ final class TaskbarModelTests: XCTestCase {
 
         let visible = visibleWindows(records, currentPID: 999)
 
-        XCTAssertEqual(visible.map(\.windowID), [1, 2])
+        XCTAssertEqual(visible.map(\.windowID), [-1, -2])
     }
 
     func testVisibleWindowsRejectsRecordsWithTheSamePositiveWindowID() {
