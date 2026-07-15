@@ -545,6 +545,121 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(rects[1].1.width, StatsWidgetMetrics.minimumGPUWidth)
     }
 
+    func testStatsWidgetModuleRectsHonorEachMetricMinimumAtExactMinimumWidth() {
+        let settings = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: true,
+            showGPU: true,
+            showMemory: true,
+            showNetwork: true,
+            showMiniGraph: true
+        )
+        let minimumWidth = StatsWidgetMetrics.minimumWidth(for: settings)
+
+        let rects = statsWidgetModuleRects(
+            settings: settings,
+            in: NSRect(x: 0, y: 0, width: minimumWidth, height: 42)
+        )
+
+        XCTAssertEqual(rects.map(\.0), [.cpu, .gpu, .memory, .network])
+        XCTAssertGreaterThanOrEqual(rects[0].1.width, StatsWidgetMetrics.minimumCPUWidth)
+        XCTAssertGreaterThanOrEqual(rects[1].1.width, StatsWidgetMetrics.minimumGPUWidth)
+        XCTAssertGreaterThanOrEqual(rects[2].1.width, StatsWidgetMetrics.minimumMemoryWidth)
+        XCTAssertGreaterThanOrEqual(rects[3].1.width, StatsWidgetMetrics.minimumNetworkWidth)
+        XCTAssertEqual(rects.last!.1.maxX, minimumWidth, accuracy: 0.001)
+    }
+
+    func testStatsWidgetMixedModulesKeepPreferredWidthsWhenSpaceAllows() {
+        let settings = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: false,
+            showGPU: true,
+            showMemory: true,
+            showNetwork: true,
+            showMiniGraph: true
+        )
+
+        let rects = statsWidgetModuleRects(
+            settings: settings,
+            in: NSRect(x: 0, y: 0, width: 220, height: 42)
+        )
+
+        XCTAssertEqual(rects.map(\.0), [.gpu, .memory, .network])
+        XCTAssertEqual(
+            rects.map { $0.1.width },
+            [
+                StatsWidgetMetrics.preferredGPUWidth,
+                StatsWidgetMetrics.preferredMemoryWidth,
+                StatsWidgetMetrics.preferredNetworkWidth
+            ]
+        )
+    }
+
+    func testStatsWidgetMixedModulesFitWithinWidthBelowDeclaredMinimum() {
+        let settings = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: false,
+            showGPU: true,
+            showMemory: true,
+            showNetwork: true,
+            showMiniGraph: true
+        )
+        let rect = NSRect(
+            x: 7,
+            y: 0,
+            width: StatsWidgetMetrics.minimumWidth(for: settings) - 23,
+            height: 42
+        )
+        let minimumWidths = [
+            StatsWidgetMetrics.minimumGPUWidth,
+            StatsWidgetMetrics.minimumMemoryWidth,
+            StatsWidgetMetrics.minimumNetworkWidth
+        ]
+        let totalSpacing = StatsWidgetMetrics.moduleSpacing * 2
+        let scale = (rect.width - totalSpacing) / minimumWidths.reduce(0, +)
+
+        let rects = statsWidgetModuleRects(settings: settings, in: rect)
+        let gaps = zip(rects, rects.dropFirst()).map { left, right in
+            right.1.minX - left.1.maxX
+        }
+
+        XCTAssertEqual(rects.map(\.0), [.gpu, .memory, .network])
+        XCTAssertEqual(gaps, [StatsWidgetMetrics.moduleSpacing, StatsWidgetMetrics.moduleSpacing])
+        for (moduleRect, minimumWidth) in zip(rects.map({ $0.1 }), minimumWidths) {
+            XCTAssertEqual(moduleRect.width, minimumWidth * scale, accuracy: 0.001)
+        }
+        XCTAssertEqual(
+            rects.map { $0.1.width }.reduce(0, +) + gaps.reduce(0, +),
+            rect.width,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(rects.last!.1.maxX, rect.maxX, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(rects.last!.1.maxX, rect.maxX + 0.001)
+    }
+
+    func testStatsWidgetUltraNarrowRectShrinksSpacingWithoutOverflow() {
+        let settings = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: false,
+            showGPU: true,
+            showMemory: true,
+            showNetwork: true,
+            showMiniGraph: true
+        )
+        let rect = NSRect(x: 7, y: 0, width: 15, height: 42)
+
+        let rects = statsWidgetModuleRects(settings: settings, in: rect)
+        let gaps = zip(rects, rects.dropFirst()).map { left, right in
+            right.1.minX - left.1.maxX
+        }
+
+        XCTAssertEqual(rects.map(\.0), [.gpu, .memory, .network])
+        XCTAssertEqual(rects.map { $0.1.width }, [0, 0, 0])
+        XCTAssertEqual(gaps.reduce(0, +), rect.width, accuracy: 0.001)
+        XCTAssertEqual(rects.last!.1.maxX, rect.maxX, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(rects.last!.1.maxX, rect.maxX + 0.001)
+    }
+
     func testStatsWidgetModuleSpacingIsCompact() {
         let settings = StatsWidgetSettings(
             isEnabled: true,
@@ -580,6 +695,30 @@ final class TaskbarSettingsTests: XCTestCase {
         let graphWidth = statsMiniGraphWidth(in: source, isEnabled: true)
 
         XCTAssertGreaterThanOrEqual(graphWidth, 53)
+    }
+
+    func testStatsCPUTaskbarFallsBackToPercentWhenGraphIsUnavailable() {
+        let graphAvailable = statsCPUTaskbarRenderContent(
+            in: NSRect(x: 0, y: 0, width: StatsWidgetMetrics.preferredCPUWidth, height: 42),
+            showMiniGraph: true
+        )
+        let graphDisabled = statsCPUTaskbarRenderContent(
+            in: NSRect(x: 0, y: 0, width: StatsWidgetMetrics.preferredCPUWidth, height: 42),
+            showMiniGraph: false
+        )
+        let graphCannotFit = statsCPUTaskbarRenderContent(
+            in: NSRect(
+                x: 0,
+                y: 0,
+                width: StatsWidgetMetrics.sideLabelWidth + StatsWidgetMetrics.sideLabelGap + 17,
+                height: 42
+            ),
+            showMiniGraph: true
+        )
+
+        XCTAssertEqual(graphAvailable, .miniGraph(width: 60))
+        XCTAssertEqual(graphDisabled, .percent)
+        XCTAssertEqual(graphCannotFit, .percent)
     }
 
     func testStatsMiniGraphBarsStartAtLeftEdge() {

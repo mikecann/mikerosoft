@@ -746,6 +746,17 @@ func formattedStatsMemoryBytes(_ bytes: Double) -> String {
     return String(format: "%.1f %@", scaled, units[unitIndex])
 }
 
+enum StatsCPUTaskbarRenderContent: Equatable {
+    case miniGraph(width: CGFloat)
+    case percent
+}
+
+func statsCPUTaskbarRenderContent(in rect: NSRect, showMiniGraph: Bool) -> StatsCPUTaskbarRenderContent {
+    let contentRect = statsSideLabelRects(in: rect).content
+    let graphWidth = statsMiniGraphWidth(in: contentRect, isEnabled: showMiniGraph)
+    return graphWidth > 0 ? .miniGraph(width: graphWidth) : .percent
+}
+
 func statsWidgetModuleRects(settings: StatsWidgetSettings, in rect: NSRect) -> [(StatsWidgetMetric, NSRect)] {
     let metrics = StatsWidgetMetrics.metrics(for: settings)
     guard !metrics.isEmpty else { return [] }
@@ -775,17 +786,22 @@ func statsWidgetModuleRects(settings: StatsWidgetSettings, in rect: NSRect) -> [
         }
     }
 
-    let totalSpacing = StatsWidgetMetrics.moduleSpacing * CGFloat(max(0, metrics.count - 1))
+    let gapCount = max(0, metrics.count - 1)
+    let totalSpacing = min(
+        max(0, rect.width),
+        StatsWidgetMetrics.moduleSpacing * CGFloat(gapCount)
+    )
+    let moduleSpacing = gapCount > 0 ? totalSpacing / CGFloat(gapCount) : 0
     let available = max(0, rect.width - totalSpacing)
     let widths = fittedTaskbarItemWidths(
         preferredWidths: preferredWidths,
-        softMinimumWidth: minimumWidths.min() ?? 0,
+        minimumWidths: minimumWidths,
         availableWidth: available
     )
 
     var x = rect.minX
     return zip(metrics, widths).map { metric, width in
-        defer { x += width + StatsWidgetMetrics.moduleSpacing }
+        defer { x += width + moduleSpacing }
         return (metric, NSRect(x: x, y: rect.minY, width: width, height: rect.height))
     }
 }
@@ -807,16 +823,21 @@ func statsWidgetMetricRect(_ metric: StatsWidgetMetric, in rect: NSRect, setting
 }
 
 private func drawCPU(snapshot: StatsSnapshot, settings: StatsWidgetSettings, in rect: NSRect) {
-    let layout = statsSideLabelRects(in: rect)
-    drawVerticalStatsLabel("CPU", in: layout.label)
-
-    let graphWidth = statsMiniGraphWidth(in: layout.content, isEnabled: settings.showMiniGraph)
-    if graphWidth > 0 {
+    switch statsCPUTaskbarRenderContent(in: rect, showMiniGraph: settings.showMiniGraph) {
+    case let .miniGraph(graphWidth):
+        let layout = statsSideLabelRects(in: rect)
+        drawVerticalStatsLabel("CPU", in: layout.label)
         drawMiniGraph(
             snapshot.cpuHistory,
             in: statsMiniGraphRect(in: layout.content, width: graphWidth)
         )
-        return
+    case .percent:
+        drawLabeledStatText(
+            label: "CPU",
+            value: formattedStatsPercent(snapshot.cpuPercent),
+            in: rect,
+            accent: .systemBlue
+        )
     }
 }
 
