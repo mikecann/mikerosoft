@@ -655,21 +655,42 @@ struct TaskbarPreferences: Codable, Equatable {
     }
 }
 
-final class TaskbarSettings {
-    private let defaults: UserDefaults
-    private let key = "taskbarPreferences.v1"
+protocol TaskbarSettingsStoring {
+    func data(forKey key: String) -> Data?
+    func set(_ data: Data, forKey key: String)
+}
 
-    var onChange: (() -> Void)?
-    private(set) var preferences: TaskbarPreferences {
-        didSet {
-            persist()
-            onChange?()
-        }
+struct UserDefaultsTaskbarSettingsStore: TaskbarSettingsStoring {
+    let defaults: UserDefaults
+
+    func data(forKey key: String) -> Data? {
+        defaults.data(forKey: key)
     }
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        self.preferences = Self.load(from: defaults, key: key)
+    func set(_ data: Data, forKey key: String) {
+        defaults.set(data, forKey: key)
+    }
+}
+
+final class TaskbarSettings {
+    private let store: TaskbarSettingsStoring
+    private let persistenceDelay: TimeInterval
+    private let key = "taskbarPreferences.v1"
+    private var pendingPersistenceWorkItem: DispatchWorkItem?
+    private var persistenceGeneration = 0
+
+    var onChange: (() -> Void)?
+    var onStartAtLoginChange: ((Bool) -> Void)?
+    private(set) var preferences: TaskbarPreferences
+
+    convenience init(defaults: UserDefaults = .standard) {
+        self.init(store: UserDefaultsTaskbarSettingsStore(defaults: defaults))
+    }
+
+    init(store: TaskbarSettingsStoring, persistenceDelay: TimeInterval = 0.25) {
+        self.store = store
+        self.persistenceDelay = persistenceDelay
+        self.preferences = Self.load(from: store, key: key)
     }
 
     func values(for screenID: UInt32) -> TaskbarSettingValues {
@@ -681,8 +702,12 @@ final class TaskbarSettings {
     }
 
     func updateGeneral(_ transform: (inout TaskbarSettingValues) -> Void) {
-        transform(&preferences.general)
-        preferences.general.clamp()
+        var general = preferences.general
+        transform(&general)
+        general.clamp()
+        guard general != preferences.general else { return }
+        preferences.general = general
+        settingsDidChange()
     }
 
     func updateOverrides(for screenID: UInt32, _ transform: (inout TaskbarMonitorOverrides) -> Void) {
@@ -711,11 +736,15 @@ final class TaskbarSettings {
             override.revealAnimationDuration = TaskbarSettingValues.clampedRevealAnimationDuration(duration)
         }
 
+        var monitorOverrides = preferences.monitorOverrides
         if override.hasAnyOverride {
-            preferences.monitorOverrides[key] = override
+            monitorOverrides[key] = override
         } else {
-            preferences.monitorOverrides.removeValue(forKey: key)
+            monitorOverrides.removeValue(forKey: key)
         }
+        guard monitorOverrides != preferences.monitorOverrides else { return }
+        preferences.monitorOverrides = monitorOverrides
+        settingsDidChange()
     }
 
     func isPinned(_ app: PinnedApp, for screenID: UInt32? = nil) -> Bool {
@@ -767,20 +796,49 @@ final class TaskbarSettings {
     }
 
     func setStartAtLogin(_ enabled: Bool) {
+        guard preferences.startAtLogin != enabled else { return }
         preferences.startAtLogin = enabled
+        schedulePersistence()
+        onStartAtLoginChange?(enabled)
+    }
+
+    func flushPendingPersistence() {
+        guard let pendingPersistenceWorkItem else { return }
+        pendingPersistenceWorkItem.cancel()
+        self.pendingPersistenceWorkItem = nil
+        persistenceGeneration += 1
+        persist()
     }
 
     private func persist() {
         do {
             let data = try JSONEncoder().encode(preferences)
-            defaults.set(data, forKey: key)
+            store.set(data, forKey: key)
         } catch {
             log("failed to save settings: \(error)")
         }
     }
 
-    private static func load(from defaults: UserDefaults, key: String) -> TaskbarPreferences {
-        guard let data = defaults.data(forKey: key) else {
+    private func schedulePersistence() {
+        pendingPersistenceWorkItem?.cancel()
+        persistenceGeneration += 1
+        let generation = persistenceGeneration
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.persistenceGeneration == generation else { return }
+            self.pendingPersistenceWorkItem = nil
+            self.persist()
+        }
+        pendingPersistenceWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + persistenceDelay, execute: workItem)
+    }
+
+    private func settingsDidChange() {
+        schedulePersistence()
+        onChange?()
+    }
+
+    private static func load(from store: TaskbarSettingsStoring, key: String) -> TaskbarPreferences {
+        guard let data = store.data(forKey: key) else {
             return .defaults
         }
 

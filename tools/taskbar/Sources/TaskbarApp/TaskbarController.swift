@@ -169,7 +169,8 @@ final class TaskbarPanel {
 }
 
 final class TaskbarController: NSObject {
-    private let settings = TaskbarSettings()
+    private let settings: TaskbarSettings
+    private let startAtLoginSync: (Bool) -> Void
     private let windowAvoider = WindowAvoider()
     private let performanceWatchdog = MainThreadWatchdog()
     private var panels: [UInt32: TaskbarPanel] = [:]
@@ -185,14 +186,25 @@ final class TaskbarController: NSObject {
     private var menuScreenContext: UInt32?
     private let commandFileURL = URL(fileURLWithPath: "/tmp/mikerosoft-taskbar-command")
 
+    init(
+        settings: TaskbarSettings = TaskbarSettings(),
+        startAtLoginSync: @escaping (Bool) -> Void = { StartupManager.setEnabled($0) }
+    ) {
+        self.settings = settings
+        self.startAtLoginSync = startAtLoginSync
+        super.init()
+        settings.onStartAtLoginChange = { [weak self] enabled in
+            self?.startAtLoginSync(enabled)
+        }
+    }
+
     func start() {
         configureTaskbarAccessibilityMessagingTimeout()
         performanceWatchdog.start()
         settings.onChange = { [weak self] in
-            self?.syncStartAtLogin()
-            self?.refresh()
+            self?.scheduleRefreshSoon()
         }
-        syncStartAtLogin()
+        startAtLoginSync(settings.preferences.startAtLogin)
         log("screens=\(collectScreens().map { "\($0.name):\($0.appKitFrame)" }.joined(separator: " | "))")
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -204,6 +216,11 @@ final class TaskbarController: NSObject {
         }
         autoHideTimer?.tolerance = 0.02
         log("taskbar ready")
+    }
+
+    func prepareForTermination() {
+        pendingRefreshWorkItem?.cancel()
+        settings.flushPendingPersistence()
     }
 
     @objc func refresh() {
@@ -759,10 +776,6 @@ final class TaskbarController: NSObject {
             override.statsWidget = value
         }
         refresh()
-    }
-
-    private func syncStartAtLogin() {
-        StartupManager.setEnabled(settings.preferences.startAtLogin)
     }
 
     @objc private func quit() {
