@@ -488,6 +488,33 @@ final class TaskbarModelTests: XCTestCase {
         XCTAssertEqual(items.map(\.isPinned), [true, true, false])
     }
 
+    func testFirstTickMetadataMatchesRunningWindowToPinnedAppWithoutPlaceholderDuplicate() {
+        let windows = [
+            record(
+                owner: "Safari",
+                title: "Article",
+                pid: 10,
+                windowID: 1,
+                bundleID: "com.apple.Safari",
+                appPath: "/Applications/Safari.app"
+            )
+        ]
+        let pinned = [
+            PinnedApp(
+                displayName: "Safari",
+                bundleID: "com.apple.Safari",
+                appPath: "/Applications/Safari.app"
+            )
+        ]
+
+        let items = buildTaskbarItems(windows: windows, frontmostPID: nil, pinnedApps: pinned)
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items[0].pid, 10)
+        XCTAssertTrue(items[0].isPinned)
+        XCTAssertEqual(items[0].identity, pinned[0].identity)
+    }
+
     func testClosedPinnedAppsRemainVisible() {
         let windows = [
             record(owner: "Notes", title: "Planning", pid: 30, windowID: 3, bundleID: "com.apple.Notes")

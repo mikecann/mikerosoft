@@ -3,6 +3,404 @@ import XCTest
 @testable import TaskbarApp
 
 final class WindowProviderTests: XCTestCase {
+    func testMetadataSamplerReturnsInitialSnapshotSynchronously() {
+        let pid = pid_t(123)
+        var collectedPIDs: [Set<pid_t>] = []
+        let sampler = RunningApplicationMetadataSampler(collect: { pids in
+            collectedPIDs.append(pids)
+            return [
+                pid: RunningApplicationMetadata(
+                    bundleID: "com.example.Editor",
+                    appPath: "/Applications/Editor.app"
+                )
+            ]
+        })
+
+        let metadata = sampler.metadata(for: [pid], now: Date(timeIntervalSince1970: 100))
+
+        XCTAssertEqual(metadata[pid]?.bundleID, "com.example.Editor")
+        XCTAssertEqual(metadata[pid]?.appPath, "/Applications/Editor.app")
+        XCTAssertEqual(collectedPIDs, [[pid]])
+    }
+
+    func testMetadataSamplerRefreshesUnknownPIDWithoutWaitingForTheTwoSecondGate() {
+        let editorPID = pid_t(123)
+        let browserPID = pid_t(456)
+        var collectedPIDs: [Set<pid_t>] = []
+        let sampler = RunningApplicationMetadataSampler(collect: { pids in
+            collectedPIDs.append(pids)
+            return Dictionary(uniqueKeysWithValues: pids.map { pid in
+                let name = pid == editorPID ? "Editor" : "Browser"
+                return (
+                    pid,
+                    RunningApplicationMetadata(
+                        bundleID: "com.example.\(name)",
+                        appPath: "/Applications/\(name).app"
+                    )
+                )
+            })
+        })
+
+        _ = sampler.metadata(for: [editorPID], now: Date(timeIntervalSince1970: 100))
+        let metadata = sampler.metadata(
+            for: [editorPID, browserPID],
+            now: Date(timeIntervalSince1970: 100.5)
+        )
+
+        XCTAssertEqual(metadata[browserPID]?.bundleID, "com.example.Browser")
+        XCTAssertEqual(collectedPIDs, [[editorPID], [editorPID, browserPID]])
+    }
+
+    func testMetadataSamplerDoesNotRescanPermanentlyMissingPIDBeforePeriodicGate() {
+        let editorPID = pid_t(123)
+        let windowServerPID = pid_t(415)
+        var collectionCount = 0
+        let sampler = RunningApplicationMetadataSampler(collect: { _ in
+            collectionCount += 1
+            return [
+                editorPID: RunningApplicationMetadata(
+                    bundleID: "com.example.Editor",
+                    appPath: "/Applications/Editor.app"
+                )
+            ]
+        })
+
+        _ = sampler.metadata(for: [editorPID], now: Date(timeIntervalSince1970: 100))
+        _ = sampler.metadata(for: [editorPID, windowServerPID], now: Date(timeIntervalSince1970: 100.1))
+        let nextTick = sampler.metadata(
+            for: [editorPID, windowServerPID],
+            now: Date(timeIntervalSince1970: 101.1)
+        )
+
+        XCTAssertNil(nextTick[windowServerPID])
+        XCTAssertEqual(collectionCount, 2)
+    }
+
+    func testMetadataSamplerQueuesUnknownPIDWhilePeriodicRefreshIsInFlight() throws {
+        let editorPID = pid_t(123)
+        let browserPID = pid_t(456)
+        var collectedPIDs: [Set<pid_t>] = []
+        var scheduledRefreshes: [() -> Void] = []
+        let sampler = RunningApplicationMetadataSampler(
+            collect: { pids in
+                collectedPIDs.append(pids)
+                return Dictionary(uniqueKeysWithValues: pids.map { pid in
+                    let name = pid == editorPID ? "Editor" : "Browser"
+                    return (
+                        pid,
+                        RunningApplicationMetadata(
+                            bundleID: "com.example.\(name)",
+                            appPath: "/Applications/\(name).app"
+                        )
+                    )
+                })
+            },
+            schedule: { scheduledRefreshes.append($0) }
+        )
+
+        _ = sampler.metadata(for: [editorPID], now: Date(timeIntervalSince1970: 100))
+        _ = sampler.metadata(for: [editorPID], now: Date(timeIntervalSince1970: 102.1))
+        let whileRefreshing = sampler.metadata(
+            for: [editorPID, browserPID],
+            now: Date(timeIntervalSince1970: 102.2)
+        )
+
+        XCTAssertNil(whileRefreshing[browserPID])
+        try XCTUnwrap(scheduledRefreshes.first)()
+        scheduledRefreshes.removeFirst()
+
+        _ = sampler.metadata(
+            for: [editorPID, browserPID],
+            now: Date(timeIntervalSince1970: 102.3)
+        )
+
+        try XCTUnwrap(scheduledRefreshes.first)()
+        scheduledRefreshes.removeFirst()
+
+        let nextTick = sampler.metadata(
+            for: [editorPID, browserPID],
+            now: Date(timeIntervalSince1970: 103.1)
+        )
+
+        XCTAssertEqual(nextTick[browserPID]?.bundleID, "com.example.Browser")
+        XCTAssertEqual(collectedPIDs, [[editorPID], [editorPID], [editorPID, browserPID]])
+        XCTAssertTrue(scheduledRefreshes.isEmpty)
+    }
+
+    func testAccessibilitySamplerReturnsInitialSnapshotSynchronously() {
+        let pid = pid_t(321)
+        let expected = AccessibilityWindowSurface(
+            pid: pid,
+            windowID: 987,
+            title: "First document",
+            bounds: CGRect(x: 10, y: 20, width: 800, height: 600),
+            signature: ""
+        )
+        var collectedPIDs: [Set<pid_t>] = []
+        let sampler = AccessibilitySurfaceSampler { pids in
+            collectedPIDs.append(pids)
+            return [expected]
+        }
+
+        let surfaces = sampler.surfaces(for: [pid], now: Date(timeIntervalSince1970: 100))
+
+        XCTAssertEqual(surfaces, [expected])
+        XCTAssertEqual(collectedPIDs, [[pid]])
+    }
+
+    func testMinimizedSamplerReturnsInitialSnapshotSynchronously() {
+        let record = WindowRecord(
+            owner: "Editor",
+            title: "Draft",
+            pid: 321,
+            windowID: 987,
+            accessibilityWindowID: 987,
+            layer: 0,
+            isOnScreen: false,
+            isMinimized: true,
+            bounds: CGRect(x: 10, y: 20, width: 800, height: 600),
+            screenID: 1,
+            bundleID: "com.example.Editor",
+            appPath: "/Applications/Editor.app",
+            accessibilityTitle: "Draft",
+            accessibilitySignature: ""
+        )
+        var collectionCount = 0
+        let sampler = MinimizedWindowSampler(collect: { _ in
+            collectionCount += 1
+            return [record]
+        })
+
+        let records = sampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+
+        XCTAssertEqual(records, [record])
+        XCTAssertEqual(collectionCount, 1)
+    }
+
+    func testMinimizedSamplerInvalidatesWindowAfterTaskbarRestoresIt() {
+        let record = WindowRecord(
+            owner: "Editor",
+            title: "Draft",
+            pid: 321,
+            windowID: 987,
+            accessibilityWindowID: 987,
+            layer: 0,
+            isOnScreen: false,
+            isMinimized: true,
+            bounds: CGRect(x: 10, y: 20, width: 800, height: 600),
+            screenID: 1,
+            bundleID: "com.example.Editor",
+            appPath: "/Applications/Editor.app",
+            accessibilityTitle: "Draft",
+            accessibilitySignature: ""
+        )
+        let sampler = MinimizedWindowSampler(collect: { _ in [record] })
+        _ = sampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+
+        sampler.invalidate(pid: record.pid, windowID: record.windowID)
+
+        XCTAssertEqual(
+            sampler.records(
+                screens: [],
+                excluding: [],
+                visibleWindowIDs: [],
+                now: Date(timeIntervalSince1970: 100.5)
+            ),
+            []
+        )
+    }
+
+    func testMinimizedSamplerUsesOnlyExactWindowIdentityForSameTitleWindows() {
+        let first = WindowRecord(
+            owner: "Editor",
+            title: "Untitled",
+            pid: 321,
+            windowID: -101,
+            accessibilityWindowID: 0,
+            layer: 0,
+            isOnScreen: false,
+            isMinimized: true,
+            bounds: CGRect(x: 10, y: 20, width: 800, height: 600),
+            screenID: 1,
+            bundleID: "com.example.Editor",
+            appPath: "/Applications/Editor.app",
+            accessibilityTitle: "Untitled",
+            accessibilitySignature: ""
+        )
+        let second = WindowRecord(
+            owner: "Editor",
+            title: "Untitled",
+            pid: 321,
+            windowID: -202,
+            accessibilityWindowID: 0,
+            layer: 0,
+            isOnScreen: false,
+            isMinimized: true,
+            bounds: CGRect(x: 30, y: 40, width: 800, height: 600),
+            screenID: 1,
+            bundleID: "com.example.Editor",
+            appPath: "/Applications/Editor.app",
+            accessibilityTitle: "Untitled",
+            accessibilitySignature: ""
+        )
+        let exactSampler = MinimizedWindowSampler(collect: { _ in [second, first] })
+        _ = exactSampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+
+        exactSampler.invalidate(pid: first.pid, windowID: first.windowID)
+
+        XCTAssertEqual(
+            exactSampler.records(
+                screens: [],
+                excluding: [],
+                visibleWindowIDs: [],
+                now: Date(timeIntervalSince1970: 100.5)
+            ).map(\.windowID),
+            [second.windowID]
+        )
+
+        let unavailableIDSampler = MinimizedWindowSampler(collect: { _ in [first, second] })
+        _ = unavailableIDSampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+        unavailableIDSampler.invalidate(pid: first.pid, windowID: 0)
+
+        XCTAssertEqual(
+            unavailableIDSampler.records(
+                screens: [],
+                excluding: [],
+                visibleWindowIDs: [],
+                now: Date(timeIntervalSince1970: 100.5)
+            ).map(\.windowID),
+            [first.windowID, second.windowID]
+        )
+
+        let missingPositiveIDSampler = MinimizedWindowSampler(collect: { _ in [first, second] })
+        _ = missingPositiveIDSampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+        missingPositiveIDSampler.invalidate(pid: first.pid, windowID: 999)
+
+        XCTAssertEqual(
+            missingPositiveIDSampler.records(
+                screens: [],
+                excluding: [],
+                visibleWindowIDs: [],
+                now: Date(timeIntervalSince1970: 100.5)
+            ).map(\.windowID),
+            [first.windowID, second.windowID]
+        )
+    }
+
+    func testMinimizedSamplerInvalidationWinsAgainstInitialSynchronousScan() {
+        let record = WindowRecord(
+            owner: "Editor",
+            title: "Draft",
+            pid: 321,
+            windowID: 987,
+            accessibilityWindowID: 987,
+            layer: 0,
+            isOnScreen: false,
+            isMinimized: true,
+            bounds: CGRect(x: 10, y: 20, width: 800, height: 600),
+            screenID: 1,
+            bundleID: "com.example.Editor",
+            appPath: "/Applications/Editor.app",
+            accessibilityTitle: "Draft",
+            accessibilitySignature: ""
+        )
+        var sampler: MinimizedWindowSampler!
+        sampler = MinimizedWindowSampler(collect: { _ in
+            sampler.invalidate(pid: record.pid, windowID: record.windowID)
+            return [record]
+        })
+
+        let initial = sampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+        let nextTick = sampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100.5)
+        )
+
+        XCTAssertEqual(initial, [])
+        XCTAssertEqual(nextTick, [])
+    }
+
+    func testMinimizedSamplerDoesNotRestoreInvalidatedWindowFromInFlightRefresh() throws {
+        let record = WindowRecord(
+            owner: "Editor",
+            title: "Draft",
+            pid: 321,
+            windowID: 987,
+            accessibilityWindowID: 987,
+            layer: 0,
+            isOnScreen: false,
+            isMinimized: true,
+            bounds: CGRect(x: 10, y: 20, width: 800, height: 600),
+            screenID: 1,
+            bundleID: "com.example.Editor",
+            appPath: "/Applications/Editor.app",
+            accessibilityTitle: "Draft",
+            accessibilitySignature: ""
+        )
+        var scheduledRefresh: (() -> Void)?
+        let sampler = MinimizedWindowSampler(
+            collect: { _ in [record] },
+            schedule: { scheduledRefresh = $0 }
+        )
+        _ = sampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 100)
+        )
+        _ = sampler.records(
+            screens: [],
+            excluding: [],
+            visibleWindowIDs: [],
+            now: Date(timeIntervalSince1970: 102.1)
+        )
+
+        sampler.invalidate(pid: record.pid, windowID: record.windowID)
+        try XCTUnwrap(scheduledRefresh)()
+
+        XCTAssertEqual(
+            sampler.records(
+                screens: [],
+                excluding: [],
+                visibleWindowIDs: [],
+                now: Date(timeIntervalSince1970: 102.5)
+            ),
+            []
+        )
+    }
+
     func testResolvedWindowTitleUsesAccessibilityTitleWhenCGTitleIsOwner() {
         XCTAssertEqual(
             resolvedWindowTitle(

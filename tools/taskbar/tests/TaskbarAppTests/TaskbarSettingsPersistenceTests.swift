@@ -249,6 +249,57 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(syncedValues, [false])
     }
 
+    func testControllerDefersInitialRefreshUntilWindowProviderCachesAreWarm() throws {
+        let screen = ScreenInfo(id: 123, name: "Display", appKitFrame: .zero, quartzFrame: .zero)
+        var warmedScreens: [ScreenInfo] = []
+        var includedMinimizedWindows = false
+        var finishWarmup: (() -> Void)?
+        var refreshCount = 0
+        let controller = TaskbarController(
+            settings: TaskbarSettings(store: RecordingTaskbarSettingsStore()),
+            startAtLoginSync: { _ in },
+            performFullRefresh: { refreshCount += 1 },
+            screenCollector: { [screen] },
+            initialWindowProviderWarmup: { screens, includeMinimized, completion in
+                warmedScreens = screens
+                includedMinimizedWindows = includeMinimized
+                finishWarmup = completion
+            }
+        )
+
+        controller.start()
+        controller.refresh()
+
+        XCTAssertEqual(warmedScreens, [screen])
+        XCTAssertTrue(includedMinimizedWindows)
+        XCTAssertEqual(refreshCount, 0)
+
+        try XCTUnwrap(finishWarmup)()
+
+        XCTAssertEqual(refreshCount, 1)
+        controller.prepareForTermination()
+    }
+
+    func testControllerDoesNotFinishStartingAfterTerminationDuringWindowProviderWarmup() throws {
+        var finishWarmup: (() -> Void)?
+        var refreshCount = 0
+        let controller = TaskbarController(
+            settings: TaskbarSettings(store: RecordingTaskbarSettingsStore()),
+            startAtLoginSync: { _ in },
+            performFullRefresh: { refreshCount += 1 },
+            screenCollector: { [] },
+            initialWindowProviderWarmup: { _, _, completion in
+                finishWarmup = completion
+            }
+        )
+
+        controller.start()
+        controller.prepareForTermination()
+        try XCTUnwrap(finishWarmup)()
+
+        XCTAssertEqual(refreshCount, 0)
+    }
+
     func testControllerSettingsRefreshRemainsRegisteredWhenAnotherListenerIsAdded() {
         let store = RecordingTaskbarSettingsStore()
         let settings = TaskbarSettings(store: store)
