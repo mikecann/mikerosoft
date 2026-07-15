@@ -74,9 +74,12 @@ final class TaskbarPanel {
     }
 
     func update(screen: ScreenInfo, items: [TaskbarItem], values: TaskbarSettingValues) {
+        let previousTargetFrame = frame(shown: isShown)
+        let panelWasVisible = panel.isVisible
         let valuesChanged = self.values != values
         self.screen = screen
         self.values = values
+        let panelGeometryChanged = previousTargetFrame != frame(shown: isShown)
 
         let height = CGFloat(values.taskbarHeight)
         let frame = NSRect(
@@ -106,7 +109,10 @@ final class TaskbarPanel {
         containerView.setWidgetRepaintVisibility(panel.isVisible)
 
         if values.autoHide {
-            updateAutoHide(mouseLocation: NSEvent.mouseLocation, animated: false)
+            let targetShown = shouldReveal(mouseLocation: NSEvent.mouseLocation)
+            if targetShown != isShown || panelGeometryChanged || !panelWasVisible {
+                setShown(targetShown, animated: false)
+            }
         } else {
             setShown(true, animated: false)
         }
@@ -130,18 +136,28 @@ final class TaskbarPanel {
 
     private func setShown(_ shown: Bool, animated: Bool) {
         let targetFrame = frame(shown: shown)
-        guard panel.frame != targetFrame else { return }
-
+        let shouldAnimate = animated
+            && values.revealAnimation != .instant
+            && values.revealAnimationDuration > 0
+        let action = taskbarSetShownAction(
+            targetShown: shown,
+            currentShown: isShown,
+            frameMatchesTarget: panel.frame == targetFrame,
+            animatedRequested: shouldAnimate
+        )
         isShown = shown
-        if !animated || values.revealAnimation == .instant || values.revealAnimationDuration <= 0 {
-            panel.setFrame(targetFrame, display: true)
-            return
-        }
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = values.revealAnimationDuration
-            context.timingFunction = timingFunction(for: values.revealAnimation)
-            panel.animator().setFrame(targetFrame, display: true)
+        switch action {
+        case .nothing:
+            return
+        case .snap:
+            panel.setFrame(targetFrame, display: true)
+        case .animate:
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = values.revealAnimationDuration
+                context.timingFunction = timingFunction(for: values.revealAnimation)
+                panel.animator().setFrame(targetFrame, display: true)
+            }
         }
     }
 
