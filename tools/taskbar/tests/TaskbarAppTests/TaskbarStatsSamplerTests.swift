@@ -3,6 +3,45 @@ import XCTest
 @testable import TaskbarApp
 
 final class TaskbarStatsSamplerTests: XCTestCase {
+    func testCPUPercentUsesOnlySampleDeltasWithoutOverflowing() throws {
+        let sinceBootTicks: [UInt32] = [
+            2_500_000_000,
+            900_000_000,
+            3_000_000_000,
+            700_000_000
+        ]
+
+        XCTAssertNil(cpuPercent(currentTicks: sinceBootTicks, previousTicks: nil))
+
+        let secondSamplePercent = try XCTUnwrap(
+            cpuPercent(
+                currentTicks: [2_500_000_060, 900_000_020, 3_000_000_120, 700_000_000],
+                previousTicks: sinceBootTicks
+            )
+        )
+        XCTAssertEqual(secondSamplePercent, 40, accuracy: 0.001)
+
+        let largeDeltaPercent = try XCTUnwrap(
+            cpuPercent(
+                currentTicks: sinceBootTicks,
+                previousTicks: [0, 0, 0, 0]
+            )
+        )
+        XCTAssertEqual(
+            largeDeltaPercent,
+            4_100_000_000.0 / 7_100_000_000.0 * 100,
+            accuracy: 0.001
+        )
+
+        let wrappedCounterPercent = try XCTUnwrap(
+            cpuPercent(
+                currentTicks: [5, 120, 230, 310],
+                previousTicks: [UInt32.max - 10, 100, 200, 300]
+            )
+        )
+        XCTAssertEqual(wrappedCounterPercent, 46.0 / 76.0 * 100, accuracy: 0.001)
+    }
+
     func testCommandOutputDrainsLargeOutputBeforeWaitingForExit() {
         let startedAt = Date()
         let output = runStatsCommandOutput(

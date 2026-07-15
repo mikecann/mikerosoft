@@ -190,6 +190,23 @@ struct StatsWidgetPlugin: TaskbarWidgetPlugin {
 
 typealias StatsCommandOutput = (_ executable: String, _ arguments: [String]) -> String?
 
+func cpuPercent(currentTicks: [UInt32], previousTicks: [UInt32]?) -> Double? {
+    guard let previousTicks,
+          currentTicks.count == Int(CPU_STATE_MAX),
+          previousTicks.count == currentTicks.count
+    else {
+        return nil
+    }
+
+    let deltas = zip(currentTicks, previousTicks).map { current, previous in
+        UInt64(current &- previous)
+    }
+    let idle = deltas[Int(CPU_STATE_IDLE)]
+    let total = deltas.reduce(UInt64.zero, +)
+    guard total > 0 else { return nil }
+    return clampedPercent(Double(total - idle) / Double(total) * 100)
+}
+
 final class TaskbarStatsSampler {
     static let shared = TaskbarStatsSampler()
 
@@ -296,22 +313,10 @@ final class TaskbarStatsSampler {
         guard let info = readCPULoadInfo() else { return nil }
         defer { previousCPU = info }
 
-        let current = cpuTicks(from: info)
-        let previous = previousCPU.map(cpuTicks(from:))
-        let deltas: [UInt32]
-
-        if let previous {
-            deltas = zip(current, previous).map { current, previous in
-                current >= previous ? current - previous : current
-            }
-        } else {
-            deltas = current
-        }
-
-        let idle = Double(deltas[2])
-        let total = Double(deltas.reduce(0, +))
-        guard total > 0 else { return nil }
-        return clampedPercent((total - idle) / total * 100)
+        return cpuPercent(
+            currentTicks: cpuTicks(from: info),
+            previousTicks: previousCPU.map(cpuTicks(from:))
+        )
     }
 
     private func readCPULoadInfo() -> host_cpu_load_info? {
