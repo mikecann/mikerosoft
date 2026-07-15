@@ -21,6 +21,7 @@ struct WindowRecord: Equatable {
     let title: String
     let pid: pid_t
     let windowID: Int
+    let accessibilityWindowID: Int
     let layer: Int
     let isOnScreen: Bool
     let isMinimized: Bool
@@ -86,6 +87,14 @@ private func deduplicatedAccessibilitySurfaces(_ records: [WindowRecord]) -> [Wi
 }
 
 private func isDuplicateSurface(_ left: WindowRecord, _ right: WindowRecord) -> Bool {
+    if left.windowID > 0, left.windowID == right.windowID {
+        return true
+    }
+
+    if hasProvenAccessibilityWindowID(left), hasProvenAccessibilityWindowID(right) {
+        return false
+    }
+
     let leftSignature = accessibilityDuplicateSignature(left)
     let rightSignature = accessibilityDuplicateSignature(right)
 
@@ -107,6 +116,10 @@ private func isDuplicateSurface(_ left: WindowRecord, _ right: WindowRecord) -> 
     }
 
     return left.bounds.overlapRatio(with: right.bounds) >= 0.5
+}
+
+private func hasProvenAccessibilityWindowID(_ record: WindowRecord) -> Bool {
+    record.windowID > 0 && record.accessibilityWindowID == record.windowID
 }
 
 private func isUntitledInternalSiblingSurface(_ record: WindowRecord, comparedTo sibling: WindowRecord) -> Bool {

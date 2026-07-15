@@ -1,6 +1,38 @@
 import AppKit
 import CoreGraphics
+import Darwin
 import Foundation
+
+private typealias AXGetWindowFunction = @convention(c) (
+    AXUIElement,
+    UnsafeMutablePointer<CGWindowID>
+) -> AXError
+
+private let axGetWindow: AXGetWindowFunction? = {
+    guard let handle = dlopen(nil, RTLD_NOW),
+          let symbol = dlsym(handle, "_AXUIElementGetWindow")
+    else {
+        return nil
+    }
+
+    return unsafeBitCast(symbol, to: AXGetWindowFunction.self)
+}()
+
+private func accessibilityWindowID(_ element: AXUIElement) -> Int {
+    guard let axGetWindow else { return 0 }
+
+    var windowID = CGWindowID(0)
+    guard axGetWindow(element, &windowID) == .success else { return 0 }
+    return Int(windowID)
+}
+
+func resolvedAccessibilitySignature(
+    windowIDBridgeAvailable: Bool,
+    fallback: () -> String
+) -> String {
+    guard !windowIDBridgeAvailable else { return "" }
+    return fallback()
+}
 
 func currentPID() -> pid_t {
     ProcessInfo.processInfo.processIdentifier
@@ -31,6 +63,7 @@ func activateApplicationWindow(item: TaskbarItem) -> Bool {
     setTaskbarAccessibilityMessagingTimeout(axApp)
     guard let target = matchingApplicationWindow(
         axApp: axApp,
+        windowIDs: item.windowIDs,
         title: item.title,
         bounds: item.windowBounds,
         accessibilitySignature: item.accessibilitySignature
@@ -126,6 +159,7 @@ func collectWindowRecords(screens: [ScreenInfo], includeMinimized: Bool = false)
     let matchRequests = rawWindows.map { window in
         AccessibilityWindowMatchRequest(
             pid: pid_t((window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0),
+            windowID: (window[kCGWindowNumber as String] as? NSNumber)?.intValue ?? 0,
             cgTitle: window[kCGWindowName as String] as? String ?? "",
             bounds: rect(from: window[kCGWindowBounds as String] as? [String: Any])
         )
@@ -140,6 +174,11 @@ func collectWindowRecords(screens: [ScreenInfo], includeMinimized: Bool = false)
         let bounds = rect(from: window[kCGWindowBounds as String] as? [String: Any])
         let owner = window[kCGWindowOwnerName as String] as? String ?? ""
         let cgTitle = window[kCGWindowName as String] as? String ?? ""
+        let windowID = (window[kCGWindowNumber as String] as? NSNumber)?.intValue ?? 0
+        let matchedAccessibilityWindowID = accessibilitySurface?.windowID ?? 0
+        let accessibilityWindowID = windowID > 0 && matchedAccessibilityWindowID == windowID
+            ? matchedAccessibilityWindowID
+            : 0
         let title = resolvedWindowTitle(
             cgTitle: cgTitle,
             owner: owner,
@@ -151,7 +190,8 @@ func collectWindowRecords(screens: [ScreenInfo], includeMinimized: Bool = false)
             owner: owner,
             title: title,
             pid: pid,
-            windowID: (window[kCGWindowNumber as String] as? NSNumber)?.intValue ?? 0,
+            windowID: windowID,
+            accessibilityWindowID: accessibilityWindowID,
             layer: (window[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0,
             isOnScreen: (window[kCGWindowIsOnscreen as String] as? Bool) ?? true,
             isMinimized: false,
@@ -169,7 +209,12 @@ func collectWindowRecords(screens: [ScreenInfo], includeMinimized: Bool = false)
     }
 
     let cgKeys = Set(cgRecords.map { AccessibilityWindowKey(pid: $0.pid, title: $0.title, bounds: $0.bounds) })
-    return cgRecords + MinimizedWindowSampler.shared.records(screens: screens, excluding: cgKeys)
+    let cgWindowIDs = Set(cgRecords.lazy.map(\.windowID).filter { $0 > 0 })
+    return cgRecords + MinimizedWindowSampler.shared.records(
+        screens: screens,
+        excluding: cgKeys,
+        visibleWindowIDs: cgWindowIDs
+    )
 }
 
 private struct AccessibilityWindowKey: Hashable {
@@ -192,15 +237,32 @@ private struct AccessibilityWindowKey: Hashable {
 
 struct AccessibilityWindowSurface: Equatable {
     let pid: pid_t
+    let windowID: Int
     let title: String
     let bounds: CGRect
     let signature: String
+
+    init(pid: pid_t, windowID: Int = 0, title: String, bounds: CGRect, signature: String) {
+        self.pid = pid
+        self.windowID = windowID
+        self.title = title
+        self.bounds = bounds
+        self.signature = signature
+    }
 }
 
 struct AccessibilityWindowMatchRequest: Equatable {
     let pid: pid_t
+    let windowID: Int
     let cgTitle: String
     let bounds: CGRect
+
+    init(pid: pid_t, windowID: Int = 0, cgTitle: String, bounds: CGRect) {
+        self.pid = pid
+        self.windowID = windowID
+        self.cgTitle = cgTitle
+        self.bounds = bounds
+    }
 }
 
 func resolvedWindowTitle(cgTitle: String, owner: String, accessibilityTitle: String) -> String {
@@ -219,12 +281,13 @@ func resolvedWindowTitle(cgTitle: String, owner: String, accessibilityTitle: Str
 
 func matchingAccessibilitySurface(
     pid: pid_t,
+    windowID: Int = 0,
     cgTitle: String,
     bounds: CGRect,
     in surfaces: [AccessibilityWindowSurface]
 ) -> AccessibilityWindowSurface? {
     matchingAccessibilitySurfaces(
-        requests: [AccessibilityWindowMatchRequest(pid: pid, cgTitle: cgTitle, bounds: bounds)],
+        requests: [AccessibilityWindowMatchRequest(pid: pid, windowID: windowID, cgTitle: cgTitle, bounds: bounds)],
         in: surfaces
     ).first ?? nil
 }
@@ -234,19 +297,38 @@ func matchingAccessibilitySurfaces(
     in surfaces: [AccessibilityWindowSurface]
 ) -> [AccessibilityWindowSurface?] {
     var consumedSurfaceIndexes = Set<Int>()
+    var matches = Array<AccessibilityWindowSurface?>(repeating: nil, count: requests.count)
 
-    return requests.map { request in
+    for requestIndex in requests.indices {
+        let request = requests[requestIndex]
+        guard request.windowID > 0,
+              let matchIndex = surfaces.indices.first(where: { index in
+                  !consumedSurfaceIndexes.contains(index)
+                      && surfaces[index].windowID == request.windowID
+              })
+        else {
+            continue
+        }
+
+        consumedSurfaceIndexes.insert(matchIndex)
+        matches[requestIndex] = surfaces[matchIndex]
+    }
+
+    for requestIndex in requests.indices where matches[requestIndex] == nil {
+        let request = requests[requestIndex]
         guard let matchIndex = matchingAccessibilitySurfaceIndex(
             request: request,
             in: surfaces,
             consumedSurfaceIndexes: consumedSurfaceIndexes
         ) else {
-            return nil
+            continue
         }
 
         consumedSurfaceIndexes.insert(matchIndex)
-        return surfaces[matchIndex]
+        matches[requestIndex] = surfaces[matchIndex]
     }
+
+    return matches
 }
 
 private func matchingAccessibilitySurfaceIndex(
@@ -257,6 +339,9 @@ private func matchingAccessibilitySurfaceIndex(
     let candidates = surfaces.indices.filter { index in
         guard !consumedSurfaceIndexes.contains(index) else { return false }
         let surface = surfaces[index]
+        guard !(request.windowID > 0 && surface.windowID > 0 && request.windowID != surface.windowID) else {
+            return false
+        }
         let requestKey = AccessibilityWindowKey(pid: request.pid, title: "", bounds: request.bounds)
         let surfaceKey = AccessibilityWindowKey(pid: surface.pid, title: "", bounds: surface.bounds)
         return requestKey == surfaceKey
@@ -319,6 +404,7 @@ private func normalizedWindowTitle(_ value: String) -> String {
 
 private func matchingApplicationWindow(
     axApp: AXUIElement,
+    windowIDs: [Int],
     title: String,
     bounds: CGRect?,
     accessibilitySignature: String
@@ -330,14 +416,33 @@ private func matchingApplicationWindow(
         return nil
     }
 
-    let candidates = windows.compactMap { window -> (window: AXUIElement, score: Int)? in
+    let eligibleWindows = windows.filter { window in
         setTaskbarAccessibilityMessagingTimeout(window)
         let role = accessibilityString(window, kAXRoleAttribute)
-        guard role.isEmpty || role == "AXWindow" else { return nil }
+        return role.isEmpty || role == "AXWindow"
+    }
+    let candidateWindowIDs = eligibleWindows.map(accessibilityWindowID)
 
+    if let matchIndex = exactApplicationWindowMatchIndex(
+        itemWindowIDs: windowIDs,
+        candidateWindowIDs: candidateWindowIDs
+    ) {
+        return eligibleWindows[matchIndex]
+    }
+
+    let scoredCandidates = zip(eligibleWindows, candidateWindowIDs).compactMap {
+        window, candidateWindowID -> (window: AXUIElement, score: Int)? in
+        guard canHeuristicallyMatchApplicationWindow(
+            itemWindowIDs: windowIDs,
+            candidateWindowID: candidateWindowID
+        ) else {
+            return nil
+        }
         let candidateTitle = accessibilityString(window, kAXTitleAttribute)
         let candidateBounds = accessibilityBounds(window)
-        let candidateSignature = accessibilityChildSignature(window)
+        let candidateSignature = resolvedAccessibilitySignature(windowIDBridgeAvailable: axGetWindow != nil) {
+            accessibilityChildSignature(window)
+        }
         let score = applicationWindowMatchScore(
             itemTitle: title,
             itemBounds: bounds,
@@ -350,9 +455,21 @@ private func matchingApplicationWindow(
         return (window, score)
     }
 
-    return candidates.max { left, right in
+    return scoredCandidates.max { left, right in
         left.score < right.score
     }?.window
+}
+
+func exactApplicationWindowMatchIndex(itemWindowIDs: [Int], candidateWindowIDs: [Int]) -> Int? {
+    let knownItemWindowIDs = Set(itemWindowIDs.filter { $0 > 0 })
+    guard !knownItemWindowIDs.isEmpty else { return nil }
+    return candidateWindowIDs.firstIndex(where: knownItemWindowIDs.contains)
+}
+
+func canHeuristicallyMatchApplicationWindow(itemWindowIDs: [Int], candidateWindowID: Int) -> Bool {
+    let knownItemWindowIDs = Set(itemWindowIDs.filter { $0 > 0 })
+    guard !knownItemWindowIDs.isEmpty, candidateWindowID > 0 else { return true }
+    return knownItemWindowIDs.contains(candidateWindowID)
 }
 
 func applicationWindowMatchScore(
@@ -485,10 +602,14 @@ private func collectAccessibilitySurfaces(for pids: Set<pid_t>) -> [Accessibilit
             guard let bounds = accessibilityBounds(window) else { continue }
             let role = accessibilityString(window, kAXRoleAttribute)
             guard role.isEmpty || role == "AXWindow" else { continue }
-            let signature = accessibilityChildSignature(window)
+            let windowID = accessibilityWindowID(window)
+            let signature = resolvedAccessibilitySignature(windowIDBridgeAvailable: axGetWindow != nil) {
+                accessibilityChildSignature(window)
+            }
             surfaces.append(
                 AccessibilityWindowSurface(
                     pid: pid,
+                    windowID: windowID,
                     title: title,
                     bounds: bounds,
                     signature: signature
@@ -508,10 +629,16 @@ private final class MinimizedWindowSampler {
     private var lastRefresh = Date.distantPast
     private var isRefreshing = false
 
-    func records(screens: [ScreenInfo], excluding visibleKeys: Set<AccessibilityWindowKey>, now: Date = Date()) -> [WindowRecord] {
+    func records(
+        screens: [ScreenInfo],
+        excluding visibleKeys: Set<AccessibilityWindowKey>,
+        visibleWindowIDs: Set<Int>,
+        now: Date = Date()
+    ) -> [WindowRecord] {
         lock.lock()
         let cached = cachedRecords.filter { record in
-            !visibleKeys.contains(AccessibilityWindowKey(pid: record.pid, title: record.title, bounds: record.bounds))
+            !isStaleCachedMinimizedWindow(windowID: record.windowID, visibleWindowIDs: visibleWindowIDs)
+                && !visibleKeys.contains(AccessibilityWindowKey(pid: record.pid, title: record.title, bounds: record.bounds))
         }
         let shouldRefresh = now.timeIntervalSince(lastRefresh) >= 2.0 && !isRefreshing
         if shouldRefresh {
@@ -560,12 +687,17 @@ private func collectMinimizedWindowRecords(screens: [ScreenInfo]) -> [WindowReco
 
             let title = accessibilityString(window, kAXTitleAttribute)
             guard let bounds = accessibilityBounds(window) else { continue }
+            let resolvedAccessibilityWindowID = accessibilityWindowID(window)
+            let windowID = resolvedMinimizedWindowID(resolvedAccessibilityWindowID) {
+                syntheticWindowID(pid: pid, title: title, bounds: bounds)
+            }
             records.append(
                 WindowRecord(
                     owner: app.localizedName ?? app.bundleURL?.deletingPathExtension().lastPathComponent ?? "",
                     title: title,
                     pid: pid,
-                    windowID: syntheticWindowID(pid: pid, title: title, bounds: bounds),
+                    windowID: windowID,
+                    accessibilityWindowID: resolvedAccessibilityWindowID,
                     layer: 0,
                     isOnScreen: false,
                     isMinimized: true,
@@ -581,6 +713,15 @@ private func collectMinimizedWindowRecords(screens: [ScreenInfo]) -> [WindowReco
     }
 
     return records
+}
+
+func resolvedMinimizedWindowID(_ windowID: Int, fallback: () -> Int) -> Int {
+    guard windowID > 0 else { return fallback() }
+    return windowID
+}
+
+func isStaleCachedMinimizedWindow(windowID: Int, visibleWindowIDs: Set<Int>) -> Bool {
+    windowID > 0 && visibleWindowIDs.contains(windowID)
 }
 
 private func accessibilityBounds(_ element: AXUIElement) -> CGRect? {
