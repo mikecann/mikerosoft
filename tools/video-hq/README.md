@@ -1,5 +1,7 @@
 # Video HQ
 
+![Video HQ production command center](docs/header.jpg)
+
 A native macOS command center for Mike's video-production workflows. Video HQ
 treats each direct folder in `~/Movies/Projects` as one video project, loads its
 script, and previews rendered MP4s from the project root.
@@ -23,6 +25,20 @@ manually.
 Existing sidecars are loaded whenever a video is opened. Description files are
 compatible with the existing `video-description` CLI chat-log format, and the
 app displays its latest Gemini response.
+
+## Screenshots
+
+### Script and render workspace
+
+![Video HQ showing a project script beside its rendered video](docs/ss1.jpg)
+
+### Timestamped transcript
+
+![Video HQ showing a saved timestamped transcript](docs/ss2.jpg)
+
+### YouTube description
+
+![Video HQ showing a generated YouTube description](docs/ss3.jpg)
 
 ## Setup
 
