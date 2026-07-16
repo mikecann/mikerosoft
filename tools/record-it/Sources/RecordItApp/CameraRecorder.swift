@@ -87,20 +87,22 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             throw RecordItError.message("The selected camera did not report a usable frame duration.")
         }
 
-        try device.lockForConfiguration()
-        device.activeFormat = format
-        device.activeVideoMinFrameDuration = frameRateRange.minFrameDuration
-        device.activeVideoMaxFrameDuration = frameRateRange.minFrameDuration
-        device.unlockForConfiguration()
-
         captureSession.beginConfiguration()
         defer { captureSession.commitConfiguration() }
 
         let videoInput = try AVCaptureDeviceInput(device: device)
-        guard captureSession.canAddInput(videoInput) else {
-            throw RecordItError.message("The selected camera could not be added to the capture session.")
+        try addCameraInputThenApplySelectedFormat {
+            guard captureSession.canAddInput(videoInput) else {
+                throw RecordItError.message("The selected camera could not be added to the capture session.")
+            }
+            captureSession.addInput(videoInput)
+        } applyFormat: {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            device.activeFormat = format
+            device.activeVideoMinFrameDuration = frameRateRange.minFrameDuration
+            device.activeVideoMaxFrameDuration = frameRateRange.minFrameDuration
         }
-        captureSession.addInput(videoInput)
 
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.videoSettings = [
@@ -136,6 +138,14 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             startGate: startGate
         )
     }
+}
+
+func addCameraInputThenApplySelectedFormat(
+    addInput: () throws -> Void,
+    applyFormat: () throws -> Void
+) rethrows {
+    try addInput()
+    try applyFormat()
 }
 
 private func requestAccess(for mediaType: AVMediaType) async -> Bool {

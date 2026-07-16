@@ -339,7 +339,11 @@ struct RecordItView: View {
             .buttonStyle(.borderedProminent)
             .tint(model.isRecording ? .red : .accentColor)
             .controlSize(.large)
-            .disabled(!model.canRecord && !model.isRecording)
+            .disabled(recordButtonIsDisabled(
+                canRecord: model.canRecord,
+                isRecording: model.isRecording,
+                isBusy: model.isBusy
+            ))
         }
     }
 
@@ -348,6 +352,10 @@ struct RecordItView: View {
             .font(.subheadline.weight(.medium))
             .frame(width: 104, alignment: .leading)
     }
+}
+
+func recordButtonIsDisabled(canRecord: Bool, isRecording: Bool, isBusy: Bool) -> Bool {
+    isBusy || (!canRecord && !isRecording)
 }
 
 private func elapsedTime(from start: Date, to end: Date) -> String {
