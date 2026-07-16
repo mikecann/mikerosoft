@@ -2,6 +2,17 @@ import XCTest
 @testable import RecordItApp
 
 final class CaptureSelectionTests: XCTestCase {
+    func testCameraFormatIsAppliedAfterTheInputJoinsTheSession() {
+        var configurationSteps: [String] = []
+
+        addCameraInputThenApplySelectedFormat(
+            addInput: { configurationSteps.append("input") },
+            applyFormat: { configurationSteps.append("format") }
+        )
+
+        XCTAssertEqual(configurationSteps, ["input", "format"])
+    }
+
     func testPreferredDisplayDefaultsToHG584T05() {
         let displays = [
             CaptureDisplay(id: 1, name: "LG Monitor", width: 5120, height: 2880),

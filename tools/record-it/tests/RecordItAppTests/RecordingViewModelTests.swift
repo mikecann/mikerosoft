@@ -4,6 +4,16 @@ import XCTest
 
 @MainActor
 final class RecordingViewModelTests: XCTestCase {
+    func testRecordButtonIsDisabledWhileARecordingOperationIsBusy() {
+        XCTAssertTrue(
+            recordButtonIsDisabled(
+                canRecord: false,
+                isRecording: true,
+                isBusy: true
+            )
+        )
+    }
+
     func testResetFileNameReplacesAnOverrideWithTheCurrentTimestampDefault() {
         let model = RecordingViewModel()
         model.fileName = "launch-demo"
