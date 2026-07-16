@@ -356,6 +356,59 @@ Edit the constants at the top of `mac-screenshot.py`:
 
 ---
 
+## record-it specifics
+
+Native SwiftUI screen and camera recorder for macOS. ScreenCaptureKit records the
+selected display and system audio. AVFoundation records the selected camera and
+default microphone. When both are selected, each source gets its own full-resolution
+HEVC `.mov` file.
+
+### Dev workflow
+
+After any Swift change, run the tests and restart the staged app:
+
+```bash
+swift test --package-path tools/record-it
+bash tools/record-it/restart.sh
+```
+
+Always launch the staged `~/Applications/Record It.app`. Do not run the raw
+SwiftPM executable for permission testing because macOS keys Screen Recording,
+Camera, and Microphone permissions to the signed app bundle.
+
+### Key behaviour
+
+- `HG584T05` is the default display and produces a 3840 × 2160, 30 fps output.
+- If the active display framebuffer is smaller than the recording output, the
+  UI shows the exact source-to-output scaling and warns that the result may look soft.
+- The first 4K/30-capable camera is selected by default. On this machine that is
+  `Razer Kiyo Pro Ultra`.
+- The file name field defaults to the timestamp prefix, accepts an override
+  without `.mov`, and resets to a fresh timestamp after every recording.
+- Screen audio defaults to ScreenCaptureKit system playback and can be disabled.
+  It does not use a microphone.
+- Camera audio is independently selectable and defaults to the first microphone
+  whose name contains `Yeti`.
+- Projects come from `~/Movies/Projects`, newest creation date first.
+- Project recordings go to `<project>/source`; No Project goes to
+  `~/Movies/record-it-output`.
+- Screen and camera outputs are separate files so neither source is scaled into
+  a combined canvas.
+- Quitting while recording finishes the active writers before the app exits.
+
+### Key files
+
+| Path | What it is |
+|---|---|
+| `tools/record-it/Sources/RecordItApp/RecordItApplication.swift` | SwiftUI app and controls |
+| `tools/record-it/Sources/RecordItApp/ScreenRecorder.swift` | ScreenCaptureKit pipeline |
+| `tools/record-it/Sources/RecordItApp/CameraRecorder.swift` | AVFoundation camera + microphone pipeline |
+| `tools/record-it/Sources/RecordItApp/MovieWriter.swift` | HEVC/AAC `.mov` writer |
+| `tools/record-it/build-app.sh` | Builds, stages, and signs the app bundle |
+| `tools/record-it/restart.sh` | Stops, rebuilds, and launches the debug app |
+
+---
+
 ## scale-monitor specifics
 
 - Monitor: HG584T05, "Display 4", AMD Radeon Graphics
