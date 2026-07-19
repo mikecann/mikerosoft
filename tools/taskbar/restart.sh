@@ -41,6 +41,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BINARY" "$APP_BIN"
 chmod +x "$APP_BIN"
+cp "$SCRIPT_DIR/icons/TaskbarIcon.icns" "$APP_DIR/Contents/Resources/TaskbarIcon.icns"
 cat >"$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -56,6 +57,8 @@ cat >"$APP_DIR/Contents/Info.plist" <<PLIST
     <string>Mikerosoft Taskbar</string>
     <key>CFBundleDisplayName</key>
     <string>Mikerosoft Taskbar</string>
+    <key>CFBundleIconFile</key>
+    <string>TaskbarIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
