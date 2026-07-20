@@ -914,8 +914,17 @@ final class TaskbarSettingsTests: XCTestCase {
         }
 
         XCTAssertEqual(gaps, [10, 10, 10])
-        XCTAssertEqual(StatsWidgetMetrics.preferredMemoryWidth, StatsWidgetMetrics.minimumMemoryWidth)
+        XCTAssertGreaterThan(StatsWidgetMetrics.preferredMemoryWidth, StatsWidgetMetrics.minimumMemoryWidth)
         XCTAssertLessThanOrEqual(StatsWidgetMetrics.preferredNetworkWidth, 82)
+    }
+
+    func testStatsMemoryModuleLeavesRoomForThreeDigitPercent() {
+        let contentWidth = StatsWidgetMetrics.preferredMemoryWidth
+            - StatsWidgetMetrics.sideLabelWidth
+            - StatsWidgetMetrics.sideLabelGap
+
+        XCTAssertGreaterThanOrEqual(contentWidth, 36)
+        XCTAssertEqual(StatsWidgetMetrics.minimumMemoryWidth, 38)
     }
 
     func testStatsMiniGraphUsesOnePixelVerticalPadding() {

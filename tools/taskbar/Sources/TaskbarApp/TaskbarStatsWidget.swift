@@ -129,7 +129,10 @@ enum StatsWidgetMetrics {
     static let minimumGPUWidth: CGFloat = 42
     static let preferredGPUWidth: CGFloat = 48
     static let minimumMemoryWidth: CGFloat = 38
-    static let preferredMemoryWidth: CGFloat = 38
+    // A three-digit percentage ("100%") needs 36 points after the vertical
+    // label and gap; narrower content is truncated by AppKit to e.g. "4...".
+    // Keep the old compact minimum so crowded taskbars can still fit the widget.
+    static let preferredMemoryWidth: CGFloat = 48
     static let minimumNetworkWidth: CGFloat = 64
     static let preferredNetworkWidth: CGFloat = 82
     static let moduleSpacing: CGFloat = 10
