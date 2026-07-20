@@ -10,6 +10,7 @@ final class TaskbarPanel {
     private var values: TaskbarSettingValues
     private var currentItems: [TaskbarItem] = []
     private var isShown = true
+    private var isObscuredByFullscreenWindow = false
 
     init(
         screen: ScreenInfo,
@@ -43,7 +44,9 @@ final class TaskbarPanel {
         panel.ignoresMouseEvents = false
         panel.isReleasedWhenClosed = false
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        // Do not opt into native fullscreen Spaces. Borderless fullscreen games
+        // are handled separately by the foreground-window geometry check.
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary]
 
         view = TaskbarView(frame: NSRect(x: 0, y: 0, width: frame.width, height: frame.height))
         containerView = TaskbarContainerView(
@@ -73,12 +76,18 @@ final class TaskbarPanel {
         panel.contentView = containerView
     }
 
-    func update(screen: ScreenInfo, items: [TaskbarItem], values: TaskbarSettingValues) {
+    func update(
+        screen: ScreenInfo,
+        items: [TaskbarItem],
+        values: TaskbarSettingValues,
+        isObscuredByFullscreenWindow: Bool = false
+    ) {
         let previousTargetFrame = frame(shown: isShown)
         let panelWasVisible = panel.isVisible
         let valuesChanged = self.values != values
         self.screen = screen
         self.values = values
+        self.isObscuredByFullscreenWindow = isObscuredByFullscreenWindow
         let panelGeometryChanged = previousTargetFrame != frame(shown: isShown)
 
         let height = CGFloat(values.taskbarHeight)
@@ -98,7 +107,10 @@ final class TaskbarPanel {
             containerView.update(items: items, settings: values)
             currentItems = items
         }
-        guard values.isVisible else {
+        guard taskbarPanelShouldBeVisible(
+            configuredVisible: values.isVisible,
+            isObscuredByFullscreenWindow: isObscuredByFullscreenWindow
+        ) else {
             panel.orderOut(nil)
             containerView.setWidgetRepaintVisibility(panel.isVisible)
             return
@@ -119,7 +131,7 @@ final class TaskbarPanel {
     }
 
     func updateAutoHide(mouseLocation: NSPoint, animated: Bool) {
-        guard values.isVisible, values.autoHide else { return }
+        guard values.isVisible, values.autoHide, !isObscuredByFullscreenWindow else { return }
         setShown(shouldReveal(mouseLocation: mouseLocation), animated: animated)
     }
 
@@ -349,6 +361,18 @@ final class TaskbarController: NSObject {
             now: ProcessInfo.processInfo.systemUptime
         )
         pendingFrontmostWindowExpectation = frontmostWindowResolution.remainingExpectation
+        let fullscreenScreenIDs = fullscreenCoveredScreenIDs(
+            records: records,
+            screens: screens,
+            frontmostPID: currentFrontmostPID,
+            currentPID: currentProcessID
+        )
+
+        if let statsPopoverPanel,
+           let popoverScreen = screens.first(where: { $0.appKitFrame.intersects(statsPopoverPanel.frame) }),
+           fullscreenScreenIDs.contains(popoverScreen.id) {
+            closeStatsPopover()
+        }
 
         for screen in screens {
             let values = valuesByScreen[screen.id] ?? settings.values(for: screen.id)
@@ -364,7 +388,12 @@ final class TaskbarController: NSObject {
                 frontmostWindowID: frontmostWindowResolution.effectiveWindowID,
                 pinnedApps: values.pinnedApps
             )
-            panels[screen.id]?.update(screen: screen, items: items, values: values)
+            panels[screen.id]?.update(
+                screen: screen,
+                items: items,
+                values: values,
+                isObscuredByFullscreenWindow: fullscreenScreenIDs.contains(screen.id)
+            )
         }
 
         let avoidanceRequests = windowAdjustmentRequests(
@@ -542,7 +571,7 @@ final class TaskbarController: NSObject {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.collectionBehavior = [.canJoinAllSpaces, .transient]
         panel.contentViewController = StatsPopoverViewController(metric: metric, size: size)
         statsPopoverMetric = metric
         statsPopoverPanel = panel

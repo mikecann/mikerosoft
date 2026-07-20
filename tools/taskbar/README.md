@@ -24,6 +24,7 @@ maximising underneath the bar.
 - Supports taskbar widgets, starting with Date & Time and Stats widgets
 - Lets widgets own their menu, rendering, and settings surface
 - Auto-hides with configurable animation
+- Hides on any monitor occupied by a foreground fullscreen app or game
 - Controls taskbar size, item width, item spacing, and background opacity
 - Keeps normal windows above the taskbar when apps maximise
 - Opens the settings window for the monitor you right-clicked

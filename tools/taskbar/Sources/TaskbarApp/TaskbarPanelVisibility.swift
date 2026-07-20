@@ -4,6 +4,13 @@ enum TaskbarSetShownAction: Equatable {
     case nothing
 }
 
+func taskbarPanelShouldBeVisible(
+    configuredVisible: Bool,
+    isObscuredByFullscreenWindow: Bool
+) -> Bool {
+    configuredVisible && !isObscuredByFullscreenWindow
+}
+
 func taskbarSetShownAction(
     targetShown: Bool,
     currentShown: Bool,

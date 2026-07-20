@@ -115,6 +115,17 @@ final class WindowAvoidanceTests: XCTestCase {
         XCTAssertNil(clampedWindowFrame(frame, screen: screen, reservedBottomHeight: 54))
     }
 
+    func testFullscreenWindowIsNotResizedToMakeRoomForTaskbar() {
+        let requests = windowAdjustmentRequests(
+            records: [record(pid: 100, windowID: 1, bounds: screen().quartzFrame)],
+            screens: [screen()],
+            valuesByScreen: [1: values()],
+            currentPID: 999
+        )
+
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func testWindowAdjustmentRequestsIncludeOnlyWindowsThatNeedClamping() {
         let records = [
             record(pid: 100, windowID: 1),

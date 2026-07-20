@@ -2,6 +2,21 @@ import XCTest
 @testable import TaskbarApp
 
 final class TaskbarPanelVisibilityTests: XCTestCase {
+    func testFullscreenWindowOverridesConfiguredVisibility() {
+        XCTAssertFalse(
+            taskbarPanelShouldBeVisible(
+                configuredVisible: true,
+                isObscuredByFullscreenWindow: true
+            )
+        )
+        XCTAssertTrue(
+            taskbarPanelShouldBeVisible(
+                configuredVisible: true,
+                isObscuredByFullscreenWindow: false
+            )
+        )
+    }
+
     func testAnimatedRepeatForInFlightStateDoesNothing() {
         XCTAssertEqual(
             taskbarSetShownAction(

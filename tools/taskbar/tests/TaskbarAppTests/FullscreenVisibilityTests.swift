@@ -1,0 +1,79 @@
+import CoreGraphics
+import Darwin
+import XCTest
+@testable import TaskbarApp
+
+final class FullscreenVisibilityTests: XCTestCase {
+    private let screens = [
+        ScreenInfo(
+            id: 1,
+            name: "Main",
+            appKitFrame: CGRect(x: 0, y: 0, width: 2560, height: 1440),
+            quartzFrame: CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        ),
+        ScreenInfo(
+            id: 2,
+            name: "Side",
+            appKitFrame: CGRect(x: 2560, y: 0, width: 1920, height: 1080),
+            quartzFrame: CGRect(x: 2560, y: 0, width: 1920, height: 1080)
+        )
+    ]
+
+    func testForegroundWindowCoveringScreenHidesOnlyThatScreensTaskbar() {
+        let records = [record(pid: 200, bounds: CGRect(x: 2559, y: -1, width: 1922, height: 1082))]
+
+        let hiddenScreenIDs = fullscreenCoveredScreenIDs(
+            records: records,
+            screens: screens,
+            frontmostPID: 200,
+            currentPID: 999
+        )
+
+        XCTAssertEqual(hiddenScreenIDs, [2])
+    }
+
+    func testOrdinaryMaximizedWindowDoesNotHideTaskbar() {
+        let records = [record(pid: 200, bounds: CGRect(x: 0, y: 24, width: 2560, height: 1362))]
+
+        let hiddenScreenIDs = fullscreenCoveredScreenIDs(
+            records: records,
+            screens: screens,
+            frontmostPID: 200,
+            currentPID: 999
+        )
+
+        XCTAssertTrue(hiddenScreenIDs.isEmpty)
+    }
+
+    func testBackgroundFullscreenSizedWindowDoesNotHideTaskbar() {
+        let records = [record(pid: 200, bounds: screens[0].quartzFrame)]
+
+        let hiddenScreenIDs = fullscreenCoveredScreenIDs(
+            records: records,
+            screens: screens,
+            frontmostPID: 201,
+            currentPID: 999
+        )
+
+        XCTAssertTrue(hiddenScreenIDs.isEmpty)
+    }
+
+    private func record(pid: pid_t, bounds: CGRect) -> WindowRecord {
+        WindowRecord(
+            owner: "Steam Game",
+            title: "Game",
+            pid: pid,
+            windowID: 42,
+            accessibilityWindowID: 42,
+            layer: 0,
+            isOnScreen: true,
+            isMinimized: false,
+            bounds: bounds,
+            screenID: nil,
+            bundleID: "com.example.game",
+            appPath: "/Applications/Game.app",
+            accessibilityTitle: "Game",
+            accessibilitySignature: ""
+        )
+    }
+}
