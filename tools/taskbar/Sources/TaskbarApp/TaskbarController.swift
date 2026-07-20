@@ -378,17 +378,30 @@ final class TaskbarController: NSObject {
 
     func activate(item: TaskbarItem) {
         let pidText = item.pid.map(String.init) ?? "not-running"
-        log("activating \(item.owner) pid=\(pidText) windows=\(item.windowIDs)")
-        pendingFrontmostWindowExpectation = frontmostWindowExpectation(
-            afterActivating: item,
-            now: ProcessInfo.processInfo.systemUptime
-        )
-        if let pid = item.pid {
-            if item.isMinimized {
+        let action = taskbarItemClickAction(for: item)
+        log("taskbar click \(action) \(item.owner) pid=\(pidText) windows=\(item.windowIDs)")
+
+        switch action {
+        case .minimize:
+            pendingFrontmostWindowExpectation = nil
+            minimizeApplicationWindowAsync(item: item)
+        case .restore:
+            pendingFrontmostWindowExpectation = frontmostWindowExpectation(
+                afterActivating: item,
+                now: ProcessInfo.processInfo.systemUptime
+            )
+            if let pid = item.pid {
                 unminimizeApplicationWindowAsync(pid: pid, title: item.title)
             }
             activateApplicationWindowAsync(item: item)
-        } else {
+        case .activate:
+            pendingFrontmostWindowExpectation = frontmostWindowExpectation(
+                afterActivating: item,
+                now: ProcessInfo.processInfo.systemUptime
+            )
+            activateApplicationWindowAsync(item: item)
+        case .launch:
+            pendingFrontmostWindowExpectation = nil
             _ = launchApplication(appPath: item.appPath, bundleID: item.bundleID)
         }
         scheduleRefreshSoon()

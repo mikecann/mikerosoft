@@ -489,6 +489,15 @@ def open_log(path: str) -> None:
     subprocess.run(["open", path], check=False)
 
 
+def activate_settings_window() -> None:
+    """Bring the accessory app forward when its normal settings window opens."""
+    try:
+        from AppKit import NSApp
+        NSApp.activateIgnoringOtherApps_(True)
+    except Exception:
+        pass
+
+
 def get_foreground_window_title() -> str:
     try:
         from AppKit import NSWorkspace  # type: ignore[import]

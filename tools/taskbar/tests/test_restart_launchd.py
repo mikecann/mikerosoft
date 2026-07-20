@@ -43,6 +43,18 @@ def runtime_launchd_plist():
 
 
 class RestartLaunchdTests(unittest.TestCase):
+    def test_ad_hoc_signature_has_a_stable_designated_requirement(self):
+        source = RESTART_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn(
+            'DESIGNATED_REQUIREMENT=\'=designated => identifier "com.mikerosoft.taskbar"\'',
+            source,
+        )
+        self.assertRegex(
+            source,
+            r'codesign .*--requirements "\$DESIGNATED_REQUIREMENT" .*"\$APP_DIR"',
+        )
+
     def test_staged_app_bundle_includes_its_icon(self):
         plist = app_bundle_plist()
         source = RESTART_SCRIPT.read_text(encoding="utf-8")

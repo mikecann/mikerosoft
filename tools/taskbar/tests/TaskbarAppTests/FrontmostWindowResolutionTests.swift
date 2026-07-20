@@ -129,6 +129,39 @@ final class FrontmostWindowResolutionTests: XCTestCase {
         XCTAssertNil(frontmostWindowExpectation(afterActivating: item, now: 10))
     }
 
+    func testClickingFrontmostWindowMinimizesIt() {
+        let item = taskbarItem()
+        let frontmostItem = TaskbarItem(
+            owner: item.owner,
+            pid: item.pid,
+            title: item.title,
+            windowCount: item.windowCount,
+            windowIDs: item.windowIDs,
+            windowBounds: item.windowBounds,
+            accessibilitySignature: item.accessibilitySignature,
+            isFrontmost: true,
+            isMinimized: false,
+            bundleID: item.bundleID,
+            appPath: item.appPath,
+            isPinned: item.isPinned,
+            pinOrder: item.pinOrder
+        )
+
+        XCTAssertEqual(taskbarItemClickAction(for: frontmostItem), .minimize)
+    }
+
+    func testClickingMinimizedWindowRestoresIt() {
+        XCTAssertEqual(taskbarItemClickAction(for: taskbarItem(isMinimized: true)), .restore)
+    }
+
+    func testClickingInactiveWindowActivatesIt() {
+        XCTAssertEqual(taskbarItemClickAction(for: taskbarItem()), .activate)
+    }
+
+    func testClickingClosedPinnedAppLaunchesIt() {
+        XCTAssertEqual(taskbarItemClickAction(for: taskbarItem(pid: nil, windowIDs: [])), .launch)
+    }
+
     func testResolvedOptimisticWindowIDMarksClickedTaskbarItemFrontmost() {
         let windows = [
             windowRecord(title: "Inbox", windowID: 578),

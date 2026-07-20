@@ -1394,6 +1394,8 @@ class Overlay:
             self._settings_win.deiconify()
             self._settings_win.lift()
             self._settings_win.focus_force()
+            if sys.platform == "darwin":
+                platform.activate_settings_window()
             return
 
         state = payload["state"]
@@ -1562,6 +1564,8 @@ class Overlay:
 
         win.protocol("WM_DELETE_WINDOW", _close)
         win.focus_force()
+        if sys.platform == "darwin":
+            platform.activate_settings_window()
 
     def _position(self):
         """Position at bottom-centre of the monitor holding the focused window."""

@@ -64,6 +64,20 @@ struct FrontmostWindowResolution: Equatable {
     let remainingExpectation: FrontmostWindowExpectation?
 }
 
+enum TaskbarItemClickAction: Equatable {
+    case minimize
+    case restore
+    case activate
+    case launch
+}
+
+func taskbarItemClickAction(for item: TaskbarItem) -> TaskbarItemClickAction {
+    guard item.pid != nil else { return .launch }
+    if item.isMinimized { return .restore }
+    if item.isFrontmost { return .minimize }
+    return .activate
+}
+
 func frontmostWindowExpectation(
     afterActivating item: TaskbarItem,
     now: TimeInterval,

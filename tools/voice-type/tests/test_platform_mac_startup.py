@@ -4,6 +4,7 @@ import pathlib
 import tempfile
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 
 
 TOOLS_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -117,6 +118,15 @@ class PlatformMacStartupTests(unittest.TestCase):
                         self.module.set_startup(False, log=None)
 
             run_mock.assert_called_once_with(["launchctl", "bootout", service], check=False)
+
+    def test_activate_settings_window_brings_accessory_app_forward(self):
+        ns_app = mock.Mock()
+        appkit = SimpleNamespace(NSApp=ns_app)
+
+        with mock.patch.dict("sys.modules", {"AppKit": appkit}):
+            self.module.activate_settings_window()
+
+        ns_app.activateIgnoringOtherApps_.assert_called_once_with(True)
 
 
 if __name__ == "__main__":

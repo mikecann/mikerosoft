@@ -16,6 +16,7 @@ maximising underneath the bar.
 
 - Shows one taskbar per monitor
 - Shows every window individually instead of grouping by app
+- Minimises the active window when its item is clicked again, and restores it on the next click
 - Keeps the selected app highlighted with a sliding pill
 - Pins apps so they stay visible when closed
 - Shrinks item widths when the bar is crowded so every item still fits

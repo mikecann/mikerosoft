@@ -84,6 +84,38 @@ func activateApplicationWindowAsync(item: TaskbarItem) {
     }
 }
 
+func minimizeApplicationWindow(item: TaskbarItem) -> Bool {
+    guard let pid = item.pid, AXIsProcessTrusted() else { return false }
+
+    let axApp = AXUIElementCreateApplication(pid)
+    setTaskbarAccessibilityMessagingTimeout(axApp)
+    guard let target = matchingApplicationWindow(
+        axApp: axApp,
+        windowIDs: item.windowIDs,
+        title: item.title,
+        bounds: item.windowBounds,
+        accessibilitySignature: item.accessibilitySignature
+    ) else {
+        return false
+    }
+
+    return AXUIElementSetAttributeValue(
+        target,
+        kAXMinimizedAttribute as CFString,
+        kCFBooleanTrue
+    ) == .success
+}
+
+func minimizeApplicationWindowAsync(item: TaskbarItem) {
+    let pidText = item.pid.map(String.init) ?? "not-running"
+    performAccessibilityWindowAction("minimize window pid=\(pidText)") {
+        guard minimizeApplicationWindow(item: item), let pid = item.pid else { return }
+        for windowID in item.windowIDs {
+            MinimizedWindowSampler.shared.invalidate(pid: pid, windowID: windowID)
+        }
+    }
+}
+
 func unminimizeApplicationWindowAndReturnID(pid: pid_t, title: String) -> Int? {
     guard AXIsProcessTrusted() else { return nil }
 

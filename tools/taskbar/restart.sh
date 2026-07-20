@@ -15,6 +15,7 @@ APP_NAME="Mikerosoft Taskbar"
 APP_DIR="${TASKBAR_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
 APP_BIN="$APP_DIR/Contents/MacOS/taskbar-swift"
 SIGNING_IDENTITY="${TASKBAR_CODESIGN_IDENTITY:-}"
+DESIGNATED_REQUIREMENT='=designated => identifier "com.mikerosoft.taskbar"'
 
 if ! command -v swift >/dev/null 2>&1; then
   echo "ERROR: swift is not on PATH."
@@ -83,7 +84,7 @@ fi
 if [ -z "$SIGNING_IDENTITY" ]; then
   SIGNING_IDENTITY="-"
 fi
-codesign --force --deep --timestamp=none --sign "$SIGNING_IDENTITY" "$APP_DIR" >/dev/null
+codesign --force --deep --timestamp=none --sign "$SIGNING_IDENTITY" --requirements "$DESIGNATED_REQUIREMENT" "$APP_DIR" >/dev/null
 
 cat >"$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

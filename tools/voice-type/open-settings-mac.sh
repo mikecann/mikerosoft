@@ -13,25 +13,16 @@ if [ ! -f "$VENV/bin/python3" ]; then
   exit 1
 fi
 
-if [ ! -S "$SOCKET_PATH" ]; then
-  echo "voice-type is not running, starting it first..."
-  bash "$SCRIPT_DIR/voice-type-mac.sh" >/dev/null
-fi
+wait_for_socket() {
+  for _ in $(seq 1 80); do
+    [ -S "$SOCKET_PATH" ] && return 0
+    sleep 0.25
+  done
+  return 1
+}
 
-for _ in $(seq 1 40); do
-  if [ -S "$SOCKET_PATH" ]; then
-    break
-  fi
-  sleep 0.25
-done
-
-if [ ! -S "$SOCKET_PATH" ]; then
-  echo "ERROR: voice-type control socket did not appear."
-  echo "Check the log: tail -f $SCRIPT_DIR/voice-type.log"
-  exit 1
-fi
-
-VOICE_TYPE_SCRIPT_DIR="$SCRIPT_DIR" "$VENV/bin/python3" - <<'PY'
+send_settings_request() {
+  VOICE_TYPE_SCRIPT_DIR="$SCRIPT_DIR" "$VENV/bin/python3" - <<'PY'
 import os
 import sys
 
@@ -45,3 +36,27 @@ response = send_request(socket_path, {"command": "show_settings"})
 if not response.get("ok"):
     raise SystemExit(response.get("error", "show_settings failed"))
 PY
+}
+
+if [ ! -S "$SOCKET_PATH" ]; then
+  echo "voice-type is not running, starting it first..."
+  bash "$SCRIPT_DIR/voice-type-mac.sh" >/dev/null
+  wait_for_socket || {
+    echo "ERROR: voice-type control socket did not appear."
+    echo "Check the log: tail -f $SCRIPT_DIR/voice-type.log"
+    exit 1
+  }
+fi
+
+if ! send_settings_request; then
+  restart_after_failed_request=1
+  echo "voice-type control socket is stale; restarting the worker..."
+  rm -f "$SOCKET_PATH"
+  bash "$SCRIPT_DIR/voice-type-mac.sh" >/dev/null
+  wait_for_socket || {
+    echo "ERROR: voice-type did not restart successfully."
+    echo "Check the log: tail -f $SCRIPT_DIR/voice-type.log"
+    exit 1
+  }
+  send_settings_request
+fi

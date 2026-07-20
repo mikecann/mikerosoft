@@ -297,6 +297,9 @@ cmd /c "tasklist /FO CSV" | ConvertFrom-Csv | Where-Object { $_."Image Name" -li
 - Always kill all instances before launching a new one. Never leave multiple instances running.
 - Always launch via `restart.bat` or `voice-type.vbs` - never directly with `Start-Process python ...`.
 - After launching, tail the log to confirm a clean startup.
+- On macOS, `setup_mac.sh` must install `~/Applications/Voice Type.app` via
+  `install-spotlight-app.sh`; the app is the Spotlight entry point for opening
+  settings. Building only `.venv/bin/Voice Type` is not sufficient for Spotlight.
 
 ---
 

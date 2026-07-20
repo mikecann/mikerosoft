@@ -19,8 +19,9 @@ for candidate in \
     /usr/local/bin/python3 \
     python3; do
   if command -v "$candidate" &>/dev/null; then
-    ver=$("$candidate" -c "import sys; print(sys.version_info[:2])" 2>/dev/null || echo "")
-    if [[ "$ver" > "(3, 9)" ]] && [[ "$candidate" != "/usr/bin/python3" ]]; then
+    major=$("$candidate" -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "0")
+    minor=$("$candidate" -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
+    if [[ "$major" == "3" ]] && [[ "$minor" -ge "10" ]] && [[ "$candidate" != "/usr/bin/python3" ]]; then
       PYTHON="$candidate"
       break
     fi
@@ -96,6 +97,10 @@ fi
 # interpreter. This supports framework and non-framework Python builds.
 PYTHON_CFLAGS=( $("$PYTHON_CONFIG" --embed --cflags) )
 PYTHON_LDFLAGS=( $("$PYTHON_CONFIG" --embed --ldflags) )
+PYTHON_LIBDIR=$("$VENV/bin/python3" -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR") or "")')
+if [[ -n "$PYTHON_LIBDIR" ]] && [[ -f "$PYTHON_LIBDIR/libpython${PYTHON_VERSION:-3.12}.dylib" || -d "$PYTHON_LIBDIR" ]]; then
+  PYTHON_LDFLAGS+=("-L$PYTHON_LIBDIR" "-Wl,-rpath,$PYTHON_LIBDIR")
+fi
 LAUNCHER="$VENV/bin/Voice Type"
 
 xcrun clang "$SCRIPT_DIR/voice-type-launcher.c" \
@@ -103,6 +108,10 @@ xcrun clang "$SCRIPT_DIR/voice-type-launcher.c" \
   "${PYTHON_LDFLAGS[@]}" \
   -o "$LAUNCHER"
 codesign --force --sign - --identifier com.mikerosoft.voice-type "$LAUNCHER"
+
+echo ""
+echo "==> Installing Spotlight application..."
+bash "$SCRIPT_DIR/install-spotlight-app.sh"
 
 echo ""
 echo "==> All packages installed."
@@ -121,3 +130,5 @@ echo "    bash $SCRIPT_DIR/voice-type-mac.sh"
 echo ""
 echo "  Or directly:"
 echo "    '$LAUNCHER' $SCRIPT_DIR/voice-type.py"
+echo ""
+echo "  Open settings from Spotlight by searching for Voice Type."
