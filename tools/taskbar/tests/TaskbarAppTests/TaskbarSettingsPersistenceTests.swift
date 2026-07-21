@@ -615,6 +615,16 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(settings.preferences.general.statsWidget.cpuDisplay, .perCPU)
     }
 
+    func testStatsMenuExplainsTheDetectedCPUPerformanceLevels() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+
+        let menu = try XCTUnwrap(controller.makeWidgetMenu(for: .stats, screenID: 123))
+
+        XCTAssertTrue(menu.items.contains { $0.title.hasPrefix("Cores ") })
+    }
+
     func testMenuActionsUpdateGeneralWhenMonitorOnlyOverridesOtherFields() throws {
         let store = RecordingTaskbarSettingsStore()
         let settings = TaskbarSettings(store: store)

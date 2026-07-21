@@ -469,6 +469,88 @@ final class TaskbarStatsSamplerTests: XCTestCase {
         )
     }
 
+    func testCPUPerformanceLevelsReadSystemNamesAndCountsInPerformanceOrder() {
+        let integers = [
+            "hw.nperflevels": 2,
+            "hw.perflevel0.logicalcpu": 6,
+            "hw.perflevel1.logicalcpu": 12
+        ]
+        let strings = [
+            "hw.perflevel0.name": "Super",
+            "hw.perflevel1.name": "Performance"
+        ]
+
+        let levels = cpuPerformanceLevels(
+            integerReader: { integers[$0] },
+            stringReader: { strings[$0] }
+        )
+
+        XCTAssertEqual(
+            levels,
+            [
+                CPUPerformanceLevel(name: "Super", processorCount: 6),
+                CPUPerformanceLevel(name: "Performance", processorCount: 12)
+            ]
+        )
+    }
+
+    func testCPUPerformanceLevelsRejectIncompleteTopology() {
+        let levels = cpuPerformanceLevels(
+            integerReader: { name in
+                [
+                    "hw.nperflevels": 2,
+                    "hw.perflevel0.logicalcpu": 6
+                ][name]
+            },
+            stringReader: { _ in nil }
+        )
+
+        XCTAssertTrue(levels.isEmpty)
+    }
+
+    func testProcessorLevelIndicesReversePerformanceLevelsToMatchLogicalCPUOrder() {
+        let levels = [
+            CPUPerformanceLevel(name: "Super", processorCount: 2),
+            CPUPerformanceLevel(name: "Performance", processorCount: 4)
+        ]
+
+        XCTAssertEqual(
+            cpuProcessorPerformanceLevelIndices(levels: levels, processorCount: 6),
+            [1, 1, 1, 1, 0, 0]
+        )
+        XCTAssertEqual(
+            cpuProcessorPerformanceLevelIndices(levels: levels, processorCount: 5),
+            [nil, nil, nil, nil, nil]
+        )
+    }
+
+    func testCPUPerformanceColourRolesUseReportedLevelNames() {
+        XCTAssertEqual(
+            cpuPerformanceColorRole(
+                for: CPUPerformanceLevel(name: "Super", processorCount: 6),
+                index: 0,
+                totalLevels: 2
+            ),
+            .superCore
+        )
+        XCTAssertEqual(
+            cpuPerformanceColorRole(
+                for: CPUPerformanceLevel(name: "Performance", processorCount: 12),
+                index: 1,
+                totalLevels: 2
+            ),
+            .performance
+        )
+        XCTAssertEqual(
+            cpuPerformanceColorRole(
+                for: CPUPerformanceLevel(name: "Efficiency", processorCount: 4),
+                index: 1,
+                totalLevels: 2
+            ),
+            .efficiency
+        )
+    }
+
     func testSnapshotPublishesAndPreservesRealCPUSplit() {
         var readings: [[UInt32]?] = [
             [100, 200, 300, 400],
@@ -509,7 +591,13 @@ final class TaskbarStatsSamplerTests: XCTestCase {
             commandOutput: { _, _ in nil },
             backgroundQueue: DispatchQueue(label: "TaskbarStatsSamplerTests.cpuProcessors"),
             cpuTickReader: { nil },
-            cpuProcessorTickReader: { processorReadings.removeFirst() }
+            cpuProcessorTickReader: { processorReadings.removeFirst() },
+            cpuPerformanceLevelReader: {
+                [
+                    CPUPerformanceLevel(name: "Performance", processorCount: 1),
+                    CPUPerformanceLevel(name: "Efficiency", processorCount: 1)
+                ]
+            }
         )
 
         _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000))
@@ -520,6 +608,8 @@ final class TaskbarStatsSamplerTests: XCTestCase {
         XCTAssertEqual(measured.cpuProcessorPercents[0], 60.0 / 110.0 * 100, accuracy: 0.001)
         XCTAssertEqual(measured.cpuProcessorPercents[1], 40, accuracy: 0.001)
         XCTAssertEqual(cached.cpuProcessorPercents, measured.cpuProcessorPercents)
+        XCTAssertEqual(measured.cpuProcessorPerformanceLevelIndices, [1, 0])
+        XCTAssertEqual(measured.cpuPerformanceLevels.map(\.name), ["Performance", "Efficiency"])
     }
 
     func testMemoryBreakdownUsesMeasuredComponentsAndAccountsForUsedBytes() {

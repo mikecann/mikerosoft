@@ -98,7 +98,9 @@ seconds, and 24-hour time independently per monitor.
 
 Stats shows CPU, RAM, and network activity in a compact strip. CPU can show a
 percentage, aggregate usage history, or one live utilisation bar per logical
-CPU. Its first slice uses native macOS sampling APIs and takes design/API
+CPU. Per-CPU bars use the performance-level names reported by macOS and colour
+Super, Performance, and Efficiency cores differently. Its first slice uses
+native macOS sampling APIs and takes design/API
 inspiration from
 [exelban/stats](https://github.com/exelban/stats), which is MIT licensed, but it
 does not vendor the full Stats app.

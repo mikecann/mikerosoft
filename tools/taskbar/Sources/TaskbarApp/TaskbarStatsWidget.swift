@@ -26,6 +26,18 @@ private struct StatsGPUReading {
     var cores: Int?
 }
 
+struct CPUPerformanceLevel: Equatable {
+    var name: String
+    var processorCount: Int
+}
+
+enum CPUPerformanceColorRole: Equatable {
+    case superCore
+    case performance
+    case efficiency
+    case standard
+}
+
 struct StatsSnapshot: Equatable {
     var cpuPercent: Double
     var cpuUserPercent: Double
@@ -44,6 +56,8 @@ struct StatsSnapshot: Equatable {
     var networkUploadBytesPerSecond: Double
     var networkDownloadBytesPerSecond: Double
     var cpuProcessorPercents: [Double]
+    var cpuPerformanceLevels: [CPUPerformanceLevel]
+    var cpuProcessorPerformanceLevelIndices: [Int?]
     var cpuHistory: [Double]
     var gpuHistory: [Double]
     var memoryHistory: [Double]
@@ -70,6 +84,8 @@ struct StatsSnapshot: Equatable {
         networkUploadBytesPerSecond: 0,
         networkDownloadBytesPerSecond: 0,
         cpuProcessorPercents: [],
+        cpuPerformanceLevels: [],
+        cpuProcessorPerformanceLevelIndices: [],
         cpuHistory: Array(repeating: 0, count: 22),
         gpuHistory: Array(repeating: 0, count: 22),
         memoryHistory: Array(repeating: 0, count: 22),
@@ -319,6 +335,113 @@ func cpuProcessorPercents(
     return usages.count == currentTicks.count ? usages : nil
 }
 
+typealias StatsSysctlIntegerReader = (_ name: String) -> Int?
+typealias StatsSysctlStringReader = (_ name: String) -> String?
+
+func cpuPerformanceLevels(
+    integerReader: StatsSysctlIntegerReader,
+    stringReader: StatsSysctlStringReader
+) -> [CPUPerformanceLevel] {
+    guard let levelCount = integerReader("hw.nperflevels"), levelCount > 0 else {
+        return []
+    }
+
+    var levels: [CPUPerformanceLevel] = []
+    for index in 0..<levelCount {
+        let prefix = "hw.perflevel\(index)"
+        guard let processorCount = integerReader("\(prefix).logicalcpu"), processorCount > 0 else {
+            return []
+        }
+        let reportedName = stringReader("\(prefix).name")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = reportedName.flatMap { $0.isEmpty ? nil : $0 } ?? "Level \(index + 1)"
+        levels.append(
+            CPUPerformanceLevel(
+                name: name,
+                processorCount: processorCount
+            )
+        )
+    }
+    return levels
+}
+
+func cpuProcessorPerformanceLevelIndices(
+    levels: [CPUPerformanceLevel],
+    processorCount: Int
+) -> [Int?] {
+    guard processorCount > 0 else { return [] }
+    guard levels.reduce(0, { $0 + $1.processorCount }) == processorCount else {
+        return Array(repeating: nil, count: processorCount)
+    }
+
+    // Apple publishes performance levels from highest to lowest, while Apple
+    // Silicon logical CPU IDs are laid out from the lower tiers to the higher
+    // tiers. Reverse the level groups so each bar follows its logical CPU ID.
+    return levels.indices.reversed().flatMap { levelIndex in
+        Array(repeating: Optional(levelIndex), count: levels[levelIndex].processorCount)
+    }
+}
+
+func cpuPerformanceColorRole(
+    for level: CPUPerformanceLevel,
+    index: Int,
+    totalLevels: Int
+) -> CPUPerformanceColorRole {
+    let name = level.name.lowercased()
+    if name.contains("super") || name.contains("ultra") {
+        return .superCore
+    }
+    if name.contains("efficiency") || name.contains("efficient") {
+        return .efficiency
+    }
+    if name.contains("performance") {
+        return .performance
+    }
+
+    if totalLevels >= 3 {
+        if index == 0 { return .superCore }
+        if index == totalLevels - 1 { return .efficiency }
+    } else if totalLevels == 2 {
+        return index == 0 ? .performance : .efficiency
+    }
+    return .standard
+}
+
+func formattedCPUPerformanceLevels(_ levels: [CPUPerformanceLevel]) -> String {
+    levels.map { "\($0.processorCount) \($0.name)" }.joined(separator: " · ")
+}
+
+private func readStatsSysctlInteger(_ name: String) -> Int? {
+    var value: Int32 = 0
+    var size = MemoryLayout<Int32>.size
+    let result = name.withCString { pointer in
+        sysctlbyname(pointer, &value, &size, nil, 0)
+    }
+    return result == 0 ? Int(value) : nil
+}
+
+private func readStatsSysctlString(_ name: String) -> String? {
+    var size = 0
+    let sizeResult = name.withCString { pointer in
+        sysctlbyname(pointer, nil, &size, nil, 0)
+    }
+    guard sizeResult == 0, size > 0 else { return nil }
+
+    var buffer = [CChar](repeating: 0, count: size)
+    let readResult = name.withCString { pointer in
+        sysctlbyname(pointer, &buffer, &size, nil, 0)
+    }
+    guard readResult == 0 else { return nil }
+    return String(cString: buffer)
+}
+
+private func readCPUPerformanceLevels() -> [CPUPerformanceLevel] {
+    cpuPerformanceLevels(
+        integerReader: readStatsSysctlInteger,
+        stringReader: readStatsSysctlString
+    )
+}
+
 func statsGaugeNeedleEndpoint(percent: Double, center: NSPoint, radius: CGFloat) -> NSPoint {
     let startAngle: CGFloat = 205
     let totalAngle: CGFloat = 130
@@ -339,6 +462,7 @@ final class TaskbarStatsSampler {
     private let backgroundQueue: DispatchQueue
     private let cpuTickReader: (() -> [UInt32]?)?
     private let cpuProcessorTickReader: (() -> [[UInt32]]?)?
+    private let cpuPerformanceLevels: [CPUPerformanceLevel]
     private let memoryReader: (() -> MemoryUsage?)?
     private let networkCounterReader: () -> [String: NetworkInterfaceCounters]?
     private let hostPort: host_t
@@ -366,6 +490,7 @@ final class TaskbarStatsSampler {
         backgroundQueue: DispatchQueue = DispatchQueue.global(qos: .utility),
         cpuTickReader: (() -> [UInt32]?)? = nil,
         cpuProcessorTickReader: (() -> [[UInt32]]?)? = nil,
+        cpuPerformanceLevelReader: () -> [CPUPerformanceLevel] = readCPUPerformanceLevels,
         memoryReader: (() -> MemoryUsage?)? = nil,
         networkCounterReader: @escaping () -> [String: NetworkInterfaceCounters]? = readNetworkInterfaceCounters64,
         hostPortProvider: () -> host_t = { mach_host_self() },
@@ -377,6 +502,7 @@ final class TaskbarStatsSampler {
         self.backgroundQueue = backgroundQueue
         self.cpuTickReader = cpuTickReader
         self.cpuProcessorTickReader = cpuProcessorTickReader
+        self.cpuPerformanceLevels = cpuPerformanceLevelReader()
         self.memoryReader = memoryReader
         self.networkCounterReader = networkCounterReader
         self.hostPort = hostPortProvider()
@@ -440,6 +566,10 @@ final class TaskbarStatsSampler {
             compressedBytes: cachedSnapshot.memoryCompressedBytes
         )
         let cpuProcessorPercents = readCPUProcessorPercents() ?? cachedSnapshot.cpuProcessorPercents
+        let processorPerformanceLevelIndices = cpuProcessorPerformanceLevelIndices(
+            levels: cpuPerformanceLevels,
+            processorCount: cpuProcessorPercents.count
+        )
         let gpu = cachedGPU
         let network = readNetworkSpeed(now: now)
         let processes = cachedProcesses
@@ -469,6 +599,8 @@ final class TaskbarStatsSampler {
             networkUploadBytesPerSecond: network.upload,
             networkDownloadBytesPerSecond: network.download,
             cpuProcessorPercents: cpuProcessorPercents,
+            cpuPerformanceLevels: cpuPerformanceLevels,
+            cpuProcessorPerformanceLevelIndices: processorPerformanceLevelIndices,
             cpuHistory: cpuHistory,
             gpuHistory: gpuHistory,
             memoryHistory: memoryHistory,
@@ -994,6 +1126,21 @@ func statsCPUGraphValues(snapshot: StatsSnapshot, display: StatsCPUDisplay) -> [
     }
 }
 
+func statsCPUProcessorColorRoles(snapshot: StatsSnapshot) -> [CPUPerformanceColorRole] {
+    snapshot.cpuProcessorPerformanceLevelIndices.map { levelIndex in
+        guard let levelIndex,
+              snapshot.cpuPerformanceLevels.indices.contains(levelIndex)
+        else {
+            return .standard
+        }
+        return cpuPerformanceColorRole(
+            for: snapshot.cpuPerformanceLevels[levelIndex],
+            index: levelIndex,
+            totalLevels: snapshot.cpuPerformanceLevels.count
+        )
+    }
+}
+
 func statsWidgetModuleRects(settings: StatsWidgetSettings, in rect: NSRect) -> [(StatsWidgetMetric, NSRect)] {
     let metrics = StatsWidgetMetrics.metrics(for: settings)
     guard !metrics.isEmpty else { return [] }
@@ -1064,9 +1211,14 @@ private func drawCPU(snapshot: StatsSnapshot, settings: StatsWidgetSettings, in 
     case let .miniGraph(graphWidth):
         let layout = statsSideLabelRects(in: rect)
         drawVerticalStatsLabel("CPU", in: layout.label)
+        let colorRoles = settings.cpuDisplay == .perCPU
+            ? statsCPUProcessorColorRoles(snapshot: snapshot)
+            : []
         drawMiniGraph(
             statsCPUGraphValues(snapshot: snapshot, display: settings.cpuDisplay) ?? [],
-            in: statsMiniGraphRect(in: layout.content, width: graphWidth)
+            in: statsMiniGraphRect(in: layout.content, width: graphWidth),
+            colorRoles: colorRoles,
+            maximumBarCount: settings.cpuDisplay == .perCPU ? .max : 18
         )
     case .percent:
         drawLabeledStatText(
@@ -1263,18 +1415,37 @@ func statsMiniGraphBarLayout(in rect: NSRect, barCount: Int) -> (barWidth: CGFlo
     return (barWidth, gap, rect.minX)
 }
 
-private func drawMiniGraph(_ values: [Double], in rect: NSRect) {
+private func statsCPUColor(for role: CPUPerformanceColorRole) -> NSColor {
+    switch role {
+    case .superCore:
+        return .systemOrange
+    case .performance:
+        return .systemBlue
+    case .efficiency:
+        return .systemTeal
+    case .standard:
+        return .systemBlue
+    }
+}
+
+private func drawMiniGraph(
+    _ values: [Double],
+    in rect: NSRect,
+    colorRoles: [CPUPerformanceColorRole] = [],
+    maximumBarCount: Int = 18
+) {
     guard !values.isEmpty, rect.width > 2, rect.height > 2 else { return }
 
     NSColor(calibratedWhite: 1, alpha: 0.12).setFill()
     NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
 
-    let barCount = min(values.count, 18)
+    let barCount = min(values.count, maximumBarCount)
     let visibleValues = Array(values.suffix(barCount))
+    let visibleColorRoles = Array(colorRoles.suffix(barCount))
     let layout = statsMiniGraphBarLayout(in: rect, barCount: barCount)
     var x = layout.firstX
 
-    for value in visibleValues {
+    for (index, value) in visibleValues.enumerated() {
         let percent = clampedPercent(value) / 100
         let height = max(1, rect.height * CGFloat(percent))
         let barRect = NSRect(
@@ -1283,7 +1454,8 @@ private func drawMiniGraph(_ values: [Double], in rect: NSRect) {
             width: layout.barWidth,
             height: height
         )
-        NSColor.systemBlue.withAlphaComponent(0.82).setFill()
+        let role = visibleColorRoles.indices.contains(index) ? visibleColorRoles[index] : .standard
+        statsCPUColor(for: role).withAlphaComponent(0.88).setFill()
         NSBezierPath(roundedRect: barRect, xRadius: 1, yRadius: 1).fill()
         x += layout.barWidth + layout.gap
     }
@@ -1446,7 +1618,7 @@ private final class StatsPopoverView: NSView {
 
         drawSectionTitle("USAGE HISTORY", y: 188, in: bounds)
         drawPercentHistory(snapshot.cpuHistory, in: NSRect(x: 18, y: 216, width: bounds.width - 36, height: 112), color: .systemBlue)
-        drawCoreSampleBars(snapshot.cpuHistory, in: NSRect(x: 18, y: 336, width: bounds.width - 36, height: 52))
+        drawCPUProcessorBars(snapshot: snapshot, in: NSRect(x: 18, y: 336, width: bounds.width - 36, height: 52))
 
         drawSectionTitle("DETAILS", y: 410, in: bounds)
         drawDetailRow(label: "System:", value: formattedStatsPercent(snapshot.cpuSystemPercent), color: .systemRed, y: 438, in: bounds)
@@ -1615,27 +1787,54 @@ private final class StatsPopoverView: NSView {
         )
     }
 
-    private func drawCoreSampleBars(_ values: [Double], in rect: NSRect) {
+    private func drawCPUProcessorBars(snapshot: StatsSnapshot, in rect: NSRect) {
         NSColor(calibratedWhite: 1, alpha: 0.08).setFill()
         NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
 
-        let barCount = 10
-        let gap: CGFloat = 4
-        let barWidth = max(2, floor((rect.width - gap * CGFloat(barCount - 1)) / CGFloat(barCount)))
-        let samples = Array(values.suffix(barCount))
-        for index in 0..<barCount {
-            let value = samples.indices.contains(index) ? clampedPercent(samples[index]) / 100 : 0
-            let height = max(4, rect.height * CGFloat(value))
-            let barRect = NSRect(
-                x: rect.minX + CGFloat(index) * (barWidth + gap),
-                y: rect.maxY - height,
-                width: barWidth,
-                height: height
-            )
-            let color = index < 2 ? NSColor.systemTeal : NSColor.systemIndigo
-            color.withAlphaComponent(0.78).setFill()
-            NSBezierPath(roundedRect: barRect, xRadius: 3, yRadius: 3).fill()
+        let levels = snapshot.cpuPerformanceLevels
+        if !levels.isEmpty {
+            let orderedIndices = Array(levels.indices.reversed())
+            let itemWidth = rect.width / CGFloat(orderedIndices.count)
+            for (position, levelIndex) in orderedIndices.enumerated() {
+                let level = levels[levelIndex]
+                let itemRect = NSRect(
+                    x: rect.minX + CGFloat(position) * itemWidth + 6,
+                    y: rect.minY + 3,
+                    width: max(1, itemWidth - 8),
+                    height: 13
+                )
+                let role = cpuPerformanceColorRole(
+                    for: level,
+                    index: levelIndex,
+                    totalLevels: levels.count
+                )
+                statsCPUColor(for: role).withAlphaComponent(0.95).setFill()
+                NSBezierPath(
+                    roundedRect: NSRect(x: itemRect.minX, y: itemRect.minY + 3, width: 7, height: 7),
+                    xRadius: 2,
+                    yRadius: 2
+                ).fill()
+                drawStatsText(
+                    "\(level.name) \(level.processorCount)",
+                    in: NSRect(x: itemRect.minX + 11, y: itemRect.minY, width: itemRect.width - 11, height: 13),
+                    size: 9.5,
+                    weight: .semibold,
+                    color: NSColor(calibratedWhite: 0.82, alpha: 1)
+                )
+            }
         }
+
+        drawMiniGraph(
+            snapshot.cpuProcessorPercents,
+            in: NSRect(
+                x: rect.minX + 5,
+                y: rect.minY + 19,
+                width: rect.width - 10,
+                height: rect.height - 23
+            ),
+            colorRoles: statsCPUProcessorColorRoles(snapshot: snapshot),
+            maximumBarCount: .max
+        )
     }
 
     private func drawGauge(percent: Double, title: String, center: NSPoint, radius: CGFloat) {

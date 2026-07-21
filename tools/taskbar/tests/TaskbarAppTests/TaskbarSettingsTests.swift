@@ -1014,6 +1014,24 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertNil(statsCPUGraphValues(snapshot: snapshot, display: .percentage))
     }
 
+    func testStatsCPUProcessorColoursFollowEachProcessorsPerformanceLevel() {
+        var snapshot = StatsSnapshot.empty
+        snapshot.cpuPerformanceLevels = [
+            CPUPerformanceLevel(name: "Performance", processorCount: 2),
+            CPUPerformanceLevel(name: "Efficiency", processorCount: 2)
+        ]
+        snapshot.cpuProcessorPerformanceLevelIndices = [1, 1, 0, 0]
+
+        XCTAssertEqual(
+            statsCPUProcessorColorRoles(snapshot: snapshot),
+            [.efficiency, .efficiency, .performance, .performance]
+        )
+        XCTAssertEqual(
+            formattedCPUPerformanceLevels(snapshot.cpuPerformanceLevels),
+            "2 Performance · 2 Efficiency"
+        )
+    }
+
     func testStatsMiniGraphBarsStartAtLeftEdge() {
         let source = NSRect(x: 20, y: 0, width: 62, height: 22)
 

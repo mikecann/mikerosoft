@@ -641,6 +641,15 @@ final class TaskbarController: NSObject {
         )
         network.isEnabled = false
         menu.addItem(network)
+        if !snapshot.cpuPerformanceLevels.isEmpty {
+            let cores = NSMenuItem(
+                title: "Cores \(formattedCPUPerformanceLevels(snapshot.cpuPerformanceLevels))",
+                action: nil,
+                keyEquivalent: ""
+            )
+            cores.isEnabled = false
+            menu.addItem(cores)
+        }
         menu.addItem(.separator())
 
         addWidgetToggle(
