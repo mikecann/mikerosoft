@@ -73,7 +73,7 @@ Useful settings:
 - Horizontal spacing between items
 - Background opacity
 - Date & Time widget display
-- Stats widget CPU, RAM, network, and CPU graph display
+- Stats widget CPU, RAM, network, and CPU display modes
 - Auto-hide and reveal animation
 - Pinned apps
 - Keep windows above bar
@@ -96,8 +96,10 @@ visible in settings so they can be turned back on.
 Date & Time uses menu-bar-style text and can show or hide the date, day of week,
 seconds, and 24-hour time independently per monitor.
 
-Stats shows CPU, RAM, and network activity in a compact strip. Its first slice
-uses native macOS sampling APIs and takes design/API inspiration from
+Stats shows CPU, RAM, and network activity in a compact strip. CPU can show a
+percentage, aggregate usage history, or one live utilisation bar per logical
+CPU. Its first slice uses native macOS sampling APIs and takes design/API
+inspiration from
 [exelban/stats](https://github.com/exelban/stats), which is MIT licensed, but it
 does not vendor the full Stats app.
 

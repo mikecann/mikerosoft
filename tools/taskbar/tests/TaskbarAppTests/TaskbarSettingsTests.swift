@@ -380,6 +380,42 @@ final class TaskbarSettingsTests: XCTestCase {
 
         XCTAssertEqual(decoded.memoryDisplay, .percent)
         XCTAssertTrue(decoded.showGPU)
+        XCTAssertEqual(decoded.cpuDisplay, .perCPU)
+    }
+
+    func testStatsWidgetMigratesDisabledLegacyGraphToPercentage() throws {
+        let json = """
+        {
+          "isEnabled": true,
+          "showCPU": true,
+          "showMiniGraph": false
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(StatsWidgetSettings.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.cpuDisplay, .percentage)
+        XCTAssertFalse(decoded.showMiniGraph)
+    }
+
+    func testStatsWidgetPersistsPerCPUDisplayMode() throws {
+        let settings = StatsWidgetSettings(
+            isEnabled: true,
+            showCPU: true,
+            showGPU: true,
+            showMemory: true,
+            showNetwork: true,
+            showMiniGraph: true,
+            cpuDisplay: .perCPU
+        )
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(StatsWidgetSettings.self, from: data)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+
+        XCTAssertEqual(decoded.cpuDisplay, .perCPU)
+        XCTAssertTrue(decoded.showMiniGraph)
+        XCTAssertEqual(object?["cpuDisplay"] as? String, "perCPU")
     }
 
     func testDateTimeWidgetEncodingDoesNotWriteLegacyClockKeys() throws {
@@ -966,6 +1002,16 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(graphAvailable, .miniGraph(width: 60))
         XCTAssertEqual(graphDisabled, .percent)
         XCTAssertEqual(graphCannotFit, .percent)
+    }
+
+    func testStatsCPUGraphUsesHistoryOrCurrentProcessorValuesForSelectedMode() {
+        var snapshot = StatsSnapshot.empty
+        snapshot.cpuHistory = [10, 20, 30]
+        snapshot.cpuProcessorPercents = [40, 50]
+
+        XCTAssertEqual(statsCPUGraphValues(snapshot: snapshot, display: .history), [10, 20, 30])
+        XCTAssertEqual(statsCPUGraphValues(snapshot: snapshot, display: .perCPU), [40, 50])
+        XCTAssertNil(statsCPUGraphValues(snapshot: snapshot, display: .percentage))
     }
 
     func testStatsMiniGraphBarsStartAtLeftEdge() {

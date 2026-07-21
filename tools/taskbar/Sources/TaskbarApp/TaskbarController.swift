@@ -673,12 +673,17 @@ final class TaskbarController: NSObject {
             action: #selector(toggleStatsNetworkFromMenu),
             to: menu
         )
-        addWidgetToggle(
-            title: "CPU Graph",
-            state: value.showMiniGraph,
-            action: #selector(toggleStatsMiniGraphFromMenu),
-            to: menu
-        )
+        let cpuDisplayItem = NSMenuItem(title: "CPU Display", action: nil, keyEquivalent: "")
+        let cpuDisplayMenu = NSMenu(title: "CPU Display")
+        for display in StatsCPUDisplay.allCases {
+            let item = NSMenuItem(title: display.label, action: #selector(setStatsCPUDisplayFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = display.rawValue
+            item.state = value.cpuDisplay == display ? .on : .off
+            cpuDisplayMenu.addItem(item)
+        }
+        menu.addItem(cpuDisplayItem)
+        menu.setSubmenu(cpuDisplayMenu, for: cpuDisplayItem)
 
         let memoryDisplayItem = NSMenuItem(title: "RAM Display", action: nil, keyEquivalent: "")
         let memoryDisplayMenu = NSMenu(title: "RAM Display")
@@ -912,8 +917,13 @@ final class TaskbarController: NSObject {
         updateStatsWidgetFromMenu { $0.showNetwork.toggle() }
     }
 
-    @objc private func toggleStatsMiniGraphFromMenu() {
-        updateStatsWidgetFromMenu { $0.showMiniGraph.toggle() }
+    @objc private func setStatsCPUDisplayFromMenu(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let display = StatsCPUDisplay(rawValue: rawValue)
+        else {
+            return
+        }
+        updateStatsWidgetFromMenu { $0.cpuDisplay = display }
     }
 
     @objc private func setStatsMemoryDisplayFromMenu(_ sender: NSMenuItem) {

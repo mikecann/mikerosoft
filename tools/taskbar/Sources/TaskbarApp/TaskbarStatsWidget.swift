@@ -43,6 +43,7 @@ struct StatsSnapshot: Equatable {
     var memoryTotalBytes: Double
     var networkUploadBytesPerSecond: Double
     var networkDownloadBytesPerSecond: Double
+    var cpuProcessorPercents: [Double]
     var cpuHistory: [Double]
     var gpuHistory: [Double]
     var memoryHistory: [Double]
@@ -68,6 +69,7 @@ struct StatsSnapshot: Equatable {
         memoryTotalBytes: Double(ProcessInfo.processInfo.physicalMemory),
         networkUploadBytesPerSecond: 0,
         networkDownloadBytesPerSecond: 0,
+        cpuProcessorPercents: [],
         cpuHistory: Array(repeating: 0, count: 22),
         gpuHistory: Array(repeating: 0, count: 22),
         memoryHistory: Array(repeating: 0, count: 22),
@@ -300,6 +302,23 @@ func cpuPercent(currentTicks: [UInt32], previousTicks: [UInt32]?) -> Double? {
     cpuUsage(currentTicks: currentTicks, previousTicks: previousTicks)?.activePercent
 }
 
+func cpuProcessorPercents(
+    currentTicks: [[UInt32]],
+    previousTicks: [[UInt32]]?
+) -> [Double]? {
+    guard let previousTicks,
+          !currentTicks.isEmpty,
+          currentTicks.count == previousTicks.count
+    else {
+        return nil
+    }
+
+    let usages = zip(currentTicks, previousTicks).compactMap { current, previous in
+        cpuUsage(currentTicks: current, previousTicks: previous)?.activePercent
+    }
+    return usages.count == currentTicks.count ? usages : nil
+}
+
 func statsGaugeNeedleEndpoint(percent: Double, center: NSPoint, radius: CGFloat) -> NSPoint {
     let startAngle: CGFloat = 205
     let totalAngle: CGFloat = 130
@@ -319,6 +338,7 @@ final class TaskbarStatsSampler {
     private let commandOutput: StatsCommandOutput
     private let backgroundQueue: DispatchQueue
     private let cpuTickReader: (() -> [UInt32]?)?
+    private let cpuProcessorTickReader: (() -> [[UInt32]]?)?
     private let memoryReader: (() -> MemoryUsage?)?
     private let networkCounterReader: () -> [String: NetworkInterfaceCounters]?
     private let hostPort: host_t
@@ -333,6 +353,7 @@ final class TaskbarStatsSampler {
     private var isRefreshingProcesses = false
     private var isRefreshingNetworkProcesses = false
     private var previousCPUTicks: [UInt32]?
+    private var previousCPUProcessorTicks: [[UInt32]]?
     private var previousNetwork: (counters: [String: NetworkInterfaceCounters], date: Date)?
     private var cachedGPU = StatsGPUReading(percent: 0, renderPercent: 0, tilerPercent: 0, model: "GPU", cores: nil)
     private var cachedProcesses: [StatsProcessSample] = []
@@ -344,6 +365,7 @@ final class TaskbarStatsSampler {
         },
         backgroundQueue: DispatchQueue = DispatchQueue.global(qos: .utility),
         cpuTickReader: (() -> [UInt32]?)? = nil,
+        cpuProcessorTickReader: (() -> [[UInt32]]?)? = nil,
         memoryReader: (() -> MemoryUsage?)? = nil,
         networkCounterReader: @escaping () -> [String: NetworkInterfaceCounters]? = readNetworkInterfaceCounters64,
         hostPortProvider: () -> host_t = { mach_host_self() },
@@ -354,6 +376,7 @@ final class TaskbarStatsSampler {
         self.commandOutput = commandOutput
         self.backgroundQueue = backgroundQueue
         self.cpuTickReader = cpuTickReader
+        self.cpuProcessorTickReader = cpuProcessorTickReader
         self.memoryReader = memoryReader
         self.networkCounterReader = networkCounterReader
         self.hostPort = hostPortProvider()
@@ -416,6 +439,7 @@ final class TaskbarStatsSampler {
             wiredBytes: cachedSnapshot.memoryWiredBytes,
             compressedBytes: cachedSnapshot.memoryCompressedBytes
         )
+        let cpuProcessorPercents = readCPUProcessorPercents() ?? cachedSnapshot.cpuProcessorPercents
         let gpu = cachedGPU
         let network = readNetworkSpeed(now: now)
         let processes = cachedProcesses
@@ -444,6 +468,7 @@ final class TaskbarStatsSampler {
             memoryTotalBytes: memory.totalBytes,
             networkUploadBytesPerSecond: network.upload,
             networkDownloadBytesPerSecond: network.download,
+            cpuProcessorPercents: cpuProcessorPercents,
             cpuHistory: cpuHistory,
             gpuHistory: gpuHistory,
             memoryHistory: memoryHistory,
@@ -511,6 +536,63 @@ final class TaskbarStatsSampler {
 
         guard result == KERN_SUCCESS else { return nil }
         return info
+    }
+
+    private func readCPUProcessorPercents() -> [Double]? {
+        let currentTicks: [[UInt32]]
+        if let cpuProcessorTickReader {
+            guard let ticks = cpuProcessorTickReader() else { return nil }
+            currentTicks = ticks
+        } else {
+            guard let ticks = readCPUProcessorTicks() else { return nil }
+            currentTicks = ticks
+        }
+
+        defer { previousCPUProcessorTicks = currentTicks }
+        return cpuProcessorPercents(
+            currentTicks: currentTicks,
+            previousTicks: previousCPUProcessorTicks
+        )
+    }
+
+    private func readCPUProcessorTicks() -> [[UInt32]]? {
+        var processorCount: natural_t = 0
+        var processorInfo: processor_info_array_t?
+        var processorInfoCount: mach_msg_type_number_t = 0
+        let result = host_processor_info(
+            hostPort,
+            PROCESSOR_CPU_LOAD_INFO,
+            &processorCount,
+            &processorInfo,
+            &processorInfoCount
+        )
+
+        guard result == KERN_SUCCESS,
+              processorCount > 0,
+              let processorInfo
+        else {
+            return nil
+        }
+
+        defer {
+            let byteCount = vm_size_t(processorInfoCount) * vm_size_t(MemoryLayout<integer_t>.stride)
+            _ = vm_deallocate(
+                mach_task_self_,
+                vm_address_t(UInt(bitPattern: processorInfo)),
+                byteCount
+            )
+        }
+
+        let stateCount = Int(CPU_STATE_MAX)
+        let count = Int(processorCount)
+        guard Int(processorInfoCount) >= count * stateCount else { return nil }
+
+        return (0..<count).map { processorIndex in
+            let offset = processorIndex * stateCount
+            return (0..<stateCount).map { stateIndex in
+                UInt32(bitPattern: processorInfo[offset + stateIndex])
+            }
+        }
     }
 
     private func cpuTicks(from info: host_cpu_load_info) -> [UInt32] {
@@ -901,6 +983,17 @@ func statsCPUTaskbarRenderContent(in rect: NSRect, showMiniGraph: Bool) -> Stats
     return graphWidth > 0 ? .miniGraph(width: graphWidth) : .percent
 }
 
+func statsCPUGraphValues(snapshot: StatsSnapshot, display: StatsCPUDisplay) -> [Double]? {
+    switch display {
+    case .percentage:
+        return nil
+    case .history:
+        return snapshot.cpuHistory
+    case .perCPU:
+        return snapshot.cpuProcessorPercents
+    }
+}
+
 func statsWidgetModuleRects(settings: StatsWidgetSettings, in rect: NSRect) -> [(StatsWidgetMetric, NSRect)] {
     let metrics = StatsWidgetMetrics.metrics(for: settings)
     guard !metrics.isEmpty else { return [] }
@@ -972,7 +1065,7 @@ private func drawCPU(snapshot: StatsSnapshot, settings: StatsWidgetSettings, in 
         let layout = statsSideLabelRects(in: rect)
         drawVerticalStatsLabel("CPU", in: layout.label)
         drawMiniGraph(
-            snapshot.cpuHistory,
+            statsCPUGraphValues(snapshot: snapshot, display: settings.cpuDisplay) ?? [],
             in: statsMiniGraphRect(in: layout.content, width: graphWidth)
         )
     case .percent:

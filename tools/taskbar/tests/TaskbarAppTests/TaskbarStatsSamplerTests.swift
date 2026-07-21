@@ -438,6 +438,37 @@ final class TaskbarStatsSamplerTests: XCTestCase {
         XCTAssertNil(cpuUsage(currentTicks: ticks, previousTicks: ticks))
     }
 
+    func testCPUProcessorPercentsPublishOneCurrentValuePerLogicalCPU() throws {
+        let percents = try XCTUnwrap(
+            cpuProcessorPercents(
+                currentTicks: [
+                    [130, 220, 350, 410],
+                    [110, 210, 360, 420]
+                ],
+                previousTicks: [
+                    [100, 200, 300, 400],
+                    [100, 200, 300, 400]
+                ]
+            )
+        )
+
+        XCTAssertEqual(percents.count, 2)
+        XCTAssertEqual(percents[0], 60.0 / 110.0 * 100, accuracy: 0.001)
+        XCTAssertEqual(percents[1], 40, accuracy: 0.001)
+    }
+
+    func testCPUProcessorPercentsRejectMismatchedProcessorSamples() {
+        XCTAssertNil(
+            cpuProcessorPercents(
+                currentTicks: [[100, 200, 300, 400]],
+                previousTicks: [
+                    [100, 200, 300, 400],
+                    [100, 200, 300, 400]
+                ]
+            )
+        )
+    }
+
     func testSnapshotPublishesAndPreservesRealCPUSplit() {
         var readings: [[UInt32]?] = [
             [100, 200, 300, 400],
@@ -460,6 +491,35 @@ final class TaskbarStatsSamplerTests: XCTestCase {
         XCTAssertEqual(cached.cpuPercent, measured.cpuPercent, accuracy: 0.001)
         XCTAssertEqual(cached.cpuUserPercent, measured.cpuUserPercent, accuracy: 0.001)
         XCTAssertEqual(cached.cpuSystemPercent, measured.cpuSystemPercent, accuracy: 0.001)
+    }
+
+    func testSnapshotPublishesAndPreservesPerProcessorCPUUtilisation() {
+        var processorReadings: [[[UInt32]]?] = [
+            [
+                [100, 200, 300, 400],
+                [100, 200, 300, 400]
+            ],
+            [
+                [130, 220, 350, 410],
+                [110, 210, 360, 420]
+            ],
+            nil
+        ]
+        let sampler = TaskbarStatsSampler(
+            commandOutput: { _, _ in nil },
+            backgroundQueue: DispatchQueue(label: "TaskbarStatsSamplerTests.cpuProcessors"),
+            cpuTickReader: { nil },
+            cpuProcessorTickReader: { processorReadings.removeFirst() }
+        )
+
+        _ = sampler.snapshot(now: Date(timeIntervalSince1970: 1_000))
+        let measured = sampler.snapshot(now: Date(timeIntervalSince1970: 1_001))
+        let cached = sampler.snapshot(now: Date(timeIntervalSince1970: 1_002))
+
+        XCTAssertEqual(measured.cpuProcessorPercents.count, 2)
+        XCTAssertEqual(measured.cpuProcessorPercents[0], 60.0 / 110.0 * 100, accuracy: 0.001)
+        XCTAssertEqual(measured.cpuProcessorPercents[1], 40, accuracy: 0.001)
+        XCTAssertEqual(cached.cpuProcessorPercents, measured.cpuProcessorPercents)
     }
 
     func testMemoryBreakdownUsesMeasuredComponentsAndAccountsForUsedBytes() {

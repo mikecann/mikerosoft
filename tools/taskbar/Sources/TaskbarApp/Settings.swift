@@ -95,14 +95,46 @@ enum StatsMemoryDisplay: String, Codable, CaseIterable, Equatable {
     }
 }
 
+enum StatsCPUDisplay: String, Codable, CaseIterable, Equatable {
+    case percentage
+    case history
+    case perCPU
+
+    var label: String {
+        switch self {
+        case .percentage:
+            return "Percentage"
+        case .history:
+            return "History"
+        case .perCPU:
+            return "Per CPU"
+        }
+    }
+}
+
 struct StatsWidgetSettings: Codable, Equatable {
     var isEnabled: Bool
     var showCPU: Bool
     var showGPU: Bool
     var showMemory: Bool
     var showNetwork: Bool
-    var showMiniGraph: Bool
+    var cpuDisplay: StatsCPUDisplay
     var memoryDisplay: StatsMemoryDisplay
+
+    // Keep the old API and JSON field working so existing settings migrate
+    // cleanly. A graph is now either the aggregate history or live per-CPU bars.
+    var showMiniGraph: Bool {
+        get { cpuDisplay != .percentage }
+        set {
+            if newValue {
+                if cpuDisplay == .percentage {
+                    cpuDisplay = .perCPU
+                }
+            } else {
+                cpuDisplay = .percentage
+            }
+        }
+    }
 
     static var defaults: StatsWidgetSettings {
         StatsWidgetSettings(
@@ -112,7 +144,8 @@ struct StatsWidgetSettings: Codable, Equatable {
             showMemory: true,
             showNetwork: true,
             showMiniGraph: true,
-            memoryDisplay: .percent
+            memoryDisplay: .percent,
+            cpuDisplay: .perCPU
         )
     }
 
@@ -127,6 +160,7 @@ struct StatsWidgetSettings: Codable, Equatable {
         case showMemory
         case showNetwork
         case showMiniGraph
+        case cpuDisplay
         case memoryDisplay
     }
 
@@ -137,15 +171,16 @@ struct StatsWidgetSettings: Codable, Equatable {
         showMemory: Bool,
         showNetwork: Bool,
         showMiniGraph: Bool,
-        memoryDisplay: StatsMemoryDisplay = .percent
+        memoryDisplay: StatsMemoryDisplay = .percent,
+        cpuDisplay: StatsCPUDisplay? = nil
     ) {
         self.isEnabled = isEnabled
         self.showCPU = showCPU
         self.showGPU = showGPU
         self.showMemory = showMemory
         self.showNetwork = showNetwork
-        self.showMiniGraph = showMiniGraph
         self.memoryDisplay = memoryDisplay
+        self.cpuDisplay = cpuDisplay ?? (showMiniGraph ? .perCPU : .percentage)
     }
 
     init(from decoder: Decoder) throws {
@@ -156,7 +191,9 @@ struct StatsWidgetSettings: Codable, Equatable {
         showGPU = try container.decodeIfPresent(Bool.self, forKey: .showGPU) ?? defaults.showGPU
         showMemory = try container.decodeIfPresent(Bool.self, forKey: .showMemory) ?? defaults.showMemory
         showNetwork = try container.decodeIfPresent(Bool.self, forKey: .showNetwork) ?? defaults.showNetwork
-        showMiniGraph = try container.decodeIfPresent(Bool.self, forKey: .showMiniGraph) ?? defaults.showMiniGraph
+        let legacyShowMiniGraph = try container.decodeIfPresent(Bool.self, forKey: .showMiniGraph) ?? defaults.showMiniGraph
+        cpuDisplay = try container.decodeIfPresent(StatsCPUDisplay.self, forKey: .cpuDisplay)
+            ?? (legacyShowMiniGraph ? .perCPU : .percentage)
         memoryDisplay = try container.decodeIfPresent(StatsMemoryDisplay.self, forKey: .memoryDisplay) ?? defaults.memoryDisplay
     }
 
@@ -168,6 +205,7 @@ struct StatsWidgetSettings: Codable, Equatable {
         try container.encode(showMemory, forKey: .showMemory)
         try container.encode(showNetwork, forKey: .showNetwork)
         try container.encode(showMiniGraph, forKey: .showMiniGraph)
+        try container.encode(cpuDisplay, forKey: .cpuDisplay)
         try container.encode(memoryDisplay, forKey: .memoryDisplay)
     }
 }

@@ -669,7 +669,7 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
                 gpuAction: #selector(setGeneralStatsGPU(_:)),
                 memoryAction: #selector(setGeneralStatsMemory(_:)),
                 networkAction: #selector(setGeneralStatsNetwork(_:)),
-                graphAction: #selector(setGeneralStatsMiniGraph(_:)),
+                cpuDisplayAction: #selector(setGeneralStatsCPUDisplay(_:)),
                 memoryDisplayAction: #selector(setGeneralStatsMemoryDisplay(_:))
             )
         ))
@@ -804,7 +804,7 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         gpuAction: Selector,
         memoryAction: Selector,
         networkAction: Selector,
-        graphAction: Selector,
+        cpuDisplayAction: Selector,
         memoryDisplayAction: Selector
     ) -> NSView {
         let stack = NSStackView()
@@ -819,7 +819,7 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
         let cpuRow = horizontalRow()
         cpuRow.addArrangedSubview(titledCheckbox("CPU", state: value.showCPU, enabled: enabled, action: cpuAction))
-        cpuRow.addArrangedSubview(titledCheckbox("Graph", state: value.showMiniGraph, enabled: enabled, action: graphAction))
+        cpuRow.addArrangedSubview(statsCPUDisplayPopup(display: value.cpuDisplay, enabled: enabled, action: cpuDisplayAction))
         stack.addArrangedSubview(statsOptionGroup(label: "CPU", control: cpuRow))
 
         let gpuRow = horizontalRow()
@@ -889,6 +889,21 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             popup.addItem(withTitle: display.label)
         }
         if let index = StatsMemoryDisplay.allCases.firstIndex(of: display) {
+            popup.selectItem(at: index)
+        }
+        popup.target = self
+        popup.action = action
+        popup.isEnabled = enabled
+        popup.widthAnchor.constraint(equalToConstant: 140).isActive = true
+        return popup
+    }
+
+    private func statsCPUDisplayPopup(display: StatsCPUDisplay, enabled: Bool, action: Selector) -> NSPopUpButton {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        for display in StatsCPUDisplay.allCases {
+            popup.addItem(withTitle: display.label)
+        }
+        if let index = StatsCPUDisplay.allCases.firstIndex(of: display) {
             popup.selectItem(at: index)
         }
         popup.target = self
@@ -1054,7 +1069,7 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             gpuAction: #selector(setMonitorStatsGPU(_:)),
             memoryAction: #selector(setMonitorStatsMemory(_:)),
             networkAction: #selector(setMonitorStatsNetwork(_:)),
-            graphAction: #selector(setMonitorStatsMiniGraph(_:)),
+            cpuDisplayAction: #selector(setMonitorStatsCPUDisplay(_:)),
             memoryDisplayAction: #selector(setMonitorStatsMemoryDisplay(_:))
         ))
         return settingRow(
@@ -1330,6 +1345,12 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         return StatsMemoryDisplay.allCases[index]
     }
 
+    private func selectedStatsCPUDisplay(from popup: NSPopUpButton) -> StatsCPUDisplay? {
+        let index = popup.indexOfSelectedItem
+        guard StatsCPUDisplay.allCases.indices.contains(index) else { return nil }
+        return StatsCPUDisplay.allCases[index]
+    }
+
     private func refreshSliderLabel(_ sender: NSSlider) {
         (sender as? ValueSlider)?.refreshValueLabel()
     }
@@ -1420,8 +1441,9 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         updateGeneral { $0.statsWidget.showNetwork = sender.state == .on }
     }
 
-    @objc private func setGeneralStatsMiniGraph(_ sender: NSButton) {
-        updateGeneral { $0.statsWidget.showMiniGraph = sender.state == .on }
+    @objc private func setGeneralStatsCPUDisplay(_ sender: NSPopUpButton) {
+        guard let display = selectedStatsCPUDisplay(from: sender) else { return }
+        updateGeneral { $0.statsWidget.cpuDisplay = display }
     }
 
     @objc private func setGeneralStatsMemoryDisplay(_ sender: NSPopUpButton) {
@@ -1644,8 +1666,9 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         updateMonitorStatsWidget { $0.showNetwork = sender.state == .on }
     }
 
-    @objc private func setMonitorStatsMiniGraph(_ sender: NSButton) {
-        updateMonitorStatsWidget { $0.showMiniGraph = sender.state == .on }
+    @objc private func setMonitorStatsCPUDisplay(_ sender: NSPopUpButton) {
+        guard let display = selectedStatsCPUDisplay(from: sender) else { return }
+        updateMonitorStatsWidget { $0.cpuDisplay = display }
     }
 
     @objc private func setMonitorStatsMemoryDisplay(_ sender: NSPopUpButton) {

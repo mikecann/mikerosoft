@@ -602,6 +602,19 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(settings.preferences.monitorOverrides["123"]?.statsWidget, expected)
     }
 
+    func testStatsMenuCanSelectPerCPUDisplayMode() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+
+        let menu = try XCTUnwrap(controller.makeWidgetMenu(for: .stats, screenID: 123))
+        let displayItem = try XCTUnwrap(menu.items.first(where: { $0.title == "CPU Display" }))
+        let perCPUItem = try XCTUnwrap(displayItem.submenu?.items.first(where: { $0.title == "Per CPU" }))
+        try performMenuItem(perCPUItem, on: controller)
+
+        XCTAssertEqual(settings.preferences.general.statsWidget.cpuDisplay, .perCPU)
+    }
+
     func testMenuActionsUpdateGeneralWhenMonitorOnlyOverridesOtherFields() throws {
         let store = RecordingTaskbarSettingsStore()
         let settings = TaskbarSettings(store: store)
