@@ -7,13 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PRIMARY_REPO_ROOT="$(git -C "$REPO_ROOT" worktree list --porcelain | sed -n 's/^worktree //p' | head -n 1)"
 DOTENV_PATH="${VIDEO_HQ_DOTENV_PATH:-$PRIMARY_REPO_ROOT/.env}"
-PROJECTS_ROOT="${VIDEO_HQ_PROJECTS_ROOT:-$HOME/Movies/Projects}"
+PROJECTS_ROOT="${VIDEO_HQ_PROJECTS_ROOT:-$HOME/dev/convex/convex-videos}"
 BUILD_CONFIGURATION="${VIDEO_HQ_BUILD_CONFIGURATION:-release}"
 APP_NAME="Video HQ"
 APP_DIR="${VIDEO_HQ_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
 APP_BIN="$APP_DIR/Contents/MacOS/video-hq"
 ICON_SOURCE="$SCRIPT_DIR/icons/video-hq.png"
 SIGNING_IDENTITY="${VIDEO_HQ_CODESIGN_IDENTITY:-}"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 LEGACY_APP_DIR="$HOME/Applications/Video Misc.app"
 LEGACY_APP_BIN="$LEGACY_APP_DIR/Contents/MacOS/video-misc"
 OPEN_APP=1
@@ -153,6 +154,30 @@ fi
 
 codesign --force --deep --timestamp=none --sign "$SIGNING_IDENTITY" "$APP_DIR" >/dev/null
 touch "$APP_DIR"
+
+# Replacing an app bundle in place does not reliably refresh Launch Services or
+# Spotlight. Register and import it explicitly so a fresh install behaves like a
+# normal app in ~/Applications and appears in Spotlight immediately.
+if [[ -x "$LSREGISTER" ]]; then
+  "$LSREGISTER" -f "$APP_DIR"
+fi
+/usr/bin/mdimport "$APP_DIR"
+
+SPOTLIGHT_READY=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  ARCHITECTURES="$(mdls -raw -name kMDItemExecutableArchitectures "$APP_DIR")"
+  SPOTLIGHT_MATCHES="$(mdfind 'kMDItemCFBundleIdentifier == "com.mikerosoft.video-hq"')"
+  if [[ "$ARCHITECTURES" == *arm64* && "$SPOTLIGHT_MATCHES" == *"$APP_DIR"* ]]; then
+    SPOTLIGHT_READY=1
+    break
+  fi
+  sleep 0.2
+done
+
+if [[ "$SPOTLIGHT_READY" -ne 1 ]]; then
+  echo "ERROR: macOS did not index Video HQ as a Spotlight application." >&2
+  exit 1
+fi
 
 echo "Installed: $APP_DIR"
 if [[ "$OPEN_APP" -eq 1 ]]; then

@@ -123,6 +123,6 @@ enum RepoLocator {
             return URL(fileURLWithPath: configured, isDirectory: true)
         }
         return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Movies/Projects", isDirectory: true)
+            .appendingPathComponent("dev/convex/convex-videos", isDirectory: true)
     }
 }

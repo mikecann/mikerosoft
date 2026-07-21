@@ -41,8 +41,20 @@ final class VideoHQModel: ObservableObject {
     @Published private(set) var notionStatusMessage = ""
     @Published private(set) var notionErrorMessage: String?
 
+    @Published var isNewProjectWizardPresented = false
+    @Published var newProjectSource: NewProjectSource = .notion
+    @Published var newProjectName = ""
+    @Published var newProjectFolderName = ""
+    @Published var selectedNotionProjectID: String?
+    @Published private(set) var notionProjectOptions: [NotionVideoProject] = []
+    @Published private(set) var isLoadingNewProjectOptions = false
+    @Published private(set) var isCreatingNewProject = false
+    @Published private(set) var newProjectStatusMessage = ""
+    @Published private(set) var newProjectErrorMessage: String?
+
     private let configuration: VideoHQConfiguration?
     private let configurationError: Error?
+    private let teleprompterWindowController = TeleprompterWindowController()
 
     convenience init() {
         do {
@@ -107,6 +119,13 @@ final class VideoHQModel: ObservableObject {
         configuration?.credentialDotenvURL.path ?? "your .env file"
     }
 
+    var canCreateNewProject: Bool {
+        let hasName = !newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasFolder = !newProjectFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasSource = newProjectSource == .folder || selectedNotionProjectID != nil
+        return hasName && hasFolder && hasSource && !isCreatingNewProject
+    }
+
     func hasResult(for panel: Panel) -> Bool {
         switch panel {
         case .script: return !projectScript.isEmpty
@@ -121,6 +140,96 @@ final class VideoHQModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             statusMessage = "Could not refresh video projects."
+        }
+    }
+
+    func openNewProjectWizard() {
+        newProjectSource = .notion
+        newProjectName = ""
+        newProjectFolderName = ""
+        selectedNotionProjectID = nil
+        notionProjectOptions = []
+        newProjectStatusMessage = ""
+        newProjectErrorMessage = nil
+        isNewProjectWizardPresented = true
+    }
+
+    func setNewProjectName(_ name: String) {
+        let oldSuggestion = NewVideoProject.folderSuggestion(for: newProjectName)
+        let shouldUpdateFolder = newProjectFolderName.isEmpty || newProjectFolderName == oldSuggestion
+        newProjectName = name
+        if shouldUpdateFolder {
+            newProjectFolderName = NewVideoProject.folderSuggestion(for: name)
+        }
+    }
+
+    func setNewProjectSource(_ source: NewProjectSource) {
+        guard source != newProjectSource else { return }
+        newProjectSource = source
+        newProjectName = ""
+        newProjectFolderName = ""
+        selectedNotionProjectID = nil
+        newProjectStatusMessage = ""
+        newProjectErrorMessage = nil
+    }
+
+    func selectNotionProject(_ id: String) {
+        guard let project = notionProjectOptions.first(where: { $0.id == id }) else { return }
+        selectedNotionProjectID = project.id
+        newProjectName = project.name
+        newProjectFolderName = NewVideoProject.folderSuggestion(for: project.name)
+    }
+
+    func loadNotionProjectOptions() {
+        guard !isLoadingNewProjectOptions else { return }
+        guard let client = newProjectNotionClient() else { return }
+        isLoadingNewProjectOptions = true
+        newProjectErrorMessage = nil
+        newProjectStatusMessage = "Loading scripts from Convex Projects..."
+
+        Task {
+            do {
+                notionProjectOptions = try await client.listVideoProjects()
+                newProjectStatusMessage = notionProjectOptions.isEmpty
+                    ? "No projects are currently in Writing or Ready to Shoot."
+                    : "Choose a script in Writing or Ready to Shoot."
+            } catch {
+                notionProjectOptions = []
+                newProjectErrorMessage = error.localizedDescription
+                newProjectStatusMessage = ""
+            }
+            isLoadingNewProjectOptions = false
+        }
+    }
+
+    func createNewProject() {
+        guard canCreateNewProject, let configuration else { return }
+        let notionPageID = newProjectSource == .notion ? selectedNotionProjectID : nil
+        let client = notionPageID == nil ? nil : newProjectNotionClient()
+        guard notionPageID == nil || client != nil else { return }
+
+        isCreatingNewProject = true
+        newProjectErrorMessage = nil
+        newProjectStatusMessage = notionPageID == nil
+            ? "Creating project folder..."
+            : "Creating project and downloading its Notion script..."
+
+        Task {
+            do {
+                let projectURL = try await NewVideoProject.create(
+                    rootURL: configuration.projectsRoot,
+                    folderName: newProjectFolderName,
+                    notionPageID: notionPageID,
+                    markdownProvider: client
+                )
+                try loadProjects(preferredProjectID: projectURL)
+                statusMessage = "Created \(newProjectName) at \(projectURL.path)."
+                isNewProjectWizardPresented = false
+            } catch {
+                newProjectErrorMessage = error.localizedDescription
+                newProjectStatusMessage = ""
+            }
+            isCreatingNewProject = false
         }
     }
 
@@ -203,6 +312,15 @@ final class VideoHQModel: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(activeText, forType: .string)
         statusMessage = "Copied \(selectedPanel.rawValue.lowercased()) to the clipboard."
+    }
+
+    func openTeleprompter() {
+        guard !projectScript.isEmpty else { return }
+        teleprompterWindowController.show(
+            script: projectScript,
+            projectName: selectedProject?.name ?? "Script"
+        )
+        statusMessage = "Opened the script on the Elgato Prompter."
     }
 
     func revealActiveFile() {
@@ -364,6 +482,18 @@ final class VideoHQModel: ObservableObject {
         }
         guard let apiKey = configuration.notionAPIKey else {
             notionErrorMessage = NotionClientError.missingAPIKey(configuration.credentialDotenvURL).localizedDescription
+            return nil
+        }
+        return NotionClient(apiKey: apiKey)
+    }
+
+    private func newProjectNotionClient() -> NotionClient? {
+        guard let configuration else {
+            newProjectErrorMessage = configurationError?.localizedDescription ?? "Video HQ could not load its configuration."
+            return nil
+        }
+        guard let apiKey = configuration.notionAPIKey else {
+            newProjectErrorMessage = NotionClientError.missingAPIKey(configuration.credentialDotenvURL).localizedDescription
             return nil
         }
         return NotionClient(apiKey: apiKey)

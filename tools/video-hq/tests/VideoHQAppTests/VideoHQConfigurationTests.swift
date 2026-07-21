@@ -3,6 +3,16 @@ import XCTest
 @testable import VideoHQApp
 
 final class VideoHQConfigurationTests: XCTestCase {
+    func testDefaultProjectsRootUsesConvexVideosFolder() {
+        let root = RepoLocator.projectsRoot(environment: [:], bundle: .main)
+
+        XCTAssertEqual(
+            root,
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("dev/convex/convex-videos", isDirectory: true)
+        )
+    }
+
     func testConfigurationLoadsQuotedOpenRouterKeyFromRepoDotenv() throws {
         let repoRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

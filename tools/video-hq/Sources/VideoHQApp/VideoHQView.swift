@@ -38,6 +38,9 @@ struct VideoHQView: View {
         .sheet(isPresented: $model.isNotionImporterPresented) {
             notionImporter
         }
+        .sheet(isPresented: $model.isNewProjectWizardPresented) {
+            NewProjectWizard(model: model)
+        }
         .alert("Video HQ", isPresented: errorBinding) {
             Button("OK", role: .cancel) { model.errorMessage = nil }
         } message: {
@@ -67,18 +70,28 @@ struct VideoHQView: View {
             HStack(spacing: 10) {
                 Label("Project", systemImage: "folder.fill")
                     .font(.headline)
-                if model.projects.isEmpty {
-                    Text("No projects found")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Picker("Project", selection: projectSelection) {
-                        ForEach(model.projects) { project in
-                            Text(project.name).tag(project.id)
+                Menu {
+                    ForEach(model.projects) { project in
+                        Button(project.name) {
+                            model.selectProject(project.id)
                         }
                     }
-                    .labelsHidden()
-                    .frame(width: 320)
+                    if !model.projects.isEmpty {
+                        Divider()
+                    }
+                    Button("Create New Project...", systemImage: "plus") {
+                        model.openNewProjectWizard()
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Text(model.selectedProject?.name ?? "No projects found")
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .frame(width: 285, alignment: .leading)
                 }
+                .menuStyle(.borderlessButton)
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     model.refreshProjects()
                 }
@@ -111,7 +124,7 @@ struct VideoHQView: View {
             VStack(spacing: 7) {
                 Text(isDropTargeted ? "Drop your video" : "No video projects found")
                     .font(.title2.weight(.semibold))
-                Text("Add a folder to ~/Movies/Projects, drag in a video, or choose one from Finder.")
+                Text("Create a project in ~/dev/convex/convex-videos, drag in a video, or choose one from Finder.")
                     .foregroundStyle(.secondary)
             }
             Button("Choose Video...", systemImage: "folder") {
@@ -119,6 +132,9 @@ struct VideoHQView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            Button("Create New Project...", systemImage: "plus") {
+                model.openNewProjectWizard()
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
@@ -270,6 +286,12 @@ struct VideoHQView: View {
                     .font(.headline)
                 Spacer()
                 if !model.activeText.isEmpty {
+                    if model.selectedPanel == .script {
+                        Button("Teleprompter", systemImage: "text.viewfinder") {
+                            model.openTeleprompter()
+                        }
+                        .help("Open large script text on the Elgato Prompter")
+                    }
                     Button("Reveal", systemImage: "folder") {
                         model.revealActiveFile()
                     }
@@ -494,13 +516,6 @@ struct VideoHQView: View {
         .frame(height: 34)
     }
 
-    private var projectSelection: Binding<URL> {
-        Binding(
-            get: { model.selectedProjectID ?? model.projects[0].id },
-            set: { model.selectProject($0) }
-        )
-    }
-
     private var renderSelection: Binding<URL> {
         Binding(
             get: { model.videoURL ?? model.renderedVideos[0] },
@@ -529,6 +544,198 @@ struct VideoHQView: View {
         Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
+        )
+    }
+}
+
+private struct NewProjectWizard: View {
+    enum Step {
+        case source
+        case details
+    }
+
+    @ObservedObject var model: VideoHQModel
+    @State private var step: Step = .source
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Create New Project")
+                        .font(.title2.weight(.semibold))
+                    Text(step == .source ? "Choose a starting point" : "Set up the project")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { model.isNewProjectWizardPresented = false }
+                    .disabled(model.isCreatingNewProject)
+            }
+
+            if step == .source {
+                sourceStep
+            } else {
+                detailsStep
+            }
+
+            Spacer(minLength: 0)
+            Divider()
+            HStack {
+                if step == .details {
+                    Button("Back") { step = .source }
+                        .disabled(model.isCreatingNewProject)
+                }
+                Spacer()
+                if step == .source {
+                    Button("Continue") {
+                        step = .details
+                        if model.newProjectSource == .notion {
+                            model.loadNotionProjectOptions()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Create Project") { model.createNewProject() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!model.canCreateNewProject)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 680, height: 610)
+    }
+
+    private var sourceStep: some View {
+        VStack(spacing: 14) {
+            sourceCard(
+                .notion,
+                title: "Create from Notion",
+                message: "Choose a Convex Projects script in Writing or Ready to Shoot and download it as script.md.",
+                icon: "doc.text"
+            )
+            sourceCard(
+                .folder,
+                title: "Create from a Folder",
+                message: "Name a new local video project and create its folder without a script.",
+                icon: "folder.badge.plus"
+            )
+        }
+    }
+
+    private func sourceCard(_ source: NewProjectSource, title: String, message: String, icon: String) -> some View {
+        Button {
+            model.setNewProjectSource(source)
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.system(size: 28))
+                    .foregroundStyle(.tint)
+                    .frame(width: 42)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title).font(.headline)
+                    Text(message)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+                Image(systemName: model.newProjectSource == source ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(model.newProjectSource == source ? Color.accentColor : Color.secondary)
+                    .font(.title2)
+            }
+            .padding(16)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(model.newProjectSource == source ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: 2)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var detailsStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if model.newProjectSource == .notion {
+                notionProjectPicker
+            } else {
+                Text("Local Project").font(.headline)
+                Text("Video HQ will create an empty project folder. You can add a script and recordings later.")
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Project name").font(.headline)
+                TextField("For example, Full-text Search", text: projectNameBinding)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Folder name").font(.headline)
+                TextField("full-text-search", text: $model.newProjectFolderName)
+                    .textFieldStyle(.roundedBorder)
+                Text("Created inside ~/dev/convex/convex-videos. The suggested name follows your existing kebab-case folders.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if model.isCreatingNewProject || model.isLoadingNewProjectOptions {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(model.newProjectStatusMessage).foregroundStyle(.secondary)
+                }
+            } else if let error = model.newProjectErrorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            } else if !model.newProjectStatusMessage.isEmpty {
+                Text(model.newProjectStatusMessage).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var notionProjectPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Notion script").font(.headline)
+                Spacer()
+                Button("Reload", systemImage: "arrow.clockwise") { model.loadNotionProjectOptions() }
+                    .disabled(model.isLoadingNewProjectOptions)
+            }
+            if !model.hasNotionAPIKey {
+                Text("Add NOTION_API_KEY to \(model.notionSetupPath), then reopen Video HQ.")
+                    .foregroundStyle(.orange)
+            }
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(model.notionProjectOptions) { project in
+                        Button {
+                            model.selectNotionProject(project.id)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(project.name).font(.headline)
+                                    Text(project.status).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if model.selectedNotionProjectID == project.id {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
+                                }
+                            }
+                            .padding(10)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(height: 190)
+        }
+    }
+
+    private var projectNameBinding: Binding<String> {
+        Binding(
+            get: { model.newProjectName },
+            set: { model.setNewProjectName($0) }
         )
     }
 }
