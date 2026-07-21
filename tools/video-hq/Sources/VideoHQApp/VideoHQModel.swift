@@ -24,11 +24,13 @@ final class VideoHQModel: ObservableObject {
     @Published private(set) var projects: [VideoProject] = []
     @Published private(set) var selectedProjectID: URL?
     @Published private(set) var projectScript = ""
+    @Published private(set) var projectNotionPageID: String?
     @Published private(set) var videoURL: URL?
     @Published private(set) var player: AVPlayer?
     @Published private(set) var transcript = ""
     @Published private(set) var description = ""
     @Published var selectedPanel: Panel = .script
+    @Published var scriptDisplayMode: ScriptDisplayMode = .raw
     @Published private(set) var workingPanel: Panel?
     @Published private(set) var statusMessage = "Loading video projects..."
     @Published var errorMessage: String?
@@ -54,18 +56,27 @@ final class VideoHQModel: ObservableObject {
 
     private let configuration: VideoHQConfiguration?
     private let configurationError: Error?
+    private let preferences: VideoHQPreferences
     private let teleprompterWindowController = TeleprompterWindowController()
 
     convenience init() {
+        let preferences = VideoHQPreferences()
         do {
-            self.init(configuration: try VideoHQConfiguration.load())
+            self.init(
+                configuration: try VideoHQConfiguration.load(),
+                preferences: preferences
+            )
         } catch {
-            self.init(configurationError: error)
+            self.init(configurationError: error, preferences: preferences)
         }
     }
 
-    init(configuration: VideoHQConfiguration) {
+    init(
+        configuration: VideoHQConfiguration,
+        preferences: VideoHQPreferences = VideoHQPreferences()
+    ) {
         self.configuration = configuration
+        self.preferences = preferences
         configurationError = nil
         do {
             try loadProjects()
@@ -75,16 +86,16 @@ final class VideoHQModel: ObservableObject {
         }
     }
 
-    private init(configurationError: Error) {
+    private init(configurationError: Error, preferences: VideoHQPreferences) {
         configuration = nil
         self.configurationError = configurationError
+        self.preferences = preferences
         statusMessage = "Video HQ could not load its configuration."
         errorMessage = configurationError.localizedDescription
     }
 
     var selectedProject: VideoProject? {
-        guard let selectedProjectID else { return nil }
-        return projects.first { $0.id == selectedProjectID }
+        project(matching: selectedProjectID)
     }
 
     var renderedVideos: [URL] {
@@ -93,6 +104,13 @@ final class VideoHQModel: ObservableObject {
 
     var hasProjectScript: Bool {
         !projectScript.isEmpty
+    }
+
+    var notionScriptActionTitle: String {
+        if projectNotionPageID != nil {
+            return "Sync from Notion"
+        }
+        return hasProjectScript ? "Replace from Notion" : "Download from Notion"
     }
 
     var activeText: String {
@@ -234,16 +252,16 @@ final class VideoHQModel: ObservableObject {
     }
 
     func selectProject(_ id: URL?) {
-        guard let id, let project = projects.first(where: { $0.id == id }) else { return }
+        guard let project = project(matching: id) else { return }
         selectedProjectID = project.id
+        preferences.lastSelectedProjectURL = project.id
         selectedPanel = .script
 
         do {
-            projectScript = try project.scriptURL.map {
-                try String(contentsOf: $0, encoding: .utf8)
-            } ?? ""
+            try loadProjectScript(from: project.scriptURL)
         } catch {
             projectScript = ""
+            projectNotionPageID = nil
             errorMessage = error.localizedDescription
         }
 
@@ -377,13 +395,32 @@ final class VideoHQModel: ObservableObject {
         downloadNotionScript(pageID: pageID)
     }
 
+    func syncNotionScript() {
+        guard let projectNotionPageID else {
+            openNotionImporter()
+            return
+        }
+        downloadNotionScript(pageID: projectNotionPageID)
+    }
+
     func downloadNotionScript(pageID: String) {
         guard !isNotionWorking else { return }
-        guard let project = selectedProject, let client = notionClient() else { return }
+        let isSync = projectNotionPageID == pageID
+        guard let project = selectedProject else { return }
+        guard let client = notionClient() else {
+            if isSync {
+                errorMessage = notionErrorMessage
+                notionErrorMessage = nil
+            }
+            return
+        }
         isNotionWorking = true
         workingPanel = .script
         notionErrorMessage = nil
-        notionStatusMessage = "Downloading script..."
+        notionStatusMessage = isSync ? "Syncing script..." : "Downloading script..."
+        if isSync {
+            statusMessage = "Syncing script from Notion..."
+        }
 
         Task {
             do {
@@ -391,17 +428,26 @@ final class VideoHQModel: ObservableObject {
                     pageID: pageID,
                     into: project.directoryURL
                 )
-                projectScript = try String(contentsOf: result.scriptURL, encoding: .utf8)
+                try loadProjectScript(from: result.scriptURL)
                 try reloadProjectMetadata()
-                statusMessage = result.wasTruncated
-                    ? "Downloaded script.md, but Notion reported truncated content."
-                    : "Downloaded script.md to \(project.name)."
+                if result.wasTruncated {
+                    statusMessage = "\(isSync ? "Synced" : "Downloaded") script.md, but Notion reported truncated content."
+                } else {
+                    statusMessage = isSync
+                        ? "Synced script.md from Notion."
+                        : "Downloaded script.md to \(project.name)."
+                }
                 isNotionImporterPresented = false
                 notionPageReference = ""
                 notionSearchResults = []
                 notionStatusMessage = ""
             } catch {
-                notionErrorMessage = error.localizedDescription
+                if isSync {
+                    errorMessage = error.localizedDescription
+                    statusMessage = "Notion sync failed."
+                } else {
+                    notionErrorMessage = error.localizedDescription
+                }
                 notionStatusMessage = ""
             }
             isNotionWorking = false
@@ -417,18 +463,20 @@ final class VideoHQModel: ObservableObject {
         guard !projects.isEmpty else {
             selectedProjectID = nil
             projectScript = ""
+            projectNotionPageID = nil
             clearVideo()
             statusMessage = "No project folders found in \(configuration.projectsRoot.path)."
             return
         }
-        let selection = preferredProjectID.flatMap { id in projects.first { $0.id == id } } ?? projects[0]
+        let projectID = preferredProjectID ?? preferences.lastSelectedProjectURL
+        let selection = project(matching: projectID) ?? projects[0]
         selectProject(selection.id)
     }
 
     private func reloadProjectMetadata() throws {
         guard let configuration, let selectedProjectID else { return }
         projects = try VideoProjectCatalog(rootURL: configuration.projectsRoot).discover()
-        self.selectedProjectID = projects.first { $0.id == selectedProjectID }?.id
+        self.selectedProjectID = project(matching: selectedProjectID)?.id
     }
 
     @discardableResult
@@ -444,9 +492,8 @@ final class VideoHQModel: ObservableObject {
                 $0.directoryURL.standardizedFileURL == url.deletingLastPathComponent().standardizedFileURL
             }) {
                 selectedProjectID = matchingProject.id
-                projectScript = try matchingProject.scriptURL.map {
-                    try String(contentsOf: $0, encoding: .utf8)
-                } ?? ""
+                preferences.lastSelectedProjectURL = matchingProject.id
+                try loadProjectScript(from: matchingProject.scriptURL)
             }
 
             let sidecars = try VideoSidecars.load(for: url)
@@ -473,6 +520,24 @@ final class VideoHQModel: ObservableObject {
         videoURL = nil
         transcript = ""
         description = ""
+    }
+
+    private func loadProjectScript(from scriptURL: URL?) throws {
+        guard let scriptURL else {
+            projectScript = ""
+            projectNotionPageID = nil
+            return
+        }
+        let contents = try String(contentsOf: scriptURL, encoding: .utf8)
+        let document = NotionScriptDocument(contents: contents)
+        projectScript = document.markdown
+        projectNotionPageID = document.notionPageID
+    }
+
+    private func project(matching id: URL?) -> VideoProject? {
+        guard let id else { return nil }
+        let path = id.standardizedFileURL.path
+        return projects.first { $0.id.standardizedFileURL.path == path }
     }
 
     private func notionClient() -> NotionClient? {

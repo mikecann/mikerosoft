@@ -47,7 +47,7 @@ final class NewVideoProjectTests: XCTestCase {
 
         XCTAssertEqual(
             try String(contentsOf: result.appendingPathComponent("script.md"), encoding: .utf8),
-            "# Script\n\nHello\n"
+            "---\nnotion_page_id: page-id\n---\n\n# Script\n\nHello\n"
         )
     }
 

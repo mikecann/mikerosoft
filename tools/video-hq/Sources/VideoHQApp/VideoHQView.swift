@@ -284,6 +284,16 @@ struct VideoHQView: View {
             HStack {
                 Label(model.selectedPanel.rawValue, systemImage: model.selectedPanel.icon)
                     .font(.headline)
+                if model.selectedPanel == .script && !model.activeText.isEmpty {
+                    Picker("Script view", selection: $model.scriptDisplayMode) {
+                        ForEach(ScriptDisplayMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 150)
+                }
                 Spacer()
                 if !model.activeText.isEmpty {
                     if model.selectedPanel == .script {
@@ -300,8 +310,12 @@ struct VideoHQView: View {
                     }
                 }
                 if model.selectedPanel == .script {
-                    Button(model.hasProjectScript ? "Replace from Notion" : "Download from Notion") {
-                        model.openNotionImporter()
+                    Button(model.notionScriptActionTitle) {
+                        if model.projectNotionPageID != nil {
+                            model.syncNotionScript()
+                        } else {
+                            model.openNotionImporter()
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.selectedProject == nil || model.isWorking)
@@ -329,11 +343,18 @@ struct VideoHQView: View {
                 emptyPanel
             } else {
                 ScrollView {
-                    Text(model.activeText)
-                        .font(.system(.body, design: model.selectedPanel == .script ? .default : .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
+                    if model.selectedPanel == .script && model.scriptDisplayMode == .preview {
+                        MarkdownPreview(markdown: model.activeText)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(18)
+                    } else {
+                        Text(model.activeText)
+                            .font(.system(.body, design: model.selectedPanel == .script ? .default : .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(18)
+                    }
                 }
             }
         }

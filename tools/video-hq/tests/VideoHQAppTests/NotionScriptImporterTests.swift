@@ -32,8 +32,30 @@ final class NotionScriptImporterTests: XCTestCase {
         XCTAssertEqual(result.scriptURL, projectDirectory.appendingPathComponent("script.md"))
         XCTAssertEqual(
             try String(contentsOf: result.scriptURL, encoding: .utf8),
-            "# Video script\n\nOpening line.\n"
+            "---\nnotion_page_id: b55c9c91-384d-452b-81db-d1ef79372b75\n---\n\n# Video script\n\nOpening line.\n"
         )
         XCTAssertFalse(result.wasTruncated)
+    }
+
+    func testScriptDocumentReadsNotionSourceWithoutExposingFrontMatter() {
+        let document = NotionScriptDocument(contents: """
+        ---
+        notion_page_id: b55c9c91-384d-452b-81db-d1ef79372b75
+        ---
+
+        # Video script
+
+        Opening line.
+        """)
+
+        XCTAssertEqual(document.notionPageID, "b55c9c91-384d-452b-81db-d1ef79372b75")
+        XCTAssertEqual(document.markdown, "# Video script\n\nOpening line.")
+    }
+
+    func testScriptDocumentLeavesLocalMarkdownUntouched() {
+        let document = NotionScriptDocument(contents: "# Local script\n\nOpening line.")
+
+        XCTAssertNil(document.notionPageID)
+        XCTAssertEqual(document.markdown, "# Local script\n\nOpening line.")
     }
 }

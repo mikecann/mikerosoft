@@ -5,6 +5,7 @@
 A native macOS command center for Mike's video-production workflows. Video HQ
 treats each direct folder in `~/dev/convex/convex-videos` as one video project,
 loads its script, and previews rendered MP4s from the project root.
+The last selected project is restored the next time the app opens.
 
 If a project contains multiple root MP4 files, use the Render picker to switch
 between them. Videos inside subfolders such as `source/` are deliberately
@@ -20,8 +21,12 @@ manually.
   missing, the app generates it first.
 - **Script** loads `script.md`, or another root Markdown/text file with `script`
   in its name. It can search shared Notion pages or accept a Notion page link,
-  then download the page as Markdown to `<project>/script.md`. Its Teleprompter
-  button opens large, centered script text on the Elgato Prompter display.
+  then download the page as Markdown to `<project>/script.md`. Video HQ records
+  the source page ID in YAML front matter, so later downloads become one-click
+  syncs from the same Notion page. A Raw/Preview control switches between the
+  source text and rendered Markdown. The metadata stays hidden in the app and
+  its Teleprompter, which opens large, centered script text on the Elgato
+  Prompter display.
 - **New Project** is available from the project dropdown. It can create a blank
   local project or start from a project in the Convex Projects Notion database
   whose status is `Writing` or `Ready to Shoot`. The wizard suggests an editable
