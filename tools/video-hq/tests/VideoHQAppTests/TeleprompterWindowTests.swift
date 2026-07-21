@@ -27,6 +27,21 @@ final class TeleprompterWindowTests: XCTestCase {
         XCTAssertEqual(TeleprompterParagraphNavigator.nextIndex(after: 5, in: blocks), 5)
     }
 
+    func testParagraphNavigatorGoesBackOnlyThroughSpokenParagraphs() {
+        let blocks: [TeleprompterScriptBlock] = [
+            .callout("camera cue"),
+            .spoken("First"),
+            .code(language: "swift", text: "print(1)"),
+            .spoken("Second"),
+            .space,
+            .spoken("Third"),
+        ]
+
+        XCTAssertEqual(TeleprompterParagraphNavigator.previousIndex(before: nil, in: blocks), 1)
+        XCTAssertEqual(TeleprompterParagraphNavigator.previousIndex(before: 5, in: blocks), 3)
+        XCTAssertEqual(TeleprompterParagraphNavigator.previousIndex(before: 3, in: blocks), 1)
+        XCTAssertEqual(TeleprompterParagraphNavigator.previousIndex(before: 1, in: blocks), 1)
+    }
 
     func testTeleprompterUsesAStandardResizableWindow() {
         XCTAssertEqual(

@@ -61,6 +61,16 @@ enum TeleprompterParagraphNavigator {
         guard let currentIndex else { return first }
         return indices.first(where: { $0 > currentIndex }) ?? indices.last
     }
+
+    static func previousIndex(
+        before currentIndex: Int?,
+        in blocks: [TeleprompterScriptBlock]
+    ) -> Int? {
+        let indices = spokenIndices(in: blocks)
+        guard let first = indices.first else { return nil }
+        guard let currentIndex else { return first }
+        return indices.last(where: { $0 < currentIndex }) ?? first
+    }
 }
 
 enum TeleprompterScriptParser {
@@ -145,6 +155,62 @@ private final class TeleprompterWindow: NSWindow {
     }
 }
 
+// SwiftUI's tap gesture handles primary clicks but does not expose the mouse
+// button on macOS. This background view observes secondary clicks without
+// sitting on top of the ScrollView and blocking normal scrolling.
+private final class TeleprompterRightClickMonitorView: NSView {
+    var action: () -> Void = {}
+    private var eventMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        stopMonitoring()
+
+        guard let window else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) {
+            [weak self, weak window] event in
+            guard let self, event.window === window else { return event }
+            let location = self.convert(event.locationInWindow, from: nil)
+            guard self.bounds.contains(location) else { return event }
+
+            self.action()
+            return nil
+        }
+    }
+
+    fileprivate func stopMonitoring() {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
+    }
+
+    deinit {
+        stopMonitoring()
+    }
+}
+
+private struct TeleprompterRightClickMonitor: NSViewRepresentable {
+    let action: () -> Void
+
+    func makeNSView(context: Context) -> TeleprompterRightClickMonitorView {
+        let view = TeleprompterRightClickMonitorView()
+        view.action = action
+        return view
+    }
+
+    func updateNSView(_ nsView: TeleprompterRightClickMonitorView, context: Context) {
+        nsView.action = action
+    }
+
+    static func dismantleNSView(
+        _ nsView: TeleprompterRightClickMonitorView,
+        coordinator: Void
+    ) {
+        nsView.stopMonitoring()
+    }
+}
+
 private struct TeleprompterScriptView: View {
     private let blocks: [TeleprompterScriptBlock]
     @State private var currentParagraphIndex: Int?
@@ -177,6 +243,11 @@ private struct TeleprompterScriptView: View {
                 .onTapGesture {
                     advanceParagraph(using: proxy, animated: true)
                 }
+                .background {
+                    TeleprompterRightClickMonitor {
+                        retreatParagraph(using: proxy)
+                    }
+                }
                 .onAppear {
                     // Wait until SwiftUI has measured the runway before positioning
                     // the opening paragraph at the bottom of the Prompter.
@@ -201,6 +272,18 @@ private struct TeleprompterScriptView: View {
             withAnimation(.easeInOut(duration: 0.35), scroll)
         } else {
             scroll()
+        }
+    }
+
+    private func retreatParagraph(using proxy: ScrollViewProxy) {
+        guard let previousIndex = TeleprompterParagraphNavigator.previousIndex(
+            before: currentParagraphIndex,
+            in: blocks
+        ) else { return }
+
+        currentParagraphIndex = previousIndex
+        withAnimation(.easeInOut(duration: 0.35)) {
+            proxy.scrollTo(previousIndex, anchor: .bottom)
         }
     }
 
