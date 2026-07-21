@@ -2,12 +2,18 @@ import AppKit
 import XCTest
 @testable import TaskbarApp
 
-private func layoutItem(index: Int, isFrontmost: Bool = false) -> TaskbarItem {
+private func layoutItem(
+    index: Int,
+    pid: pid_t? = nil,
+    windowCount: Int = 1,
+    isFrontmost: Bool = false,
+    isPinned: Bool = false
+) -> TaskbarItem {
     TaskbarItem(
         owner: "App \(index)",
-        pid: nil,
+        pid: pid,
         title: "Window \(index)",
-        windowCount: 1,
+        windowCount: windowCount,
         windowIDs: [index],
         windowBounds: nil,
         accessibilitySignature: "",
@@ -15,8 +21,8 @@ private func layoutItem(index: Int, isFrontmost: Bool = false) -> TaskbarItem {
         isMinimized: false,
         bundleID: "com.example.app-\(index)",
         appPath: "/Applications/App \(index).app",
-        isPinned: false,
-        pinOrder: nil
+        isPinned: isPinned,
+        pinOrder: isPinned ? index : nil
     )
 }
 
@@ -35,6 +41,40 @@ private func layoutMouseEvent(_ type: NSEvent.EventType, at point: NSPoint) -> N
 }
 
 final class TaskbarLayoutTests: XCTestCase {
+    func testClosedPinnedAppUsesIconOnlyWidthAndHidesItsLabel() {
+        let item = layoutItem(index: 0, windowCount: 0, isPinned: true)
+        let iconSize: CGFloat = 24
+
+        XCTAssertFalse(taskbarItemShowsLabel(item))
+        XCTAssertEqual(
+            preferredTaskbarItemWidth(
+                for: item,
+                textWidth: 120,
+                iconSize: iconSize,
+                minimumWidth: 96,
+                maximumWidth: 220
+            ),
+            TaskbarItemMetrics.iconOnlyWidth(iconSize: iconSize)
+        )
+    }
+
+    func testRunningPinnedAppKeepsItsNormalLabelledWidth() {
+        let item = layoutItem(index: 0, pid: 42, isPinned: true)
+        let iconSize: CGFloat = 24
+
+        XCTAssertTrue(taskbarItemShowsLabel(item))
+        XCTAssertEqual(
+            preferredTaskbarItemWidth(
+                for: item,
+                textWidth: 120,
+                iconSize: iconSize,
+                minimumWidth: 96,
+                maximumWidth: 220
+            ),
+            TaskbarItemMetrics.naturalWidth(textWidth: 120, iconSize: iconSize)
+        )
+    }
+
     func testWidgetsNeverIntersectTilesAcrossLayoutMatrix() {
         // 397 pt is the smallest width that can hold the largest configured
         // widget minima, the existing margins, and one point of tile area.

@@ -168,7 +168,8 @@ final class TaskbarView: NSView {
         ]
         let textWidth = ceil((label as NSString).size(withAttributes: attributes).width)
         let iconSize = TaskbarItemMetrics.iconSize(for: tileHeight)
-        return taskbarItemWidth(
+        return preferredTaskbarItemWidth(
+            for: item,
             textWidth: textWidth,
             iconSize: iconSize,
             minimumWidth: CGFloat(settings.minimumItemWidth),
@@ -181,7 +182,8 @@ final class TaskbarView: NSView {
         let iconSize = min(preferredIconSize, max(0, rect.width - 2))
         guard iconSize > 0 else { return }
 
-        let wantsLabel = rect.width >= TaskbarItemMetrics.leadingInset
+        let wantsLabel = taskbarItemShowsLabel(item)
+            && rect.width >= TaskbarItemMetrics.leadingInset
             + iconSize
             + TaskbarItemMetrics.iconTextGap
             + 4
@@ -213,6 +215,7 @@ final class TaskbarView: NSView {
             )
         }
 
+        guard wantsLabel else { return }
         let label = taskbarItemLabel(item)
         let labelX = iconRect.maxX + TaskbarItemMetrics.iconTextGap
         let labelWidth = max(0, rect.maxX - labelX - TaskbarItemMetrics.trailingInset)

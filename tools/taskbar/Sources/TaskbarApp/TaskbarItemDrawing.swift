@@ -22,6 +22,31 @@ func taskbarItemLabel(_ item: TaskbarItem) -> String {
     item.title.isEmpty ? item.owner : item.title
 }
 
+func taskbarItemShowsLabel(_ item: TaskbarItem) -> Bool {
+    // A closed pinned app is a launcher, not a window, so it should look like
+    // an app icon rather than consume the space of a labelled window tile.
+    !(item.isPinned && item.pid == nil)
+}
+
+func preferredTaskbarItemWidth(
+    for item: TaskbarItem,
+    textWidth: CGFloat,
+    iconSize: CGFloat,
+    minimumWidth: CGFloat,
+    maximumWidth: CGFloat
+) -> CGFloat {
+    guard taskbarItemShowsLabel(item) else {
+        return TaskbarItemMetrics.iconOnlyWidth(iconSize: iconSize)
+    }
+
+    return taskbarItemWidth(
+        textWidth: textWidth,
+        iconSize: iconSize,
+        minimumWidth: minimumWidth,
+        maximumWidth: maximumWidth
+    )
+}
+
 func drawTaskbarIcon(item: TaskbarItem, rect: NSRect) {
     if let icon = TaskbarIconCache.shared.icon(for: item) {
         drawTaskbarIconImage(icon, in: rect)
