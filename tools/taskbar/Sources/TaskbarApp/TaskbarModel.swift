@@ -31,6 +31,42 @@ struct WindowRecord: Equatable {
     let appPath: String
     let accessibilityTitle: String
     let accessibilitySignature: String
+    // nil means Accessibility did not expose a fullscreen state for this window.
+    let isFullscreen: Bool?
+
+    init(
+        owner: String,
+        title: String,
+        pid: pid_t,
+        windowID: Int,
+        accessibilityWindowID: Int,
+        layer: Int,
+        isOnScreen: Bool,
+        isMinimized: Bool,
+        bounds: CGRect,
+        screenID: UInt32?,
+        bundleID: String,
+        appPath: String,
+        accessibilityTitle: String,
+        accessibilitySignature: String,
+        isFullscreen: Bool? = nil
+    ) {
+        self.owner = owner
+        self.title = title
+        self.pid = pid
+        self.windowID = windowID
+        self.accessibilityWindowID = accessibilityWindowID
+        self.layer = layer
+        self.isOnScreen = isOnScreen
+        self.isMinimized = isMinimized
+        self.bounds = bounds
+        self.screenID = screenID
+        self.bundleID = bundleID
+        self.appPath = appPath
+        self.accessibilityTitle = accessibilityTitle
+        self.accessibilitySignature = accessibilitySignature
+        self.isFullscreen = isFullscreen
+    }
 }
 
 struct TaskbarItem: Equatable {

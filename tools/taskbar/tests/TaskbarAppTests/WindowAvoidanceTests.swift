@@ -11,7 +11,8 @@ final class WindowAvoidanceTests: XCTestCase {
         layer: Int = 0,
         isOnScreen: Bool = true,
         bounds: CGRect = CGRect(x: 80, y: 80, width: 1200, height: 1360),
-        screenID: UInt32? = 1
+        screenID: UInt32? = 1,
+        isFullscreen: Bool? = nil
     ) -> WindowRecord {
         WindowRecord(
             owner: owner,
@@ -27,7 +28,8 @@ final class WindowAvoidanceTests: XCTestCase {
             bundleID: "",
             appPath: "",
             accessibilityTitle: "",
-            accessibilitySignature: ""
+            accessibilitySignature: "",
+            isFullscreen: isFullscreen
         )
     }
 
@@ -117,13 +119,27 @@ final class WindowAvoidanceTests: XCTestCase {
 
     func testFullscreenWindowIsNotResizedToMakeRoomForTaskbar() {
         let requests = windowAdjustmentRequests(
-            records: [record(pid: 100, windowID: 1, bounds: screen().quartzFrame)],
+            records: [record(pid: 100, windowID: 1, bounds: screen().quartzFrame, isFullscreen: true)],
             screens: [screen()],
             valuesByScreen: [1: values()],
             currentPID: 999
         )
 
         XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testScreenSizedMaximizedWindowIsResizedToMakeRoomForTaskbar() {
+        let requests = windowAdjustmentRequests(
+            records: [record(pid: 100, windowID: 1, bounds: screen().quartzFrame, isFullscreen: false)],
+            screens: [screen()],
+            valuesByScreen: [1: values()],
+            currentPID: 999
+        )
+
+        XCTAssertEqual(
+            requests.first?.clampedFrame,
+            CGRect(x: 0, y: 0, width: 2560, height: 1386)
+        )
     }
 
     func testWindowAdjustmentRequestsIncludeOnlyWindowsThatNeedClamping() {

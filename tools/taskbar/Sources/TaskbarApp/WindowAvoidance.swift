@@ -79,7 +79,9 @@ func windowAdjustmentRequests(
         guard values.isVisible, values.avoidOverlappingWindows, !values.autoHide else { continue }
         // Fullscreen apps own the entire display. Leave their window alone and
         // let the taskbar hide instead of shrinking a game to make room.
-        guard !windowCoversScreen(record.bounds, screenBounds: screen.quartzFrame) else { continue }
+        guard !(windowCoversScreen(record.bounds, screenBounds: screen.quartzFrame)
+            && windowShouldObscureTaskbar(record))
+        else { continue }
         guard let clamped = clampedWindowFrame(record.bounds, screen: screen, reservedBottomHeight: values.taskbarHeight) else { continue }
         guard !adjustedWindowIDs.contains(record.windowID) else { continue }
 

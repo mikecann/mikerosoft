@@ -211,7 +211,8 @@ func collectWindowRecords(screens: [ScreenInfo], includeMinimized: Bool = false)
         in: accessibilitySurfaces
     )
 
-    let cgRecords = zip(rawWindows, matchedAccessibilitySurfaces).map { window, accessibilitySurface in
+    let cgRecords: [WindowRecord] = zip(rawWindows, matchedAccessibilitySurfaces).map {
+        (window: [String: Any], accessibilitySurface: AccessibilityWindowSurface?) -> WindowRecord in
         let pid = pid_t((window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value ?? 0)
         let bounds = rect(from: window[kCGWindowBounds as String] as? [String: Any])
         let owner = window[kCGWindowOwnerName as String] as? String ?? ""
@@ -242,7 +243,8 @@ func collectWindowRecords(screens: [ScreenInfo], includeMinimized: Bool = false)
             bundleID: metadata?.bundleID ?? "",
             appPath: metadata?.appPath ?? "",
             accessibilityTitle: accessibilitySurface?.title ?? "",
-            accessibilitySignature: accessibilitySurface?.signature ?? ""
+            accessibilitySignature: accessibilitySurface?.signature ?? "",
+            isFullscreen: accessibilitySurface?.isFullscreen
         )
     }
 
@@ -283,13 +285,22 @@ struct AccessibilityWindowSurface: Equatable {
     let title: String
     let bounds: CGRect
     let signature: String
+    let isFullscreen: Bool?
 
-    init(pid: pid_t, windowID: Int = 0, title: String, bounds: CGRect, signature: String) {
+    init(
+        pid: pid_t,
+        windowID: Int = 0,
+        title: String,
+        bounds: CGRect,
+        signature: String,
+        isFullscreen: Bool? = nil
+    ) {
         self.pid = pid
         self.windowID = windowID
         self.title = title
         self.bounds = bounds
         self.signature = signature
+        self.isFullscreen = isFullscreen
     }
 }
 
@@ -726,7 +737,8 @@ private func collectAccessibilitySurfaces(for pids: Set<pid_t>) -> [Accessibilit
                     windowID: windowID,
                     title: title,
                     bounds: bounds,
-                    signature: signature
+                    signature: signature,
+                    isFullscreen: accessibilityOptionalBool(window, "AXFullScreen")
                 )
             )
         }
@@ -950,6 +962,14 @@ private func accessibilityBool(_ element: AXUIElement, _ attribute: String) -> B
         return false
     }
     return valueRef as? Bool ?? false
+}
+
+private func accessibilityOptionalBool(_ element: AXUIElement, _ attribute: String) -> Bool? {
+    var valueRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute as CFString, &valueRef) == .success else {
+        return nil
+    }
+    return valueRef as? Bool
 }
 
 private func syntheticWindowID(pid: pid_t, title: String, bounds: CGRect) -> Int {

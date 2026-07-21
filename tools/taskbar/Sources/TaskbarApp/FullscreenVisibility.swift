@@ -3,6 +3,20 @@ import Darwin
 
 private let fullscreenEdgeTolerance: CGFloat = 2
 
+private func isSteamGame(_ record: WindowRecord) -> Bool {
+    record.appPath
+        .replacingOccurrences(of: "\\", with: "/")
+        .lowercased()
+        .contains("/steamapps/common/")
+}
+
+func windowShouldObscureTaskbar(_ record: WindowRecord) -> Bool {
+    // A normal macOS window can fill the exact screen after a title-bar double
+    // click. Only native fullscreen windows, or borderless Steam games which do
+    // not reliably expose AXFullScreen, should make the taskbar disappear.
+    record.isFullscreen == true || isSteamGame(record)
+}
+
 func windowCoversScreen(_ windowBounds: CGRect, screenBounds: CGRect) -> Bool {
     windowBounds.minX <= screenBounds.minX + fullscreenEdgeTolerance
         && windowBounds.minY <= screenBounds.minY + fullscreenEdgeTolerance
@@ -26,6 +40,7 @@ func fullscreenCoveredScreenIDs(
     }
 
     return foregroundWindows.reduce(into: Set<UInt32>()) { coveredScreenIDs, window in
+        guard windowShouldObscureTaskbar(window) else { return }
         for screen in screens where windowCoversScreen(window.bounds, screenBounds: screen.quartzFrame) {
             coveredScreenIDs.insert(screen.id)
         }

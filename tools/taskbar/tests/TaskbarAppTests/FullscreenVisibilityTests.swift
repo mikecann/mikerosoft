@@ -20,7 +20,11 @@ final class FullscreenVisibilityTests: XCTestCase {
     ]
 
     func testForegroundWindowCoveringScreenHidesOnlyThatScreensTaskbar() {
-        let records = [record(pid: 200, bounds: CGRect(x: 2559, y: -1, width: 1922, height: 1082))]
+        let records = [record(
+            pid: 200,
+            bounds: CGRect(x: 2559, y: -1, width: 1922, height: 1082),
+            isFullscreen: true
+        )]
 
         let hiddenScreenIDs = fullscreenCoveredScreenIDs(
             records: records,
@@ -33,7 +37,10 @@ final class FullscreenVisibilityTests: XCTestCase {
     }
 
     func testOrdinaryMaximizedWindowDoesNotHideTaskbar() {
-        let records = [record(pid: 200, bounds: CGRect(x: 0, y: 24, width: 2560, height: 1362))]
+        // macOS "Fill" can give a normal zoomed window the full screen-sized
+        // frame. AXFullScreen remains false, which distinguishes it from true
+        // fullscreen mode.
+        let records = [record(pid: 200, bounds: screens[0].quartzFrame, isFullscreen: false)]
 
         let hiddenScreenIDs = fullscreenCoveredScreenIDs(
             records: records,
@@ -43,6 +50,24 @@ final class FullscreenVisibilityTests: XCTestCase {
         )
 
         XCTAssertTrue(hiddenScreenIDs.isEmpty)
+    }
+
+    func testBorderlessSteamGameStillHidesTaskbarWithoutNativeFullscreenState() {
+        let records = [record(
+            pid: 200,
+            bounds: screens[0].quartzFrame,
+            appPath: "/Users/mike/Library/Application Support/Steam/steamapps/common/Game/Game.app",
+            isFullscreen: false
+        )]
+
+        let hiddenScreenIDs = fullscreenCoveredScreenIDs(
+            records: records,
+            screens: screens,
+            frontmostPID: 200,
+            currentPID: 999
+        )
+
+        XCTAssertEqual(hiddenScreenIDs, [1])
     }
 
     func testBackgroundFullscreenSizedWindowDoesNotHideTaskbar() {
@@ -58,7 +83,12 @@ final class FullscreenVisibilityTests: XCTestCase {
         XCTAssertTrue(hiddenScreenIDs.isEmpty)
     }
 
-    private func record(pid: pid_t, bounds: CGRect) -> WindowRecord {
+    private func record(
+        pid: pid_t,
+        bounds: CGRect,
+        appPath: String = "/Applications/Game.app",
+        isFullscreen: Bool? = nil
+    ) -> WindowRecord {
         WindowRecord(
             owner: "Steam Game",
             title: "Game",
@@ -71,9 +101,10 @@ final class FullscreenVisibilityTests: XCTestCase {
             bounds: bounds,
             screenID: nil,
             bundleID: "com.example.game",
-            appPath: "/Applications/Game.app",
+            appPath: appPath,
             accessibilityTitle: "Game",
-            accessibilitySignature: ""
+            accessibilitySignature: "",
+            isFullscreen: isFullscreen
         )
     }
 }
