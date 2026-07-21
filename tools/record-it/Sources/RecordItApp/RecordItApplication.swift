@@ -44,6 +44,8 @@ struct RecordItApplication: App {
 struct RecordItView: View {
     @ObservedObject var model: RecordingViewModel
     @ObservedObject private var preferences: RecordingPreferences
+    @State private var showingEncoderSettings = false
+    @State private var previewCamera: CaptureCamera?
 
     init(model: RecordingViewModel) {
         self.model = model
@@ -73,6 +75,12 @@ struct RecordItView: View {
             Button("OK") { model.presentedError = nil }
         } message: {
             Text(model.presentedError ?? "Unknown error")
+        }
+        .sheet(isPresented: $showingEncoderSettings) {
+            EncoderSettingsView(model: model)
+        }
+        .sheet(item: $previewCamera) { camera in
+            CameraPreviewSheet(camera: camera)
         }
     }
 
@@ -129,6 +137,11 @@ struct RecordItView: View {
             GridRow {
                 rowLabel("File name", systemImage: "doc")
                 fileNameEditor
+            }
+
+            GridRow {
+                rowLabel("Encoder", systemImage: "slider.horizontal.3")
+                encoderSettingsControl
             }
 
             if model.mode.capturesScreen {
@@ -197,7 +210,7 @@ struct RecordItView: View {
             .disabled(model.isRecording || model.isBusy)
 
             if let display = model.selectedDisplay {
-                Text("HEVC · \(display.resolutionLabel) · 30 fps")
+                Text("\(model.selectedEncoder?.codec.displayName ?? "Hardware") · \(display.resolutionLabel) · 30 fps")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -234,6 +247,22 @@ struct RecordItView: View {
         }
     }
 
+    private var encoderSettingsControl: some View {
+        HStack(spacing: 10) {
+            Text(model.encoderSummary)
+                .font(.caption)
+                .foregroundStyle(model.selectedEncoder == nil ? Color.orange : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 8)
+
+            Button("Settings…") {
+                showingEncoderSettings = true
+            }
+            .disabled(model.availableEncoders.isEmpty || model.isRecording || model.isBusy)
+        }
+    }
+
     private var outputNamePreview: String? {
         guard let baseName = model.resolvedFileName else { return nil }
         switch model.mode {
@@ -266,19 +295,30 @@ struct RecordItView: View {
 
     private var cameraPicker: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Picker("Camera", selection: $model.selectedCameraID) {
-                ForEach(model.cameras) { camera in
-                    Text("\(camera.name)  ·  \(camera.resolutionLabel)").tag(camera.id)
+            HStack(spacing: 10) {
+                Picker("Camera", selection: $model.selectedCameraID) {
+                    ForEach(model.cameras) { camera in
+                        Text("\(camera.name)  ·  \(camera.resolutionLabel)").tag(camera.id)
+                    }
                 }
+                .labelsHidden()
+                .disabled(model.isRecording || model.isBusy)
+
+                Button("Preview…") {
+                    previewCamera = model.selectedCamera
+                }
+                .disabled(cameraPreviewButtonIsDisabled(
+                    hasSelectedCamera: model.selectedCamera != nil,
+                    isRecording: model.isRecording,
+                    isBusy: model.isBusy
+                ))
             }
-            .labelsHidden()
-            .disabled(model.isRecording || model.isBusy)
 
             if let camera = model.selectedCamera {
                 HStack(spacing: 5) {
                     Image(systemName: camera.recordsNative4K ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                     Text(camera.recordsNative4K
-                         ? "Native 4K · HEVC · 30 fps"
+                         ? "Native 4K · \(model.selectedEncoder?.codec.displayName ?? "hardware") · 30 fps"
                          : "This camera cannot supply native 4K at 30 fps")
                 }
                 .font(.caption)
@@ -351,6 +391,140 @@ struct RecordItView: View {
         Label(title, systemImage: systemImage)
             .font(.subheadline.weight(.medium))
             .frame(width: 104, alignment: .leading)
+    }
+}
+
+private struct EncoderSettingsView: View {
+    @ObservedObject var model: RecordingViewModel
+    @ObservedObject private var preferences: RecordingPreferences
+    @Environment(\.dismiss) private var dismiss
+
+    init(model: RecordingViewModel) {
+        self.model = model
+        preferences = model.preferences
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Encoder Settings")
+                    .font(.title2.bold())
+                Text("Only available H.264 and HEVC hardware encoders are shown.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 16) {
+                GridRow {
+                    settingsLabel("Encoder")
+                    Picker("Encoder", selection: $preferences.selectedEncoderID) {
+                        ForEach(model.availableEncoders) { encoder in
+                            Text(encoder.displayName).tag(encoder.id)
+                        }
+                    }
+                    .labelsHidden()
+                }
+
+                GridRow {
+                    settingsLabel("Rate control")
+                    Picker("Rate control", selection: $preferences.rateControl) {
+                        ForEach(supportedRateControls) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+                rateControlFields
+            }
+
+            Text(preferences.rateControl.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            HStack {
+                Label("Settings are saved automatically", systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 500)
+        .onChange(of: preferences.selectedEncoderID) {
+            preferences.reconcileEncoderSelection(in: model.availableEncoders)
+        }
+        .onChange(of: preferences.bitRateMbps) {
+            if preferences.maximumBitRateMbps < preferences.bitRateMbps {
+                preferences.maximumBitRateMbps = preferences.bitRateMbps
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var rateControlFields: some View {
+        switch preferences.rateControl {
+        case .cbr:
+            GridRow {
+                settingsLabel("Bitrate")
+                integerControl(value: $preferences.bitRateMbps, range: 1...500, step: 5, unit: "Mbps")
+            }
+        case .cqp:
+            GridRow {
+                settingsLabel("QP level")
+                integerControl(value: $preferences.qualityParameter, range: 0...51, step: 1, unit: "lower is better")
+            }
+        case .vbr:
+            GridRow {
+                settingsLabel("Target bitrate")
+                integerControl(value: $preferences.bitRateMbps, range: 1...500, step: 5, unit: "Mbps")
+            }
+            GridRow {
+                settingsLabel("Maximum bitrate")
+                integerControl(
+                    value: $preferences.maximumBitRateMbps,
+                    range: min(500, max(1, preferences.bitRateMbps))...500,
+                    step: 5,
+                    unit: "Mbps"
+                )
+            }
+        }
+    }
+
+    private var supportedRateControls: [RateControlMode] {
+        guard let encoder = model.selectedEncoder else { return [] }
+        return RateControlMode.allCases.filter { encoder.supportedRateControls.contains($0) }
+    }
+
+    private func settingsLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.medium))
+            .frame(width: 118, alignment: .leading)
+    }
+
+    private func integerControl(
+        value: Binding<Int>,
+        range: ClosedRange<Int>,
+        step: Int,
+        unit: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            TextField("Value", value: value, format: .number)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 72)
+            Text(unit)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Stepper("", value: value, in: range, step: step)
+                .labelsHidden()
+        }
     }
 }
 

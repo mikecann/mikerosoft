@@ -4,6 +4,15 @@ import XCTest
 
 @MainActor
 final class RecordingViewModelTests: XCTestCase {
+    func testDefaultProjectsRootUsesTheConvexVideosDirectory() {
+        let homeDirectory = URL(fileURLWithPath: "/Users/m5-mike", isDirectory: true)
+
+        XCTAssertEqual(
+            defaultProjectsRoot(homeDirectory: homeDirectory),
+            URL(fileURLWithPath: "/Users/m5-mike/dev/convex/convex-videos", isDirectory: true)
+        )
+    }
+
     func testRecordButtonIsDisabledWhileARecordingOperationIsBusy() {
         XCTAssertTrue(
             recordButtonIsDisabled(

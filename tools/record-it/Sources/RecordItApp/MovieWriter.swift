@@ -1,17 +1,49 @@
 import AVFoundation
+import VideoToolbox
 
-func videoOutputSettings(width: Int, height: Int) -> [String: Any] {
-    let pixels = width * height
-    let bitRate = pixels >= 3840 * 2160 ? 60_000_000 : 30_000_000
+func videoOutputSettings(
+    width: Int,
+    height: Int,
+    configuration: EncoderConfiguration
+) -> [String: Any] {
+    let bitRate = max(1, configuration.bitRateMbps) * 1_000_000
+    let maximumBitRate = max(configuration.bitRateMbps, configuration.maximumBitRateMbps) * 1_000_000
+    var compressionProperties: [String: Any] = [
+        AVVideoExpectedSourceFrameRateKey: 30,
+        AVVideoMaxKeyFrameIntervalKey: 60,
+        kVTCompressionPropertyKey_RealTime as String: true
+    ]
+
+    switch configuration.rateControl {
+    case .cbr:
+        compressionProperties[kVTCompressionPropertyKey_ConstantBitRate as String] = bitRate
+    case .cqp:
+        // AVAssetWriter does not expose per-frame QP options, so pin both hardware
+        // encoder bounds to the same value to produce constant-QP output.
+        let qualityParameter = min(51, max(0, configuration.qualityParameter))
+        compressionProperties[kVTCompressionPropertyKey_MinAllowedFrameQP as String] = qualityParameter
+        compressionProperties[kVTCompressionPropertyKey_MaxAllowedFrameQP as String] = qualityParameter
+    case .vbr:
+        if #available(macOS 26.0, *) {
+            compressionProperties[kVTCompressionPropertyKey_VariableBitRate as String] = bitRate
+            compressionProperties[kVTCompressionPropertyKey_VBVMaxBitRate as String] = maximumBitRate
+        } else {
+            compressionProperties[kVTCompressionPropertyKey_AverageBitRate as String] = bitRate
+            compressionProperties[kVTCompressionPropertyKey_DataRateLimits as String] = [
+                maximumBitRate / 8,
+                1
+            ]
+        }
+    }
+
     return [
-        AVVideoCodecKey: AVVideoCodecType.hevc,
+        AVVideoCodecKey: configuration.encoder.codec.avVideoCodecType,
         AVVideoWidthKey: width,
         AVVideoHeightKey: height,
-        AVVideoCompressionPropertiesKey: [
-            AVVideoAverageBitRateKey: bitRate,
-            AVVideoExpectedSourceFrameRateKey: 30,
-            AVVideoMaxKeyFrameIntervalKey: 60
-        ]
+        AVVideoEncoderSpecificationKey: [
+            kVTVideoEncoderSpecification_EncoderID as String: configuration.encoder.id
+        ],
+        AVVideoCompressionPropertiesKey: compressionProperties
     ]
 }
 
@@ -42,6 +74,7 @@ final class MovieWriter {
         width: Int,
         height: Int,
         includesAudio: Bool,
+        encoderConfiguration: EncoderConfiguration,
         startGate: RecordingStartGate? = nil
     ) throws {
         self.outputURL = outputURL
@@ -51,11 +84,15 @@ final class MovieWriter {
         writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
         videoInput = AVAssetWriterInput(
             mediaType: .video,
-            outputSettings: videoOutputSettings(width: width, height: height)
+            outputSettings: videoOutputSettings(
+                width: width,
+                height: height,
+                configuration: encoderConfiguration
+            )
         )
         videoInput.expectsMediaDataInRealTime = true
         guard writer.canAdd(videoInput) else {
-            throw RecordItError.message("The HEVC video writer could not be configured.")
+            throw RecordItError.message("The selected hardware video encoder could not be configured.")
         }
         writer.add(videoInput)
 

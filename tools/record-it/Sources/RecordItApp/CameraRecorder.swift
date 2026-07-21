@@ -6,6 +6,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let camera: CaptureCamera
     private let microphone: CaptureAudioDevice?
     private let outputURL: URL
+    private let encoderConfiguration: EncoderConfiguration
     private let startGate: RecordingStartGate?
     private let captureSession = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -18,11 +19,13 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         camera: CaptureCamera,
         microphone: CaptureAudioDevice?,
         outputURL: URL,
+        encoderConfiguration: EncoderConfiguration,
         startGate: RecordingStartGate? = nil
     ) {
         self.camera = camera
         self.microphone = microphone
         self.outputURL = outputURL
+        self.encoderConfiguration = encoderConfiguration
         self.startGate = startGate
     }
 
@@ -135,6 +138,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             width: Int(dimensions.width),
             height: Int(dimensions.height),
             includesAudio: microphoneAttached,
+            encoderConfiguration: encoderConfiguration,
             startGate: startGate
         )
     }

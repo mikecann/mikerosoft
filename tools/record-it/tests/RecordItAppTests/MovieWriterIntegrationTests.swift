@@ -9,11 +9,25 @@ final class MovieWriterIntegrationTests: XCTestCase {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("record-it-\(UUID().uuidString).mov")
         defer { try? FileManager.default.removeItem(at: outputURL) }
+        let encoder = try XCTUnwrap(preferredHardwareVideoEncoder(
+            in: HardwareVideoEncoderCatalog.availableEncoders(),
+            savedID: ""
+        ))
         let writer = try MovieWriter(
             outputURL: outputURL,
             width: 128,
             height: 128,
-            includesAudio: false
+            includesAudio: false,
+            encoderConfiguration: EncoderConfiguration(
+                encoder: encoder,
+                rateControl: preferredRateControl(
+                    savedMode: .vbr,
+                    supportedModes: encoder.supportedRateControls
+                ) ?? .cbr,
+                bitRateMbps: 10,
+                maximumBitRateMbps: 15,
+                qualityParameter: 20
+            )
         )
 
         for frame in [0, 1, 3] {
@@ -46,6 +60,42 @@ final class MovieWriterIntegrationTests: XCTestCase {
             frameCount += 1
         }
         XCTAssertEqual(frameCount, 4, "The missing source frame should be duplicated for constant 30 fps output.")
+    }
+
+    func testWriterAcceptsEveryRateControlAdvertisedByEveryHardwareEncoder() async throws {
+        let encoders = HardwareVideoEncoderCatalog.availableEncoders()
+        XCTAssertFalse(encoders.isEmpty)
+
+        for encoder in encoders {
+            for rateControl in RateControlMode.allCases where encoder.supportedRateControls.contains(rateControl) {
+                let outputURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("record-it-\(rateControl.rawValue)-\(UUID().uuidString).mov")
+                defer { try? FileManager.default.removeItem(at: outputURL) }
+                let writer = try MovieWriter(
+                    outputURL: outputURL,
+                    width: 128,
+                    height: 128,
+                    includesAudio: false,
+                    encoderConfiguration: EncoderConfiguration(
+                        encoder: encoder,
+                        rateControl: rateControl,
+                        bitRateMbps: 10,
+                        maximumBitRateMbps: 15,
+                        qualityParameter: 20
+                    )
+                )
+
+                writer.appendVideo(try videoSampleBuffer(frame: 0, width: 128, height: 128))
+                writer.appendVideo(try videoSampleBuffer(frame: 1, width: 128, height: 128))
+                try await writer.finish()
+
+                XCTAssertGreaterThan(
+                    try FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int ?? 0,
+                    0,
+                    "\(encoder.displayName) with \(rateControl.displayName) should produce a non-empty movie."
+                )
+            }
+        }
     }
 }
 

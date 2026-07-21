@@ -14,17 +14,34 @@ ScreenCaptureKit, and AVFoundation.
 ## What it records
 
 - Screen, camera, or both
-- The selected screen at 30 fps, encoded as HEVC
+- The selected screen at 30 fps, encoded with the selected hardware H.264 or
+  HEVC encoder
 - `HG584T05` by default, with a 3840 × 2160 output
 - An orange warning shows the active framebuffer and output sizes whenever the
   recording would be upscaled, because a 4K-sized file is not necessarily a
   native-detail 4K capture
 - The selected camera's best format at 30 fps, preferring native 3840 × 2160
+- A **Preview…** button beside the camera selector opens a live, uncropped
+  framing view without recording audio or creating a file
 - Selectable screen audio: **System Sound** or **None**. System Sound captures
   playback from music, browsers, videos, and other Mac apps, not a microphone
 - Selectable camera microphone, defaulting to the first input with `Yeti` in its
   name. Choose **None** for a silent camera file
 - Separate `screen.mov` and `camera.mov` files when recording both, preserving each source's full resolution
+
+## Encoder settings
+
+Open **Encoder → Settings…** to choose from the H.264 and HEVC hardware
+encoders currently available through VideoToolbox. The rate-control menu only
+shows modes supported by the selected encoder:
+
+- **CBR** uses a fixed bitrate target
+- **CQP** pins the frame quantization level; lower values give higher quality
+  and larger files
+- **VBR** uses separate target and maximum bitrates
+
+The selected encoder, rate-control mode, bitrates, and CQP level are saved
+automatically and restored on the next launch.
 
 ## File names
 
@@ -41,11 +58,12 @@ and resets the field to a fresh timestamp after every recording.
 
 ## Output folders
 
-The Project menu lists directories under `~/Movies/Projects`, newest first.
+The Project menu lists directories under `~/dev/convex/convex-videos`, newest
+first.
 Choosing a project saves into its `source` folder, creating it when needed:
 
 ```text
-~/Movies/Projects/ai-tips/source/
+~/dev/convex/convex-videos/ai-tips/source/
 ```
 
 Choosing **No Project** saves into:

@@ -7,6 +7,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private let display: CaptureDisplay
     private let audioSource: ScreenAudioSource
     private let outputURL: URL
+    private let encoderConfiguration: EncoderConfiguration
     private let startGate: RecordingStartGate?
     private let outputQueue = DispatchQueue(label: "com.mikerosoft.record-it.screen-output")
     private var stream: SCStream?
@@ -17,11 +18,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         display: CaptureDisplay,
         audioSource: ScreenAudioSource,
         outputURL: URL,
+        encoderConfiguration: EncoderConfiguration,
         startGate: RecordingStartGate? = nil
     ) {
         self.display = display
         self.audioSource = audioSource
         self.outputURL = outputURL
+        self.encoderConfiguration = encoderConfiguration
         self.startGate = startGate
     }
 
@@ -44,6 +47,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             width: display.width,
             height: display.height,
             includesAudio: audioSource.capturesSystemAudio,
+            encoderConfiguration: encoderConfiguration,
             startGate: startGate
         )
         let filter = SCContentFilter(

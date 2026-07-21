@@ -386,13 +386,19 @@ Camera, and Microphone permissions to the signed app bundle.
   UI shows the exact source-to-output scaling and warns that the result may look soft.
 - The first 4K/30-capable camera is selected by default. On this machine that is
   `Razer Kiyo Pro Ultra`.
+- The camera **Preview…** button opens the selected camera in an uncropped 16:9
+  sheet. It captures no audio, writes no file, and stops the camera session
+  before dismissing.
 - The file name field defaults to the timestamp prefix, accepts an override
   without `.mov`, and resets to a fresh timestamp after every recording.
 - Screen audio defaults to ScreenCaptureKit system playback and can be disabled.
   It does not use a microphone.
 - Camera audio is independently selectable and defaults to the first microphone
   whose name contains `Yeti`.
-- Projects come from `~/Movies/Projects`, newest creation date first.
+- The encoder menu lists only available VideoToolbox H.264 and HEVC hardware
+  encoders. CBR, CQP, and VBR controls are capability-filtered and persist in
+  `UserDefaults` between launches.
+- Projects come from `~/dev/convex/convex-videos`, newest creation date first.
 - Project recordings go to `<project>/source`; No Project goes to
   `~/Movies/record-it-output`.
 - Screen and camera outputs are separate files so neither source is scaled into
@@ -404,9 +410,11 @@ Camera, and Microphone permissions to the signed app bundle.
 | Path | What it is |
 |---|---|
 | `tools/record-it/Sources/RecordItApp/RecordItApplication.swift` | SwiftUI app and controls |
+| `tools/record-it/Sources/RecordItApp/CameraPreview.swift` | Live camera framing preview + session lifecycle |
 | `tools/record-it/Sources/RecordItApp/ScreenRecorder.swift` | ScreenCaptureKit pipeline |
 | `tools/record-it/Sources/RecordItApp/CameraRecorder.swift` | AVFoundation camera + microphone pipeline |
-| `tools/record-it/Sources/RecordItApp/MovieWriter.swift` | HEVC/AAC `.mov` writer |
+| `tools/record-it/Sources/RecordItApp/EncoderSettings.swift` | Hardware encoder discovery + rate-control configuration |
+| `tools/record-it/Sources/RecordItApp/MovieWriter.swift` | Hardware H.264/HEVC + AAC `.mov` writer |
 | `tools/record-it/build-app.sh` | Builds, stages, and signs the app bundle |
 | `tools/record-it/restart.sh` | Stops, rebuilds, and launches the debug app |
 

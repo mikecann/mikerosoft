@@ -2,6 +2,10 @@ import AppKit
 import Combine
 import Foundation
 
+func defaultProjectsRoot(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+    homeDirectory.appendingPathComponent("dev/convex/convex-videos", isDirectory: true)
+}
+
 @MainActor
 final class RecordingViewModel: ObservableObject {
     @Published var mode: RecordingMode = .both
@@ -13,6 +17,7 @@ final class RecordingViewModel: ObservableObject {
     @Published var selectedCameraID = ""
     @Published private(set) var microphones: [CaptureAudioDevice] = []
     @Published var selectedMicrophoneID = ""
+    @Published private(set) var availableEncoders: [HardwareVideoEncoder] = []
     @Published var fileName = defaultRecordingBaseName(startedAt: Date())
     @Published var screenAudioSource: ScreenAudioSource = .systemSound
     @Published private(set) var isRecording = false
@@ -33,7 +38,7 @@ final class RecordingViewModel: ObservableObject {
     ) {
         self.preferences = preferences
         projectCatalog = ProjectCatalog(
-            projectsRoot: homeDirectory.appendingPathComponent("Movies/Projects", isDirectory: true),
+            projectsRoot: defaultProjectsRoot(homeDirectory: homeDirectory),
             fallbackOutputRoot: homeDirectory.appendingPathComponent("Movies/record-it-output", isDirectory: true)
         )
     }
@@ -58,8 +63,29 @@ final class RecordingViewModel: ObservableObject {
         normalizedRecordingBaseName(fileName)
     }
 
+    var selectedEncoder: HardwareVideoEncoder? {
+        availableEncoders.first { $0.id == preferences.selectedEncoderID }
+    }
+
+    var encoderConfiguration: EncoderConfiguration? {
+        guard let encoder = selectedEncoder else { return nil }
+        return EncoderConfiguration(
+            encoder: encoder,
+            rateControl: preferences.rateControl,
+            bitRateMbps: preferences.bitRateMbps,
+            maximumBitRateMbps: max(preferences.bitRateMbps, preferences.maximumBitRateMbps),
+            qualityParameter: preferences.qualityParameter
+        )
+    }
+
+    var encoderSummary: String {
+        encoderConfiguration?.summary ?? "No compatible hardware encoder found"
+    }
+
     var canRecord: Bool {
-        guard selectedDestination != nil, resolvedFileName != nil, !isBusy else { return false }
+        guard selectedDestination != nil, resolvedFileName != nil, encoderConfiguration != nil, !isBusy else {
+            return false
+        }
         if mode.capturesScreen && selectedDisplay == nil { return false }
         if mode.capturesCamera && selectedCamera == nil { return false }
         return true
@@ -68,6 +94,9 @@ final class RecordingViewModel: ObservableObject {
     func load() async {
         isBusy = true
         defer { isBusy = false }
+
+        availableEncoders = HardwareVideoEncoderCatalog.availableEncoders()
+        preferences.reconcileEncoderSelection(in: availableEncoders)
 
         do {
             destinations = try projectCatalog.destinations()
@@ -103,7 +132,8 @@ final class RecordingViewModel: ObservableObject {
         guard
             canRecord,
             let destination = selectedDestination,
-            let outputBaseName = resolvedFileName
+            let outputBaseName = resolvedFileName,
+            let encoderConfiguration
         else { return }
         isBusy = true
         statusMessage = "Starting…"
@@ -130,6 +160,7 @@ final class RecordingViewModel: ObservableObject {
                         display: display,
                         audioSource: screenAudioSource,
                         outputURL: outputURL,
+                        encoderConfiguration: encoderConfiguration,
                         startGate: startGate
                     )
                 )
@@ -143,6 +174,7 @@ final class RecordingViewModel: ObservableObject {
                         camera: camera,
                         microphone: selectedMicrophone,
                         outputURL: outputURL,
+                        encoderConfiguration: encoderConfiguration,
                         startGate: startGate
                     )
                 )
