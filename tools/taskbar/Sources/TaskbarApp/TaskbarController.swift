@@ -536,7 +536,7 @@ final class TaskbarController: NSObject {
         }
     }
 
-    private func showStatsPopover(metric: StatsWidgetMetric, screenID _: UInt32, relativeTo rect: NSRect, of view: NSView) {
+    private func showStatsPopover(metric: StatsWidgetMetric, screenID: UInt32, relativeTo rect: NSRect, of view: NSView) {
         if statsPopoverPanel?.isVisible == true, statsPopoverMetric == metric {
             closeStatsPopover()
             return
@@ -572,7 +572,11 @@ final class TaskbarController: NSObject {
         panel.isReleasedWhenClosed = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .transient]
-        panel.contentViewController = StatsPopoverViewController(metric: metric, size: size)
+        panel.contentViewController = StatsPopoverViewController(
+            metric: metric,
+            size: size,
+            cpuCoreColors: settings.values(for: screenID).statsWidget.cpuCoreColors
+        )
         statsPopoverMetric = metric
         statsPopoverPanel = panel
         installStatsPopoverEventMonitors(for: panel)

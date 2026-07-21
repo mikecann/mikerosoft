@@ -381,6 +381,7 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.memoryDisplay, .percent)
         XCTAssertTrue(decoded.showGPU)
         XCTAssertEqual(decoded.cpuDisplay, .perCPU)
+        XCTAssertEqual(decoded.cpuCoreColors, .defaults)
     }
 
     func testStatsWidgetMigratesDisabledLegacyGraphToPercentage() throws {
@@ -416,6 +417,25 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.cpuDisplay, .perCPU)
         XCTAssertTrue(decoded.showMiniGraph)
         XCTAssertEqual(object?["cpuDisplay"] as? String, "perCPU")
+    }
+
+    func testStatsWidgetPersistsCustomCPUCoreColours() throws {
+        var settings = StatsWidgetSettings.defaults
+        settings.cpuCoreColors = StatsCPUCoreColors(
+            superCore: "#112233",
+            performance: "#445566",
+            efficiency: "#778899"
+        )
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(StatsWidgetSettings.self, from: data)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let colours = object?["cpuCoreColors"] as? [String: Any]
+
+        XCTAssertEqual(decoded.cpuCoreColors, settings.cpuCoreColors)
+        XCTAssertEqual(colours?["superCore"] as? String, "#112233")
+        XCTAssertEqual(colours?["performance"] as? String, "#445566")
+        XCTAssertEqual(colours?["efficiency"] as? String, "#778899")
     }
 
     func testDateTimeWidgetEncodingDoesNotWriteLegacyClockKeys() throws {
@@ -1030,6 +1050,19 @@ final class TaskbarSettingsTests: XCTestCase {
             formattedCPUPerformanceLevels(snapshot.cpuPerformanceLevels),
             "2 Performance · 2 Efficiency"
         )
+    }
+
+    func testStatsCPUCoreColourLookupUsesConfiguredTierColours() {
+        let colours = StatsCPUCoreColors(
+            superCore: "#111111",
+            performance: "#222222",
+            efficiency: "#333333"
+        )
+
+        XCTAssertEqual(statsCPUCoreColorHex(for: .superCore, colors: colours), "#111111")
+        XCTAssertEqual(statsCPUCoreColorHex(for: .performance, colors: colours), "#222222")
+        XCTAssertEqual(statsCPUCoreColorHex(for: .efficiency, colors: colours), "#333333")
+        XCTAssertEqual(statsCPUCoreColorHex(for: .standard, colors: colours), "#222222")
     }
 
     func testStatsMiniGraphBarsStartAtLeftEdge() {

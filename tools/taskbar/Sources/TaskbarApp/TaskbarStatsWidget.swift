@@ -1218,6 +1218,7 @@ private func drawCPU(snapshot: StatsSnapshot, settings: StatsWidgetSettings, in 
             statsCPUGraphValues(snapshot: snapshot, display: settings.cpuDisplay) ?? [],
             in: statsMiniGraphRect(in: layout.content, width: graphWidth),
             colorRoles: colorRoles,
+            cpuCoreColors: settings.cpuCoreColors,
             maximumBarCount: settings.cpuDisplay == .perCPU ? .max : 18
         )
     case .percent:
@@ -1415,23 +1416,56 @@ func statsMiniGraphBarLayout(in rect: NSRect, barCount: Int) -> (barWidth: CGFlo
     return (barWidth, gap, rect.minX)
 }
 
-private func statsCPUColor(for role: CPUPerformanceColorRole) -> NSColor {
+func statsCPUCoreColorHex(
+    for role: CPUPerformanceColorRole,
+    colors: StatsCPUCoreColors
+) -> String {
     switch role {
     case .superCore:
-        return .systemOrange
+        return colors.superCore
     case .performance:
-        return .systemBlue
+        return colors.performance
     case .efficiency:
-        return .systemTeal
+        return colors.efficiency
     case .standard:
-        return .systemBlue
+        return colors.performance
     }
+}
+
+func statsColorFromHex(_ value: String) -> NSColor? {
+    let digits = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+    guard digits.count == 6, let rgb = UInt32(digits, radix: 16) else { return nil }
+    return NSColor(
+        srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255,
+        green: CGFloat((rgb >> 8) & 0xFF) / 255,
+        blue: CGFloat(rgb & 0xFF) / 255,
+        alpha: 1
+    )
+}
+
+func statsColorHex(_ color: NSColor) -> String? {
+    guard let color = color.usingColorSpace(.sRGB) else { return nil }
+    let red = Int((min(1, max(0, color.redComponent)) * 255).rounded())
+    let green = Int((min(1, max(0, color.greenComponent)) * 255).rounded())
+    let blue = Int((min(1, max(0, color.blueComponent)) * 255).rounded())
+    return String(format: "#%02X%02X%02X", red, green, blue)
+}
+
+private func statsCPUColor(
+    for role: CPUPerformanceColorRole,
+    colors: StatsCPUCoreColors
+) -> NSColor {
+    statsColorFromHex(statsCPUCoreColorHex(for: role, colors: colors))
+        ?? statsColorFromHex(statsCPUCoreColorHex(for: role, colors: .defaults))
+        ?? .systemBlue
 }
 
 private func drawMiniGraph(
     _ values: [Double],
     in rect: NSRect,
     colorRoles: [CPUPerformanceColorRole] = [],
+    cpuCoreColors: StatsCPUCoreColors = .defaults,
     maximumBarCount: Int = 18
 ) {
     guard !values.isEmpty, rect.width > 2, rect.height > 2 else { return }
@@ -1454,8 +1488,10 @@ private func drawMiniGraph(
             width: layout.barWidth,
             height: height
         )
-        let role = visibleColorRoles.indices.contains(index) ? visibleColorRoles[index] : .standard
-        statsCPUColor(for: role).withAlphaComponent(0.88).setFill()
+        let color = visibleColorRoles.indices.contains(index)
+            ? statsCPUColor(for: visibleColorRoles[index], colors: cpuCoreColors)
+            : NSColor.systemBlue
+        color.withAlphaComponent(0.88).setFill()
         NSBezierPath(roundedRect: barRect, xRadius: 1, yRadius: 1).fill()
         x += layout.barWidth + layout.gap
     }
@@ -1525,24 +1561,32 @@ enum StatsPopoverLayout {
 final class StatsPopoverViewController: NSViewController {
     private let metric: StatsWidgetMetric
     private let size: NSSize
+    private let cpuCoreColors: StatsCPUCoreColors
     private var refreshTimer: Timer?
 
-    init(metric: StatsWidgetMetric, size: NSSize? = nil) {
+    init(
+        metric: StatsWidgetMetric,
+        size: NSSize? = nil,
+        cpuCoreColors: StatsCPUCoreColors = .defaults
+    ) {
         self.metric = metric
         self.size = size ?? StatsPopoverLayout.size(for: metric)
+        self.cpuCoreColors = cpuCoreColors
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) {
         metric = .cpu
         size = StatsPopoverLayout.size(for: .cpu)
+        cpuCoreColors = .defaults
         super.init(coder: coder)
     }
 
     override func loadView() {
         view = StatsPopoverView(
             frame: NSRect(origin: .zero, size: size),
-            metric: metric
+            metric: metric,
+            cpuCoreColors: cpuCoreColors
         )
     }
 
@@ -1562,11 +1606,13 @@ final class StatsPopoverViewController: NSViewController {
 
 private final class StatsPopoverView: NSView {
     private let metric: StatsWidgetMetric
+    private let cpuCoreColors: StatsCPUCoreColors
 
     override var isFlipped: Bool { true }
 
-    init(frame frameRect: NSRect, metric: StatsWidgetMetric) {
+    init(frame frameRect: NSRect, metric: StatsWidgetMetric, cpuCoreColors: StatsCPUCoreColors) {
         self.metric = metric
+        self.cpuCoreColors = cpuCoreColors
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 18
@@ -1575,6 +1621,7 @@ private final class StatsPopoverView: NSView {
 
     required init?(coder: NSCoder) {
         metric = .cpu
+        cpuCoreColors = .defaults
         super.init(coder: coder)
     }
 
@@ -1808,7 +1855,7 @@ private final class StatsPopoverView: NSView {
                     index: levelIndex,
                     totalLevels: levels.count
                 )
-                statsCPUColor(for: role).withAlphaComponent(0.95).setFill()
+                statsCPUColor(for: role, colors: cpuCoreColors).withAlphaComponent(0.95).setFill()
                 NSBezierPath(
                     roundedRect: NSRect(x: itemRect.minX, y: itemRect.minY + 3, width: 7, height: 7),
                     xRadius: 2,
@@ -1833,6 +1880,7 @@ private final class StatsPopoverView: NSView {
                 height: rect.height - 23
             ),
             colorRoles: statsCPUProcessorColorRoles(snapshot: snapshot),
+            cpuCoreColors: cpuCoreColors,
             maximumBarCount: .max
         )
     }

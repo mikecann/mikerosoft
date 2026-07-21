@@ -112,6 +112,40 @@ enum StatsCPUDisplay: String, Codable, CaseIterable, Equatable {
     }
 }
 
+struct StatsCPUCoreColors: Codable, Equatable {
+    var superCore: String
+    var performance: String
+    var efficiency: String
+
+    static var defaults: StatsCPUCoreColors {
+        StatsCPUCoreColors(
+            superCore: "#FF9230",
+            performance: "#0091FF",
+            efficiency: "#00D2E0"
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case superCore
+        case performance
+        case efficiency
+    }
+
+    init(superCore: String, performance: String, efficiency: String) {
+        self.superCore = superCore
+        self.performance = performance
+        self.efficiency = efficiency
+    }
+
+    init(from decoder: Decoder) throws {
+        let defaults = Self.defaults
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        superCore = try container.decodeIfPresent(String.self, forKey: .superCore) ?? defaults.superCore
+        performance = try container.decodeIfPresent(String.self, forKey: .performance) ?? defaults.performance
+        efficiency = try container.decodeIfPresent(String.self, forKey: .efficiency) ?? defaults.efficiency
+    }
+}
+
 struct StatsWidgetSettings: Codable, Equatable {
     var isEnabled: Bool
     var showCPU: Bool
@@ -120,6 +154,7 @@ struct StatsWidgetSettings: Codable, Equatable {
     var showNetwork: Bool
     var cpuDisplay: StatsCPUDisplay
     var memoryDisplay: StatsMemoryDisplay
+    var cpuCoreColors: StatsCPUCoreColors
 
     // Keep the old API and JSON field working so existing settings migrate
     // cleanly. A graph is now either the aggregate history or live per-CPU bars.
@@ -162,6 +197,7 @@ struct StatsWidgetSettings: Codable, Equatable {
         case showMiniGraph
         case cpuDisplay
         case memoryDisplay
+        case cpuCoreColors
     }
 
     init(
@@ -172,7 +208,8 @@ struct StatsWidgetSettings: Codable, Equatable {
         showNetwork: Bool,
         showMiniGraph: Bool,
         memoryDisplay: StatsMemoryDisplay = .percent,
-        cpuDisplay: StatsCPUDisplay? = nil
+        cpuDisplay: StatsCPUDisplay? = nil,
+        cpuCoreColors: StatsCPUCoreColors = .defaults
     ) {
         self.isEnabled = isEnabled
         self.showCPU = showCPU
@@ -181,6 +218,7 @@ struct StatsWidgetSettings: Codable, Equatable {
         self.showNetwork = showNetwork
         self.memoryDisplay = memoryDisplay
         self.cpuDisplay = cpuDisplay ?? (showMiniGraph ? .perCPU : .percentage)
+        self.cpuCoreColors = cpuCoreColors
     }
 
     init(from decoder: Decoder) throws {
@@ -195,6 +233,8 @@ struct StatsWidgetSettings: Codable, Equatable {
         cpuDisplay = try container.decodeIfPresent(StatsCPUDisplay.self, forKey: .cpuDisplay)
             ?? (legacyShowMiniGraph ? .perCPU : .percentage)
         memoryDisplay = try container.decodeIfPresent(StatsMemoryDisplay.self, forKey: .memoryDisplay) ?? defaults.memoryDisplay
+        cpuCoreColors = try container.decodeIfPresent(StatsCPUCoreColors.self, forKey: .cpuCoreColors)
+            ?? defaults.cpuCoreColors
     }
 
     func encode(to encoder: Encoder) throws {
@@ -207,6 +247,7 @@ struct StatsWidgetSettings: Codable, Equatable {
         try container.encode(showMiniGraph, forKey: .showMiniGraph)
         try container.encode(cpuDisplay, forKey: .cpuDisplay)
         try container.encode(memoryDisplay, forKey: .memoryDisplay)
+        try container.encode(cpuCoreColors, forKey: .cpuCoreColors)
     }
 }
 

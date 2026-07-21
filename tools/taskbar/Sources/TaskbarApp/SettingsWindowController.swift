@@ -168,6 +168,36 @@ private final class ValueSlider: NSSlider {
     }
 }
 
+private enum StatsCPUCoreColorKind: Int, CaseIterable {
+    case superCore
+    case performance
+    case efficiency
+
+    var title: String {
+        switch self {
+        case .superCore: return "Super"
+        case .performance: return "Performance"
+        case .efficiency: return "Efficiency"
+        }
+    }
+
+    var identifier: String {
+        switch self {
+        case .superCore: return "stats-super-core-color"
+        case .performance: return "stats-performance-core-color"
+        case .efficiency: return "stats-efficiency-core-color"
+        }
+    }
+
+    var colorRole: CPUPerformanceColorRole {
+        switch self {
+        case .superCore: return .superCore
+        case .performance: return .performance
+        case .efficiency: return .efficiency
+        }
+    }
+}
+
 protocol TaskbarSettingsWindow: AnyObject {
     var onClose: (() -> Void)? { get set }
     func updateScreens(_ screens: [ScreenInfo])
@@ -670,7 +700,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
                 memoryAction: #selector(setGeneralStatsMemory(_:)),
                 networkAction: #selector(setGeneralStatsNetwork(_:)),
                 cpuDisplayAction: #selector(setGeneralStatsCPUDisplay(_:)),
-                memoryDisplayAction: #selector(setGeneralStatsMemoryDisplay(_:))
+                memoryDisplayAction: #selector(setGeneralStatsMemoryDisplay(_:)),
+                cpuCoreColorAction: #selector(setGeneralStatsCPUCoreColor(_:))
             )
         ))
     }
@@ -805,7 +836,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         memoryAction: Selector,
         networkAction: Selector,
         cpuDisplayAction: Selector,
-        memoryDisplayAction: Selector
+        memoryDisplayAction: Selector,
+        cpuCoreColorAction: Selector
     ) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -822,6 +854,15 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         cpuRow.addArrangedSubview(statsCPUDisplayPopup(display: value.cpuDisplay, enabled: enabled, action: cpuDisplayAction))
         stack.addArrangedSubview(statsOptionGroup(label: "CPU", control: cpuRow))
 
+        stack.addArrangedSubview(statsOptionGroup(
+            label: "CPU core colours",
+            control: statsCPUCoreColorControls(
+                colors: value.cpuCoreColors,
+                enabled: enabled,
+                action: cpuCoreColorAction
+            )
+        ))
+
         let gpuRow = horizontalRow()
         gpuRow.addArrangedSubview(titledCheckbox("GPU", state: value.showGPU, enabled: enabled, action: gpuAction))
         stack.addArrangedSubview(statsOptionGroup(label: "GPU", control: gpuRow))
@@ -836,6 +877,44 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         stack.addArrangedSubview(statsOptionGroup(label: "Network", control: networkRow))
 
         return stack
+    }
+
+    private func statsCPUCoreColorControls(
+        colors: StatsCPUCoreColors,
+        enabled: Bool,
+        action: Selector
+    ) -> NSView {
+        let row = horizontalRow()
+        row.spacing = 14
+
+        for kind in StatsCPUCoreColorKind.allCases {
+            let control = NSStackView()
+            control.orientation = .vertical
+            control.alignment = .leading
+            control.spacing = 3
+
+            let label = NSTextField(labelWithString: kind.title)
+            label.font = .systemFont(ofSize: 10)
+            label.textColor = .secondaryLabelColor
+
+            let colorWell = NSColorWell(frame: NSRect(x: 0, y: 0, width: 54, height: 24))
+            colorWell.identifier = NSUserInterfaceItemIdentifier(kind.identifier)
+            colorWell.tag = kind.rawValue
+            colorWell.color = statsColorFromHex(
+                statsCPUCoreColorHex(for: kind.colorRole, colors: colors)
+            ) ?? .systemBlue
+            colorWell.target = self
+            colorWell.action = action
+            colorWell.isEnabled = enabled
+            colorWell.setAccessibilityLabel("\(kind.title) core colour")
+            colorWell.widthAnchor.constraint(equalToConstant: 54).isActive = true
+            colorWell.heightAnchor.constraint(equalToConstant: 24).isActive = true
+
+            control.addArrangedSubview(label)
+            control.addArrangedSubview(colorWell)
+            row.addArrangedSubview(control)
+        }
+        return row
     }
 
     private func statsOptionGroup(label: String, control: NSView) -> NSView {
@@ -1070,7 +1149,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             memoryAction: #selector(setMonitorStatsMemory(_:)),
             networkAction: #selector(setMonitorStatsNetwork(_:)),
             cpuDisplayAction: #selector(setMonitorStatsCPUDisplay(_:)),
-            memoryDisplayAction: #selector(setMonitorStatsMemoryDisplay(_:))
+            memoryDisplayAction: #selector(setMonitorStatsMemoryDisplay(_:)),
+            cpuCoreColorAction: #selector(setMonitorStatsCPUCoreColor(_:))
         ))
         return settingRow(
             icon: "chart.bar",
@@ -1351,6 +1431,32 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         return StatsCPUDisplay.allCases[index]
     }
 
+    private func selectedStatsCPUCoreColor(
+        from colorWell: NSColorWell
+    ) -> (kind: StatsCPUCoreColorKind, hex: String)? {
+        guard let kind = StatsCPUCoreColorKind(rawValue: colorWell.tag),
+              let hex = statsColorHex(colorWell.color)
+        else {
+            return nil
+        }
+        return (kind, hex)
+    }
+
+    private func setStatsCPUCoreColor(
+        _ hex: String,
+        kind: StatsCPUCoreColorKind,
+        colors: inout StatsCPUCoreColors
+    ) {
+        switch kind {
+        case .superCore:
+            colors.superCore = hex
+        case .performance:
+            colors.performance = hex
+        case .efficiency:
+            colors.efficiency = hex
+        }
+    }
+
     private func refreshSliderLabel(_ sender: NSSlider) {
         (sender as? ValueSlider)?.refreshValueLabel()
     }
@@ -1449,6 +1555,17 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
     @objc private func setGeneralStatsMemoryDisplay(_ sender: NSPopUpButton) {
         guard let display = selectedStatsMemoryDisplay(from: sender) else { return }
         updateGeneral { $0.statsWidget.memoryDisplay = display }
+    }
+
+    @objc private func setGeneralStatsCPUCoreColor(_ sender: NSColorWell) {
+        guard let selection = selectedStatsCPUCoreColor(from: sender) else { return }
+        updateGeneral {
+            setStatsCPUCoreColor(
+                selection.hex,
+                kind: selection.kind,
+                colors: &$0.statsWidget.cpuCoreColors
+            )
+        }
     }
 
     @objc private func setGeneralHeight(_ sender: NSSlider) {
@@ -1674,6 +1791,17 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
     @objc private func setMonitorStatsMemoryDisplay(_ sender: NSPopUpButton) {
         guard let display = selectedStatsMemoryDisplay(from: sender) else { return }
         updateMonitorStatsWidget { $0.memoryDisplay = display }
+    }
+
+    @objc private func setMonitorStatsCPUCoreColor(_ sender: NSColorWell) {
+        guard let selection = selectedStatsCPUCoreColor(from: sender) else { return }
+        updateMonitorStatsWidget {
+            setStatsCPUCoreColor(
+                selection.hex,
+                kind: selection.kind,
+                colors: &$0.cpuCoreColors
+            )
+        }
     }
 
     @objc private func setMonitorHeight(_ sender: NSSlider) {

@@ -16,6 +16,14 @@ private func button(actionNamed actionName: String, in view: NSView) -> NSButton
     return view.subviews.lazy.compactMap { button(actionNamed: actionName, in: $0) }.first
 }
 
+private func colorWell(identifier: String, in view: NSView) -> NSColorWell? {
+    if let colorWell = view as? NSColorWell,
+       colorWell.identifier?.rawValue == identifier {
+        return colorWell
+    }
+    return view.subviews.lazy.compactMap { colorWell(identifier: identifier, in: $0) }.first
+}
+
 final class SettingsWindowControllerTests: XCTestCase {
     func testUpdateScreensKeepsMonitorWidgetSelectedWhenScreenGeometryChanges() throws {
         let original = ScreenInfo(
@@ -119,6 +127,25 @@ final class SettingsWindowControllerTests: XCTestCase {
 
         XCTAssertFalse(settings.preferences.general.statsWidget.isEnabled)
         XCTAssertTrue(button(actionNamed: "setGeneralStatsEnabled:", in: contentView) === checkbox)
+    }
+
+    func testStatsSettingsColourWellUpdatesThePerformanceCoreColour() throws {
+        let settings = TaskbarSettings(store: RecordingSettingsStore())
+        let controller = SettingsWindowController(settings: settings, screens: [])
+        controller.selectWidget(.stats)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let performance = try XCTUnwrap(colorWell(identifier: "stats-performance-core-color", in: contentView))
+        performance.color = NSColor(srgbRed: 0.2, green: 0.4, blue: 0.6, alpha: 1)
+
+        XCTAssertTrue(
+            NSApplication.shared.sendAction(
+                try XCTUnwrap(performance.action),
+                to: performance.target,
+                from: performance
+            )
+        )
+
+        XCTAssertEqual(settings.preferences.general.statsWidget.cpuCoreColors.performance, "#336699")
     }
 
     func testClosingWindowStopsExternalSettingsRerenders() throws {
