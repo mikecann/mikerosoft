@@ -152,7 +152,7 @@ enum StatsWidgetMetrics {
     // Keep the old compact minimum so crowded taskbars can still fit the widget.
     static let preferredMemoryWidth: CGFloat = 48
     static let minimumNetworkWidth: CGFloat = 64
-    static let preferredNetworkWidth: CGFloat = 82
+    static let preferredNetworkWidth: CGFloat = 72
     static let moduleSpacing: CGFloat = 10
     static let sideLabelWidth: CGFloat = 10
     static let sideLabelGap: CGFloat = 2

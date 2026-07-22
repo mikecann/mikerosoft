@@ -50,7 +50,7 @@ final class TaskbarBatteryWidgetTests: XCTestCase {
         ]))
     }
 
-    func testBatteryWidgetTextAndSymbolReflectExactLevelAndChargingState() {
+    func testBatteryWidgetTextReflectsTheExactLevel() {
         let low = BatterySnapshot(
             percentage: 12,
             isCharging: false,
@@ -67,9 +67,24 @@ final class TaskbarBatteryWidgetTests: XCTestCase {
         )
 
         XCTAssertEqual(batteryWidgetText(snapshot: low), "12%")
-        XCTAssertEqual(batteryWidgetSymbolName(snapshot: low), "battery.0")
         XCTAssertEqual(batteryWidgetText(snapshot: charging), "76%")
-        XCTAssertEqual(batteryWidgetSymbolName(snapshot: charging), "battery.100.bolt")
+    }
+
+    func testBatteryIconKeepsAWideAspectAndFillsToTheExactPercentage() {
+        let bounds = NSRect(x: 0, y: 0, width: 24, height: 14)
+        let empty = batteryIconGeometry(in: bounds, percentage: 0)
+        let seventySix = batteryIconGeometry(in: bounds, percentage: 76)
+        let full = batteryIconGeometry(in: bounds, percentage: 100)
+
+        XCTAssertGreaterThan(seventySix.bodyRect.width / seventySix.bodyRect.height, 1.5)
+        XCTAssertGreaterThan(seventySix.terminalRect.minX, seventySix.bodyRect.maxX)
+        XCTAssertEqual(empty.fillRect.width, 0, accuracy: 0.001)
+        XCTAssertEqual(
+            seventySix.fillRect.width,
+            seventySix.interiorRect.width * 0.76,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(full.fillRect.width, full.interiorRect.width, accuracy: 0.001)
     }
 
     func testBatteryWidgetIsInstalledBeforeDateAndTimeAndEnabledByDefault() {

@@ -121,22 +121,68 @@ final class TaskbarBatteryMonitor {
 }
 
 enum BatteryWidgetMetrics {
-    static let horizontalPadding: CGFloat = 6
-    static let iconTextGap: CGFloat = 4
+    static let horizontalPadding: CGFloat = 1
+    static let iconTextGap: CGFloat = 3
 
     static func fontSize(forHeight height: CGFloat) -> CGFloat {
         min(13, max(10, height - 9))
     }
 
-    static func iconSize(forHeight height: CGFloat) -> CGFloat {
-        min(18, max(13, height - 8))
+    static func iconHeight(forHeight height: CGFloat) -> CGFloat {
+        min(13, max(9, height - 10))
+    }
+
+    static func iconWidth(forHeight height: CGFloat) -> CGFloat {
+        iconHeight(forHeight: height) * 1.85
     }
 
     static func width(forHeight height: CGFloat) -> CGFloat {
         let font = NSFont.menuBarFont(ofSize: fontSize(forHeight: height))
         let textWidth = ceil(("100%" as NSString).size(withAttributes: [.font: font]).width)
-        return horizontalPadding + iconSize(forHeight: height) + iconTextGap + textWidth + horizontalPadding
+        return horizontalPadding + iconWidth(forHeight: height) + iconTextGap + textWidth + horizontalPadding
     }
+}
+
+struct BatteryIconGeometry: Equatable {
+    let bodyRect: NSRect
+    let terminalRect: NSRect
+    let interiorRect: NSRect
+    let fillRect: NSRect
+}
+
+func batteryIconGeometry(in bounds: NSRect, percentage: Int) -> BatteryIconGeometry {
+    let terminalWidth = max(1.5, bounds.height * 0.14)
+    let terminalGap = max(0.75, bounds.height * 0.07)
+    let bodyWidth = max(0, bounds.width - terminalWidth - terminalGap)
+    let bodyHeight = min(bounds.height, bodyWidth / 1.7)
+    let bodyRect = NSRect(
+        x: bounds.minX,
+        y: bounds.midY - bodyHeight / 2,
+        width: bodyWidth,
+        height: bodyHeight
+    )
+    let terminalHeight = bodyHeight * 0.42
+    let terminalRect = NSRect(
+        x: bodyRect.maxX + terminalGap,
+        y: bodyRect.midY - terminalHeight / 2,
+        width: terminalWidth,
+        height: terminalHeight
+    )
+    let interiorInset = max(1.75, bodyHeight * 0.18)
+    let interiorRect = bodyRect.insetBy(dx: interiorInset, dy: interiorInset)
+    let level = CGFloat(min(100, max(0, percentage))) / 100
+    let fillRect = NSRect(
+        x: interiorRect.minX,
+        y: interiorRect.minY,
+        width: interiorRect.width * level,
+        height: interiorRect.height
+    )
+    return BatteryIconGeometry(
+        bodyRect: bodyRect,
+        terminalRect: terminalRect,
+        interiorRect: interiorRect,
+        fillRect: fillRect
+    )
 }
 
 struct BatteryWidgetPlugin: TaskbarWidgetPlugin {
@@ -163,18 +209,15 @@ struct BatteryWidgetPlugin: TaskbarWidgetPlugin {
         let snapshot = TaskbarBatteryMonitor.shared.snapshot(now: date)
         let text = snapshot.map(batteryWidgetText) ?? "--%"
         let color = batteryWidgetColor(snapshot: snapshot)
-        let iconSize = min(BatteryWidgetMetrics.iconSize(forHeight: rect.height), rect.height)
+        let iconHeight = min(BatteryWidgetMetrics.iconHeight(forHeight: rect.height), rect.height)
+        let iconWidth = BatteryWidgetMetrics.iconWidth(forHeight: rect.height)
         let iconRect = NSRect(
             x: rect.minX + BatteryWidgetMetrics.horizontalPadding,
-            y: rect.midY - iconSize / 2,
-            width: iconSize,
-            height: iconSize
+            y: rect.midY - iconHeight / 2,
+            width: iconWidth,
+            height: iconHeight
         )
-        let symbolName = snapshot.map(batteryWidgetSymbolName) ?? "battery.0"
-        if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Battery")?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [color])) {
-            symbol.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        }
+        drawBatteryIcon(snapshot: snapshot, color: color, in: iconRect)
 
         let font = NSFont.menuBarFont(ofSize: BatteryWidgetMetrics.fontSize(forHeight: rect.height))
         let paragraph = NSMutableParagraphStyle()
@@ -199,22 +242,61 @@ func batteryWidgetText(snapshot: BatterySnapshot) -> String {
     "\(snapshot.percentage)%"
 }
 
-func batteryWidgetSymbolName(snapshot: BatterySnapshot) -> String {
-    if snapshot.isCharging {
-        return "battery.100.bolt"
+private func drawBatteryIcon(snapshot: BatterySnapshot?, color: NSColor, in rect: NSRect) {
+    let geometry = batteryIconGeometry(in: rect, percentage: snapshot?.percentage ?? 0)
+    let lineWidth: CGFloat = 1.25
+
+    let bodyPath = NSBezierPath(
+        roundedRect: geometry.bodyRect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
+        xRadius: geometry.bodyRect.height * 0.22,
+        yRadius: geometry.bodyRect.height * 0.22
+    )
+    bodyPath.lineWidth = lineWidth
+    color.setStroke()
+    bodyPath.stroke()
+
+    let terminalPath = NSBezierPath(
+        roundedRect: geometry.terminalRect,
+        xRadius: geometry.terminalRect.width * 0.35,
+        yRadius: geometry.terminalRect.width * 0.35
+    )
+    color.setFill()
+    terminalPath.fill()
+
+    if geometry.fillRect.width > 0 {
+        let radius = min(geometry.interiorRect.height * 0.24, geometry.fillRect.width / 2)
+        let fillPath = NSBezierPath(roundedRect: geometry.fillRect, xRadius: radius, yRadius: radius)
+        color.setFill()
+        fillPath.fill()
     }
-    switch snapshot.percentage {
-    case 88...:
-        return "battery.100"
-    case 63...:
-        return "battery.75"
-    case 38...:
-        return "battery.50"
-    case 13...:
-        return "battery.25"
-    default:
-        return "battery.0"
+
+    if snapshot?.isCharging == true {
+        drawBatteryChargingBolt(in: geometry.bodyRect)
     }
+}
+
+private func drawBatteryChargingBolt(in bodyRect: NSRect) {
+    let width = bodyRect.width * 0.28
+    let height = bodyRect.height * 0.72
+    let rect = NSRect(
+        x: bodyRect.midX - width / 2,
+        y: bodyRect.midY - height / 2,
+        width: width,
+        height: height
+    )
+    let path = NSBezierPath()
+    path.move(to: NSPoint(x: rect.midX + rect.width * 0.12, y: rect.maxY))
+    path.line(to: NSPoint(x: rect.minX, y: rect.midY - rect.height * 0.02))
+    path.line(to: NSPoint(x: rect.midX - rect.width * 0.02, y: rect.midY - rect.height * 0.02))
+    path.line(to: NSPoint(x: rect.midX - rect.width * 0.12, y: rect.minY))
+    path.line(to: NSPoint(x: rect.maxX, y: rect.midY + rect.height * 0.08))
+    path.line(to: NSPoint(x: rect.midX + rect.width * 0.02, y: rect.midY + rect.height * 0.08))
+    path.close()
+    path.lineWidth = 0.65
+    NSColor(calibratedWhite: 1, alpha: 0.65).setStroke()
+    NSColor(calibratedWhite: 0.08, alpha: 0.92).setFill()
+    path.fill()
+    path.stroke()
 }
 
 func batteryWidgetColor(snapshot: BatterySnapshot?) -> NSColor {

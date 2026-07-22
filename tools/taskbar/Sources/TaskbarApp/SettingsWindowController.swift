@@ -509,6 +509,12 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             control: itemSpacingControl(value: values.itemSpacing, enabled: true, action: #selector(setGeneralItemSpacing(_:)))
         ))
         stack.addArrangedSubview(settingRow(
+            icon: "square.split.2x1",
+            title: "Widget spacing",
+            description: "Set the horizontal gap between Stats, Battery, and Date & Time.",
+            control: widgetSpacingControl(value: values.widgetSpacing, enabled: true, action: #selector(setGeneralWidgetSpacing(_:)))
+        ))
+        stack.addArrangedSubview(settingRow(
             icon: "circle.lefthalf.filled",
             title: "Background opacity",
             description: "Control how much desktop shows through the bar.",
@@ -593,6 +599,14 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             isOverridden: override.itemSpacing != nil,
             control: itemSpacingControl(value: resolved.itemSpacing, enabled: override.itemSpacing != nil, action: #selector(setMonitorItemSpacing(_:))),
             overrideAction: #selector(toggleMonitorItemSpacingOverride(_:))
+        ))
+        stack.addArrangedSubview(overrideSliderRow(
+            icon: "square.split.2x1",
+            title: "Widget spacing",
+            description: "Set the gap between widgets on this bar.",
+            isOverridden: override.widgetSpacing != nil,
+            control: widgetSpacingControl(value: resolved.widgetSpacing, enabled: override.widgetSpacing != nil, action: #selector(setMonitorWidgetSpacing(_:))),
+            overrideAction: #selector(toggleMonitorWidgetSpacingOverride(_:))
         ))
         stack.addArrangedSubview(overrideSliderRow(
             icon: "circle.lefthalf.filled",
@@ -1057,6 +1071,17 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             value: value,
             minValue: TaskbarSettingValues.minimumItemSpacing,
             maxValue: TaskbarSettingValues.maximumItemSpacing,
+            enabled: enabled,
+            action: action,
+            formatter: { "\(Int(round($0))) px" }
+        )
+    }
+
+    private func widgetSpacingControl(value: Double, enabled: Bool, action: Selector) -> NSView {
+        sliderControl(
+            value: value,
+            minValue: TaskbarSettingValues.minimumWidgetSpacing,
+            maxValue: TaskbarSettingValues.maximumWidgetSpacing,
             enabled: enabled,
             action: action,
             formatter: { "\(Int(round($0))) px" }
@@ -1654,6 +1679,11 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         updateGeneral { $0.itemSpacing = sender.doubleValue }
     }
 
+    @objc private func setGeneralWidgetSpacing(_ sender: NSSlider) {
+        refreshSliderLabel(sender)
+        updateGeneral { $0.widgetSpacing = sender.doubleValue }
+    }
+
     @objc private func setGeneralBackgroundOpacity(_ sender: NSSlider) {
         refreshSliderLabel(sender)
         updateGeneral { $0.backgroundOpacity = sender.doubleValue }
@@ -1737,6 +1767,13 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).itemSpacing
         updateOverrides(for: id) { $0.itemSpacing = sender.state == .on ? value : nil }
+        renderDetail()
+    }
+
+    @objc private func toggleMonitorWidgetSpacingOverride(_ sender: NSButton) {
+        guard let id = selectedMonitorID else { return }
+        let value = settings.values(for: id).widgetSpacing
+        updateOverrides(for: id) { $0.widgetSpacing = sender.state == .on ? value : nil }
         renderDetail()
     }
 
@@ -1913,6 +1950,12 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         guard let id = selectedMonitorID else { return }
         refreshSliderLabel(sender)
         updateOverrides(for: id) { $0.itemSpacing = sender.doubleValue }
+    }
+
+    @objc private func setMonitorWidgetSpacing(_ sender: NSSlider) {
+        guard let id = selectedMonitorID else { return }
+        refreshSliderLabel(sender)
+        updateOverrides(for: id) { $0.widgetSpacing = sender.doubleValue }
     }
 
     @objc private func setMonitorBackgroundOpacity(_ sender: NSSlider) {

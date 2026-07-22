@@ -37,8 +37,9 @@ enum DateTimeWidgetMetrics {
     }
 
     static let defaultFontSize: CGFloat = 13
-    // Preserve the breathing room that the old fixed metrics left around text.
-    static let horizontalPadding: CGFloat = 12
+    // Widget spacing is controlled by the taskbar setting, so the measured
+    // clock width should not add another invisible gap at its leading edge.
+    static let horizontalPadding: CGFloat = 0
     private static let widthCache = NSCache<NSString, CachedWidths>()
     private static let referenceDateCache = NSCache<NSString, CachedReferenceDates>()
     private static let referenceTimeZone = TimeZone(secondsFromGMT: 0) ?? .current

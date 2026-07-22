@@ -261,7 +261,7 @@ func taskbarLayout(
 
     let leftPadding: CGFloat = 6
     let widgets = activeTaskbarWidgets(for: settings)
-    let widgetSpacing = taskbarWidgetSpacing(itemSpacing: CGFloat(settings.itemSpacing))
+    let widgetSpacing = taskbarWidgetSpacing(widgetSpacing: CGFloat(settings.widgetSpacing))
     let trailingWidth: CGFloat
     if widgets.isEmpty {
         trailingWidth = 8
@@ -354,8 +354,8 @@ func taskbarInteractionRect(for visualRect: NSRect, in bounds: NSRect) -> NSRect
     )
 }
 
-func taskbarWidgetSpacing(itemSpacing: CGFloat) -> CGFloat {
-    min(max(0, itemSpacing), 2)
+func taskbarWidgetSpacing(widgetSpacing: CGFloat) -> CGFloat {
+    max(0, widgetSpacing)
 }
 
 enum TaskbarMouseUpAction: Equatable {

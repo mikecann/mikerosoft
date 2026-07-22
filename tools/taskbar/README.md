@@ -71,6 +71,7 @@ Useful settings:
 - Taskbar size
 - Minimum and maximum item width
 - Horizontal spacing between items
+- Independent horizontal spacing between widgets
 - Background opacity
 - Date & Time widget display
 - Battery widget with the current charge level and charging state
@@ -98,7 +99,8 @@ Date & Time uses menu-bar-style text and can show or hide the date, day of week,
 seconds, and 24-hour time independently per monitor.
 
 Battery reads the Mac's internal battery through the native IOKit power-source
-API. It shows the exact percentage, a level or charging icon, and a low-battery
+API. Its wide battery outline fills continuously to the exact percentage and
+keeps a charging bolt without replacing the level. It also uses a low-battery
 warning colour. Its right-click menu includes the charging state and remaining
 time when macOS reports one.
 

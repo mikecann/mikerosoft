@@ -300,6 +300,9 @@ struct TaskbarSettingValues: Codable, Equatable {
     static let defaultItemSpacing: Double = 3
     static let minimumItemSpacing: Double = 0
     static let maximumItemSpacing: Double = 24
+    static let defaultWidgetSpacing: Double = 0
+    static let minimumWidgetSpacing: Double = 0
+    static let maximumWidgetSpacing: Double = 24
     static let defaultBackgroundOpacity: Double = 0.72
     static let minimumBackgroundOpacity: Double = 0.15
     static let maximumBackgroundOpacity: Double = 1
@@ -315,6 +318,7 @@ struct TaskbarSettingValues: Codable, Equatable {
     var minimumItemWidth: Double
     var maximumItemWidth: Double
     var itemSpacing: Double
+    var widgetSpacing: Double
     var backgroundOpacity: Double
     var avoidOverlappingWindows: Bool
     var showMinimizedWindows: Bool
@@ -339,6 +343,7 @@ struct TaskbarSettingValues: Codable, Equatable {
             minimumItemWidth: defaultMinimumItemWidth,
             maximumItemWidth: defaultMaximumItemWidth,
             itemSpacing: defaultItemSpacing,
+            widgetSpacing: defaultWidgetSpacing,
             backgroundOpacity: defaultBackgroundOpacity,
             avoidOverlappingWindows: true,
             showMinimizedWindows: true,
@@ -360,6 +365,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         case minimumItemWidth
         case maximumItemWidth
         case itemSpacing
+        case widgetSpacing
         case backgroundOpacity
         case avoidOverlappingWindows
         case showMinimizedWindows
@@ -379,6 +385,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         minimumItemWidth: Double,
         maximumItemWidth: Double,
         itemSpacing: Double,
+        widgetSpacing: Double = defaultWidgetSpacing,
         backgroundOpacity: Double,
         avoidOverlappingWindows: Bool,
         showMinimizedWindows: Bool = true,
@@ -395,6 +402,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         self.minimumItemWidth = minimumItemWidth
         self.maximumItemWidth = maximumItemWidth
         self.itemSpacing = itemSpacing
+        self.widgetSpacing = widgetSpacing
         self.backgroundOpacity = backgroundOpacity
         self.avoidOverlappingWindows = avoidOverlappingWindows
         self.showMinimizedWindows = showMinimizedWindows
@@ -421,6 +429,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         minimumItemWidth = try container.decodeIfPresent(Double.self, forKey: .minimumItemWidth) ?? Self.defaultMinimumItemWidth
         maximumItemWidth = try container.decodeIfPresent(Double.self, forKey: .maximumItemWidth) ?? Self.defaultMaximumItemWidth
         itemSpacing = try container.decodeIfPresent(Double.self, forKey: .itemSpacing) ?? Self.defaultItemSpacing
+        widgetSpacing = try container.decodeIfPresent(Double.self, forKey: .widgetSpacing) ?? Self.defaultWidgetSpacing
         backgroundOpacity = try container.decodeIfPresent(Double.self, forKey: .backgroundOpacity) ?? Self.defaultBackgroundOpacity
         avoidOverlappingWindows = try container.decodeIfPresent(Bool.self, forKey: .avoidOverlappingWindows) ?? true
         showMinimizedWindows = try container.decodeIfPresent(Bool.self, forKey: .showMinimizedWindows) ?? true
@@ -441,6 +450,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         try container.encode(minimumItemWidth, forKey: .minimumItemWidth)
         try container.encode(maximumItemWidth, forKey: .maximumItemWidth)
         try container.encode(itemSpacing, forKey: .itemSpacing)
+        try container.encode(widgetSpacing, forKey: .widgetSpacing)
         try container.encode(backgroundOpacity, forKey: .backgroundOpacity)
         try container.encode(avoidOverlappingWindows, forKey: .avoidOverlappingWindows)
         try container.encode(showMinimizedWindows, forKey: .showMinimizedWindows)
@@ -470,6 +480,10 @@ struct TaskbarSettingValues: Codable, Equatable {
         min(max(value, minimumItemSpacing), maximumItemSpacing)
     }
 
+    static func clampedWidgetSpacing(_ value: Double) -> Double {
+        min(max(value, minimumWidgetSpacing), maximumWidgetSpacing)
+    }
+
     static func clampedRevealAnimationDuration(_ value: Double) -> Double {
         min(max(value, minimumRevealAnimationDuration), maximumRevealAnimationDuration)
     }
@@ -482,6 +496,7 @@ struct TaskbarSettingValues: Codable, Equatable {
             maximumItemWidth = minimumItemWidth
         }
         itemSpacing = Self.clampedItemSpacing(itemSpacing)
+        widgetSpacing = Self.clampedWidgetSpacing(widgetSpacing)
         backgroundOpacity = Self.clampedBackgroundOpacity(backgroundOpacity)
         revealAnimationDuration = Self.clampedRevealAnimationDuration(revealAnimationDuration)
     }
@@ -497,6 +512,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
     var minimumItemWidth: Double?
     var maximumItemWidth: Double?
     var itemSpacing: Double?
+    var widgetSpacing: Double?
     var backgroundOpacity: Double?
     var avoidOverlappingWindows: Bool?
     var showMinimizedWindows: Bool?
@@ -515,6 +531,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
             || minimumItemWidth != nil
             || maximumItemWidth != nil
             || itemSpacing != nil
+            || widgetSpacing != nil
             || backgroundOpacity != nil
             || avoidOverlappingWindows != nil
             || showMinimizedWindows != nil
@@ -535,6 +552,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         case minimumItemWidth
         case maximumItemWidth
         case itemSpacing
+        case widgetSpacing
         case backgroundOpacity
         case avoidOverlappingWindows
         case showMinimizedWindows
@@ -554,6 +572,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         minimumItemWidth: Double? = nil,
         maximumItemWidth: Double? = nil,
         itemSpacing: Double? = nil,
+        widgetSpacing: Double? = nil,
         backgroundOpacity: Double? = nil,
         avoidOverlappingWindows: Bool? = nil,
         showMinimizedWindows: Bool? = nil,
@@ -571,6 +590,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         self.minimumItemWidth = minimumItemWidth
         self.maximumItemWidth = maximumItemWidth
         self.itemSpacing = itemSpacing
+        self.widgetSpacing = widgetSpacing
         self.backgroundOpacity = backgroundOpacity
         self.avoidOverlappingWindows = avoidOverlappingWindows
         self.showMinimizedWindows = showMinimizedWindows
@@ -597,6 +617,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         minimumItemWidth = try container.decodeIfPresent(Double.self, forKey: .minimumItemWidth)
         maximumItemWidth = try container.decodeIfPresent(Double.self, forKey: .maximumItemWidth)
         itemSpacing = try container.decodeIfPresent(Double.self, forKey: .itemSpacing)
+        widgetSpacing = try container.decodeIfPresent(Double.self, forKey: .widgetSpacing)
         backgroundOpacity = try container.decodeIfPresent(Double.self, forKey: .backgroundOpacity)
         avoidOverlappingWindows = try container.decodeIfPresent(Bool.self, forKey: .avoidOverlappingWindows)
         showMinimizedWindows = try container.decodeIfPresent(Bool.self, forKey: .showMinimizedWindows)
@@ -617,6 +638,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         try container.encodeIfPresent(minimumItemWidth, forKey: .minimumItemWidth)
         try container.encodeIfPresent(maximumItemWidth, forKey: .maximumItemWidth)
         try container.encodeIfPresent(itemSpacing, forKey: .itemSpacing)
+        try container.encodeIfPresent(widgetSpacing, forKey: .widgetSpacing)
         try container.encodeIfPresent(backgroundOpacity, forKey: .backgroundOpacity)
         try container.encodeIfPresent(avoidOverlappingWindows, forKey: .avoidOverlappingWindows)
         try container.encodeIfPresent(showMinimizedWindows, forKey: .showMinimizedWindows)
@@ -693,6 +715,9 @@ struct TaskbarPreferences: Codable, Equatable {
         }
         if let itemSpacing = override.itemSpacing {
             values.itemSpacing = itemSpacing
+        }
+        if let widgetSpacing = override.widgetSpacing {
+            values.widgetSpacing = widgetSpacing
         }
         if let backgroundOpacity = override.backgroundOpacity {
             values.backgroundOpacity = backgroundOpacity
@@ -844,6 +869,9 @@ final class TaskbarSettings {
         }
         if let itemSpacing = override.itemSpacing {
             override.itemSpacing = TaskbarSettingValues.clampedItemSpacing(itemSpacing)
+        }
+        if let widgetSpacing = override.widgetSpacing {
+            override.widgetSpacing = TaskbarSettingValues.clampedWidgetSpacing(widgetSpacing)
         }
         if let opacity = override.backgroundOpacity {
             override.backgroundOpacity = TaskbarSettingValues.clampedBackgroundOpacity(opacity)

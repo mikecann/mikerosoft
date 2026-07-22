@@ -12,6 +12,7 @@ final class TaskbarSettingsTests: XCTestCase {
         minimumItemWidth: Double = 96,
         maximumItemWidth: Double = 220,
         itemSpacing: Double = 3,
+        widgetSpacing: Double = 0,
         backgroundOpacity: Double = 0.72,
         avoidOverlappingWindows: Bool = true,
         showMinimizedWindows: Bool = true,
@@ -29,6 +30,7 @@ final class TaskbarSettingsTests: XCTestCase {
             minimumItemWidth: minimumItemWidth,
             maximumItemWidth: maximumItemWidth,
             itemSpacing: itemSpacing,
+            widgetSpacing: widgetSpacing,
             backgroundOpacity: backgroundOpacity,
             avoidOverlappingWindows: avoidOverlappingWindows,
             showMinimizedWindows: showMinimizedWindows,
@@ -70,6 +72,7 @@ final class TaskbarSettingsTests: XCTestCase {
             minimumItemWidth: 120,
             maximumItemWidth: 260,
             itemSpacing: 12,
+            widgetSpacing: 6,
             backgroundOpacity: 0.5,
             avoidOverlappingWindows: false,
             showMinimizedWindows: false,
@@ -96,6 +99,7 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(resolved.minimumItemWidth, 120)
         XCTAssertEqual(resolved.maximumItemWidth, 260)
         XCTAssertEqual(resolved.itemSpacing, 12)
+        XCTAssertEqual(resolved.widgetSpacing, 6)
         XCTAssertEqual(resolved.backgroundOpacity, 0.5)
         XCTAssertEqual(resolved.avoidOverlappingWindows, false)
         XCTAssertEqual(resolved.showMinimizedWindows, false)
@@ -113,6 +117,7 @@ final class TaskbarSettingsTests: XCTestCase {
                 minimumItemWidth: 110,
                 maximumItemWidth: 240,
                 itemSpacing: 9,
+                widgetSpacing: 7,
                 backgroundOpacity: 0.6,
                 avoidOverlappingWindows: false,
                 showMinimizedWindows: false,
@@ -135,6 +140,7 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(resolved.minimumItemWidth, 110)
         XCTAssertEqual(resolved.maximumItemWidth, 240)
         XCTAssertEqual(resolved.itemSpacing, 9)
+        XCTAssertEqual(resolved.widgetSpacing, 7)
         XCTAssertEqual(resolved.backgroundOpacity, 0.6)
         XCTAssertEqual(resolved.avoidOverlappingWindows, false)
         XCTAssertEqual(resolved.showMinimizedWindows, false)
@@ -151,6 +157,9 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(TaskbarSettingValues.clampedItemSpacing(-3), 0)
         XCTAssertEqual(TaskbarSettingValues.clampedItemSpacing(12), 12)
         XCTAssertEqual(TaskbarSettingValues.clampedItemSpacing(30), 24)
+        XCTAssertEqual(TaskbarSettingValues.clampedWidgetSpacing(-3), 0)
+        XCTAssertEqual(TaskbarSettingValues.clampedWidgetSpacing(12), 12)
+        XCTAssertEqual(TaskbarSettingValues.clampedWidgetSpacing(30), 24)
     }
 
     func testVisualSettingsAreClampedToUsefulRanges() {
@@ -158,6 +167,7 @@ final class TaskbarSettingsTests: XCTestCase {
             minimumItemWidth: 10,
             maximumItemWidth: 20,
             itemSpacing: 50,
+            widgetSpacing: 50,
             backgroundOpacity: 2,
             revealAnimationDuration: 5
         )
@@ -167,6 +177,7 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(values.minimumItemWidth, 56)
         XCTAssertEqual(values.maximumItemWidth, 56)
         XCTAssertEqual(values.itemSpacing, 24)
+        XCTAssertEqual(values.widgetSpacing, 24)
         XCTAssertEqual(values.backgroundOpacity, 1)
         XCTAssertEqual(values.revealAnimationDuration, 1)
     }
@@ -483,6 +494,7 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(statsWidget?["showMemory"] as? Bool, false)
         XCTAssertEqual(statsWidget?["showNetwork"] as? Bool, true)
         XCTAssertEqual(statsWidget?["memoryDisplay"] as? String, "percent")
+        XCTAssertEqual(object?["widgetSpacing"] as? Double, 0)
         XCTAssertNil(object?["backgroundStyle"])
         XCTAssertNil(object?["glassAmount"])
         XCTAssertNil(object?["showClock"])
@@ -526,6 +538,7 @@ final class TaskbarSettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(TaskbarSettingValues.self, from: Data(json.utf8))
 
         XCTAssertTrue(decoded.showMinimizedWindows)
+        XCTAssertEqual(decoded.widgetSpacing, TaskbarSettingValues.defaultWidgetSpacing)
     }
 
     func testDateTimeWidgetFormatsMenuBarLikeTime() {
@@ -971,7 +984,7 @@ final class TaskbarSettingsTests: XCTestCase {
 
         XCTAssertEqual(gaps, [10, 10, 10])
         XCTAssertGreaterThan(StatsWidgetMetrics.preferredMemoryWidth, StatsWidgetMetrics.minimumMemoryWidth)
-        XCTAssertLessThanOrEqual(StatsWidgetMetrics.preferredNetworkWidth, 82)
+        XCTAssertLessThanOrEqual(StatsWidgetMetrics.preferredNetworkWidth, 72)
     }
 
     func testStatsMemoryModuleLeavesRoomForThreeDigitPercent() {
@@ -1175,10 +1188,10 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertFalse(interaction.contains(NSPoint(x: 19, y: 1)))
     }
 
-    func testWidgetSpacingIsCappedBelowAppItemSpacing() {
-        XCTAssertEqual(taskbarWidgetSpacing(itemSpacing: 0), 0)
-        XCTAssertEqual(taskbarWidgetSpacing(itemSpacing: 1), 1)
-        XCTAssertEqual(taskbarWidgetSpacing(itemSpacing: 12), 2)
+    func testWidgetSpacingUsesItsIndependentSetting() {
+        XCTAssertEqual(taskbarWidgetSpacing(widgetSpacing: 0), 0)
+        XCTAssertEqual(taskbarWidgetSpacing(widgetSpacing: 1), 1)
+        XCTAssertEqual(taskbarWidgetSpacing(widgetSpacing: 12), 12)
     }
 
     func testInstalledWidgetsIncludeStatsAndBatteryBeforeDateTime() {

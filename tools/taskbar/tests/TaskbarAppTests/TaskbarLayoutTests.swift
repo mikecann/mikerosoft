@@ -86,7 +86,7 @@ final class TaskbarLayoutTests: XCTestCase {
             installedWidgets.reduce(CGFloat(0)) {
                 $0 + $1.minimumWidth(in: largestWidgets, height: 22)
             }
-            + taskbarWidgetSpacing(itemSpacing: 3) * CGFloat(max(0, installedWidgets.count - 1))
+            + taskbarWidgetSpacing(widgetSpacing: largestWidgets.widgetSpacing) * CGFloat(max(0, installedWidgets.count - 1))
             + 27
         )
         let barWidths: [CGFloat] = [smallestBarWidth, max(600, smallestBarWidth), 900, 1_440]
@@ -142,7 +142,7 @@ final class TaskbarLayoutTests: XCTestCase {
                                 for (leftWidget, rightWidget) in zip(layout.widgets, layout.widgets.dropFirst()) {
                                     XCTAssertGreaterThanOrEqual(
                                         rightWidget.rect.minX - leftWidget.rect.maxX,
-                                        taskbarWidgetSpacing(itemSpacing: CGFloat(settings.itemSpacing)),
+                                        taskbarWidgetSpacing(widgetSpacing: CGFloat(settings.widgetSpacing)),
                                         context
                                     )
                                 }
@@ -245,6 +245,24 @@ final class TaskbarLayoutTests: XCTestCase {
                 fontSize: DateTimeWidgetMetrics.fontSize(forHeight: 22)
             )
         )
+    }
+
+    func testWidgetSpacingIsIndependentFromAppItemSpacing() throws {
+        var settings = TaskbarSettingValues.defaults
+        settings.statsWidget.isEnabled = false
+        settings.itemSpacing = 24
+        settings.widgetSpacing = 7
+        let layout = taskbarLayout(
+            bounds: NSRect(x: 0, y: 0, width: 600, height: 30),
+            items: [],
+            settings: settings,
+            tileHeight: 22,
+            preferredTileWidths: []
+        )
+        let battery = try XCTUnwrap(layout.widgets.first { $0.id == .battery }?.rect)
+        let date = try XCTUnwrap(layout.widgets.first { $0.id == .dateTime }?.rect)
+
+        XCTAssertEqual(date.minX - battery.maxX, 7, accuracy: 0.001)
     }
 
     func testNoWidgetLayoutKeepsExistingTrailingPadding() throws {

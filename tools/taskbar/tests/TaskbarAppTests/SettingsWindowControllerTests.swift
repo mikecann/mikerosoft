@@ -24,6 +24,15 @@ private func colorWell(identifier: String, in view: NSView) -> NSColorWell? {
     return view.subviews.lazy.compactMap { colorWell(identifier: identifier, in: $0) }.first
 }
 
+private func slider(actionNamed actionName: String, in view: NSView) -> NSSlider? {
+    if let slider = view as? NSSlider,
+       let action = slider.action,
+       NSStringFromSelector(action) == actionName {
+        return slider
+    }
+    return view.subviews.lazy.compactMap { slider(actionNamed: actionName, in: $0) }.first
+}
+
 final class SettingsWindowControllerTests: XCTestCase {
     func testUpdateScreensKeepsMonitorWidgetSelectedWhenScreenGeometryChanges() throws {
         let original = ScreenInfo(
@@ -160,6 +169,36 @@ final class SettingsWindowControllerTests: XCTestCase {
         XCTAssertTrue(NSApplication.shared.sendAction(try XCTUnwrap(checkbox.action), to: checkbox.target, from: checkbox))
 
         XCTAssertFalse(settings.preferences.general.batteryWidget.isEnabled)
+    }
+
+    func testGeneralWidgetSpacingControlUpdatesOnlyWidgetSpacing() throws {
+        let settings = TaskbarSettings(store: RecordingSettingsStore())
+        let controller = SettingsWindowController(settings: settings, screens: [])
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let control = try XCTUnwrap(slider(actionNamed: "setGeneralWidgetSpacing:", in: contentView))
+        control.doubleValue = 8
+
+        XCTAssertTrue(NSApplication.shared.sendAction(try XCTUnwrap(control.action), to: control.target, from: control))
+
+        XCTAssertEqual(settings.preferences.general.widgetSpacing, 8)
+        XCTAssertEqual(settings.preferences.general.itemSpacing, TaskbarSettingValues.defaultItemSpacing)
+    }
+
+    func testMonitorWidgetSpacingCanBeOverridden() throws {
+        let screen = ScreenInfo(id: 7, name: "Studio Display", appKitFrame: .zero, quartzFrame: .zero)
+        let settings = TaskbarSettings(store: RecordingSettingsStore())
+        let controller = SettingsWindowController(settings: settings, screens: [screen])
+        controller.selectMonitor(screenID: screen.id)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let override = try XCTUnwrap(button(actionNamed: "toggleMonitorWidgetSpacingOverride:", in: contentView))
+        override.state = .on
+        XCTAssertTrue(NSApplication.shared.sendAction(try XCTUnwrap(override.action), to: override.target, from: override))
+
+        let control = try XCTUnwrap(slider(actionNamed: "setMonitorWidgetSpacing:", in: contentView))
+        control.doubleValue = 5
+        XCTAssertTrue(NSApplication.shared.sendAction(try XCTUnwrap(control.action), to: control.target, from: control))
+
+        XCTAssertEqual(settings.preferences.monitorOverrides["7"]?.widgetSpacing, 5)
     }
 
     func testClosingWindowStopsExternalSettingsRerenders() throws {
