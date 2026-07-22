@@ -44,8 +44,8 @@ struct RecordItApplication: App {
 struct RecordItView: View {
     @ObservedObject var model: RecordingViewModel
     @ObservedObject private var preferences: RecordingPreferences
+    @StateObject private var cameraPreviewWindowController = CameraPreviewWindowController()
     @State private var showingEncoderSettings = false
-    @State private var previewCamera: CaptureCamera?
 
     init(model: RecordingViewModel) {
         self.model = model
@@ -55,8 +55,12 @@ struct RecordItView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             header
-            captureMode
-            configuration
+            if shouldShowRecordingDashboard(isRecording: model.isRecording, isBusy: model.isBusy) {
+                recordingDashboard
+            } else {
+                captureMode
+                configuration
+            }
             Divider()
             footer
         }
@@ -78,9 +82,6 @@ struct RecordItView: View {
         }
         .sheet(isPresented: $showingEncoderSettings) {
             EncoderSettingsView(model: model)
-        }
-        .sheet(item: $previewCamera) { camera in
-            CameraPreviewSheet(camera: camera)
         }
     }
 
@@ -125,6 +126,120 @@ struct RecordItView: View {
             .labelsHidden()
             .disabled(model.isRecording || model.isBusy)
         }
+    }
+
+    private var recordingDashboard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("RECORDING", systemImage: "record.circle.fill")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.red)
+                Spacer()
+                if let startedAt = model.recordingStartedAt {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(elapsedTime(from: startedAt, to: context.date))
+                            .font(.title2.monospacedDigit().weight(.semibold))
+                    }
+                }
+            }
+
+            recordingHealthBanner
+
+            if model.activeTelemetry.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Waiting for the first written video sample…")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 120)
+            } else {
+                ForEach(model.activeTelemetry) { telemetry in
+                    recordingSourceCard(telemetry)
+                }
+            }
+
+            Label(
+                "Record It will stop automatically if video callbacks cease or the encoder stops accepting frames.",
+                systemImage: "shield.checkered"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var recordingHealthBanner: some View {
+        HStack(spacing: 9) {
+            Image(systemName: healthIcon(model.recordingHealth))
+                .foregroundStyle(healthColor(model.recordingHealth))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(overallHealthTitle(model.recordingHealth))
+                    .font(.subheadline.weight(.semibold))
+                Text(overallHealthDetail(model.recordingHealth))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(11)
+        .background(healthColor(model.recordingHealth).opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func recordingSourceCard(_ telemetry: RecordingTelemetry) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(telemetry.source.displayName, systemImage: telemetry.source == .screen ? "display" : "video")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Label(telemetry.healthMessage, systemImage: healthIcon(telemetry.health))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(healthColor(telemetry.health))
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
+                GridRow {
+                    telemetryValue("Video timeline", formattedMediaDuration(telemetry.mediaDuration))
+                    telemetryValue("File size", formattedByteCount(telemetry.fileSizeBytes))
+                }
+                GridRow {
+                    telemetryValue("Video samples written", telemetry.videoSamplesWritten.formatted())
+                    telemetryValue("Audio samples written", telemetry.audioSamplesWritten.formatted())
+                }
+                GridRow {
+                    telemetryValue("Output", telemetry.resolutionLabel)
+                    telemetryValue("Encoder", telemetry.codecName)
+                }
+            }
+
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.down.doc.fill")
+                Text("Writing \(telemetry.outputFileName)")
+            }
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(telemetry.outputURL.path)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(healthColor(telemetry.health).opacity(0.35), lineWidth: 1)
+        }
+    }
+
+    private func telemetryValue(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.monospacedDigit().weight(.medium))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var configuration: some View {
@@ -302,10 +417,12 @@ struct RecordItView: View {
                     }
                 }
                 .labelsHidden()
-                .disabled(model.isRecording || model.isBusy)
+                .disabled(model.isRecording || model.isBusy || cameraPreviewWindowController.isPreviewOpen)
 
                 Button("Preview…") {
-                    previewCamera = model.selectedCamera
+                    if let camera = model.selectedCamera {
+                        cameraPreviewWindowController.show(camera: camera)
+                    }
                 }
                 .disabled(cameraPreviewButtonIsDisabled(
                     hasSelectedCamera: model.selectedCamera != nil,
@@ -382,7 +499,8 @@ struct RecordItView: View {
             .disabled(recordButtonIsDisabled(
                 canRecord: model.canRecord,
                 isRecording: model.isRecording,
-                isBusy: model.isBusy
+                isBusy: model.isBusy,
+                isCameraPreviewOpen: cameraPreviewWindowController.isPreviewOpen
             ))
         }
     }
@@ -528,11 +646,61 @@ private struct EncoderSettingsView: View {
     }
 }
 
-func recordButtonIsDisabled(canRecord: Bool, isRecording: Bool, isBusy: Bool) -> Bool {
-    isBusy || (!canRecord && !isRecording)
+func recordButtonIsDisabled(
+    canRecord: Bool,
+    isRecording: Bool,
+    isBusy: Bool,
+    isCameraPreviewOpen: Bool = false
+) -> Bool {
+    isBusy || isCameraPreviewOpen || (!canRecord && !isRecording)
 }
 
 private func elapsedTime(from start: Date, to end: Date) -> String {
     let seconds = max(0, Int(end.timeIntervalSince(start)))
     return String(format: "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
+}
+
+private func formattedMediaDuration(_ duration: TimeInterval) -> String {
+    let seconds = max(0, Int(duration))
+    return String(format: "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
+}
+
+private func formattedByteCount(_ bytes: Int64) -> String {
+    ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+}
+
+private func healthColor(_ health: RecordingHealth) -> Color {
+    switch health {
+    case .starting: .secondary
+    case .healthy: .green
+    case .warning: .orange
+    case .failed: .red
+    }
+}
+
+private func healthIcon(_ health: RecordingHealth) -> String {
+    switch health {
+    case .starting: "hourglass"
+    case .healthy: "checkmark.circle.fill"
+    case .warning: "exclamationmark.triangle.fill"
+    case .failed: "xmark.octagon.fill"
+    }
+}
+
+private func overallHealthTitle(_ health: RecordingHealth) -> String {
+    switch health {
+    case .starting: "Starting capture pipelines"
+    case .healthy: "Recording is healthy"
+    case .warning: "Recording needs attention"
+    case .failed: "Recording has failed"
+    }
+}
+
+private func overallHealthDetail(_ health: RecordingHealth) -> String {
+    switch health {
+    case .starting: "Waiting for confirmed video writes"
+    case .healthy: "Video samples are reaching the output file"
+    case .warning: "Video activity has slowed; the watchdog is still monitoring it"
+    case .failed: "The recording will stop so you do not continue with a broken video"
+    }
 }

@@ -378,19 +378,36 @@ bash tools/record-it/restart.sh
 Always launch the staged `~/Applications/Record It.app`. Do not run the raw
 SwiftPM executable for permission testing because macOS keys Screen Recording,
 Camera, and Microphone permissions to the signed app bundle.
+When no Apple Development identity exists, `build-app.sh` adds a stable explicit
+designated requirement to the ad-hoc signature. Do not remove it: the default
+ad-hoc requirement is the changing binary hash and invalidates TCC permissions
+after every rebuild.
 
 ### Key behaviour
 
-- `HG584T05` is the default display and produces a 3840 × 2160, 30 fps output.
-- If the active display framebuffer is smaller than the recording output, the
-  UI shows the exact source-to-output scaling and warns that the result may look soft.
+- `HG584T05` is the default display and is kept at 1920 × 1080 HiDPI on this
+  machine, producing a native 3840 × 2160, 30 fps recording.
+- Screen output always preserves the selected display's active framebuffer.
+  Record It does not change display modes or upscale screen recordings.
+- Screen video uses variable-duration frames. Do not restore the old catch-up
+  loop that manufactured every missing 30 fps frame: a long static interval at
+  4K can permanently backlog the hardware encoder while audio continues.
+- A screen-callback and encoder-backpressure watchdog stops failed recordings
+  visibly. Diagnostics are written to `~/Library/Logs/Record It/record-it.log`.
+- While recording, the configuration form becomes a live dashboard sourced
+  from `MovieWriter` progress. It shows accepted video/audio sample counts,
+  media duration, file size, output name, encoder, resolution, and health for
+  each active source. Both screen and camera pipelines warn after three seconds
+  without activity and stop after ten seconds or 60 rejected video samples.
 - The first 4K/30-capable camera is selected by default. On this machine that is
   `Razer Kiyo Pro Ultra`.
 - The camera **Preview…** button opens the selected camera in an uncropped 16:9
-  sheet. It captures no audio, writes no file, and stops the camera session
-  before dismissing.
+  titled window that can move and resize, and remembers its frame. It captures
+  no audio, writes no file, and stops the camera session before closing.
 - The file name field defaults to the timestamp prefix, accepts an override
   without `.mov`, and resets to a fresh timestamp after every recording.
+- The selected Screen, Camera, or Both recording mode persists in `UserDefaults`
+  and is restored on the next launch.
 - Screen audio defaults to ScreenCaptureKit system playback and can be disabled.
   It does not use a microphone.
 - Camera audio is independently selectable and defaults to the first microphone
@@ -411,6 +428,8 @@ Camera, and Microphone permissions to the signed app bundle.
 |---|---|
 | `tools/record-it/Sources/RecordItApp/RecordItApplication.swift` | SwiftUI app and controls |
 | `tools/record-it/Sources/RecordItApp/CameraPreview.swift` | Live camera framing preview + session lifecycle |
+| `tools/record-it/Sources/RecordItApp/ScreenCaptureHealth.swift` | Screen watchdog + persistent recording diagnostics |
+| `tools/record-it/Sources/RecordItApp/RecordingTelemetry.swift` | Live writer progress and recording-health model |
 | `tools/record-it/Sources/RecordItApp/ScreenRecorder.swift` | ScreenCaptureKit pipeline |
 | `tools/record-it/Sources/RecordItApp/CameraRecorder.swift` | AVFoundation camera + microphone pipeline |
 | `tools/record-it/Sources/RecordItApp/EncoderSettings.swift` | Hardware encoder discovery + rate-control configuration |

@@ -1,9 +1,17 @@
+import AppKit
 import AVFoundation
 import XCTest
 @testable import RecordItApp
 
 @MainActor
 final class CameraPreviewTests: XCTestCase {
+    func testPreviewUsesAStandardMovableResizableWindow() {
+        XCTAssertTrue(cameraPreviewWindowStyleMask.contains(.titled))
+        XCTAssertTrue(cameraPreviewWindowStyleMask.contains(.closable))
+        XCTAssertTrue(cameraPreviewWindowStyleMask.contains(.miniaturizable))
+        XCTAssertTrue(cameraPreviewWindowStyleMask.contains(.resizable))
+    }
+
     func testPreviewButtonRequiresAnIdleSelectedCamera() {
         XCTAssertFalse(cameraPreviewButtonIsDisabled(
             hasSelectedCamera: true,

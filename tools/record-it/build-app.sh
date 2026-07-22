@@ -9,6 +9,7 @@ APP_DIR="${RECORD_IT_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
 APP_BIN="$APP_DIR/Contents/MacOS/record-it-swift"
 ICON_SOURCE="$SCRIPT_DIR/icons/record-it.png"
 SIGNING_IDENTITY="${RECORD_IT_CODESIGN_IDENTITY:-}"
+SIGNING_REQUIREMENTS=()
 
 if ! command -v swift >/dev/null 2>&1; then
   echo "ERROR: swift is not on PATH. Install Xcode or Command Line Tools first."
@@ -55,6 +56,16 @@ if [[ -z "$SIGNING_IDENTITY" ]]; then
   SIGNING_IDENTITY="-"
 fi
 
-codesign --force --deep --timestamp=none --sign "$SIGNING_IDENTITY" "$APP_DIR" >/dev/null
+if [[ "$SIGNING_IDENTITY" == "-" ]]; then
+  BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_DIR/Contents/Info.plist")"
+  # The default designated requirement for an ad-hoc signature is its binary
+  # hash. That changes after every build and makes macOS TCC forget Screen
+  # Recording, Camera, and Microphone permission. Keep a stable local
+  # requirement when no Apple Development certificate is available.
+  SIGNING_REQUIREMENTS=(--requirements "=designated => identifier \"$BUNDLE_ID\"")
+fi
+
+codesign --force --deep --timestamp=none --sign "$SIGNING_IDENTITY" \
+  "${SIGNING_REQUIREMENTS[@]}" "$APP_DIR" >/dev/null
 
 echo "Built $APP_DIR"

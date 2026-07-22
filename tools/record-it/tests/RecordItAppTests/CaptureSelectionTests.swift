@@ -38,6 +38,17 @@ final class CaptureSelectionTests: XCTestCase {
         )
     }
 
+    func testPreferredRecordingSizeUsesTheActiveFramebufferForHG584T05() {
+        let size = preferredRecordingSize(
+            displayName: "HG584T05",
+            sourceWidth: 2560,
+            sourceHeight: 1440
+        )
+
+        XCTAssertEqual(size.width, 2560)
+        XCTAssertEqual(size.height, 1440)
+    }
+
     func testCameraFormatPrefersNative4KThatSupports30FPS() {
         let formats = [
             CameraFormatOption(width: 1920, height: 1080, minimumFrameRate: 1, maximumFrameRate: 60),

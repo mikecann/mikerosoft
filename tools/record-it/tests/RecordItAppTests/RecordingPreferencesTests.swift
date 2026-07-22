@@ -3,6 +3,19 @@ import XCTest
 @testable import RecordItApp
 
 final class RecordingPreferencesTests: XCTestCase {
+    func testRecordingModeDefaultsToBothAndPersistsTheLastSelection() {
+        let suiteName = "record-it-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let initial = RecordingPreferences(defaults: defaults)
+        XCTAssertEqual(initial.recordingMode, .both)
+
+        initial.recordingMode = .screen
+
+        XCTAssertEqual(RecordingPreferences(defaults: defaults).recordingMode, .screen)
+    }
+
     func testOpenFinderSettingDefaultsOnAndPersists() {
         let suiteName = "record-it-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

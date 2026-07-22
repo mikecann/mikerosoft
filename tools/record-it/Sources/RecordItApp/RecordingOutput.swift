@@ -1,6 +1,6 @@
 import Foundation
 
-enum CaptureSource: Hashable {
+enum CaptureSource: Hashable, Sendable {
     case screen
     case camera
 
@@ -8,6 +8,13 @@ enum CaptureSource: Hashable {
         switch self {
         case .screen: "screen"
         case .camera: "camera"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .screen: "Screen"
+        case .camera: "Camera"
         }
     }
 }

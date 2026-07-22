@@ -8,25 +8,35 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let outputURL: URL
     private let encoderConfiguration: EncoderConfiguration
     private let startGate: RecordingStartGate?
+    private let onFailure: (@Sendable (Error) -> Void)?
+    private let onTelemetry: (@Sendable (RecordingTelemetry) -> Void)?
     private let captureSession = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let audioOutput = AVCaptureAudioDataOutput()
     private let sessionQueue = DispatchQueue(label: "com.mikerosoft.record-it.camera-session")
     private let writerQueue = DispatchQueue(label: "com.mikerosoft.record-it.camera-output")
     private var movieWriter: MovieWriter?
+    private var healthState: ScreenCaptureHealthState?
+    private var healthTimer: DispatchSourceTimer?
+    private var isStopping = false
+    private var captureError: Error?
 
     init(
         camera: CaptureCamera,
         microphone: CaptureAudioDevice?,
         outputURL: URL,
         encoderConfiguration: EncoderConfiguration,
-        startGate: RecordingStartGate? = nil
+        startGate: RecordingStartGate? = nil,
+        onFailure: (@Sendable (Error) -> Void)? = nil,
+        onTelemetry: (@Sendable (RecordingTelemetry) -> Void)? = nil
     ) {
         self.camera = camera
         self.microphone = microphone
         self.outputURL = outputURL
         self.encoderConfiguration = encoderConfiguration
         self.startGate = startGate
+        self.onFailure = onFailure
+        self.onTelemetry = onTelemetry
     }
 
     func start() async throws {
@@ -42,6 +52,11 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 do {
                     try configureSession()
                     captureSession.startRunning()
+                    startHealthMonitor()
+                    RecordingDiagnostics.shared.log(
+                        "camera.start device=\(camera.name) output=\(camera.width)x\(camera.height) "
+                            + "audio=\(microphone != nil) encoder=\(encoderConfiguration.encoder.displayName)"
+                    )
                     continuation.resume()
                 } catch {
                     continuation.resume(throwing: error)
@@ -51,6 +66,11 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
 
     func stop() async throws {
+        writerQueue.sync {
+            isStopping = true
+            healthTimer?.cancel()
+            healthTimer = nil
+        }
         await withCheckedContinuation { continuation in
             sessionQueue.async { [self] in
                 if captureSession.isRunning {
@@ -63,6 +83,8 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         guard let movieWriter else { return }
         self.movieWriter = nil
         try await movieWriter.finish()
+        RecordingDiagnostics.shared.log("camera.stop error=\(captureError?.localizedDescription ?? "none")")
+        if let captureError { throw captureError }
     }
 
     func captureOutput(
@@ -71,10 +93,69 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         from connection: AVCaptureConnection
     ) {
         if output === videoOutput {
-            movieWriter?.appendVideo(sampleBuffer)
+            let now = ProcessInfo.processInfo.systemUptime
+            healthState?.recordScreenCallback(at: now)
+            let accepted = movieWriter?.appendVideo(sampleBuffer) ?? false
+            let waitingForSharedStart = startGate != nil && startGate?.startTime == nil
+            healthState?.recordVideoAppend(accepted: accepted || waitingForSharedStart)
+            reportHealthProblemIfNeeded(at: now)
         } else if output === audioOutput {
             movieWriter?.appendAudio(sampleBuffer)
         }
+    }
+
+    private func startHealthMonitor() {
+        writerQueue.async { [weak self] in
+            guard let self, !isStopping else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            healthState = ScreenCaptureHealthState(startedAt: now)
+            let timer = DispatchSource.makeTimerSource(queue: writerQueue)
+            timer.schedule(deadline: .now() + 1, repeating: 1)
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                emitTelemetry(at: now)
+                reportHealthProblemIfNeeded(at: now)
+            }
+            healthTimer = timer
+            timer.resume()
+        }
+    }
+
+    private func reportHealthProblemIfNeeded(at time: TimeInterval) {
+        guard let problem = healthState?.problem(at: time) else { return }
+        reportFailure(RecordItError.message(problem))
+    }
+
+    private func reportFailure(_ error: Error) {
+        guard !isStopping, captureError == nil else { return }
+        captureError = error
+        healthTimer?.cancel()
+        healthTimer = nil
+        RecordingDiagnostics.shared.log("camera.failure error=\(error.localizedDescription)")
+        emitTelemetry(at: ProcessInfo.processInfo.systemUptime, failureMessage: error.localizedDescription)
+        onFailure?(error)
+    }
+
+    private func emitTelemetry(at time: TimeInterval, failureMessage: String? = nil) {
+        guard let movieWriter else { return }
+        let progress = movieWriter.progress()
+        onTelemetry?(RecordingTelemetry(
+            source: .camera,
+            outputURL: outputURL,
+            width: camera.width,
+            height: camera.height,
+            codecName: encoderConfiguration.encoder.codec.displayName,
+            videoSamplesWritten: progress.videoSamplesWritten,
+            audioSamplesWritten: progress.audioSamplesWritten,
+            mediaDuration: progress.mediaDuration,
+            fileSizeBytes: progress.fileSizeBytes,
+            lastVideoActivityAt: healthState?.lastScreenCallbackAt,
+            consecutiveRejectedVideoSamples: healthState?.consecutiveRejectedFrames ?? 0,
+            writerStatus: progress.writerStatus,
+            now: time,
+            failureMessage: failureMessage
+        ))
     }
 
     private func configureSession() throws {

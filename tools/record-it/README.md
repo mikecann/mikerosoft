@@ -16,13 +16,13 @@ ScreenCaptureKit, and AVFoundation.
 - Screen, camera, or both
 - The selected screen at 30 fps, encoded with the selected hardware H.264 or
   HEVC encoder
-- `HG584T05` by default, with a 3840 × 2160 output
-- An orange warning shows the active framebuffer and output sizes whenever the
-  recording would be upscaled, because a 4K-sized file is not necessarily a
-  native-detail 4K capture
+- `HG584T05` by default, preserving its active framebuffer resolution without
+  upscaling. This machine keeps it at 1920 × 1080 HiDPI, producing a native
+  3840 × 2160 recording
 - The selected camera's best format at 30 fps, preferring native 3840 × 2160
-- A **Preview…** button beside the camera selector opens a live, uncropped
-  framing view without recording audio or creating a file
+- A **Preview…** button beside the camera selector opens a movable, resizable,
+  uncropped live framing window without recording audio or creating a file.
+  The preview window remembers its last position and size
 - Selectable screen audio: **System Sound** or **None**. System Sound captures
   playback from music, browsers, videos, and other Mac apps, not a microphone
 - Selectable camera microphone, defaulting to the first input with `Yeti` in its
@@ -42,6 +42,16 @@ shows modes supported by the selected encoder:
 
 The selected encoder, rate-control mode, bitrates, and CQP level are saved
 automatically and restored on the next launch.
+
+The selected recording mode, **Screen**, **Camera**, or **Both**, is also saved
+immediately and restored the next time Record It opens.
+
+## Display resolution
+
+Record It captures the selected display's active framebuffer exactly and never
+changes display modes. Keep `HG584T05` at 1920 × 1080 HiDPI in macOS or
+BetterDisplay to record a native 3840 × 2160 source. Use browser, editor, or
+terminal zoom when individual application content needs to be larger.
 
 ## File names
 
@@ -75,6 +85,28 @@ Choosing **No Project** saves into:
 Record It can reveal the completed files in Finder after stopping. That setting
 is enabled by default and persists between launches.
 
+## Recording diagnostics
+
+While recording, the setup form is replaced with a live dashboard for each
+active source. It shows the actual video and audio samples accepted by the
+movie writer, media timeline, current file size, resolution, encoder, output
+file name, and pipeline health. This is writer telemetry, not just a recording
+timer, so a green state confirms that video is reaching the output file.
+
+Screen recordings use variable-duration frames, so a static screen does not
+create a huge duplicate-frame backlog in the 4K hardware encoder. Record It
+also watches screen and camera callbacks plus sustained encoder backpressure.
+The dashboard warns after three seconds without video activity. If video stalls
+for ten seconds, or the encoder rejects 60 consecutive samples, the recording
+stops with a visible error instead of continuing silently with audio only.
+
+Session starts, frame-status changes, 30-second health checks, failures, and
+stops are written to:
+
+```text
+~/Library/Logs/Record It/record-it.log
+```
+
 ## Setup
 
 ```bash
@@ -95,4 +127,6 @@ bash tools/record-it/restart.sh
 ```
 
 `restart.sh` stops the current app, builds a debug app bundle, signs it, stages it
-at `~/Applications/Record It.app`, and launches it.
+at `~/Applications/Record It.app`, and launches it. When no Apple Development
+certificate is installed, the build uses a stable local designated requirement
+so macOS privacy permissions survive subsequent ad-hoc rebuilds.

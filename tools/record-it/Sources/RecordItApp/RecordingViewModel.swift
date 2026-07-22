@@ -8,7 +8,9 @@ func defaultProjectsRoot(homeDirectory: URL = FileManager.default.homeDirectoryF
 
 @MainActor
 final class RecordingViewModel: ObservableObject {
-    @Published var mode: RecordingMode = .both
+    @Published var mode: RecordingMode {
+        didSet { preferences.recordingMode = mode }
+    }
     @Published private(set) var destinations: [ProjectDestination] = []
     @Published var selectedDestinationID = ""
     @Published private(set) var displays: [CaptureDisplay] = []
@@ -24,6 +26,7 @@ final class RecordingViewModel: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var recordingStartedAt: Date?
     @Published private(set) var statusMessage = "Loading devices…"
+    @Published private(set) var recordingTelemetry: [CaptureSource: RecordingTelemetry] = [:]
     @Published var presentedError: String?
 
     let preferences: RecordingPreferences
@@ -37,6 +40,7 @@ final class RecordingViewModel: ObservableObject {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         self.preferences = preferences
+        mode = preferences.recordingMode
         projectCatalog = ProjectCatalog(
             projectsRoot: defaultProjectsRoot(homeDirectory: homeDirectory),
             fallbackOutputRoot: homeDirectory.appendingPathComponent("Movies/record-it-output", isDirectory: true)
@@ -91,6 +95,14 @@ final class RecordingViewModel: ObservableObject {
         return true
     }
 
+    var activeTelemetry: [RecordingTelemetry] {
+        [.screen, .camera].compactMap { recordingTelemetry[$0] }
+    }
+
+    var recordingHealth: RecordingHealth {
+        overallRecordingHealth(activeTelemetry.map(\.health))
+    }
+
     func load() async {
         isBusy = true
         defer { isBusy = false }
@@ -111,8 +123,7 @@ final class RecordingViewModel: ObservableObject {
         microphones = CaptureDeviceCatalog.microphones()
         selectedMicrophoneID = preferredAudioDevice(in: microphones)?.id ?? ""
 
-        displays = CaptureDeviceCatalog.displays()
-        selectedDisplayID = preferredDisplay(in: displays)?.id ?? 0
+        refreshDisplays()
         statusMessage = displays.isEmpty ? "No displays found" : "Ready to record"
     }
 
@@ -137,6 +148,7 @@ final class RecordingViewModel: ObservableObject {
         else { return }
         isBusy = true
         statusMessage = "Starting…"
+        recordingTelemetry = [:]
         let startedAt = Date()
         fileName = outputBaseName
 
@@ -161,7 +173,17 @@ final class RecordingViewModel: ObservableObject {
                         audioSource: screenAudioSource,
                         outputURL: outputURL,
                         encoderConfiguration: encoderConfiguration,
-                        startGate: startGate
+                        startGate: startGate,
+                        onFailure: { [weak self] error in
+                            Task { @MainActor [weak self] in
+                                await self?.handleCaptureFailure(error)
+                            }
+                        },
+                        onTelemetry: { [weak self] telemetry in
+                            Task { @MainActor [weak self] in
+                                self?.recordingTelemetry[.screen] = telemetry
+                            }
+                        }
                     )
                 )
             }
@@ -175,7 +197,17 @@ final class RecordingViewModel: ObservableObject {
                         microphone: selectedMicrophone,
                         outputURL: outputURL,
                         encoderConfiguration: encoderConfiguration,
-                        startGate: startGate
+                        startGate: startGate,
+                        onFailure: { [weak self] error in
+                            Task { @MainActor [weak self] in
+                                await self?.handleCaptureFailure(error)
+                            }
+                        },
+                        onTelemetry: { [weak self] telemetry in
+                            Task { @MainActor [weak self] in
+                                self?.recordingTelemetry[.camera] = telemetry
+                            }
+                        }
                     )
                 )
             }
@@ -219,9 +251,26 @@ final class RecordingViewModel: ObservableObject {
         isBusy = false
     }
 
+    private func refreshDisplays(preferredName: String? = nil) {
+        let previousID = selectedDisplayID
+        let previousName = preferredName ?? selectedDisplay?.name
+        displays = CaptureDeviceCatalog.displays()
+        selectedDisplayID = displays.first(where: { $0.id == previousID })?.id
+            ?? displays.first(where: { $0.name == previousName })?.id
+            ?? preferredDisplay(in: displays)?.id
+            ?? 0
+    }
+
+    private func handleCaptureFailure(_ error: Error) async {
+        guard isRecording, !isBusy else { return }
+        await stopRecording(revealInFinder: false)
+        presentedError = "Screen capture failed and the recording was stopped immediately: \(error.localizedDescription)"
+    }
+
     private func resetActiveRecording() {
         activeSession = nil
         activeOutputURLs = []
+        recordingTelemetry = [:]
         recordingStartedAt = nil
         isRecording = false
     }

@@ -3,6 +3,7 @@ import Foundation
 
 final class RecordingPreferences: ObservableObject {
     private enum Key {
+        static let recordingMode = "recordingMode"
         static let openFinderAfterRecording = "openFinderAfterRecording"
         static let selectedEncoderID = "selectedEncoderID"
         static let rateControl = "rateControl"
@@ -12,6 +13,10 @@ final class RecordingPreferences: ObservableObject {
     }
 
     private let defaults: UserDefaults
+
+    @Published var recordingMode: RecordingMode {
+        didSet { defaults.set(recordingMode.rawValue, forKey: Key.recordingMode) }
+    }
 
     @Published var openFinderAfterRecording: Bool {
         didSet {
@@ -59,6 +64,8 @@ final class RecordingPreferences: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        recordingMode = defaults.string(forKey: Key.recordingMode)
+            .flatMap(RecordingMode.init(rawValue:)) ?? .both
         selectedEncoderID = defaults.string(forKey: Key.selectedEncoderID) ?? ""
         rateControl = defaults.string(forKey: Key.rateControl)
             .flatMap(RateControlMode.init(rawValue:)) ?? .vbr

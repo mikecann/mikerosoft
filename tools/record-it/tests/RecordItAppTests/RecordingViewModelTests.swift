@@ -4,6 +4,18 @@ import XCTest
 
 @MainActor
 final class RecordingViewModelTests: XCTestCase {
+    func testViewModelRestoresTheLastSelectedRecordingMode() {
+        let suiteName = "record-it-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = RecordingPreferences(defaults: defaults)
+        preferences.recordingMode = .camera
+
+        let model = RecordingViewModel(preferences: preferences)
+
+        XCTAssertEqual(model.mode, .camera)
+    }
+
     func testDefaultProjectsRootUsesTheConvexVideosDirectory() {
         let homeDirectory = URL(fileURLWithPath: "/Users/m5-mike", isDirectory: true)
 
@@ -19,6 +31,17 @@ final class RecordingViewModelTests: XCTestCase {
                 canRecord: false,
                 isRecording: true,
                 isBusy: true
+            )
+        )
+    }
+
+    func testRecordButtonIsDisabledWhileCameraPreviewIsOpen() {
+        XCTAssertTrue(
+            recordButtonIsDisabled(
+                canRecord: true,
+                isRecording: false,
+                isBusy: false,
+                isCameraPreviewOpen: true
             )
         )
     }

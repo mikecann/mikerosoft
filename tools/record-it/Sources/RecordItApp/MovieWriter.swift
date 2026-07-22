@@ -65,9 +65,13 @@ final class MovieWriter {
     private let startGate: RecordingStartGate?
     private var sessionStartTime: CMTime?
     private var receivedVideo = false
-    private var lastVideoSample: CMSampleBuffer?
+    private var pendingVideoSample: CMSampleBuffer?
+    private var pendingVideoFrameIndex: Int?
     private var lastOutputFrameIndex = -1
-    private let frameDuration = CMTime(value: 1, timescale: 30)
+    private var latestAudioTimestamp: CMTime?
+    private var latestVideoEndTime: CMTime?
+    private var videoSamplesWritten = 0
+    private var audioSamplesWritten = 0
 
     init(
         outputURL: URL,
@@ -122,13 +126,14 @@ final class MovieWriter {
         }
     }
 
-    func appendVideo(_ sampleBuffer: CMSampleBuffer) {
-        guard CMSampleBufferDataIsReady(sampleBuffer), writer.status == .writing else { return }
+    @discardableResult
+    func appendVideo(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard CMSampleBufferDataIsReady(sampleBuffer), writer.status == .writing else { return false }
         let sourceTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         if sessionStartTime == nil {
             if let startGate {
                 guard let gatedStartTime = startGate.startTime, sourceTimestamp >= gatedStartTime else {
-                    return
+                    return false
                 }
                 sessionStartTime = gatedStartTime
                 writer.startSession(atSourceTime: gatedStartTime)
@@ -137,47 +142,93 @@ final class MovieWriter {
                 writer.startSession(atSourceTime: sourceTimestamp)
             }
         }
-        guard let sessionStartTime else { return }
+        guard let sessionStartTime else { return false }
 
         let elapsed = max(0, CMTimeGetSeconds(sourceTimestamp - sessionStartTime))
-        let targetFrameIndex = lastOutputFrameIndex < 0
-            ? 0
-            : max(0, Int((elapsed * 30).rounded()))
-        guard targetFrameIndex > lastOutputFrameIndex else {
-            lastVideoSample = sampleBuffer
-            return
+        let targetFrameIndex = max(0, Int((elapsed * 30).rounded()))
+        if let pendingVideoFrameIndex, targetFrameIndex <= pendingVideoFrameIndex {
+            // Keep the newest pixels when ScreenCaptureKit produces more than
+            // one sample for the same 30 fps presentation slot.
+            pendingVideoSample = sampleBuffer
+            return true
         }
 
-        while lastOutputFrameIndex + 1 < targetFrameIndex, let lastVideoSample {
-            guard appendRetimedVideo(lastVideoSample, frameIndex: lastOutputFrameIndex + 1) else {
-                return
+        if let pendingVideoSample, let pendingVideoFrameIndex {
+            let durationInFrames = max(1, targetFrameIndex - pendingVideoFrameIndex)
+            guard appendRetimedVideo(
+                pendingVideoSample,
+                frameIndex: pendingVideoFrameIndex,
+                durationInFrames: durationInFrames
+            ) else {
+                return false
             }
         }
 
-        guard lastOutputFrameIndex + 1 == targetFrameIndex else { return }
-        if appendRetimedVideo(sampleBuffer, frameIndex: targetFrameIndex) {
-            lastVideoSample = sampleBuffer
-        }
+        // Hold one frame until the next source update tells us its real
+        // duration. This represents static screen time with one long sample
+        // instead of trying to encode thousands of duplicate 4K frames.
+        pendingVideoSample = sampleBuffer
+        pendingVideoFrameIndex = targetFrameIndex
+        return true
     }
 
     func appendAudio(_ sampleBuffer: CMSampleBuffer) {
+        let sourceTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         guard
             CMSampleBufferDataIsReady(sampleBuffer),
             writer.status == .writing,
             let sessionStartTime,
             let audioInput,
             audioInput.isReadyForMoreMediaData,
-            CMSampleBufferGetPresentationTimeStamp(sampleBuffer) >= sessionStartTime
+            sourceTimestamp >= sessionStartTime
         else { return }
 
-        audioInput.append(sampleBuffer)
+        if audioInput.append(sampleBuffer) {
+            latestAudioTimestamp = sourceTimestamp + CMSampleBufferGetDuration(sampleBuffer)
+            audioSamplesWritten += 1
+        }
     }
 
-    func finish() async throws {
-        guard receivedVideo else {
+    func progress() -> WriterProgress {
+        let videoDuration = timelineDuration(through: latestVideoEndTime)
+        let audioDuration = timelineDuration(through: latestAudioTimestamp)
+        let size = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? NSNumber)?
+            .int64Value ?? 0
+        return WriterProgress(
+            videoSamplesWritten: videoSamplesWritten,
+            audioSamplesWritten: audioSamplesWritten,
+            videoTimelineDuration: videoDuration,
+            audioTimelineDuration: audioDuration,
+            fileSizeBytes: size,
+            writerStatus: recordingWriterStatus
+        )
+    }
+
+    func finish(atSourceTime requestedEndTime: CMTime? = nil) async throws {
+        guard let pendingVideoSample, let pendingVideoFrameIndex, let sessionStartTime else {
             writer.cancelWriting()
             try? FileManager.default.removeItem(at: outputURL)
             throw RecordItError.message("No video frames were received.")
+        }
+
+        let minimumEndTime = sessionStartTime
+            + CMTime(value: CMTimeValue(pendingVideoFrameIndex + 1), timescale: 30)
+        let endTime = [requestedEndTime, latestAudioTimestamp]
+            .compactMap { $0 }
+            .filter(\.isValid)
+            .reduce(minimumEndTime) { max($0, $1) }
+        let endFrameIndex = max(
+            pendingVideoFrameIndex + 1,
+            Int(ceil(max(0, CMTimeGetSeconds(endTime - sessionStartTime)) * 30))
+        )
+
+        try await waitForVideoInputReadiness()
+        guard appendRetimedVideo(
+            pendingVideoSample,
+            frameIndex: pendingVideoFrameIndex,
+            durationInFrames: endFrameIndex - pendingVideoFrameIndex
+        ) else {
+            throw writer.error ?? RecordItError.message("The final video frame could not be written.")
         }
 
         videoInput.markAsFinished()
@@ -193,10 +244,25 @@ final class MovieWriter {
         }
     }
 
-    private func appendRetimedVideo(_ sampleBuffer: CMSampleBuffer, frameIndex: Int) -> Bool {
+    private func waitForVideoInputReadiness() async throws {
+        for _ in 0..<500 {
+            if videoInput.isReadyForMoreMediaData { return }
+            guard writer.status == .writing else {
+                throw writer.error ?? RecordItError.message("The video encoder stopped accepting frames.")
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw RecordItError.message("The video encoder remained stalled for more than five seconds.")
+    }
+
+    private func appendRetimedVideo(
+        _ sampleBuffer: CMSampleBuffer,
+        frameIndex: Int,
+        durationInFrames: Int
+    ) -> Bool {
         guard videoInput.isReadyForMoreMediaData, let sessionStartTime else { return false }
         var timing = CMSampleTimingInfo(
-            duration: frameDuration,
+            duration: CMTime(value: CMTimeValue(max(1, durationInFrames)), timescale: 30),
             presentationTimeStamp: sessionStartTime + CMTime(value: CMTimeValue(frameIndex), timescale: 30),
             decodeTimeStamp: .invalid
         )
@@ -214,6 +280,24 @@ final class MovieWriter {
 
         lastOutputFrameIndex = frameIndex
         receivedVideo = true
+        latestVideoEndTime = timing.presentationTimeStamp + timing.duration
+        videoSamplesWritten += 1
         return true
+    }
+
+    private func timelineDuration(through timestamp: CMTime?) -> TimeInterval {
+        guard let timestamp, let sessionStartTime else { return 0 }
+        return max(0, CMTimeGetSeconds(timestamp - sessionStartTime))
+    }
+
+    private var recordingWriterStatus: RecordingWriterStatus {
+        switch writer.status {
+        case .unknown: .unknown
+        case .writing: .writing
+        case .completed: .completed
+        case .failed: .failed
+        case .cancelled: .cancelled
+        @unknown default: .failed
+        }
     }
 }

@@ -17,6 +17,13 @@ enum CameraPreviewState: Equatable {
     case failed(String)
 }
 
+let cameraPreviewWindowStyleMask: NSWindow.StyleMask = [
+    .titled,
+    .closable,
+    .miniaturizable,
+    .resizable
+]
+
 @MainActor
 final class CameraPreviewModel: ObservableObject {
     @Published private(set) var state: CameraPreviewState = .idle
@@ -131,17 +138,82 @@ final class SystemCameraPreviewSessionController: CameraPreviewSessionControllin
 }
 
 @MainActor
-struct CameraPreviewSheet: View {
-    let camera: CaptureCamera
+final class CameraPreviewWindowController: NSObject, ObservableObject, NSWindowDelegate {
+    @Published private(set) var isPreviewOpen = false
 
-    @StateObject private var model: CameraPreviewModel
-    @State private var isClosing = false
-    @Environment(\.dismiss) private var dismiss
+    private var window: NSWindow?
+    private var model: CameraPreviewModel?
+    private var isClosing = false
 
-    init(camera: CaptureCamera) {
-        self.camera = camera
-        _model = StateObject(wrappedValue: CameraPreviewModel(cameraID: camera.id))
+    func show(camera: CaptureCamera) {
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let model = CameraPreviewModel(cameraID: camera.id)
+        let content = CameraPreviewWindowContent(
+            camera: camera,
+            model: model,
+            onDone: { [weak self] in self?.close() }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 848, height: 560),
+            styleMask: cameraPreviewWindowStyleMask,
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Camera Preview - \(camera.name)"
+        window.contentViewController = NSHostingController(rootView: content)
+        window.delegate = self
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 640, height: 430)
+        let frameAutosaveName = "RecordItCameraPreviewWindow"
+        if !window.setFrameUsingName(frameAutosaveName) {
+            window.center()
+        }
+        window.setFrameAutosaveName(frameAutosaveName)
+
+        self.model = model
+        self.window = window
+        isPreviewOpen = true
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        Task { await model.start() }
     }
+
+    func close() {
+        guard window != nil, !isClosing else { return }
+        isClosing = true
+        Task { await closePreview() }
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        close()
+        return false
+    }
+
+    private func closePreview() async {
+        guard let window else { return }
+        await model?.stop()
+        window.delegate = nil
+        window.close()
+        self.window = nil
+        model = nil
+        isPreviewOpen = false
+        isClosing = false
+    }
+}
+
+@MainActor
+private struct CameraPreviewWindowContent: View {
+    let camera: CaptureCamera
+    @ObservedObject var model: CameraPreviewModel
+    let onDone: () -> Void
+
+    @State private var isClosing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -183,7 +255,8 @@ struct CameraPreviewSheet: View {
                 }
             }
             .foregroundStyle(.white)
-            .frame(width: 800, height: 450)
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black)
             .clipShape(RoundedRectangle(cornerRadius: 12))
 
@@ -194,21 +267,17 @@ struct CameraPreviewSheet: View {
                 Spacer()
                 Button(isClosing ? "Closing…" : "Done") {
                     isClosing = true
-                    Task {
-                        await model.stop()
-                        dismiss()
-                    }
+                    onDone()
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(isClosing)
             }
         }
         .padding(24)
-        .task { await model.start() }
+        .frame(minWidth: 592, minHeight: 382)
         .onDisappear {
             Task { await model.stop() }
         }
-        .interactiveDismissDisabled()
     }
 
     @ViewBuilder

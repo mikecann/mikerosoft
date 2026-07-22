@@ -94,13 +94,12 @@ enum CaptureDeviceCatalog {
     }
 }
 
-private func preferredRecordingSize(
-    displayName: String,
+func preferredRecordingSize(
+    displayName _: String,
     sourceWidth: Int,
     sourceHeight: Int
 ) -> (width: Int, height: Int) {
-    if displayName.caseInsensitiveCompare("HG584T05") == .orderedSame {
-        return (3840, 2160)
-    }
+    // Preserve the framebuffer exactly. A larger encoded canvas cannot restore
+    // detail that macOS did not render, and it makes later crops look softer.
     return (sourceWidth, sourceHeight)
 }
