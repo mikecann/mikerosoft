@@ -16,6 +16,11 @@ fail() {
 BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw "$APP_DIR/Contents/Info.plist")"
 [[ "$BUNDLE_ID" == "com.mikerosoft.video-hq" ]] || fail "unexpected bundle identifier: $BUNDLE_ID"
 
+ROUGH_CUT_ROOT="$(plutil -extract VideoHQFilmoraAutomationRoot raw "$APP_DIR/Contents/Info.plist")"
+ROUGH_CUT_PYTHON="$(plutil -extract VideoHQRoughCutPython raw "$APP_DIR/Contents/Info.plist")"
+[[ -n "$ROUGH_CUT_ROOT" ]] || fail "Filmora automation root is missing from Info.plist"
+[[ -n "$ROUGH_CUT_PYTHON" ]] || fail "rough-cut Python is missing from Info.plist"
+
 # Spotlight treats a bundle more reliably as an application when its importer has
 # recorded the executable architecture, not merely the generic .app content type.
 ARCHITECTURES="$(mdls -raw -name kMDItemExecutableArchitectures "$APP_DIR")"

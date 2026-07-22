@@ -58,6 +58,7 @@ final class VideoHQModel: ObservableObject {
     private let configurationError: Error?
     private let preferences: VideoHQPreferences
     private let teleprompterWindowController = TeleprompterWindowController()
+    private let roughCutWindowController = RoughCutWindowController()
 
     convenience init() {
         let preferences = VideoHQPreferences()
@@ -104,6 +105,10 @@ final class VideoHQModel: ObservableObject {
 
     var hasProjectScript: Bool {
         !projectScript.isEmpty
+    }
+
+    var canOpenRoughCutReview: Bool {
+        selectedProject != nil && configuration != nil
     }
 
     var notionScriptActionTitle: String {
@@ -339,6 +344,24 @@ final class VideoHQModel: ObservableObject {
             projectName: selectedProject?.name ?? "Script"
         )
         statusMessage = "Opened the script on the Elgato Prompter."
+    }
+
+    func openRoughCutReview() {
+        guard let project = selectedProject else {
+            errorMessage = "Choose a video project before opening Rough Cut Review."
+            return
+        }
+        guard let configuration else {
+            errorMessage = configurationError?.localizedDescription
+                ?? "Video HQ could not load its rough-cut configuration."
+            return
+        }
+        roughCutWindowController.show(
+            project: project,
+            script: projectScript,
+            configuration: configuration
+        )
+        statusMessage = "Opened Rough Cut Review for \(project.name)."
     }
 
     func revealActiveFile() {

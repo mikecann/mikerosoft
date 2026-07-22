@@ -13,6 +13,20 @@ final class VideoHQConfigurationTests: XCTestCase {
         )
     }
 
+    func testRoughCutToolsCanBeConfiguredFromTheEnvironment() {
+        let automationRoot = RepoLocator.filmoraAutomationRoot(
+            environment: ["VIDEO_HQ_FILMORA_AUTOMATION_ROOT": "/tmp/filmora-tools"],
+            bundle: .main
+        )
+        let python = RepoLocator.roughCutPythonURL(
+            environment: ["VIDEO_HQ_ROUGH_CUT_PYTHON": "/tmp/media-python"],
+            bundle: .main
+        )
+
+        XCTAssertEqual(automationRoot.path, "/tmp/filmora-tools")
+        XCTAssertEqual(python.path, "/tmp/media-python")
+    }
+
     func testConfigurationLoadsQuotedOpenRouterKeyFromRepoDotenv() throws {
         let repoRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

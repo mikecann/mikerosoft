@@ -8,6 +8,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PRIMARY_REPO_ROOT="$(git -C "$REPO_ROOT" worktree list --porcelain | sed -n 's/^worktree //p' | head -n 1)"
 DOTENV_PATH="${VIDEO_HQ_DOTENV_PATH:-$PRIMARY_REPO_ROOT/.env}"
 PROJECTS_ROOT="${VIDEO_HQ_PROJECTS_ROOT:-$HOME/dev/convex/convex-videos}"
+FILMORA_AUTOMATION_ROOT="${VIDEO_HQ_FILMORA_AUTOMATION_ROOT:-$HOME/dev/me/automate-filmora}"
+ROUGH_CUT_PYTHON="${VIDEO_HQ_ROUGH_CUT_PYTHON:-$HOME/.local/share/mikerosoft-media-venv/bin/python}"
 BUILD_CONFIGURATION="${VIDEO_HQ_BUILD_CONFIGURATION:-release}"
 APP_NAME="Video HQ"
 APP_DIR="${VIDEO_HQ_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
@@ -41,6 +43,19 @@ fi
 if ! command -v ffmpeg >/dev/null 2>&1; then
   echo "WARNING: ffmpeg is missing. Transcribe will not work until you run:" >&2
   echo "  bash $REPO_ROOT/tools/transcribe/deps.sh" >&2
+fi
+
+if [[ ! -d "$FILMORA_AUTOMATION_ROOT/filmora_wfp" ]]; then
+  echo "WARNING: Filmora rough-cut tools are missing at $FILMORA_AUTOMATION_ROOT." >&2
+  echo "         Set VIDEO_HQ_FILMORA_AUTOMATION_ROOT before setup to use Rough Cut Review." >&2
+fi
+
+if [[ ! -x "$ROUGH_CUT_PYTHON" ]]; then
+  echo "WARNING: Rough-cut Python is missing at $ROUGH_CUT_PYTHON." >&2
+  echo "         Set VIDEO_HQ_ROUGH_CUT_PYTHON to Python with faster-whisper installed." >&2
+elif ! "$ROUGH_CUT_PYTHON" -c "import faster_whisper" >/dev/null 2>&1; then
+  echo "WARNING: $ROUGH_CUT_PYTHON cannot import faster_whisper." >&2
+  echo "         Rough Cut Review can reuse an SRT, but fresh word-level transcription will fail." >&2
 fi
 
 echo "Building Video HQ ($BUILD_CONFIGURATION)..."
@@ -122,6 +137,10 @@ cat >"$APP_DIR/Contents/Info.plist" <<PLIST
     <string>$DOTENV_PATH</string>
     <key>VideoHQProjectsRoot</key>
     <string>$PROJECTS_ROOT</string>
+    <key>VideoHQFilmoraAutomationRoot</key>
+    <string>$FILMORA_AUTOMATION_ROOT</string>
+    <key>VideoHQRoughCutPython</key>
+    <string>$ROUGH_CUT_PYTHON</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>

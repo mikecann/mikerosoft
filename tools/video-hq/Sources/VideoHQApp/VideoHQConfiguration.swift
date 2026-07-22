@@ -6,6 +6,26 @@ struct VideoHQConfiguration {
     let openRouterAPIKey: String?
     let notionAPIKey: String?
     let credentialDotenvURL: URL
+    let filmoraAutomationRoot: URL
+    let roughCutPythonURL: URL
+
+    init(
+        repoRoot: URL,
+        projectsRoot: URL,
+        openRouterAPIKey: String?,
+        notionAPIKey: String?,
+        credentialDotenvURL: URL,
+        filmoraAutomationRoot: URL = RepoLocator.filmoraAutomationRoot(),
+        roughCutPythonURL: URL = RepoLocator.roughCutPythonURL()
+    ) {
+        self.repoRoot = repoRoot
+        self.projectsRoot = projectsRoot
+        self.openRouterAPIKey = openRouterAPIKey
+        self.notionAPIKey = notionAPIKey
+        self.credentialDotenvURL = credentialDotenvURL
+        self.filmoraAutomationRoot = filmoraAutomationRoot
+        self.roughCutPythonURL = roughCutPythonURL
+    }
 
     var transcribeExecutableURL: URL {
         repoRoot.appendingPathComponent("tools/transcribe/transcribe")
@@ -15,6 +35,8 @@ struct VideoHQConfiguration {
         repoRoot: URL = RepoLocator.repoRoot(),
         projectsRoot: URL = RepoLocator.projectsRoot(),
         fallbackDotenvURL: URL? = RepoLocator.fallbackDotenvURL(),
+        filmoraAutomationRoot: URL? = nil,
+        roughCutPythonURL: URL? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> VideoHQConfiguration {
         let repoDotenvURL = repoRoot.appendingPathComponent(".env")
@@ -35,7 +57,11 @@ struct VideoHQConfiguration {
             projectsRoot: projectsRoot,
             openRouterAPIKey: openRouterAPIKey,
             notionAPIKey: notionAPIKey,
-            credentialDotenvURL: fallbackDotenvURL ?? repoDotenvURL
+            credentialDotenvURL: fallbackDotenvURL ?? repoDotenvURL,
+            filmoraAutomationRoot: filmoraAutomationRoot
+                ?? RepoLocator.filmoraAutomationRoot(environment: environment),
+            roughCutPythonURL: roughCutPythonURL
+                ?? RepoLocator.roughCutPythonURL(environment: environment)
         )
     }
 
@@ -124,5 +150,40 @@ enum RepoLocator {
         }
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("dev/convex/convex-videos", isDirectory: true)
+    }
+
+    static func filmoraAutomationRoot(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundle: Bundle = .main
+    ) -> URL {
+        if let configured = environment["VIDEO_HQ_FILMORA_AUTOMATION_ROOT"], !configured.isEmpty {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+        }
+        if let configured = bundle.object(forInfoDictionaryKey: "VideoHQFilmoraAutomationRoot") as? String,
+           !configured.isEmpty {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("dev/me/automate-filmora", isDirectory: true)
+    }
+
+    static func roughCutPythonURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundle: Bundle = .main,
+        fileManager: FileManager = .default
+    ) -> URL {
+        if let configured = environment["VIDEO_HQ_ROUGH_CUT_PYTHON"], !configured.isEmpty {
+            return URL(fileURLWithPath: configured)
+        }
+        if let configured = bundle.object(forInfoDictionaryKey: "VideoHQRoughCutPython") as? String,
+           !configured.isEmpty {
+            return URL(fileURLWithPath: configured)
+        }
+
+        let mediaPython = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/share/mikerosoft-media-venv/bin/python")
+        return fileManager.isExecutableFile(atPath: mediaPython.path)
+            ? mediaPython
+            : URL(fileURLWithPath: "/usr/bin/python3")
     }
 }

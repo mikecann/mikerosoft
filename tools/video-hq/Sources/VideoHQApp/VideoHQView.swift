@@ -62,6 +62,11 @@ struct VideoHQView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button("Rough Cut", systemImage: "scissors") {
+                    model.openRoughCutReview()
+                }
+                .disabled(!model.canOpenRoughCutReview)
+                .help("Analyze a source recording for silence, false starts, bad takes, and script coverage")
                 Button("Choose Video", systemImage: "folder") {
                     model.openVideoPanel()
                 }
