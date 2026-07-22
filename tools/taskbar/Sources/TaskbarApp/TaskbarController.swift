@@ -522,6 +522,8 @@ final class TaskbarController: NSObject {
         switch widgetID {
         case .stats:
             return makeStatsWidgetMenu(screenID: screenID)
+        case .battery:
+            return makeBatteryWidgetMenu(screenID: screenID)
         case .dateTime:
             return makeDateTimeWidgetMenu(screenID: screenID)
         }
@@ -531,7 +533,7 @@ final class TaskbarController: NSObject {
         switch widgetID {
         case .stats:
             showStatsPopover(metric: statsMetric ?? .cpu, screenID: screenID, relativeTo: rect, of: view)
-        case .dateTime:
+        case .battery, .dateTime:
             break
         }
     }
@@ -766,6 +768,35 @@ final class TaskbarController: NSObject {
         return menu
     }
 
+    private func makeBatteryWidgetMenu(screenID: UInt32) -> NSMenu {
+        let value = settings.values(for: screenID).batteryWidget
+        let snapshot = TaskbarBatteryMonitor.shared.snapshot()
+        let menu = NSMenu(title: "Battery")
+
+        let status = NSMenuItem(
+            title: batteryWidgetStatusText(snapshot: snapshot),
+            action: nil,
+            keyEquivalent: ""
+        )
+        status.isEnabled = false
+        menu.addItem(status)
+        menu.addItem(.separator())
+
+        addWidgetToggle(
+            title: "Show Battery",
+            state: value.isEnabled,
+            action: #selector(toggleBatteryWidgetFromMenu),
+            to: menu
+        )
+
+        menu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Battery Settings...", action: #selector(showWidgetSettingsFromMenu), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        return menu
+    }
+
     private func addWidgetToggle(title: String, state: Bool, action: Selector, to menu: NSMenu) {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
@@ -914,6 +945,10 @@ final class TaskbarController: NSObject {
         updateStatsWidgetFromMenu { $0.isEnabled.toggle() }
     }
 
+    @objc private func toggleBatteryWidgetFromMenu() {
+        updateBatteryWidgetFromMenu { $0.isEnabled.toggle() }
+    }
+
     @objc private func toggleStatsCPUFromMenu() {
         updateStatsWidgetFromMenu { $0.showCPU.toggle() }
     }
@@ -956,6 +991,11 @@ final class TaskbarController: NSObject {
     private func updateStatsWidgetFromMenu(_ transform: (inout StatsWidgetSettings) -> Void) {
         guard let context = menuWidgetContext, context.widgetID == .stats else { return }
         settings.updateStatsWidget(for: context.screenID, transform)
+    }
+
+    private func updateBatteryWidgetFromMenu(_ transform: (inout BatteryWidgetSettings) -> Void) {
+        guard let context = menuWidgetContext, context.widgetID == .battery else { return }
+        settings.updateBatteryWidget(for: context.screenID, transform)
     }
 
     @objc private func quit() {

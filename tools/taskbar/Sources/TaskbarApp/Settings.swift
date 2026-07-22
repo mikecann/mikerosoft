@@ -81,6 +81,14 @@ struct DateTimeWidgetSettings: Codable, Equatable {
     }
 }
 
+struct BatteryWidgetSettings: Codable, Equatable {
+    var isEnabled: Bool
+
+    static var defaults: BatteryWidgetSettings {
+        BatteryWidgetSettings(isEnabled: true)
+    }
+}
+
 enum StatsMemoryDisplay: String, Codable, CaseIterable, Equatable {
     case percent
     case pie
@@ -302,6 +310,7 @@ struct TaskbarSettingValues: Codable, Equatable {
     var isVisible: Bool
     var dateTimeWidget: DateTimeWidgetSettings
     var statsWidget: StatsWidgetSettings
+    var batteryWidget: BatteryWidgetSettings
     var taskbarHeight: Double
     var minimumItemWidth: Double
     var maximumItemWidth: Double
@@ -325,6 +334,7 @@ struct TaskbarSettingValues: Codable, Equatable {
             clockMode: .time,
             dateTimeWidget: .defaults,
             statsWidget: .defaults,
+            batteryWidget: .defaults,
             taskbarHeight: defaultTaskbarHeight,
             minimumItemWidth: defaultMinimumItemWidth,
             maximumItemWidth: defaultMaximumItemWidth,
@@ -345,6 +355,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         case clockMode
         case dateTimeWidget
         case statsWidget
+        case batteryWidget
         case taskbarHeight
         case minimumItemWidth
         case maximumItemWidth
@@ -363,6 +374,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         clockMode: ClockMode,
         dateTimeWidget: DateTimeWidgetSettings? = nil,
         statsWidget: StatsWidgetSettings? = nil,
+        batteryWidget: BatteryWidgetSettings? = nil,
         taskbarHeight: Double,
         minimumItemWidth: Double,
         maximumItemWidth: Double,
@@ -378,6 +390,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         self.isVisible = isVisible
         self.dateTimeWidget = dateTimeWidget ?? DateTimeWidgetSettings.legacy(clockMode: clockMode)
         self.statsWidget = statsWidget ?? .defaults
+        self.batteryWidget = batteryWidget ?? .defaults
         self.taskbarHeight = taskbarHeight
         self.minimumItemWidth = minimumItemWidth
         self.maximumItemWidth = maximumItemWidth
@@ -403,6 +416,7 @@ struct TaskbarSettingValues: Codable, Equatable {
             self.dateTimeWidget = DateTimeWidgetSettings.legacy(clockMode: oldShowClock ? .time : .hidden)
         }
         statsWidget = try container.decodeIfPresent(StatsWidgetSettings.self, forKey: .statsWidget) ?? .defaults
+        batteryWidget = try container.decodeIfPresent(BatteryWidgetSettings.self, forKey: .batteryWidget) ?? .defaults
         taskbarHeight = try container.decodeIfPresent(Double.self, forKey: .taskbarHeight) ?? Self.defaultTaskbarHeight
         minimumItemWidth = try container.decodeIfPresent(Double.self, forKey: .minimumItemWidth) ?? Self.defaultMinimumItemWidth
         maximumItemWidth = try container.decodeIfPresent(Double.self, forKey: .maximumItemWidth) ?? Self.defaultMaximumItemWidth
@@ -422,6 +436,7 @@ struct TaskbarSettingValues: Codable, Equatable {
         try container.encode(isVisible, forKey: .isVisible)
         try container.encode(dateTimeWidget, forKey: .dateTimeWidget)
         try container.encode(statsWidget, forKey: .statsWidget)
+        try container.encode(batteryWidget, forKey: .batteryWidget)
         try container.encode(taskbarHeight, forKey: .taskbarHeight)
         try container.encode(minimumItemWidth, forKey: .minimumItemWidth)
         try container.encode(maximumItemWidth, forKey: .maximumItemWidth)
@@ -477,6 +492,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
     var clockMode: ClockMode?
     var dateTimeWidget: DateTimeWidgetSettings?
     var statsWidget: StatsWidgetSettings?
+    var batteryWidget: BatteryWidgetSettings?
     var taskbarHeight: Double?
     var minimumItemWidth: Double?
     var maximumItemWidth: Double?
@@ -494,6 +510,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
             || clockMode != nil
             || dateTimeWidget != nil
             || statsWidget != nil
+            || batteryWidget != nil
             || taskbarHeight != nil
             || minimumItemWidth != nil
             || maximumItemWidth != nil
@@ -513,6 +530,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         case clockMode
         case dateTimeWidget
         case statsWidget
+        case batteryWidget
         case taskbarHeight
         case minimumItemWidth
         case maximumItemWidth
@@ -531,6 +549,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         clockMode: ClockMode? = nil,
         dateTimeWidget: DateTimeWidgetSettings? = nil,
         statsWidget: StatsWidgetSettings? = nil,
+        batteryWidget: BatteryWidgetSettings? = nil,
         taskbarHeight: Double? = nil,
         minimumItemWidth: Double? = nil,
         maximumItemWidth: Double? = nil,
@@ -547,6 +566,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         self.clockMode = clockMode
         self.dateTimeWidget = dateTimeWidget
         self.statsWidget = statsWidget
+        self.batteryWidget = batteryWidget
         self.taskbarHeight = taskbarHeight
         self.minimumItemWidth = minimumItemWidth
         self.maximumItemWidth = maximumItemWidth
@@ -572,6 +592,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         }
         dateTimeWidget = try container.decodeIfPresent(DateTimeWidgetSettings.self, forKey: .dateTimeWidget)
         statsWidget = try container.decodeIfPresent(StatsWidgetSettings.self, forKey: .statsWidget)
+        batteryWidget = try container.decodeIfPresent(BatteryWidgetSettings.self, forKey: .batteryWidget)
         taskbarHeight = try container.decodeIfPresent(Double.self, forKey: .taskbarHeight)
         minimumItemWidth = try container.decodeIfPresent(Double.self, forKey: .minimumItemWidth)
         maximumItemWidth = try container.decodeIfPresent(Double.self, forKey: .maximumItemWidth)
@@ -591,6 +612,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         try container.encodeIfPresent(clockMode, forKey: .clockMode)
         try container.encodeIfPresent(dateTimeWidget, forKey: .dateTimeWidget)
         try container.encodeIfPresent(statsWidget, forKey: .statsWidget)
+        try container.encodeIfPresent(batteryWidget, forKey: .batteryWidget)
         try container.encodeIfPresent(taskbarHeight, forKey: .taskbarHeight)
         try container.encodeIfPresent(minimumItemWidth, forKey: .minimumItemWidth)
         try container.encodeIfPresent(maximumItemWidth, forKey: .maximumItemWidth)
@@ -656,6 +678,9 @@ struct TaskbarPreferences: Codable, Equatable {
         }
         if let statsWidget = override.statsWidget {
             values.statsWidget = statsWidget
+        }
+        if let batteryWidget = override.batteryWidget {
+            values.batteryWidget = batteryWidget
         }
         if let taskbarHeight = override.taskbarHeight {
             values.taskbarHeight = taskbarHeight
@@ -864,6 +889,20 @@ final class TaskbarSettings {
         } else {
             updateGeneral { values in
                 transform(&values.statsWidget)
+            }
+        }
+    }
+
+    func updateBatteryWidget(for screenID: UInt32, _ transform: (inout BatteryWidgetSettings) -> Void) {
+        if overrides(for: screenID).batteryWidget != nil {
+            updateOverrides(for: screenID) { override in
+                var value = override.batteryWidget ?? .defaults
+                transform(&value)
+                override.batteryWidget = value
+            }
+        } else {
+            updateGeneral { values in
+                transform(&values.batteryWidget)
             }
         }
     }

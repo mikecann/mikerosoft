@@ -668,9 +668,37 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         switch widgetID {
         case .stats:
             renderStatsWidget(screen: screen, in: stack)
+        case .battery:
+            renderBatteryWidget(screen: screen, in: stack)
         case .dateTime:
             renderDateTimeWidget(screen: screen, in: stack)
         }
+    }
+
+    private func renderBatteryWidget(screen: ScreenInfo?, in stack: NSStackView) {
+        if let screen {
+            let override = settings.overrides(for: screen.id)
+            let resolved = settings.values(for: screen.id)
+            addHeader("Battery", subtitle: "\(screen.name) override for the Battery widget.", to: stack)
+            stack.addArrangedSubview(overrideBatteryWidgetRow(
+                isOverridden: override.batteryWidget != nil,
+                value: resolved.batteryWidget
+            ))
+            return
+        }
+
+        let values = settings.preferences.general
+        addHeader("Battery", subtitle: "Default Battery widget settings used by every monitor unless that monitor has an override.", to: stack)
+        stack.addArrangedSubview(settingRow(
+            icon: "battery.100",
+            title: "Battery",
+            description: "Show the Mac's current battery level in the taskbar.",
+            control: batteryWidgetControls(
+                value: values.batteryWidget,
+                enabled: true,
+                enabledAction: #selector(setGeneralBatteryEnabled(_:))
+            )
+        ))
     }
 
     private func renderStatsWidget(screen: ScreenInfo?, in stack: NSStackView) {
@@ -825,6 +853,16 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         stack.addArrangedSubview(topRow)
         stack.addArrangedSubview(optionsRow)
         return stack
+    }
+
+    private func batteryWidgetControls(
+        value: BatteryWidgetSettings,
+        enabled: Bool,
+        enabledAction: Selector
+    ) -> NSView {
+        let row = horizontalRow()
+        row.addArrangedSubview(titledCheckbox("Show", state: value.isEnabled, enabled: enabled, action: enabledAction))
+        return row
     }
 
     private func statsWidgetControls(
@@ -1156,6 +1194,30 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             icon: "chart.bar",
             title: "Stats",
             description: "Configure this monitor's Stats widget.",
+            control: controls
+        )
+    }
+
+    private func overrideBatteryWidgetRow(isOverridden: Bool, value: BatteryWidgetSettings) -> NSView {
+        let controls = NSStackView()
+        controls.orientation = .vertical
+        controls.alignment = .leading
+        controls.spacing = 6
+
+        let override = NSButton(checkboxWithTitle: "Override", target: self, action: #selector(toggleMonitorBatteryOverride(_:)))
+        override.state = isOverridden ? .on : .off
+        override.widthAnchor.constraint(equalToConstant: 92).isActive = true
+
+        controls.addArrangedSubview(override)
+        controls.addArrangedSubview(batteryWidgetControls(
+            value: value,
+            enabled: isOverridden,
+            enabledAction: #selector(setMonitorBatteryEnabled(_:))
+        ))
+        return settingRow(
+            icon: "battery.100",
+            title: "Battery",
+            description: "Configure this monitor's Battery widget.",
             control: controls
         )
     }
@@ -1531,6 +1593,10 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         updateGeneral { $0.statsWidget.isEnabled = sender.state == .on }
     }
 
+    @objc private func setGeneralBatteryEnabled(_ sender: NSButton) {
+        updateGeneral { $0.batteryWidget.isEnabled = sender.state == .on }
+    }
+
     @objc private func setGeneralStatsCPU(_ sender: NSButton) {
         updateGeneral { $0.statsWidget.showCPU = sender.state == .on }
     }
@@ -1636,6 +1702,13 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         guard let id = selectedMonitorID else { return }
         let value = settings.values(for: id).statsWidget
         updateOverrides(for: id) { $0.statsWidget = sender.state == .on ? value : nil }
+        renderDetail()
+    }
+
+    @objc private func toggleMonitorBatteryOverride(_ sender: NSButton) {
+        guard let id = selectedMonitorID else { return }
+        let value = settings.values(for: id).batteryWidget
+        updateOverrides(for: id) { $0.batteryWidget = sender.state == .on ? value : nil }
         renderDetail()
     }
 
@@ -1781,6 +1854,20 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     @objc private func setMonitorStatsNetwork(_ sender: NSButton) {
         updateMonitorStatsWidget { $0.showNetwork = sender.state == .on }
+    }
+
+    private func updateMonitorBatteryWidget(_ transform: (inout BatteryWidgetSettings) -> Void) {
+        guard let id = selectedMonitorID else { return }
+        let current = settings.overrides(for: id).batteryWidget ?? settings.values(for: id).batteryWidget
+        updateOverrides(for: id) { override in
+            var value = current
+            transform(&value)
+            override.batteryWidget = value
+        }
+    }
+
+    @objc private func setMonitorBatteryEnabled(_ sender: NSButton) {
+        updateMonitorBatteryWidget { $0.isEnabled = sender.state == .on }
     }
 
     @objc private func setMonitorStatsCPUDisplay(_ sender: NSPopUpButton) {

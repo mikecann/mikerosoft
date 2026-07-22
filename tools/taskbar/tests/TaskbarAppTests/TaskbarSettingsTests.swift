@@ -1181,8 +1181,8 @@ final class TaskbarSettingsTests: XCTestCase {
         XCTAssertEqual(taskbarWidgetSpacing(itemSpacing: 12), 2)
     }
 
-    func testInstalledWidgetsIncludeStatsBeforeDateTime() {
-        XCTAssertEqual(installedTaskbarWidgetIDs(), [.stats, .dateTime])
+    func testInstalledWidgetsIncludeStatsAndBatteryBeforeDateTime() {
+        XCTAssertEqual(installedTaskbarWidgetIDs(), [.stats, .battery, .dateTime])
     }
 
     func testSettingsSidebarSeparatesWidgetPagesFromBarPages() {

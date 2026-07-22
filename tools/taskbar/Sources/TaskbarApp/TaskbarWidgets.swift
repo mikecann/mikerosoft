@@ -2,6 +2,7 @@ import AppKit
 
 enum TaskbarWidgetID: String, Equatable {
     case stats
+    case battery
     case dateTime
 }
 
@@ -274,6 +275,7 @@ func activeTaskbarWidgets(for values: TaskbarSettingValues) -> [any TaskbarWidge
 func installedTaskbarWidgetPlugins() -> [any TaskbarWidgetPlugin] {
     [
         StatsWidgetPlugin(),
+        BatteryWidgetPlugin(),
         DateTimeWidgetPlugin()
     ]
 }

@@ -8,7 +8,7 @@ func shouldRunTaskbarWidgetRepaintTimer(
 ) -> Bool {
     isAttachedToWindow
         && isPanelVisible
-        && (values.dateTimeWidget.isEnabled || values.statsWidget.isEnabled)
+        && (values.dateTimeWidget.isEnabled || values.statsWidget.isEnabled || values.batteryWidget.isEnabled)
 }
 
 final class TaskbarContainerView: NSView {

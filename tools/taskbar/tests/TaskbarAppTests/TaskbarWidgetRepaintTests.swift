@@ -7,6 +7,7 @@ final class TaskbarWidgetRepaintTests: XCTestCase {
         var values = TaskbarSettingValues.defaults
         values.dateTimeWidget.isEnabled = false
         values.statsWidget.isEnabled = false
+        values.batteryWidget.isEnabled = false
 
         XCTAssertFalse(shouldRunTaskbarWidgetRepaintTimer(values: values, isAttachedToWindow: true, isPanelVisible: true))
 
@@ -19,6 +20,10 @@ final class TaskbarWidgetRepaintTests: XCTestCase {
         values.statsWidget.isEnabled = true
         XCTAssertTrue(shouldRunTaskbarWidgetRepaintTimer(values: values, isAttachedToWindow: true, isPanelVisible: true))
         XCTAssertFalse(shouldRunTaskbarWidgetRepaintTimer(values: values, isAttachedToWindow: false, isPanelVisible: true))
+
+        values.statsWidget.isEnabled = false
+        values.batteryWidget.isEnabled = true
+        XCTAssertTrue(shouldRunTaskbarWidgetRepaintTimer(values: values, isAttachedToWindow: true, isPanelVisible: true))
     }
 
     func testAttachedWidgetRepaintsWithoutItemChangesDuringEventTracking() {
@@ -195,6 +200,7 @@ final class TaskbarWidgetRepaintTests: XCTestCase {
         values.isVisible = false
         values.dateTimeWidget.isEnabled = false
         values.statsWidget.isEnabled = false
+        values.batteryWidget.isEnabled = false
 
         taskbarPanel.update(screen: screen, items: [], values: values)
 

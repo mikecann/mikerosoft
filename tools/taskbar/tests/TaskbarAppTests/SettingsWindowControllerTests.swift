@@ -148,6 +148,20 @@ final class SettingsWindowControllerTests: XCTestCase {
         XCTAssertEqual(settings.preferences.general.statsWidget.cpuCoreColors.performance, "#336699")
     }
 
+    func testBatterySettingsPageUpdatesTheDefaultWidgetState() throws {
+        let settings = TaskbarSettings(store: RecordingSettingsStore())
+        let controller = SettingsWindowController(settings: settings, screens: [])
+        controller.selectWidget(.battery)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let checkbox = try XCTUnwrap(button(actionNamed: "setGeneralBatteryEnabled:", in: contentView))
+        XCTAssertEqual(checkbox.state, .on)
+        checkbox.state = .off
+
+        XCTAssertTrue(NSApplication.shared.sendAction(try XCTUnwrap(checkbox.action), to: checkbox.target, from: checkbox))
+
+        XCTAssertFalse(settings.preferences.general.batteryWidget.isEnabled)
+    }
+
     func testClosingWindowStopsExternalSettingsRerenders() throws {
         let settings = TaskbarSettings(store: RecordingSettingsStore())
         settings.updateGeneral { $0.statsWidget.isEnabled = true }

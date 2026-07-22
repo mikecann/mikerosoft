@@ -76,16 +76,31 @@ final class TaskbarLayoutTests: XCTestCase {
     }
 
     func testWidgetsNeverIntersectTilesAcrossLayoutMatrix() {
-        // 397 pt is the smallest width that can hold the largest configured
-        // widget minima, the existing margins, and one point of tile area.
-        let barWidths: [CGFloat] = [397, 480, 600, 900, 1_440]
+        var largestWidgets = TaskbarSettingValues.defaults
+        largestWidgets.dateTimeWidget.dateDisplay = .always
+        largestWidgets.dateTimeWidget.showSeconds = true
+        let installedWidgets = activeTaskbarWidgets(for: largestWidgets)
+        // Include every widget minimum, gaps, existing taskbar margins, and one
+        // point of tile area so the smallest matrix case is still meaningful.
+        let smallestBarWidth = ceil(
+            installedWidgets.reduce(CGFloat(0)) {
+                $0 + $1.minimumWidth(in: largestWidgets, height: 22)
+            }
+            + taskbarWidgetSpacing(itemSpacing: 3) * CGFloat(max(0, installedWidgets.count - 1))
+            + 27
+        )
+        let barWidths: [CGFloat] = [smallestBarWidth, max(600, smallestBarWidth), 900, 1_440]
         let itemCounts = [1, 3, 6, 12]
         let itemSpacings: [Double] = [0, 3, 24]
         let widgetStates = [
-            (name: "both", statsEnabled: true, dateEnabled: true),
-            (name: "stats", statsEnabled: true, dateEnabled: false),
-            (name: "date", statsEnabled: false, dateEnabled: true),
-            (name: "none", statsEnabled: false, dateEnabled: false)
+            (name: "all", statsEnabled: true, batteryEnabled: true, dateEnabled: true),
+            (name: "stats-battery", statsEnabled: true, batteryEnabled: true, dateEnabled: false),
+            (name: "stats-date", statsEnabled: true, batteryEnabled: false, dateEnabled: true),
+            (name: "battery-date", statsEnabled: false, batteryEnabled: true, dateEnabled: true),
+            (name: "stats", statsEnabled: true, batteryEnabled: false, dateEnabled: false),
+            (name: "battery", statsEnabled: false, batteryEnabled: true, dateEnabled: false),
+            (name: "date", statsEnabled: false, batteryEnabled: false, dateEnabled: true),
+            (name: "none", statsEnabled: false, batteryEnabled: false, dateEnabled: false)
         ]
 
         for barWidth in barWidths {
@@ -97,6 +112,7 @@ final class TaskbarLayoutTests: XCTestCase {
                             for itemSpacing in itemSpacings {
                                 var settings = TaskbarSettingValues.defaults
                                 settings.statsWidget.isEnabled = widgetState.statsEnabled
+                                settings.batteryWidget.isEnabled = widgetState.batteryEnabled
                                 settings.dateTimeWidget.isEnabled = widgetState.dateEnabled
                                 settings.dateTimeWidget.showSeconds = showSeconds
                                 settings.dateTimeWidget.dateDisplay = dateDisplay
@@ -234,6 +250,7 @@ final class TaskbarLayoutTests: XCTestCase {
     func testNoWidgetLayoutKeepsExistingTrailingPadding() throws {
         var settings = TaskbarSettingValues.defaults
         settings.statsWidget.isEnabled = false
+        settings.batteryWidget.isEnabled = false
         settings.dateTimeWidget.isEnabled = false
         let layout = taskbarLayout(
             bounds: NSRect(x: 0, y: 0, width: 600, height: 30),

@@ -577,6 +577,33 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         XCTAssertTrue(settings.preferences.monitorOverrides.isEmpty)
     }
 
+    func testBatteryMenuWithoutOverrideUpdatesGeneral() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+
+        let menu = try XCTUnwrap(controller.makeWidgetMenu(for: .battery, screenID: 123))
+        let showBatteryItem = try XCTUnwrap(menu.items.first(where: { $0.title == "Show Battery" }))
+        try performMenuItem(showBatteryItem, on: controller)
+
+        XCTAssertFalse(settings.preferences.general.batteryWidget.isEnabled)
+        XCTAssertTrue(settings.preferences.monitorOverrides.isEmpty)
+    }
+
+    func testBatteryMenuWithOverrideUpdatesOverrideOnly() throws {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        settings.updateOverrides(for: 123) { $0.batteryWidget = BatteryWidgetSettings(isEnabled: false) }
+
+        let menu = try XCTUnwrap(controller.makeWidgetMenu(for: .battery, screenID: 123))
+        let showBatteryItem = try XCTUnwrap(menu.items.first(where: { $0.title == "Show Battery" }))
+        try performMenuItem(showBatteryItem, on: controller)
+
+        XCTAssertEqual(settings.preferences.general.batteryWidget, .defaults)
+        XCTAssertEqual(settings.preferences.monitorOverrides["123"]?.batteryWidget, BatteryWidgetSettings(isEnabled: true))
+    }
+
     func testStatsMenuWithOverrideUpdatesOverrideOnly() throws {
         let store = RecordingTaskbarSettingsStore()
         let settings = TaskbarSettings(store: store)

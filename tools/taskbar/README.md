@@ -21,7 +21,7 @@ maximising underneath the bar.
 - Pins apps so they stay visible when closed
 - Shrinks item widths when the bar is crowded so every item still fits
 - Ellipsises long labels
-- Supports taskbar widgets, starting with Date & Time and Stats widgets
+- Supports Date & Time, Battery, and Stats taskbar widgets
 - Lets widgets own their menu, rendering, and settings surface
 - Auto-hides with configurable animation
 - Hides on any monitor occupied by a foreground fullscreen app or game
@@ -73,6 +73,7 @@ Useful settings:
 - Horizontal spacing between items
 - Background opacity
 - Date & Time widget display
+- Battery widget with the current charge level and charging state
 - Stats widget CPU, RAM, network, and CPU display modes
 - Auto-hide and reveal animation
 - Pinned apps
@@ -95,6 +96,11 @@ visible in settings so they can be turned back on.
 
 Date & Time uses menu-bar-style text and can show or hide the date, day of week,
 seconds, and 24-hour time independently per monitor.
+
+Battery reads the Mac's internal battery through the native IOKit power-source
+API. It shows the exact percentage, a level or charging icon, and a low-battery
+warning colour. Its right-click menu includes the charging state and remaining
+time when macOS reports one.
 
 Stats shows CPU, RAM, and network activity in a compact strip. CPU can show a
 percentage, aggregate usage history, or one live utilisation bar per logical
