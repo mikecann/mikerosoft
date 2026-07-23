@@ -1,4 +1,4 @@
-![taskbar header](docs/header.png)
+![Mikerosoft Taskbar on macOS with pinned apps, minimised windows, widgets, and per-monitor settings](docs/header.webp)
 
 # taskbar
 
@@ -7,10 +7,6 @@ Windows-style taskbar for macOS, built in Swift/AppKit.
 It draws a compact taskbar at the bottom of every monitor, shows each visible
 window as its own item, lets you pin apps, and can keep normal app windows from
 maximising underneath the bar.
-
-![taskbar running across a desktop](docs/ss1.png)
-
-![taskbar settings window](docs/ss2.png)
 
 ## What it does
 
