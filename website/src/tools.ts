@@ -27,6 +27,14 @@ export interface Tool {
   platforms: readonly PlatformId[];
 }
 
+export function filterToolsByPlatforms(
+  toolList: readonly Tool[],
+  activePlatforms: readonly PlatformId[],
+): Tool[] {
+  const active = new Set(activePlatforms);
+  return toolList.filter(tool => tool.platforms.some(platform => active.has(platform)));
+}
+
 const base = 'https://cdn.jsdelivr.net/gh/mikecann/mikerosoft@main/tools';
 
 export const tools: Tool[] = [
@@ -157,7 +165,7 @@ export const tools: Tool[] = [
     name: 'taskbar',
     desc: 'Windows-style taskbar for macOS: one bar per monitor, pinned apps, per-monitor overrides, compact window items, and window avoidance',
     icon: `${base}/taskbar/icons/taskbar.png`,
-    header: `${base}/taskbar/docs/header.png`,
+    header: `${base}/taskbar/docs/header.webp`,
     screenshots: [
       `${base}/taskbar/docs/ss1.png`,
       `${base}/taskbar/docs/ss2.png`,

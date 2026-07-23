@@ -1,9 +1,10 @@
 import '@mantine/core/styles.css';
 import './App.css';
+import { useState } from 'react';
 import {
   Anchor,
-  Badge,
   Box,
+  Button,
   Container,
   createTheme,
   Group,
@@ -15,7 +16,14 @@ import {
   Title,
 } from '@mantine/core';
 import { ToolCard } from './ToolCard';
-import { PLATFORM_COLOR, PLATFORM_LABEL, PLATFORM_ORDER, tools } from './tools';
+import {
+  filterToolsByPlatforms,
+  PLATFORM_COLOR,
+  PLATFORM_LABEL,
+  PLATFORM_ORDER,
+  tools,
+  type PlatformId,
+} from './tools';
 
 const theme = createTheme({
   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
@@ -64,6 +72,17 @@ function GithubCorner() {
 }
 
 export default function App() {
+  const [activePlatforms, setActivePlatforms] = useState<PlatformId[]>([...PLATFORM_ORDER]);
+  const visibleTools = filterToolsByPlatforms(tools, activePlatforms);
+
+  function togglePlatform(platform: PlatformId) {
+    setActivePlatforms(current => (
+      current.includes(platform)
+        ? current.filter(id => id !== platform)
+        : PLATFORM_ORDER.filter(id => id === platform || current.includes(id))
+    ));
+  }
+
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
       <Box
@@ -92,23 +111,49 @@ export default function App() {
                 (and is in no way affiliated with Microsoft... please don't sue me!)
               </Text>
             </Text>
-            <Group gap="xs" justify="center" wrap="wrap">
-              {PLATFORM_ORDER.map(id => (
-                <Badge key={id} size="sm" variant="outline" color={PLATFORM_COLOR[id]}>
-                  {PLATFORM_LABEL[id]}
-                </Badge>
-              ))}
+            <Group
+              gap="xs"
+              justify="center"
+              wrap="wrap"
+              role="group"
+              aria-label="Filter tools by platform"
+            >
+              {PLATFORM_ORDER.map(id => {
+                const isActive = activePlatforms.includes(id);
+                return (
+                  <Button
+                    key={id}
+                    type="button"
+                    size="compact-sm"
+                    radius="xl"
+                    variant={isActive ? 'light' : 'outline'}
+                    color={isActive ? PLATFORM_COLOR[id] : 'gray'}
+                    aria-pressed={isActive}
+                    onClick={() => togglePlatform(id)}
+                    className="platform-filter"
+                  >
+                    {PLATFORM_LABEL[id]}
+                  </Button>
+                );
+              })}
             </Group>
           </Stack>
 
-          <SimpleGrid
-            cols={{ base: 1, sm: 2, md: 3, lg: 4 }}
-            spacing="lg"
-          >
-            {tools.map(tool => (
-              <ToolCard key={tool.name} tool={tool} />
-            ))}
-          </SimpleGrid>
+          {visibleTools.length > 0 ? (
+            <SimpleGrid
+              id="tool-grid"
+              cols={{ base: 1, sm: 2, md: 3, lg: 4 }}
+              spacing="lg"
+            >
+              {visibleTools.map(tool => (
+                <ToolCard key={tool.name} tool={tool} />
+              ))}
+            </SimpleGrid>
+          ) : (
+            <Text ta="center" c="dimmed" py="xl" role="status">
+              Select Windows or macOS to show available tools.
+            </Text>
+          )}
         </Container>
       </Box>
     </MantineProvider>

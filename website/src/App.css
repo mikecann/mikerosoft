@@ -12,6 +12,21 @@
   transform-origin: 130px 106px;
 }
 
+.platform-filter {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: opacity 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.platform-filter[aria-pressed='false'] {
+  opacity: 0.62;
+}
+
+.platform-filter[aria-pressed='false']:hover,
+.platform-filter[aria-pressed='false']:focus-visible {
+  opacity: 1;
+}
+
 .github-corner:hover .github-corner-arm,
 .github-corner:focus-visible .github-corner-arm {
   animation: github-corner-wave 560ms ease-in-out;
