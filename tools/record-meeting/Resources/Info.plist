@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Record Meeting</string>
+    <key>CFBundleExecutable</key>
+    <string>record-meeting-swift</string>
+    <key>CFBundleIconFile</key>
+    <string>record-meeting</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.mikerosoft.record-meeting</string>
+    <key>CFBundleName</key>
+    <string>Record Meeting</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Record Meeting records your microphone so your side of the meeting is included.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Record Meeting uses Screen &amp; System Audio Recording access to capture the other people in your meeting.</string>
+</dict>
+</plist>

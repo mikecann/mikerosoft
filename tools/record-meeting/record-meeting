@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="${RECORD_MEETING_APP_DIR:-$HOME/Applications/Record Meeting.app}"
+
+case "${1:-start}" in
+  start)
+    if [[ ! -d "$APP_DIR" ]]; then
+      bash "$SCRIPT_DIR/setup_mac.sh"
+    fi
+    open "$APP_DIR"
+    ;;
+  restart)
+    exec bash "$SCRIPT_DIR/restart.sh"
+    ;;
+  stop|kill)
+    exec bash "$SCRIPT_DIR/kill.sh"
+    ;;
+  setup|install)
+    exec bash "$SCRIPT_DIR/setup_mac.sh"
+    ;;
+  *)
+    echo "Usage: record-meeting [start|restart|stop|setup]" >&2
+    exit 2
+    ;;
+esac
