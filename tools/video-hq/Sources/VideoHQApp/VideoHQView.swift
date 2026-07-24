@@ -66,7 +66,7 @@ struct VideoHQView: View {
                     model.openRoughCutReview()
                 }
                 .disabled(!model.canOpenRoughCutReview)
-                .help("Analyze a source recording for silence, false starts, bad takes, and script coverage")
+                .help("Analyze a source recording for silence, false starts, bad takes, and sections needing review")
                 Button("Choose Video", systemImage: "folder") {
                     model.openVideoPanel()
                 }

@@ -348,7 +348,7 @@ final class VideoHQModel: ObservableObject {
 
     func openRoughCutReview() {
         guard let project = selectedProject else {
-            errorMessage = "Choose a video project before opening Rough Cut Review."
+            errorMessage = "Choose a video project before opening the Rough Cut Process."
             return
         }
         guard let configuration else {
@@ -358,10 +358,9 @@ final class VideoHQModel: ObservableObject {
         }
         roughCutWindowController.show(
             project: project,
-            script: projectScript,
             configuration: configuration
         )
-        statusMessage = "Opened Rough Cut Review for \(project.name)."
+        statusMessage = "Opened the Rough Cut Process for \(project.name)."
     }
 
     func revealActiveFile() {

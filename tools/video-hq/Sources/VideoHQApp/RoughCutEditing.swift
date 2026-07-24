@@ -14,6 +14,54 @@ enum RoughCutManualDecision: String, Codable, CaseIterable, Equatable {
     }
 }
 
+enum RoughCutRegionFilter: String, CaseIterable, Equatable {
+    case all
+    case valid
+    case falseStart
+    case badTake
+    case noTranscriptSkip
+    case needsReview
+    case awaitingDecision
+
+    var label: String {
+        switch self {
+        case .all: return "All sections"
+        case .valid: return "Valid"
+        case .falseStart: return "False starts"
+        case .badTake: return "Bad takes"
+        case .noTranscriptSkip: return "No transcript skips"
+        case .needsReview: return "Needs review"
+        case .awaitingDecision: return "Awaiting call"
+        }
+    }
+
+    func apply(
+        to regions: [RoughCutRegion],
+        manualDecisions: [String: RoughCutManualDecision]
+    ) -> [RoughCutRegion] {
+        regions.filter { region in
+            switch self {
+            case .all:
+                return true
+            case .valid:
+                return region.kind == .valid
+            case .falseStart:
+                return region.kind == .falseStart
+            case .badTake:
+                return region.kind == .badTake
+            case .noTranscriptSkip:
+                return region.kind == .noTranscriptSkip
+            case .needsReview:
+                return region.kind == .needsReview
+            case .awaitingDecision:
+                // Only planner review items still on Auto need an explicit call.
+                return region.kind == .needsReview
+                    && (manualDecisions[region.id] ?? .automatic) == .automatic
+            }
+        }
+    }
+}
+
 extension RoughCutRegion {
     func applyingManualDecision(_ manualDecision: RoughCutManualDecision?) -> RoughCutRegion {
         guard let manualDecision, manualDecision != .automatic else { return self }

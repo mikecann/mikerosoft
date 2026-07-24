@@ -3,6 +3,12 @@ import XCTest
 @testable import VideoHQApp
 
 final class RoughCutAnalysisTests: XCTestCase {
+    func testRoughCutProcessMovesDirectlyFromReviewToVisuals() {
+        XCTAssertEqual(RoughCutProcessStage.allCases, [.review, .visuals])
+        XCTAssertEqual(RoughCutProcessStage.review.label, "1. Review")
+        XCTAssertEqual(RoughCutProcessStage.visuals.label, "2. Visuals")
+    }
+
     func testDecodesPlannerRegionsAndClassifiesReviewSegments() throws {
         let data = Data(
             """
@@ -109,17 +115,279 @@ final class RoughCutAnalysisTests: XCTestCase {
         XCTAssertNil(try store.latestAnalysis(for: source))
     }
 
-    func testPlannerCommandReusesTheProvidedTranscript() {
+    func testMediaAnalysisCommandProducesUnclassifiedInputsAndReusesTranscript() {
         let arguments = FilmoraRoughCutRunner.arguments(
             videoURL: URL(fileURLWithPath: "/project/source/camera.mp4"),
             outputDirectoryURL: URL(fileURLWithPath: "/project/work/video-hq-rough-cut/camera/run"),
             transcriptURL: URL(fileURLWithPath: "/project/source/camera.srt")
         )
 
-        XCTAssertEqual(arguments[0...2], ["-m", "filmora_wfp", "rough-cut-plan"])
+        XCTAssertEqual(arguments[0...2], ["-m", "filmora_wfp", "rough-cut-inputs"])
         XCTAssertTrue(arguments.contains("--transcript"))
         XCTAssertEqual(arguments.last, "/project/source/camera.srt")
         XCTAssertTrue(arguments.contains("--json"))
+    }
+
+    func testCodexRoughCutAnalysisCommandIsEphemeralReadOnlyAndSchemaConstrained() {
+        let arguments = CodexRoughCutAnalysisRunner.arguments(
+            schemaURL: URL(fileURLWithPath: "/tmp/rough-cut-schema.json"),
+            outputURL: URL(fileURLWithPath: "/tmp/rough-cut-output.json"),
+            workingDirectoryURL: URL(fileURLWithPath: "/analysis/run")
+        )
+
+        XCTAssertTrue(arguments.contains("--ephemeral"))
+        XCTAssertTrue(arguments.contains("--ignore-user-config"))
+        XCTAssertEqual(
+            Array(arguments[arguments.firstIndex(of: "--sandbox")!...].prefix(2)),
+            ["--sandbox", "read-only"]
+        )
+        XCTAssertEqual(
+            Array(arguments[arguments.firstIndex(of: "--output-schema")!...].prefix(2)),
+            ["--output-schema", "/tmp/rough-cut-schema.json"]
+        )
+        XCTAssertEqual(
+            Array(arguments[arguments.firstIndex(of: "-o")!...].prefix(2)),
+            ["-o", "/tmp/rough-cut-output.json"]
+        )
+    }
+
+    func testCodexRoughCutAnalysisReplacesEveryNeutralDecision() throws {
+        let input = Data(
+            """
+            {
+              "schema_version": 1,
+              "source": {"filename": "camera.mp4", "duration_seconds": 12},
+              "settings": {"classification": "codex"},
+              "regions": [
+                {
+                  "id": "one", "start": 0, "end": 3, "text": "So the idea is",
+                  "decision": "review", "confidence": 0,
+                  "reason": "awaiting_codex_analysis", "duplicate_of": null,
+                  "has_transcript_evidence": true
+                },
+                {
+                  "id": "two", "start": 4, "end": 9, "text": "So the idea is the final version.",
+                  "decision": "review", "confidence": 0,
+                  "reason": "awaiting_codex_analysis", "duplicate_of": null,
+                  "has_transcript_evidence": true
+                }
+              ]
+            }
+            """.utf8
+        )
+        let response = Data(
+            """
+            {
+              "decisions": [
+                {
+                  "region_id": "one", "classification": "false_start",
+                  "confidence": 0.96, "reason": "The speaker restarts this thought in region two.",
+                  "duplicate_of": "two"
+                },
+                {
+                  "region_id": "two", "classification": "valid",
+                  "confidence": 0.98, "reason": "This is the completed take.",
+                  "duplicate_of": null
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let plan = try RoughCutPlan.decode(
+            from: CodexRoughCutAnalysisRunner.classifiedPlanData(
+                inputData: input,
+                responseData: response
+            )
+        )
+
+        XCTAssertEqual(plan.regions.map(\.decision), ["drop", "keep"])
+        XCTAssertEqual(plan.regions.map(\.kind), [.falseStart, .valid])
+        XCTAssertEqual(plan.regions[0].duplicateOf, "two")
+    }
+
+    func testShortSectionWithoutTranscriptIsSkippedInsteadOfNeedingReview() throws {
+        let input = Data(
+            """
+            {
+              "schema_version": 1,
+              "source": {"filename": "camera.mp4", "duration_seconds": 8},
+              "regions": [
+                {
+                  "id": "short", "start": 0, "end": 1, "text": "",
+                  "decision": "review", "confidence": 0,
+                  "reason": "awaiting_codex_analysis", "duplicate_of": null,
+                  "has_transcript_evidence": false
+                },
+                {
+                  "id": "long", "start": 2, "end": 7, "text": "",
+                  "decision": "review", "confidence": 0,
+                  "reason": "awaiting_codex_analysis", "duplicate_of": null,
+                  "has_transcript_evidence": false
+                }
+              ]
+            }
+            """.utf8
+        )
+        let response = Data(
+            """
+            {
+              "decisions": [
+                {
+                  "region_id": "short", "classification": "needs_review",
+                  "confidence": 0.7, "reason": "Audible region has no useful transcription.",
+                  "duplicate_of": null
+                },
+                {
+                  "region_id": "long", "classification": "needs_review",
+                  "confidence": 0.7, "reason": "Audible region has no useful transcription.",
+                  "duplicate_of": null
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let plan = try RoughCutPlan.decode(
+            from: CodexRoughCutAnalysisRunner.classifiedPlanData(
+                inputData: input,
+                responseData: response
+            )
+        )
+
+        XCTAssertEqual(plan.regions[0].decision, "drop")
+        XCTAssertEqual(plan.regions[0].reason, "no_transcript_skip")
+        XCTAssertEqual(plan.regions[0].kind, .noTranscriptSkip)
+        XCTAssertEqual(plan.regions[1].decision, "review")
+        XCTAssertEqual(plan.regions[1].kind, .needsReview)
+    }
+
+    func testCodexReasonPresentationHidesInternalClassificationPrefix() {
+        XCTAssertEqual(
+            RoughCutReasonPresentation.text(
+                for: "codex_needs_review: Audible region has no useful transcription."
+            ),
+            "Audible region has no useful transcription."
+        )
+        XCTAssertEqual(
+            RoughCutReasonPresentation.text(for: "no_transcript_skip"),
+            "No transcript skip"
+        )
+    }
+
+    func testCodexRoughCutAnalysisReturnsValidatedJoinSuggestionsInTheSamePass() throws {
+        let input = Data(
+            """
+            {
+              "schema_version": 1,
+              "source": {"filename": "camera.mp4", "duration_seconds": 12},
+              "regions": [
+                {
+                  "id": "one", "start": 0, "end": 3, "text": "This is",
+                  "decision": "review", "confidence": 0,
+                  "reason": "awaiting_codex_analysis", "duplicate_of": null,
+                  "has_transcript_evidence": true
+                },
+                {
+                  "id": "two", "start": 4, "end": 8, "text": "one complete sentence.",
+                  "decision": "review", "confidence": 0,
+                  "reason": "awaiting_codex_analysis", "duplicate_of": null,
+                  "has_transcript_evidence": true
+                },
+                {
+                  "id": "three", "start": 9, "end": 12, "text": "Next thought.",
+                  "decision": "review", "confidence": 0,
+                  "reason": "awaiting_codex_analysis", "duplicate_of": null,
+                  "has_transcript_evidence": true
+                }
+              ]
+            }
+            """.utf8
+        )
+        let response = Data(
+            """
+            {
+              "decisions": [
+                {
+                  "region_id": "one", "classification": "valid", "confidence": 0.98,
+                  "reason": "Intended speech.", "duplicate_of": null
+                },
+                {
+                  "region_id": "two", "classification": "valid", "confidence": 0.98,
+                  "reason": "Intended speech.", "duplicate_of": null
+                },
+                {
+                  "region_id": "three", "classification": "valid", "confidence": 0.98,
+                  "reason": "Intended speech.", "duplicate_of": null
+                }
+              ],
+              "join_suggestions": [
+                {
+                  "region_ids": ["one", "two"], "confidence": 0.95,
+                  "reason": "The first clip ends mid-sentence."
+                },
+                {
+                  "region_ids": ["one", "three"], "confidence": 0.8,
+                  "reason": "Not adjacent."
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let result = try CodexRoughCutAnalysisRunner.classifiedResult(
+            inputData: input,
+            responseData: response
+        )
+
+        XCTAssertEqual(result.joinSuggestions.count, 1)
+        XCTAssertEqual(result.joinSuggestions[0].regionIDs, ["one", "two"])
+        XCTAssertEqual(result.joinSuggestions[0].decision, .pending)
+    }
+
+    func testCodexRoughCutRequestIncludesOptionalScriptAsSupportingContext() throws {
+        let request = try CodexRoughCutAnalysisRunner.requestData(
+            inputData: Data("{\"regions\":[]}".utf8),
+            transcriptData: Data("{\"segments\":[]}".utf8),
+            script: "# Script\\nThe intended spoken line."
+        )
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: request) as? [String: Any]
+        )
+
+        XCTAssertEqual(
+            payload["reference_script"] as? String,
+            "# Script\\nThe intended spoken line."
+        )
+    }
+
+    func testJoinSuggestionsProduceMatchingNumberedIndicatorsForBothSectionRows() {
+        let suggestions = [
+            RoughCutJoinSuggestion(
+                regionIDs: ["one", "two"],
+                confidence: 0.99,
+                reason: "The sentence continues."
+            ),
+            RoughCutJoinSuggestion(
+                regionIDs: ["four", "five", "six"],
+                confidence: 0.95,
+                reason: "One interrupted thought."
+            ),
+        ]
+
+        let indicators = RoughCutJoinSectionIndicator.byRegionID(
+            suggestions: suggestions
+        )
+
+        XCTAssertEqual(indicators["one"]?.first?.proposalNumber, 1)
+        XCTAssertEqual(indicators["one"]?.first?.clipNumber, 1)
+        XCTAssertEqual(indicators["two"]?.first?.proposalNumber, 1)
+        XCTAssertEqual(indicators["two"]?.first?.clipNumber, 2)
+        XCTAssertEqual(indicators["four"]?.first?.proposalNumber, 2)
+        XCTAssertEqual(indicators["six"]?.first?.clipNumber, 3)
+        XCTAssertEqual(indicators["six"]?.first?.clipCount, 3)
+        XCTAssertEqual(indicators["one"]?.first?.showsInlineAction, false)
+        XCTAssertEqual(indicators["two"]?.first?.showsInlineAction, true)
     }
 
     func testManualDecisionsPersistAndAutomaticRemovesTheOverride() throws {
@@ -151,6 +419,407 @@ final class RoughCutAnalysisTests: XCTestCase {
         XCTAssertEqual(cut.kind, .badTake)
         XCTAssertEqual(original.decision, "keep")
         XCTAssertEqual(original.reason, "no_high_confidence_duplicate")
+    }
+
+    func testRegionFiltersCanShowOnlyReviewSectionsWithoutAnExplicitDecision() {
+        let valid = region(id: "valid", text: "Clean take")
+        let review = RoughCutRegion(
+            id: "review",
+            start: 5,
+            end: 7,
+            text: "Check this take",
+            decision: "review",
+            confidence: 0.5,
+            reason: "short_clip_suspicious",
+            duplicateOf: nil,
+            hasTranscriptEvidence: true
+        )
+        let decidedReview = RoughCutRegion(
+            id: "decided-review",
+            start: 8,
+            end: 10,
+            text: "Already reviewed",
+            decision: "review",
+            confidence: 0.5,
+            reason: "short_clip_suspicious",
+            duplicateOf: nil,
+            hasTranscriptEvidence: true
+        )
+        let regions = [valid, review, decidedReview]
+        let decisions: [String: RoughCutManualDecision] = [
+            "decided-review": .keep,
+        ]
+
+        XCTAssertEqual(
+            RoughCutRegionFilter.all.apply(to: regions, manualDecisions: decisions).map(\.id),
+            ["valid", "review", "decided-review"]
+        )
+        XCTAssertEqual(
+            RoughCutRegionFilter.needsReview.apply(
+                to: regions,
+                manualDecisions: decisions
+            ).map(\.id),
+            ["review", "decided-review"]
+        )
+        XCTAssertEqual(
+            RoughCutRegionFilter.awaitingDecision.apply(
+                to: regions,
+                manualDecisions: decisions
+            ).map(\.id),
+            ["review"]
+        )
+    }
+
+    func testRoughCutProcessStartsWithOneStoryBeatPerAcceptedRegion() {
+        let process = RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["speech-0001", "speech-0003", "speech-0004"]
+        )
+
+        XCTAssertEqual(process.groups.map(\.regionIDs), [
+            ["speech-0001"],
+            ["speech-0003"],
+            ["speech-0004"],
+        ])
+        XCTAssertEqual(process.groups.map(\.visual.layout), [
+            .unassigned,
+            .unassigned,
+            .unassigned,
+        ])
+    }
+
+    func testRoughCutProcessMergesAndUnmergesContiguousStoryBeats() throws {
+        let original = RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["one", "two", "three", "four"]
+        )
+        let merged = try original.merging(groupIDs: ["two", "three"])
+
+        XCTAssertEqual(merged.groups.map(\.regionIDs), [
+            ["one"],
+            ["two", "three"],
+            ["four"],
+        ])
+        XCTAssertThrowsError(try original.merging(groupIDs: ["one", "three"]))
+
+        let restored = merged.unmerging(groupIDs: [merged.groups[1].id])
+        XCTAssertEqual(restored.groups.map(\.regionIDs), [
+            ["one"],
+            ["two"],
+            ["three"],
+            ["four"],
+        ])
+    }
+
+    func testCodexJoinSuggestionsKeepOnlyContiguousAcceptedClips() throws {
+        let response = try JSONDecoder().decode(
+            RoughCutJoinSuggestionResponse.self,
+            from: Data(
+                """
+                {
+                  "suggestions": [
+                    {
+                      "region_ids": ["one", "two"],
+                      "confidence": 0.94,
+                      "reason": "The first clip ends mid-sentence."
+                    },
+                    {
+                      "region_ids": ["one", "three"],
+                      "confidence": 0.81,
+                      "reason": "Not actually adjacent."
+                    },
+                    {
+                      "region_ids": ["missing", "four"],
+                      "confidence": 0.76,
+                      "reason": "Contains an unknown clip."
+                    },
+                    {
+                      "region_ids": ["four"],
+                      "confidence": 0.72,
+                      "reason": "Only one clip."
+                    }
+                  ]
+                }
+                """.utf8
+            )
+        )
+
+        let validated = RoughCutJoinSuggestionValidator.validated(
+            response.suggestions,
+            acceptedRegionIDs: ["one", "two", "three", "four"]
+        )
+
+        XCTAssertEqual(validated.count, 1)
+        XCTAssertEqual(validated[0].regionIDs, ["one", "two"])
+        XCTAssertEqual(validated[0].confidence, 0.94, accuracy: 0.001)
+    }
+
+    func testLegacyJoinSuggestionsLoadAsAwaitingAndDecisionsRoundTrip() throws {
+        let legacy = try JSONDecoder().decode(
+            RoughCutJoinSuggestionResponse.self,
+            from: Data(
+                """
+                {
+                  "suggestions": [{
+                    "region_ids": ["one", "two"],
+                    "confidence": 0.94,
+                    "reason": "The sentence continues."
+                  }]
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(legacy.suggestions[0].decision, .pending)
+
+        var rejected = legacy.suggestions[0]
+        rejected.decision = .rejected
+        let encoded = try JSONEncoder().encode(
+            RoughCutJoinSuggestionResponse(suggestions: [rejected])
+        )
+        let decoded = try JSONDecoder().decode(
+            RoughCutJoinSuggestionResponse.self,
+            from: encoded
+        )
+        XCTAssertEqual(decoded.suggestions[0].decision, .rejected)
+    }
+
+    func testJoinSuggestionReconciliationPreservesDecisionsAndOlderProposals() {
+        let previous = [
+            RoughCutJoinSuggestion(
+                regionIDs: ["one", "two"],
+                confidence: 0.8,
+                reason: "Old reason",
+                decision: .rejected
+            ),
+            RoughCutJoinSuggestion(
+                regionIDs: ["three", "four"],
+                confidence: 0.7,
+                reason: "Keep this older proposal",
+                decision: .pending
+            ),
+        ]
+        let refreshed = [
+            RoughCutJoinSuggestion(
+                regionIDs: ["one", "two"],
+                confidence: 0.96,
+                reason: "Better current reason",
+                decision: .pending
+            ),
+            RoughCutJoinSuggestion(
+                regionIDs: ["four", "five"],
+                confidence: 0.91,
+                reason: "New proposal",
+                decision: .pending
+            ),
+        ]
+
+        let reconciled = RoughCutJoinSuggestionReconciler.reconcile(
+            refreshed: refreshed,
+            previous: previous,
+            acceptedRegionIDs: ["one", "two", "three", "four", "five"]
+        )
+
+        XCTAssertEqual(reconciled.map(\.regionIDs), [
+            ["one", "two"],
+            ["three", "four"],
+            ["four", "five"],
+        ])
+        XCTAssertEqual(reconciled[0].decision, .rejected)
+        XCTAssertEqual(reconciled[0].reason, "Better current reason")
+        XCTAssertEqual(reconciled[1].decision, .pending)
+    }
+
+    func testJoinApprovalAndUndoAreReversibleWithoutDeletingProposal() throws {
+        let proposal = RoughCutJoinSuggestion(
+            regionIDs: ["two", "three"],
+            confidence: 0.95,
+            reason: "One interrupted sentence.",
+            decision: .pending
+        )
+        let initialProcess = RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["one", "two", "three", "four"]
+        )
+
+        let approved = try RoughCutJoinDecisionWorkflow.apply(
+            .approved,
+            to: proposal,
+            process: initialProcess
+        )
+        XCTAssertEqual(approved.proposal.decision, .approved)
+        XCTAssertEqual(approved.process.groups.map(\.regionIDs), [
+            ["one"],
+            ["two", "three"],
+            ["four"],
+        ])
+
+        let undone = try RoughCutJoinDecisionWorkflow.apply(
+            .pending,
+            to: approved.proposal,
+            process: approved.process
+        )
+        XCTAssertEqual(undone.proposal.decision, .pending)
+        XCTAssertEqual(undone.process.groups.map(\.regionIDs), [
+            ["one"],
+            ["two"],
+            ["three"],
+            ["four"],
+        ])
+
+        let rejected = try RoughCutJoinDecisionWorkflow.apply(
+            .rejected,
+            to: approved.proposal,
+            process: approved.process
+        )
+        XCTAssertEqual(rejected.proposal.decision, .rejected)
+        XCTAssertEqual(rejected.process.groups.map(\.regionIDs), undone.process.groups.map(\.regionIDs))
+    }
+
+    func testCodexJoinSuggestionCommandIsEphemeralReadOnlyAndSchemaConstrained() {
+        let arguments = CodexJoinSuggestionRunner.arguments(
+            schemaURL: URL(fileURLWithPath: "/tmp/join-schema.json"),
+            outputURL: URL(fileURLWithPath: "/tmp/join-output.json"),
+            workingDirectoryURL: URL(fileURLWithPath: "/analysis/run")
+        )
+
+        XCTAssertTrue(arguments.contains("--ephemeral"))
+        XCTAssertTrue(arguments.contains("--ignore-user-config"))
+        XCTAssertEqual(
+            Array(arguments[arguments.firstIndex(of: "--sandbox")!...].prefix(2)),
+            ["--sandbox", "read-only"]
+        )
+        XCTAssertEqual(
+            Array(arguments[arguments.firstIndex(of: "--output-schema")!...].prefix(2)),
+            ["--output-schema", "/tmp/join-schema.json"]
+        )
+        XCTAssertEqual(
+            Array(arguments[arguments.firstIndex(of: "-o")!...].prefix(2)),
+            ["-o", "/tmp/join-output.json"]
+        )
+        XCTAssertTrue(arguments.contains("--skip-git-repo-check"))
+    }
+
+    func testSpeechJoinPlannerTrimsToWordHandlesAndUsesShortCrossfade() throws {
+        let regions = try RoughCutPlan.decode(
+            from: Data(
+                """
+                {
+                  "schema_version": 1,
+                  "source": {"filename": "camera.mov", "duration_seconds": 20},
+                  "regions": [
+                    {
+                      "id": "one", "start": 1.00, "end": 4.20,
+                      "text": "This sentence is", "decision": "keep", "confidence": 1,
+                      "reason": "keep", "duplicate_of": null,
+                      "has_transcript_evidence": true
+                    },
+                    {
+                      "id": "two", "start": 8.00, "end": 10.40,
+                      "text": "continued here.", "decision": "keep", "confidence": 1,
+                      "reason": "keep", "duplicate_of": null,
+                      "has_transcript_evidence": true
+                    }
+                  ]
+                }
+                """.utf8
+            )
+        ).regions
+        let transcript = try RoughCutTranscript.decode(
+            from: Data(
+                """
+                {
+                  "schema_version": 1,
+                  "segments": [
+                    {
+                      "start": 1.08, "end": 4.10, "text": "This sentence is",
+                      "words": [
+                        {"start": 1.08, "end": 1.30, "text": "This"},
+                        {"start": 3.80, "end": 4.10, "text": "is"}
+                      ]
+                    },
+                    {
+                      "start": 8.07, "end": 10.31, "text": "continued here.",
+                      "words": [
+                        {"start": 8.07, "end": 8.50, "text": "continued"},
+                        {"start": 10.00, "end": 10.31, "text": "here."}
+                      ]
+                    }
+                  ]
+                }
+                """.utf8
+            )
+        )
+
+        let plan = RoughCutSpeechJoinPlanner.plan(
+            regions: regions,
+            words: transcript.words,
+            joinedPairs: [RoughCutRegionPair(left: "one", right: "two")]
+        )
+
+        XCTAssertEqual(plan.clips[0].sourceStart, 1.00, accuracy: 0.001)
+        XCTAssertEqual(plan.clips[0].sourceEnd, 4.18, accuracy: 0.001)
+        XCTAssertEqual(plan.clips[0].crossfadeAfter, 0.04, accuracy: 0.001)
+        XCTAssertEqual(plan.clips[1].sourceStart, 8.01, accuracy: 0.001)
+        XCTAssertEqual(plan.clips[1].sourceEnd, 10.39, accuracy: 0.001)
+        XCTAssertEqual(plan.duration, 5.52, accuracy: 0.001)
+    }
+
+    func testRoughCutProcessReconcilesDecisionsAndPersistsVisualPlans() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        var process = try RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["one", "two", "three"]
+        ).merging(groupIDs: ["one", "two"])
+        let mergedID = process.groups[0].id
+        process = process.assigningVisual(
+            RoughCutVisualPlan(
+                layout: .screencastWithCamera,
+                detail: "Dashboard walkthrough.mov"
+            ),
+            toGroupIDs: [mergedID]
+        )
+
+        let reconciled = process.reconciled(
+            acceptedRegionIDs: ["one", "two", "four"]
+        )
+        XCTAssertEqual(reconciled.groups.map(\.regionIDs), [
+            ["one", "two"],
+            ["four"],
+        ])
+        XCTAssertEqual(reconciled.groups[0].visual.layout, .screencastWithCamera)
+        XCTAssertEqual(reconciled.groups[0].visual.detail, "Dashboard walkthrough.mov")
+
+        let store = RoughCutProcessStore(analysisDirectoryURL: root)
+        try store.save(reconciled)
+        XCTAssertEqual(try store.load(), reconciled)
+        let json = String(
+            data: try Data(contentsOf: store.processURL),
+            encoding: .utf8
+        )
+        XCTAssertTrue(json?.contains("\"region_ids\"") == true)
+        XCTAssertFalse(json?.contains("\"region_i_ds\"") == true)
+
+        let reset = reconciled.assigningVisual(
+            RoughCutVisualPlan(layout: .unassigned, detail: "stale media.mov"),
+            toGroupIDs: [reconciled.groups[0].id]
+        )
+        XCTAssertEqual(reset.groups[0].visual, .unassigned)
+
+        try Data(
+            """
+            {
+              "schema_version": 1,
+              "groups": [{
+                "id": "legacy",
+                "region_i_ds": ["legacy"],
+                "visual": {"layout": "unassigned", "detail": "stale.mov"}
+              }]
+            }
+            """.utf8
+        ).write(to: store.processURL)
+        let migrated = try store.loadOrCreate(acceptedRegionIDs: ["legacy"])
+        XCTAssertEqual(migrated.groups[0].regionIDs, ["legacy"])
+        XCTAssertEqual(migrated.groups[0].visual, .unassigned)
     }
 
     func testReviewedPlanPreservesPlannerDataAndRebuildsKeepRanges() throws {
@@ -331,24 +1000,6 @@ final class RoughCutAnalysisTests: XCTestCase {
         XCTAssertNil(RoughCutTimelineInteraction.regionID(at: 4.5, regions: regions))
         XCTAssertEqual(RoughCutTimelineInteraction.regionID(at: 5, regions: regions), "two")
         XCTAssertEqual(RoughCutTimelineInteraction.regionID(at: 8, regions: regions), "two")
-    }
-
-    func testScriptCoverageFlagsOffScriptSpeechAndMissingParagraphs() {
-        let regions = [
-            region(id: "one", text: "Build agents with durable objects."),
-            region(id: "two", text: "Remember to like and subscribe."),
-        ]
-        let script = """
-        # Script
-        Build agents with durable objects.
-        Deploy them safely to production.
-        """
-
-        let report = RoughCutScriptCoverage.analyze(script: script, regions: regions)
-
-        XCTAssertGreaterThan(report.score(for: "one") ?? 0, 0.9)
-        XCTAssertTrue(report.mismatchedRegionIDs.contains("two"))
-        XCTAssertEqual(report.missingParagraphs.map(\.text), ["Deploy them safely to production."])
     }
 
     private func region(

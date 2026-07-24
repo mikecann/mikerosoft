@@ -4,6 +4,7 @@ enum RoughCutRegionKind: String, CaseIterable, Equatable {
     case valid = "Valid"
     case falseStart = "False start"
     case badTake = "Bad take"
+    case noTranscriptSkip = "No transcript skip"
     case needsReview = "Needs review"
 }
 
@@ -40,12 +41,28 @@ struct RoughCutRegion: Decodable, Equatable, Identifiable {
     var kind: RoughCutRegionKind {
         if decision == "keep" { return .valid }
         if decision == "review" { return .needsReview }
+        if reason == "no_transcript_skip" { return .noTranscriptSkip }
 
         let duplicateReason = reason.contains("repeat")
             || reason.contains("false_start")
             || reason.contains("duplicate")
             || reason.contains("take_is_more_continuous")
         return duplicateOf != nil || duplicateReason ? .falseStart : .badTake
+    }
+}
+
+enum RoughCutReasonPresentation {
+    static func text(for reason: String) -> String {
+        var value = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.lowercased().hasPrefix("codex_"),
+           let separator = value.range(of: ":") {
+            value = String(value[separator.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            value = value.replacingOccurrences(of: "_", with: " ")
+        }
+        guard let first = value.first else { return value }
+        return first.uppercased() + value.dropFirst()
     }
 }
 
@@ -341,7 +358,7 @@ struct FilmoraRoughCutRunner {
         transcriptURL: URL?
     ) -> [String] {
         var result = [
-            "-m", "filmora_wfp", "rough-cut-plan",
+            "-m", "filmora_wfp", "rough-cut-inputs",
             videoURL.path,
             outputDirectoryURL.path,
             "--json",
@@ -356,7 +373,7 @@ struct FilmoraRoughCutRunner {
         videoURL: URL,
         outputDirectoryURL: URL,
         transcriptURL: URL?
-    ) throws -> RoughCutPlan {
+    ) throws -> URL {
         guard fileManager.fileExists(
             atPath: automationRootURL.appendingPathComponent("filmora_wfp", isDirectory: true).path
         ) else {
@@ -398,93 +415,431 @@ struct FilmoraRoughCutRunner {
             throw RoughCutAnalysisError.plannerFailed(process.terminationStatus, output)
         }
 
-        let planURL = outputDirectoryURL.appendingPathComponent("rough-cut-plan.json")
-        guard fileManager.fileExists(atPath: planURL.path) else {
-            throw RoughCutAnalysisError.plannerOutputMissing(planURL)
+        let inputURL = outputDirectoryURL.appendingPathComponent("rough-cut-input.json")
+        guard fileManager.fileExists(atPath: inputURL.path) else {
+            throw RoughCutAnalysisError.plannerOutputMissing(inputURL)
         }
-        return try RoughCutPlan.decode(from: Data(contentsOf: planURL))
+        return inputURL
     }
 }
 
-struct RoughCutMissingScriptParagraph: Equatable, Identifiable {
-    let index: Int
-    let text: String
-    let coverage: Double
+enum CodexRoughCutAnalysisError: LocalizedError {
+    case executableMissing
+    case failed(Int32, String)
+    case invalidResponse(String)
 
-    var id: Int { index }
-}
-
-struct RoughCutScriptCoverageReport: Equatable {
-    let regionScores: [String: Double]
-    let mismatchedRegionIDs: Set<String>
-    let missingParagraphs: [RoughCutMissingScriptParagraph]
-
-    func score(for regionID: String) -> Double? {
-        regionScores[regionID]
+    var errorDescription: String? {
+        switch self {
+        case .executableMissing:
+            return "Codex CLI was not found. Install it or set VIDEO_HQ_CODEX_CLI to its path."
+        case .failed(let status, let output):
+            let detail = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return detail.isEmpty
+                ? "Codex rough-cut analysis failed with exit code \(status)."
+                : "Codex rough-cut analysis failed with exit code \(status):\n\(detail)"
+        case .invalidResponse(let detail):
+            return "Codex returned an invalid rough-cut analysis: \(detail)"
+        }
     }
 }
 
-enum RoughCutScriptCoverage {
-    static func analyze(
-        script: String,
-        regions: [RoughCutRegion]
-    ) -> RoughCutScriptCoverageReport {
-        let paragraphs = TeleprompterScriptParser.parse(script).compactMap { block -> String? in
-            guard case .spoken(let text) = block else { return nil }
-            return text
-        }
-        let scriptTokens = paragraphs.flatMap(tokens(in:))
-        let retainedRegions = regions.filter { $0.decision != "drop" }
-        let retainedTranscriptTokens = retainedRegions.flatMap { tokens(in: $0.text) }
+private struct CodexRoughCutDecisionResponse: Decodable {
+    let decisions: [CodexRoughCutDecision]
+    let joinSuggestions: [RoughCutJoinSuggestion]
 
-        var scores: [String: Double] = [:]
-        var mismatches = Set<String>()
-        for region in regions {
-            let regionTokens = tokens(in: region.text)
-            guard !regionTokens.isEmpty, !scriptTokens.isEmpty else { continue }
-            let score = orderedCoverage(of: regionTokens, within: scriptTokens)
-            scores[region.id] = score
-            if region.decision != "drop", regionTokens.count >= 4, score < 0.55 {
-                mismatches.insert(region.id)
+    private enum CodingKeys: String, CodingKey {
+        case decisions
+        case joinSuggestions = "join_suggestions"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        decisions = try container.decode([CodexRoughCutDecision].self, forKey: .decisions)
+        joinSuggestions = try container.decodeIfPresent(
+            [RoughCutJoinSuggestion].self,
+            forKey: .joinSuggestions
+        ) ?? []
+    }
+}
+
+private struct CodexRoughCutDecision: Decodable {
+    enum Classification: String, Decodable {
+        case valid
+        case falseStart = "false_start"
+        case badTake = "bad_take"
+        case needsReview = "needs_review"
+    }
+
+    let regionID: String
+    let classification: Classification
+    let confidence: Double
+    let reason: String
+    let duplicateOf: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case regionID = "region_id"
+        case classification
+        case confidence
+        case reason
+        case duplicateOf = "duplicate_of"
+    }
+}
+
+struct CodexRoughCutAnalysisResult {
+    let planData: Data
+    let plan: RoughCutPlan
+    let joinSuggestions: [RoughCutJoinSuggestion]
+}
+
+struct CodexRoughCutAnalysisRunner {
+    var fileManager = FileManager.default
+    var environment = ProcessInfo.processInfo.environment
+
+    static func arguments(
+        schemaURL: URL,
+        outputURL: URL,
+        workingDirectoryURL: URL
+    ) -> [String] {
+        [
+            "exec",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--sandbox", "read-only",
+            "--skip-git-repo-check",
+            "-C", workingDirectoryURL.path,
+            "--output-schema", schemaURL.path,
+            "-o", outputURL.path,
+            Self.prompt,
+        ]
+    }
+
+    func run(
+        inputURL: URL,
+        transcriptURL: URL,
+        script: String?,
+        outputPlanURL: URL,
+        workingDirectoryURL: URL
+    ) throws -> CodexRoughCutAnalysisResult {
+        guard let executableURL = executableURL() else {
+            throw CodexRoughCutAnalysisError.executableMissing
+        }
+
+        let temporaryDirectoryURL = fileManager.temporaryDirectory
+            .appendingPathComponent("video-hq-codex-review-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(
+            at: temporaryDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        defer { try? fileManager.removeItem(at: temporaryDirectoryURL) }
+
+        let schemaURL = temporaryDirectoryURL.appendingPathComponent("rough-cut-schema.json")
+        let responseURL = temporaryDirectoryURL.appendingPathComponent("rough-cut-response.json")
+        try Self.outputSchema.write(to: schemaURL, options: .atomic)
+
+        let inputData = try Data(contentsOf: inputURL)
+        let transcriptData = try Data(contentsOf: transcriptURL)
+        let processInput = try Self.requestData(
+            inputData: inputData,
+            transcriptData: transcriptData,
+            script: script
+        )
+
+        let process = Process()
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+        process.executableURL = executableURL
+        process.arguments = Self.arguments(
+            schemaURL: schemaURL,
+            outputURL: responseURL,
+            workingDirectoryURL: workingDirectoryURL
+        )
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+        process.environment = environment
+
+        try process.run()
+        try inputPipe.fileHandleForWriting.write(contentsOf: processInput)
+        try inputPipe.fileHandleForWriting.close()
+        let processOutput = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw CodexRoughCutAnalysisError.failed(
+                process.terminationStatus,
+                String(decoding: processOutput, as: UTF8.self)
+            )
+        }
+        guard fileManager.fileExists(atPath: responseURL.path) else {
+            throw CodexRoughCutAnalysisError.invalidResponse("the output file was not created")
+        }
+
+        let result = try Self.classifiedResult(
+            inputData: inputData,
+            responseData: Data(contentsOf: responseURL)
+        )
+        try result.planData.write(to: outputPlanURL, options: .atomic)
+        return result
+    }
+
+    static func requestData(
+        inputData: Data,
+        transcriptData: Data,
+        script: String?
+    ) throws -> Data {
+        var payload: [String: Any] = [
+            "detected_sections": try JSONSerialization.jsonObject(with: inputData),
+            "complete_transcript": try JSONSerialization.jsonObject(with: transcriptData),
+        ]
+        if let script = script?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !script.isEmpty {
+            payload["reference_script"] = script
+        }
+        return try JSONSerialization.data(withJSONObject: payload)
+    }
+
+    static func classifiedPlanData(
+        inputData: Data,
+        responseData: Data
+    ) throws -> Data {
+        try classifiedResult(
+            inputData: inputData,
+            responseData: responseData
+        ).planData
+    }
+
+    static func classifiedResult(
+        inputData: Data,
+        responseData: Data
+    ) throws -> CodexRoughCutAnalysisResult {
+        guard var payload = try JSONSerialization.jsonObject(with: inputData) as? [String: Any],
+              var regions = payload["regions"] as? [[String: Any]] else {
+            throw CodexRoughCutAnalysisError.invalidResponse(
+                "the detected section input is malformed"
+            )
+        }
+
+        let response: CodexRoughCutDecisionResponse
+        do {
+            response = try JSONDecoder().decode(
+                CodexRoughCutDecisionResponse.self,
+                from: responseData
+            )
+        } catch {
+            throw CodexRoughCutAnalysisError.invalidResponse(error.localizedDescription)
+        }
+
+        let regionIDs = regions.compactMap { $0["id"] as? String }
+        guard regionIDs.count == regions.count else {
+            throw CodexRoughCutAnalysisError.invalidResponse(
+                "one or more detected sections has no id"
+            )
+        }
+        let validIDs = Set(regionIDs)
+        var decisionsByID: [String: CodexRoughCutDecision] = [:]
+        for decision in response.decisions {
+            guard validIDs.contains(decision.regionID) else {
+                throw CodexRoughCutAnalysisError.invalidResponse(
+                    "unknown section id \(decision.regionID)"
+                )
+            }
+            guard decisionsByID[decision.regionID] == nil else {
+                throw CodexRoughCutAnalysisError.invalidResponse(
+                    "section \(decision.regionID) was classified more than once"
+                )
+            }
+            guard decision.confidence.isFinite,
+                  (0...1).contains(decision.confidence),
+                  !decision.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw CodexRoughCutAnalysisError.invalidResponse(
+                    "section \(decision.regionID) has invalid confidence or reasoning"
+                )
+            }
+            if let duplicateOf = decision.duplicateOf, !validIDs.contains(duplicateOf) {
+                throw CodexRoughCutAnalysisError.invalidResponse(
+                    "section \(decision.regionID) refers to unknown duplicate \(duplicateOf)"
+                )
+            }
+            decisionsByID[decision.regionID] = decision
+        }
+        guard decisionsByID.count == regions.count else {
+            let missing = regionIDs.filter { decisionsByID[$0] == nil }
+            throw CodexRoughCutAnalysisError.invalidResponse(
+                "Codex omitted sections: \(missing.joined(separator: ", "))"
+            )
+        }
+
+        var keepRanges: [[String: Double]] = []
+        var dropRanges: [[String: Double]] = []
+        for index in regions.indices {
+            let regionID = regionIDs[index]
+            guard let decision = decisionsByID[regionID] else { continue }
+            let start = (regions[index]["start"] as? NSNumber)?.doubleValue
+            let end = (regions[index]["end"] as? NSNumber)?.doubleValue
+            let hasTranscriptEvidence =
+                (regions[index]["has_transcript_evidence"] as? Bool) == true
+            let transcriptText = (regions[index]["text"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let shouldSkipWithoutTranscript =
+                (start.flatMap { regionStart in
+                    end.map { $0 - regionStart < 5 }
+                } ?? false)
+                && (!hasTranscriptEvidence || transcriptText.isEmpty)
+
+            if shouldSkipWithoutTranscript {
+                regions[index]["decision"] = "drop"
+                regions[index]["confidence"] = 1.0
+                regions[index]["reason"] = "no_transcript_skip"
+                regions[index]["duplicate_of"] = NSNull()
+            } else {
+                let prefix: String
+                switch decision.classification {
+                case .valid:
+                    regions[index]["decision"] = "keep"
+                    prefix = "codex_valid"
+                case .falseStart:
+                    regions[index]["decision"] = "drop"
+                    prefix = "codex_false_start"
+                case .badTake:
+                    regions[index]["decision"] = "drop"
+                    prefix = "codex_bad_take"
+                case .needsReview:
+                    regions[index]["decision"] = "review"
+                    prefix = "codex_needs_review"
+                }
+                regions[index]["confidence"] = decision.confidence
+                regions[index]["reason"] = "\(prefix): \(decision.reason)"
+                regions[index]["duplicate_of"] = decision.classification == .falseStart
+                    ? (decision.duplicateOf ?? NSNull())
+                    : NSNull()
+            }
+
+            guard let start, let end else { continue }
+            let range = ["start": start, "end": end]
+            if (regions[index]["decision"] as? String) == "drop" {
+                dropRanges.append(range)
+            } else {
+                keepRanges.append(range)
             }
         }
 
-        let missing = paragraphs.enumerated().compactMap { index, paragraph -> RoughCutMissingScriptParagraph? in
-            let paragraphTokens = tokens(in: paragraph)
-            guard !paragraphTokens.isEmpty else { return nil }
-            let coverage = orderedCoverage(of: paragraphTokens, within: retainedTranscriptTokens)
-            let threshold = paragraphTokens.count < 4 ? 0.9 : 0.65
-            guard coverage < threshold else { return nil }
-            return RoughCutMissingScriptParagraph(index: index, text: paragraph, coverage: coverage)
+        payload["regions"] = regions
+        payload["keep_ranges"] = keepRanges
+        payload["duplicate_drop_ranges"] = dropRanges
+        payload["non_speech_drop_ranges"] = []
+        payload["review_required"] = regions.contains {
+            ($0["decision"] as? String) != "keep"
         }
-
-        return RoughCutScriptCoverageReport(
-            regionScores: scores,
-            mismatchedRegionIDs: mismatches,
-            missingParagraphs: missing
+        payload["codex_analysis"] = [
+            "schema_version": 1,
+            "scope": "complete_transcript",
+        ]
+        guard JSONSerialization.isValidJSONObject(payload) else {
+            throw CodexRoughCutAnalysisError.invalidResponse(
+                "the classified plan is not valid JSON"
+            )
+        }
+        let planData = try JSONSerialization.data(
+            withJSONObject: payload,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        )
+        let plan = try RoughCutPlan.decode(from: planData)
+        let acceptedRegionIDs = plan.regions
+            .filter { $0.decision == "keep" }
+            .map(\.id)
+        return CodexRoughCutAnalysisResult(
+            planData: planData,
+            plan: plan,
+            joinSuggestions: RoughCutJoinSuggestionValidator.validated(
+                response.joinSuggestions,
+                acceptedRegionIDs: acceptedRegionIDs
+            )
         )
     }
 
-    private static func tokens(in text: String) -> [String] {
-        text.lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
+    private func executableURL() -> URL? {
+        let home = fileManager.homeDirectoryForCurrentUser
+        let candidates = [
+            environment["VIDEO_HQ_CODEX_CLI"].map(URL.init(fileURLWithPath:)),
+            home.appendingPathComponent(".local/bin/codex"),
+            URL(fileURLWithPath: "/opt/homebrew/bin/codex"),
+            URL(fileURLWithPath: "/usr/local/bin/codex"),
+        ].compactMap { $0 }
+        return candidates.first { fileManager.isExecutableFile(atPath: $0.path) }
     }
 
-    private static func orderedCoverage(of needle: [String], within haystack: [String]) -> Double {
-        guard !needle.isEmpty, !haystack.isEmpty else { return 0 }
-        var previous = Array(repeating: 0, count: haystack.count + 1)
-        for needleToken in needle {
-            var current = Array(repeating: 0, count: haystack.count + 1)
-            for index in haystack.indices {
-                if needleToken == haystack[index] {
-                    current[index + 1] = previous[index] + 1
-                } else {
-                    current[index + 1] = max(previous[index + 1], current[index])
-                }
+    private static let prompt = """
+    You are the editorial reviewer for Step 1 of a spoken-to-camera rough-cut process.
+    Read the complete ordered transcript and every detected section supplied on stdin.
+    Classify every section exactly once as valid, false_start, bad_take, or needs_review.
+
+    A false_start is an abandoned or incomplete attempt that is restarted or superseded
+    later. Set duplicate_of to the later completed section when there is a clear match.
+    A bad_take is material that should not appear in the edit, such as recording
+    directions, isolated filler, accidental speech, or an explicitly rejected attempt.
+    Valid material is the intended narrative even when a sentence continues into the
+    next section. Use needs_review when the transcript alone cannot support a confident
+    editorial call, including audible sections with no useful transcription.
+
+    Judge sections in the context of the entire narrative, not by word overlap alone.
+    A reference script may be supplied as supporting context for intended wording and
+    narrative order. The recording transcript remains the source of truth. Do not mark
+    an unscripted but useful recorded line as bad merely because it differs from the script.
+
+    In the same response, suggest likely joins where two or more clips classified as
+    valid form one interrupted sentence or thought after excluded clips are removed.
+    Suggest a join only when the first clip ends mid-clause or mid-thought and the next
+    valid clip clearly continues it. Do not join complete sentences just because their
+    topics are related. Return no more than 20 high-confidence join suggestions.
+    Do not classify a section as bad merely because it is short, informal, or not a
+    complete sentence. Return exact region_id values and concise reasoning.
+    """
+
+    private static let outputSchema = Data(
+        """
+        {
+          "type": "object",
+          "properties": {
+            "decisions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "region_id": {"type": "string"},
+                  "classification": {
+                    "type": "string",
+                    "enum": ["valid", "false_start", "bad_take", "needs_review"]
+                  },
+                  "confidence": {"type": "number"},
+                  "reason": {"type": "string"},
+                  "duplicate_of": {"type": ["string", "null"]}
+                },
+                "required": [
+                  "region_id", "classification", "confidence", "reason", "duplicate_of"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "join_suggestions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "region_ids": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "confidence": {"type": "number"},
+                  "reason": {"type": "string"}
+                },
+                "required": ["region_ids", "confidence", "reason"],
+                "additionalProperties": false
+              }
             }
-            previous = current
+          },
+          "required": ["decisions", "join_suggestions"],
+          "additionalProperties": false
         }
-        return Double(previous[haystack.count]) / Double(needle.count)
-    }
+        """.utf8
+    )
 }
