@@ -1,3 +1,5 @@
+![Record Meeting](docs/header.webp)
+
 # Record Meeting
 
 A small always-on-top macOS recorder for online meetings. It captures both the
@@ -11,6 +13,12 @@ automatically highlights and scrolls to the line at the current playhead.
 
 Completed meetings can also be added as pages in a single **Recorded Meetings**
 Notion database.
+
+## Screenshots
+
+![Record Meeting ready to capture a meeting](docs/ss1.png)
+
+![Record Meeting synchronized waveform and transcript review](docs/ss2.png)
 
 ## Requirements
 

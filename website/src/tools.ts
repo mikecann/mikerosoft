@@ -186,6 +186,18 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
+    name: 'record-meeting',
+    desc: 'Always-on-top meeting recorder with system audio and microphone capture, live waveform, synchronized speaker-labelled transcript review, MP3 export, and Notion publishing',
+    icon: `${base}/record-meeting/icons/record-meeting.png`,
+    header: `${base}/record-meeting/docs/header.webp`,
+    screenshots: [
+      `${base}/record-meeting/docs/ss1.png`,
+      `${base}/record-meeting/docs/ss2.png`,
+    ],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/record-meeting',
+    platforms: ['macos'],
+  },
+  {
     name: 'video-hq',
     desc: 'Native macOS video-production hub: browse project folders, import scripts from Notion, preview rendered MP4s, transcribe, and generate YouTube descriptions',
     icon: `${base}/video-hq/icons/video-hq.png`,
