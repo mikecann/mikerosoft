@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+case "${1:-restart}" in
+  restart|start)
+    exec "$SCRIPT_DIR/restart.sh"
+    ;;
+  stop|kill)
+    exec "$SCRIPT_DIR/kill.sh"
+    ;;
+  setup|install)
+    exec "$SCRIPT_DIR/setup_mac.sh"
+    ;;
+  uninstall)
+    exec "$SCRIPT_DIR/uninstall.sh"
+    ;;
+  *)
+    echo "Usage: last-window-quits [restart|start|stop|kill|setup|install|uninstall]" >&2
+    exit 2
+    ;;
+esac

@@ -40,6 +40,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/sleep-monitors/docs/header.webp" width="220"><br>[sleep-monitors](tools/sleep-monitors/README.md) | CLI + shortcut | Turn off all connected monitors until keyboard or mouse input wakes them |
 | <img src="tools/task-stats/docs/header.webp" width="220"><br>[task-stats](tools/task-stats/README.md) | Taskbar | Real-time NET/CPU/GPU/MEM sparklines overlaid on the taskbar |
 | <img src="tools/taskbar/docs/header.webp" width="220"><br>[taskbar](tools/taskbar/README.md) | Mac - taskbar | Windows-style taskbar for macOS with one bar per monitor, pinned apps, battery/stats/date widgets, per-monitor overrides, and window avoidance |
+| <img src="tools/last-window-quits/icons/last-window-quits.png" width="32"><br>[last-window-quits](tools/last-window-quits/README.md) | Mac - menu bar | Quit normal Dock apps when their final window closes, while preserving minimized windows and normal save prompts |
 | <img src="tools/record-it/docs/header.webp" width="220"><br>[record-it](tools/record-it/README.md) | Mac - GUI | Native SwiftUI screen and camera recorder with 4K/30 capture, project-aware output folders, and separate full-resolution files |
 | <img src="tools/record-meeting/docs/header.webp" width="220"><br>[record-meeting](tools/record-meeting/README.md) | Mac - GUI | Always-on-top meeting recorder with system audio + microphone capture, live waveform, synchronized transcript review, MP3 export, speaker-labelled transcription, and Notion publishing |
 | <img src="tools/video-hq/docs/header.jpg" width="220"><br>[video-hq](tools/video-hq/README.md) | Mac - GUI | Native video-production command center with project and render discovery, Notion script import, transcription, and YouTube descriptions |
@@ -90,6 +91,8 @@ For macOS, set tools up individually where mac support exists:
 - `worktrees` (needs [Bun](https://bun.sh) on your PATH): see [tools/worktrees/README.md](tools/worktrees/README.md) for setup (`install-to-path.sh` plus `~/.local/bin` on `PATH`).
 - `taskbar`:
   `bash tools/taskbar/setup_mac.sh`
+- `last-window-quits`:
+  `bash tools/last-window-quits/setup_mac.sh`
 - `record-it`:
   `bash tools/record-it/setup_mac.sh`
 - `record-meeting`:
@@ -110,6 +113,7 @@ while still not covering the Windows-only integrations.
 | `ghopen` | Supported | `bash tools/ghopen/setup_mac.sh` | `ghopen` | Opens the current repo on GitHub. With `gh` installed it opens the PR page first when the branch has one |
 | `worktrees` | Supported | See [tools/worktrees/README.md](tools/worktrees/README.md) | `worktrees` | Needs `~/.local/bin` on `PATH` (or run `bash tools/worktrees/run.sh`). Uses the checkout you are in to find `tools/worktrees`; run `bun install` in that folder per clone if deps are missing |
 | `taskbar` | Supported | `bash tools/taskbar/setup_mac.sh` | `taskbar restart` | Swift/AppKit taskbar for macOS. Run `bash install_mac.sh` if you want the `taskbar` launcher on `PATH` |
+| `last-window-quits` | Supported | `bash tools/last-window-quits/setup_mac.sh` | `last-window-quits restart` | Menu-bar daemon that quits regular Dock apps after their final window closes. Requires Accessibility permission |
 | `record-it` | Supported | `bash tools/record-it/setup_mac.sh` | `record-it` | SwiftUI + ScreenCaptureKit + AVFoundation recorder. Saves into the selected project's `source` folder |
 | `record-meeting` | Supported | `bash tools/record-meeting/setup_mac.sh` | `record-meeting` | SwiftUI meeting audio recorder with diarized transcripts and optional Notion publishing |
 | `video-hq` | Supported | `bash tools/video-hq/setup_mac.sh` | Launch `Video HQ` from Spotlight or run `video-hq` | Project-first command center with Notion script import, rendered-video preview, transcription, and OpenRouter-powered descriptions |
