@@ -38,4 +38,36 @@ struct TranscriptTests {
         #expect(TranscriptDocument.displayName(for: "SPEAKER_11", names: [:]) == "Speaker 12")
         #expect(TranscriptDocument.displayName(for: nil, names: [:]) == "Unknown speaker")
     }
+
+    @Test
+    func activeSegmentTracksPlaybackAndHandlesGaps() {
+        let segments = [
+            TranscriptSegment(start: 0, end: 1.5, text: "First", speaker: "SPEAKER_00"),
+            TranscriptSegment(start: 2, end: 4, text: "Second", speaker: "SPEAKER_01"),
+        ]
+
+        #expect(TranscriptTimeline.activeSegmentIndex(at: 0.5, segments: segments) == 0)
+        #expect(TranscriptTimeline.activeSegmentIndex(at: 1.75, segments: segments) == nil)
+        #expect(TranscriptTimeline.activeSegmentIndex(at: 3.25, segments: segments) == 1)
+        #expect(TranscriptTimeline.activeSegmentIndex(at: 5, segments: segments) == nil)
+    }
+
+    @Test
+    func waveformResamplingKeepsPeaksAndRequestedWidth() {
+        let samples = [0.1, 0.8, 0.2, 0.4, 1.4, -0.3]
+
+        let resampled = WaveformMath.resample(samples, targetCount: 3)
+
+        #expect(resampled == [0.8, 0.4, 1.0])
+        #expect(WaveformMath.resample([], targetCount: 4) == [])
+        #expect(WaveformMath.resample(samples, targetCount: 0) == [])
+    }
+
+    @Test
+    func audioPowerIsClampedAndMakesQuietAudioVisible() {
+        #expect(WaveformMath.normalizedPower(meanSquare: 0) == 0)
+        #expect(WaveformMath.normalizedPower(meanSquare: 1) == 1)
+        #expect(WaveformMath.normalizedPower(meanSquare: 4) == 1)
+        #expect(WaveformMath.normalizedPower(meanSquare: 0.0001) > 0)
+    }
 }

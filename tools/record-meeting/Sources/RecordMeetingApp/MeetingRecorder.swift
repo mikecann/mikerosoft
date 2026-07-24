@@ -1,16 +1,27 @@
 import AVFoundation
+import AudioToolbox
 import CoreGraphics
 import CoreMedia
 import CoreVideo
 import ScreenCaptureKit
 
-final class MeetingRecorder: NSObject, SCStreamDelegate, SCRecordingOutputDelegate, @unchecked Sendable {
+final class MeetingRecorder: NSObject, SCStreamOutput, SCStreamDelegate, SCRecordingOutputDelegate, @unchecked Sendable {
     private let lock = NSLock()
+    private let audioQueue = DispatchQueue(label: "com.mikerosoft.record-meeting.audio-meter")
     private var stream: SCStream?
     private var recordingOutput: SCRecordingOutput?
     private var finishContinuation: CheckedContinuation<Void, Error>?
     private var finishResult: Result<Void, Error>?
     private var streamError: Error?
+    private var audioLevelHandler: (@Sendable (Double) -> Void)?
+    private var lastMeterEmission = 0.0
+    private var pendingAudioLevel = 0.0
+
+    func setAudioLevelHandler(_ handler: (@Sendable (Double) -> Void)?) {
+        lock.withLock {
+            audioLevelHandler = handler
+        }
+    }
 
     func start(outputURL: URL) async throws {
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
@@ -60,11 +71,15 @@ final class MeetingRecorder: NSObject, SCStreamDelegate, SCRecordingOutputDelega
         let output = SCRecordingOutput(configuration: outputConfiguration, delegate: self)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addRecordingOutput(output)
+        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioQueue)
+        try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: audioQueue)
 
         lock.withLock {
             finishContinuation = nil
             finishResult = nil
             streamError = nil
+            lastMeterEmission = 0
+            pendingAudioLevel = 0
             self.stream = stream
             recordingOutput = output
         }
@@ -118,6 +133,26 @@ final class MeetingRecorder: NSObject, SCStreamDelegate, SCRecordingOutputDelega
         finish(.failure(error))
     }
 
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard outputType == .audio || outputType == .microphone,
+              let level = Self.audioLevel(sampleBuffer: sampleBuffer) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let emittedLevel: Double? = lock.withLock {
+            pendingAudioLevel = max(pendingAudioLevel, level)
+            guard now - lastMeterEmission >= 0.05 else { return nil }
+            lastMeterEmission = now
+            let result = pendingAudioLevel
+            pendingAudioLevel = 0
+            return result
+        }
+        guard let emittedLevel else { return }
+        lock.withLock { audioLevelHandler }?(emittedLevel)
+    }
+
     private func waitForRecordingToFinish() async throws {
         try await withCheckedThrowingContinuation { continuation in
             var immediateResult: Result<Void, Error>?
@@ -153,6 +188,64 @@ final class MeetingRecorder: NSObject, SCStreamDelegate, SCRecordingOutputDelega
             finishResult = nil
             streamError = nil
         }
+    }
+
+    private static func audioLevel(sampleBuffer: CMSampleBuffer) -> Double? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(
+                formatDescription
+              )?.pointee,
+              streamDescription.mFormatID == kAudioFormatLinearPCM,
+              let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
+            return nil
+        }
+
+        let byteCount = CMBlockBufferGetDataLength(blockBuffer)
+        guard byteCount > 0 else { return nil }
+        var bytes = Data(count: byteCount)
+        let status = bytes.withUnsafeMutableBytes { storage in
+            guard let address = storage.baseAddress else { return kCMBlockBufferBadCustomBlockSourceErr }
+            return CMBlockBufferCopyDataBytes(
+                blockBuffer,
+                atOffset: 0,
+                dataLength: byteCount,
+                destination: address
+            )
+        }
+        guard status == kCMBlockBufferNoErr else { return nil }
+
+        let isFloat = streamDescription.mFormatFlags & kAudioFormatFlagIsFloat != 0
+        let isSignedInteger = streamDescription.mFormatFlags & kAudioFormatFlagIsSignedInteger != 0
+        let bits = Int(streamDescription.mBitsPerChannel)
+
+        let meanSquare: Double? = bytes.withUnsafeBytes { storage in
+            if isFloat, bits == 32 {
+                let samples = storage.bindMemory(to: Float.self)
+                guard !samples.isEmpty else { return nil }
+                return samples.reduce(0.0) { $0 + Double($1 * $1) } / Double(samples.count)
+            }
+            if isSignedInteger, bits == 16 {
+                let samples = storage.bindMemory(to: Int16.self)
+                guard !samples.isEmpty else { return nil }
+                let scale = Double(Int16.max)
+                return samples.reduce(0.0) {
+                    let value = Double($1) / scale
+                    return $0 + value * value
+                } / Double(samples.count)
+            }
+            if isSignedInteger, bits == 32 {
+                let samples = storage.bindMemory(to: Int32.self)
+                guard !samples.isEmpty else { return nil }
+                let scale = Double(Int32.max)
+                return samples.reduce(0.0) {
+                    let value = Double($1) / scale
+                    return $0 + value * value
+                } / Double(samples.count)
+            }
+            return nil
+        }
+        guard let meanSquare else { return nil }
+        return WaveformMath.normalizedPower(meanSquare: meanSquare)
     }
 }
 

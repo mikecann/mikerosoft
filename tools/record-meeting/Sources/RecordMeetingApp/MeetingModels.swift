@@ -143,6 +143,7 @@ struct ProcessedMeeting: Identifiable, Sendable {
     let endedAt: Date
     let title: String
     let description: String
+    let waveformSamples: [Double]
 
     var id: String { audioURL.path }
 }

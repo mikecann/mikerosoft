@@ -5,6 +5,10 @@ Mac's system audio and your microphone, saves an MP3, transcribes it locally,
 detects speakers, asks you to name each detected voice, and writes a Markdown
 transcript plus JSON metadata.
 
+The recording window shows a live waveform. After processing, a review screen
+lets you play or scrub the full recording, click transcript lines to seek, and
+automatically highlights and scrolls to the line at the current playhead.
+
 Completed meetings can also be added as pages in a single **Recorded Meetings**
 Notion database.
 
@@ -12,7 +16,7 @@ Notion database.
 
 - macOS 15 or newer
 - Xcode or the Xcode Command Line Tools
-- Homebrew `ffmpeg`
+- `ffmpeg` on `PATH`, in `~/.local/bin`, or installed with Homebrew
 - A Hugging Face token with access accepted for
   [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1)
 - Optional: a Notion integration token with insert-content access

@@ -22,12 +22,20 @@ class SpeakerTurn(NamedTuple):
     speaker: str
 
 
+def executable_candidates(name: str, home: Path | None = None) -> list[Path]:
+    home = home or Path.home()
+    return [
+        home / ".local/bin" / name,
+        Path("/opt/homebrew/bin") / name,
+        Path("/usr/local/bin") / name,
+    ]
+
+
 def executable(name: str) -> str:
     found = shutil.which(name)
     if found:
         return found
-    for prefix in ("/opt/homebrew/bin", "/usr/local/bin"):
-        candidate = Path(prefix) / name
+    for candidate in executable_candidates(name):
         if candidate.is_file():
             return str(candidate)
     raise RuntimeError(f"{name} is not installed. Run tools/record-meeting/setup_mac.sh.")

@@ -76,7 +76,7 @@ struct RecordMeetingView: View {
                 set: { _ in }
             )
         ) { meeting in
-            SpeakerNamingView(model: model, meeting: meeting)
+            MeetingReviewView(model: model, meeting: meeting)
                 .interactiveDismissDisabled()
         }
     }
@@ -124,28 +124,35 @@ struct RecordMeetingView: View {
     }
 
     private var recordingState: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(model.isRecording ? Color.red : (model.isProcessing ? Color.orange : Color.green))
-                .frame(width: 10, height: 10)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.statusMessage)
-                    .font(.headline)
-                if let startedAt = model.startedAt, model.isRecording {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(TranscriptDocument.durationString(context.date.timeIntervalSince(startedAt)))
-                            .font(.title2.monospacedDigit().bold())
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(model.isRecording ? Color.red : (model.isProcessing ? Color.orange : Color.green))
+                    .frame(width: 10, height: 10)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.statusMessage)
+                        .font(.headline)
+                    if let startedAt = model.startedAt, model.isRecording {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text(TranscriptDocument.durationString(context.date.timeIntervalSince(startedAt)))
+                                .font(.title2.monospacedDigit().bold())
+                        }
+                    } else if model.isProcessing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text("The window stays above other apps while it is open.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                } else if model.isProcessing {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Text("The window stays above other apps while it is open.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+                Spacer()
             }
-            Spacer()
+            if (model.isRecording || model.isProcessing), !model.recordingWaveform.isEmpty {
+                AudioWaveformView(samples: model.recordingWaveform)
+                    .frame(height: 46)
+                    .transition(.opacity)
+            }
         }
         .padding(14)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
@@ -203,85 +210,6 @@ private struct FloatingWindowConfigurator: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
-private struct SpeakerNamingView: View {
-    @ObservedObject var model: MeetingViewModel
-    let meeting: ProcessedMeeting
-    @State private var names: [String: String] = [:]
-    @State private var player: AVAudioPlayer?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Who was speaking?")
-                    .font(.title2.bold())
-                Text("Play each sample, then replace the temporary speaker label with a name.")
-                    .foregroundStyle(.secondary)
-            }
-
-            ScrollView {
-                VStack(spacing: 12) {
-                    ForEach(Array(meeting.document.speakers.enumerated()), id: \.element.id) { index, speaker in
-                        HStack(spacing: 12) {
-                            Button {
-                                playSample(path: speaker.samplePath)
-                            } label: {
-                                Image(systemName: "play.circle.fill")
-                                    .font(.title2)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Play voice sample")
-                            .disabled(speaker.samplePath.isEmpty)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Speaker \(index + 1)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                TextField("Name", text: binding(for: speaker.id, fallback: "Speaker \(index + 1)"))
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                        }
-                        .padding(10)
-                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                    }
-                }
-            }
-
-            HStack {
-                Spacer()
-                Button("Save transcript") {
-                    player?.stop()
-                    Task { await model.finalizeSpeakerNames(names) }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isProcessing)
-            }
-        }
-        .padding(24)
-        .frame(width: 480, height: min(620, CGFloat(220 + meeting.document.speakers.count * 90)))
-        .onAppear {
-            for (index, speaker) in meeting.document.speakers.enumerated() {
-                names[speaker.id] = "Speaker \(index + 1)"
-            }
-        }
-    }
-
-    private func binding(for id: String, fallback: String) -> Binding<String> {
-        Binding(
-            get: { names[id] ?? fallback },
-            set: { names[id] = $0 }
-        )
-    }
-
-    private func playSample(path: String) {
-        do {
-            player = try AVAudioPlayer(contentsOf: URL(fileURLWithPath: path))
-            player?.play()
-        } catch {
-            model.presentedError = "Could not play the speaker sample: \(error.localizedDescription)"
-        }
-    }
 }
 
 private struct PreferencesView: View {

@@ -12,6 +12,7 @@ final class MeetingViewModel: ObservableObject {
     @Published var presentedError: String?
     @Published var pendingMeeting: ProcessedMeeting?
     @Published private(set) var lastNotionURL: URL?
+    @Published private(set) var recordingWaveform: [Double] = []
 
     let preferences: RecordMeetingPreferences
     private let recorder: MeetingRecorder
@@ -19,6 +20,7 @@ final class MeetingViewModel: ObservableObject {
     private let keychain: KeychainStore
     private var activeRawURL: URL?
     private var activeFileStem: String?
+    private var capturedWaveform: [Double] = []
 
     init(
         preferences: RecordMeetingPreferences = RecordMeetingPreferences(),
@@ -30,6 +32,11 @@ final class MeetingViewModel: ObservableObject {
         self.recorder = recorder
         self.processor = processor
         self.keychain = keychain
+        recorder.setAudioLevelHandler { [weak self] level in
+            Task { @MainActor in
+                self?.receiveAudioLevel(level)
+            }
+        }
     }
 
     var isBusy: Bool { isRecording || isProcessing }
@@ -49,6 +56,8 @@ final class MeetingViewModel: ObservableObject {
         let rawURL = directory.appendingPathComponent(".\(stem)-capture.mov")
 
         do {
+            capturedWaveform = []
+            recordingWaveform = []
             try FileManager.default.createDirectory(
                 at: directory,
                 withIntermediateDirectories: true
@@ -75,6 +84,7 @@ final class MeetingViewModel: ObservableObject {
 
         isRecording = false
         isProcessing = true
+        recordingWaveform = WaveformMath.resample(capturedWaveform, targetCount: 240)
         statusMessage = "Finishing the recording…"
         let endedAt = Date()
 
@@ -106,7 +116,8 @@ final class MeetingViewModel: ObservableObject {
                 startedAt: startedAt,
                 endedAt: endedAt,
                 title: title,
-                description: meetingDescription
+                description: meetingDescription,
+                waveformSamples: capturedWaveform
             )
             statusMessage = "Name the detected speakers"
         } catch {
@@ -118,6 +129,17 @@ final class MeetingViewModel: ObservableObject {
         self.startedAt = nil
         activeRawURL = nil
         activeFileStem = nil
+    }
+
+    private func receiveAudioLevel(_ level: Double) {
+        guard isRecording else { return }
+        capturedWaveform.append(level)
+        // Three hours at 20 samples per second is still a small array, and
+        // retaining it gives the completed review a full-meeting waveform.
+        if capturedWaveform.count > 216_000 {
+            capturedWaveform.removeFirst(capturedWaveform.count - 216_000)
+        }
+        recordingWaveform = Array(capturedWaveform.suffix(96))
     }
 
     func finalizeSpeakerNames(_ names: [String: String]) async {

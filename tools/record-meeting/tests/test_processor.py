@@ -11,6 +11,15 @@ SPEC.loader.exec_module(PROCESSOR)
 
 
 class ProcessorTests(unittest.TestCase):
+    def test_executable_candidates_include_user_local_bin(self):
+        home = Path("/Users/example")
+
+        candidates = PROCESSOR.executable_candidates("ffmpeg", home=home)
+
+        self.assertIn(home / ".local/bin/ffmpeg", candidates)
+        self.assertIn(Path("/opt/homebrew/bin/ffmpeg"), candidates)
+        self.assertIn(Path("/usr/local/bin/ffmpeg"), candidates)
+
     def test_longest_turn_for_each_speaker(self):
         turns = [
             PROCESSOR.SpeakerTurn(0, 1, "SPEAKER_00"),
