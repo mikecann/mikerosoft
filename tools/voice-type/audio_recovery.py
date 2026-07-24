@@ -41,6 +41,19 @@ class AudioBackendRecovery:
         with self._lock:
             self._restart_required = True
 
+    def note_open_failure(self) -> None:
+        # PortAudio/CoreAudio can leave the process-wide backend unusable after
+        # Pa_OpenStream fails. Do not keep retrying inside the same process.
+        with self._lock:
+            self._restart_required = True
+
+    def recover_if_required(self, restart: Callable[[], None]) -> bool:
+        """Claim and run the automatic restart once."""
+        if not self._claim_restart():
+            return False
+        restart()
+        return True
+
     def finish_then_recover(
         self,
         finish: Callable[[], T],
@@ -53,8 +66,8 @@ class AudioBackendRecovery:
             return finish()
         finally:
             should_restart = self.restart_required if requested is None else requested
-            if should_restart and self._claim_restart():
-                restart()
+            if should_restart:
+                self.recover_if_required(restart)
 
     def _claim_restart(self) -> bool:
         with self._lock:

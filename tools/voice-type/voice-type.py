@@ -1625,11 +1625,14 @@ class Recorder:
         log(f"Mic: {info['name']!r}")
         # blocksize=256 → 16 ms per callback — low enough that the first
         # captured block is ≤16 ms after the key goes down.
-        self._stream = sd.InputStream(
+        stream = sd.InputStream(
             samplerate=SAMPLE_RATE, channels=CHANNELS, dtype=DTYPE,
             device=DEVICE, callback=self._callback, blocksize=256,
         )
-        self._stream.start()
+        stream.start()
+        # Publish only a fully-started stream. If PortAudio raises above, the
+        # recorder remains cleanly disconnected and the process is relaunched.
+        self._stream = stream
 
     def _close_stream(self):
         if self._stream is None:
@@ -1685,12 +1688,23 @@ class Recorder:
             log("Audio stream restarted successfully.")
         except Exception as e:
             log(f"Audio stream restart failed: {e}")
+            raise
 
     def start(self):
         if not self.audio_recovery.can_open_stream:
             log("Recording ignored while automatic CoreAudio recovery is pending.")
             return False
-        self._ensure_stream()
+        try:
+            self._ensure_stream()
+        except Exception as e:
+            self._stream = None
+            self._stream_error = True
+            self.audio_recovery.note_open_failure()
+            log(
+                f"Microphone stream could not open: {e}. "
+                "Voice Type will restart automatically."
+            )
+            return False
         with self._lock:
             self._frames    = []
             self._recording = True
@@ -2194,6 +2208,12 @@ def run():
                     else:
                         overlay.hide()
                         tray.set_state("idle")
+                        recorder.audio_recovery.recover_if_required(
+                            lambda: _restart_app(
+                                "microphone stream could not open; relaunching "
+                                "the CoreAudio backend"
+                            )
+                        )
 
             elif not is_down and was_down:
                 if tray.enabled:

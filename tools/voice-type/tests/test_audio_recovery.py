@@ -30,6 +30,26 @@ class AudioRecoveryTests(unittest.TestCase):
         self.assertFalse(recovery.can_open_stream)
         self.assertTrue(recovery.restart_required)
 
+    def test_open_failure_blocks_retry_until_process_restart(self):
+        recovery = self.module.AudioBackendRecovery()
+
+        recovery.note_open_failure()
+
+        self.assertFalse(recovery.can_open_stream)
+        self.assertTrue(recovery.restart_required)
+
+    def test_open_failure_claims_only_one_automatic_restart(self):
+        recovery = self.module.AudioBackendRecovery()
+        recovery.note_open_failure()
+        events = []
+
+        for _ in range(2):
+            recovery.recover_if_required(
+                lambda: events.append("app restarted"),
+            )
+
+        self.assertEqual(events, ["app restarted"])
+
     def test_successful_close_keeps_backend_usable(self):
         recovery = self.module.AudioBackendRecovery()
 
