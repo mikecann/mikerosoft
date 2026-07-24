@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { filterToolsByPlatforms, type PlatformId, type Tool } from './tools.ts';
+import { filterToolsByPlatforms, tools, type PlatformId, type Tool } from './tools.ts';
 
 const fixtures: Tool[] = [
   {
@@ -48,4 +48,13 @@ test('shows tools available on the one active platform', () => {
 
 test('shows no tools when both platform toggles are inactive', () => {
   assert.deepEqual(namesFor([]), []);
+});
+
+test('publishes Last Window Quits as a documented macOS tool', () => {
+  const tool = tools.find(candidate => candidate.name === 'last-window-quits');
+
+  assert.ok(tool);
+  assert.deepEqual(tool.platforms, ['macos']);
+  assert.match(tool.header ?? '', /last-window-quits\/docs\/header\.webp$/);
+  assert.match(tool.url, /tools\/last-window-quits$/);
 });

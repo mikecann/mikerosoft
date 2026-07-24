@@ -174,6 +174,15 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
+    name: 'last-window-quits',
+    desc: 'Quit normal macOS Dock apps one second after their final window closes, while preserving minimized windows, save prompts, and background-only apps',
+    icon: `${base}/last-window-quits/icons/last-window-quits.png`,
+    header: `${base}/last-window-quits/docs/header.webp`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/last-window-quits',
+    platforms: ['macos'],
+  },
+  {
     name: 'record-it',
     desc: 'Native SwiftUI screen and camera recorder with 4K/30 capture, project-aware source folders, system audio, microphone audio, and separate full-resolution outputs',
     icon: `${base}/record-it/icons/record-it.png`,

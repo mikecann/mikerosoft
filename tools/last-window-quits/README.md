@@ -1,5 +1,7 @@
 # Last Window Quits
 
+![A macOS-style window dissolving as its Dock icon powers down](docs/header.webp)
+
 A small macOS menu-bar tool that quits a normal Dock app after its last window
 closes.
 
@@ -36,6 +38,16 @@ Grant **Last Window Quits** access in:
 Look for **LWQ** in the menu bar. `LWQ!` means Accessibility permission is
 still needed. Its menu can pause the behaviour, toggle start-at-login, request
 permission, or quit the tool.
+
+## How it works
+
+The signed Swift menu-bar app checks normal foreground applications twice per
+second through macOS Accessibility. Its state machine only arms an application
+after seeing at least one window. When that count falls to zero and remains
+there for one second, it asks macOS to terminate the application normally.
+
+The staged app uses a stable signing requirement so rebuilding it does not
+invalidate its Accessibility permission.
 
 ## Development
 
