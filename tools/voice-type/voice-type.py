@@ -207,6 +207,7 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 from audio_gate import should_skip_short_low_level_audio
 from runtime_policy import should_keep_mic_stream_open_local
+from audio_recovery import AudioBackendRecovery
 from speech_backends import MlxWhisperModel, resolve_local_mlx_repo
 from text_formatter import (
     DEFAULT_FORMATTER_MODEL,
@@ -933,11 +934,11 @@ def _apply_settings_changes(*, tray, updates: dict) -> None:
     _set_formatter_model(str(updates.get("formatter_model", _settings.get("formatter_model"))))
 
 
-def _restart_app() -> None:
+def _restart_app(reason: str = "requested from settings window") -> None:
     """Last-resort restart: spawn the relauncher detached, so it survives this
     process being killed, then kill/relaunch voice-type. Used by the settings
     window's Restart button to recover a wedged overlay."""
-    log("Restart requested from settings window.")
+    log(f"Restart requested: {reason}.")
     if sys.platform == "win32":
         script = os.path.join(_SCRIPT_DIR, "restart.bat")
         subprocess.Popen(
@@ -1614,6 +1615,7 @@ class Recorder:
         self._recording = False
         self._stream_error = False  # set on any callback status; triggers restart on next key press
         self._keep_stream_open = should_keep_mic_stream_open_local()
+        self.audio_recovery = AudioBackendRecovery()
         self._stream: sd.InputStream | None = None
         if self._keep_stream_open:
             self._open_stream()
@@ -1652,8 +1654,12 @@ class Recorder:
         t.start()
         t.join(timeout=STREAM_CLOSE_TIMEOUT)
         if t.is_alive():
+            self.audio_recovery.note_close_timeout()
             log(f"Stream close timed out after {STREAM_CLOSE_TIMEOUT}s "
-                "(CoreAudio deadlock?); abandoning stream, will reopen on next use.")
+                "(CoreAudio deadlock); backend is poisoned and Voice Type will "
+                "restart after finishing this dictation.")
+        else:
+            self.audio_recovery.note_close_finished()
 
     def _ensure_stream(self):
         """Restart the audio stream if it's dead or errored.
@@ -1681,10 +1687,14 @@ class Recorder:
             log(f"Audio stream restart failed: {e}")
 
     def start(self):
+        if not self.audio_recovery.can_open_stream:
+            log("Recording ignored while automatic CoreAudio recovery is pending.")
+            return False
         self._ensure_stream()
         with self._lock:
             self._frames    = []
             self._recording = True
+        return True
 
     def peek(self) -> np.ndarray:
         """Non-destructive snapshot of all audio recorded so far."""
@@ -2174,13 +2184,16 @@ def run():
                     platform.snapshot_target_app()
                     tray.set_state("recording")
                     overlay.show_rec()
-                    recorder.start()
-                    streamer.start()
-                    mode = _effective_output_mode()
-                    if mode == "precompute":
-                        precomputer.start()
+                    if recorder.start():
+                        streamer.start()
+                        mode = _effective_output_mode()
+                        if mode == "precompute":
+                            precomputer.start()
+                        else:
+                            precomputer.stop()
                     else:
-                        precomputer.stop()
+                        overlay.hide()
+                        tray.set_state("idle")
 
             elif not is_down and was_down:
                 if tray.enabled:
@@ -2190,6 +2203,7 @@ def run():
                     # halted so the overlay/CPU don't spin forever.
                     streamer.stop()   # signal stream loop; final pass always runs below
                     audio = recorder.stop()
+                    restart_after_finish = recorder.audio_recovery.restart_required
                     mode = _effective_output_mode()
                     if mode == "precompute":
                         precomputer.stop(wait=PRECOMP_STOP_WAIT)
@@ -2197,7 +2211,11 @@ def run():
                         precomputer.stop()
                     pre_state = precomputer.snapshot()
 
-                    def _finish(audio=audio, preview=streamer.last_preview, pre_state=pre_state):
+                    def _finish_dictation(
+                        audio=audio,
+                        preview=streamer.last_preview,
+                        pre_state=pre_state,
+                    ):
                         # Show "processing" with the last streaming preview so the
                         # user sees what was recognised so far while we finalise.
                         mode = _effective_output_mode()
@@ -2231,6 +2249,18 @@ def run():
                             _finish_stabilized(audio, overlay, tray, t0)
                         else:
                             _finish_one_shot(audio, overlay, tray, t0, mode)
+
+                    def _finish(
+                        restart_after_finish=restart_after_finish,
+                    ):
+                        recorder.audio_recovery.finish_then_recover(
+                            _finish_dictation,
+                            lambda: _restart_app(
+                                "CoreAudio stream close timed out; relaunching "
+                                "before another microphone stream is opened"
+                            ),
+                            requested=restart_after_finish,
+                        )
 
                     threading.Thread(target=_finish, daemon=True).start()
 
