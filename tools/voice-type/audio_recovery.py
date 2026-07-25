@@ -20,6 +20,7 @@ class AudioBackendRecovery:
     def __init__(self) -> None:
         self._restart_required = False
         self._restart_started = False
+        self._finalizations_in_flight = 0
         self._lock = threading.Lock()
 
     @property
@@ -47,31 +48,78 @@ class AudioBackendRecovery:
         with self._lock:
             self._restart_required = True
 
-    def recover_if_required(self, restart: Callable[[], None]) -> bool:
+    def recover_if_required(self, restart: Callable[[], object]) -> bool:
         """Claim and run the automatic restart once."""
         if not self._claim_restart():
             return False
-        restart()
+        try:
+            result = restart()
+        except Exception:
+            self._release_restart_claim()
+            raise
+        if result is False:
+            self._release_restart_claim()
+            return False
         return True
+
+    def prepare_finish(
+        self,
+        finish: Callable[[], T],
+        restart: Callable[[], object],
+    ) -> Callable[[], T]:
+        """Register a finalization now and return the work to run off-thread.
+
+        Registration happens before the worker thread starts. A new key-down
+        therefore cannot claim a pending backend restart and kill the
+        transcription that is already being finalized.
+        """
+        with self._lock:
+            self._finalizations_in_flight += 1
+
+        def run() -> T:
+            try:
+                return finish()
+            finally:
+                should_restart = False
+                with self._lock:
+                    self._finalizations_in_flight -= 1
+                    if (
+                        self._finalizations_in_flight == 0
+                        and self._restart_required
+                        and not self._restart_started
+                    ):
+                        self._restart_started = True
+                        should_restart = True
+                if should_restart:
+                    try:
+                        result = restart()
+                    except Exception:
+                        self._release_restart_claim()
+                        raise
+                    if result is False:
+                        self._release_restart_claim()
+
+        return run
 
     def finish_then_recover(
         self,
         finish: Callable[[], T],
-        restart: Callable[[], None],
-        *,
-        requested: bool | None = None,
+        restart: Callable[[], object],
     ) -> T:
         """Finish the captured dictation, then claim one automatic restart."""
-        try:
-            return finish()
-        finally:
-            should_restart = self.restart_required if requested is None else requested
-            if should_restart:
-                self.recover_if_required(restart)
+        return self.prepare_finish(finish, restart)()
 
     def _claim_restart(self) -> bool:
         with self._lock:
-            if not self._restart_required or self._restart_started:
+            if (
+                not self._restart_required
+                or self._restart_started
+                or self._finalizations_in_flight > 0
+            ):
                 return False
             self._restart_started = True
             return True
+
+    def _release_restart_claim(self) -> None:
+        with self._lock:
+            self._restart_started = False

@@ -1,6 +1,7 @@
 import importlib.util
 import pathlib
 import sys
+import threading
 import unittest
 
 
@@ -50,6 +51,22 @@ class AudioRecoveryTests(unittest.TestCase):
 
         self.assertEqual(events, ["app restarted"])
 
+    def test_failed_restart_releases_claim_for_a_later_retry(self):
+        recovery = self.module.AudioBackendRecovery()
+        recovery.note_open_failure()
+        events = []
+
+        first_result = recovery.recover_if_required(
+            lambda: events.append("first attempt") or False,
+        )
+        second_result = recovery.recover_if_required(
+            lambda: events.append("second attempt"),
+        )
+
+        self.assertFalse(first_result)
+        self.assertTrue(second_result)
+        self.assertEqual(events, ["first attempt", "second attempt"])
+
     def test_successful_close_keeps_backend_usable(self):
         recovery = self.module.AudioBackendRecovery()
 
@@ -87,18 +104,33 @@ class AudioRecoveryTests(unittest.TestCase):
 
         self.assertEqual(events, ["dictation attempted", "app restarted"])
 
-    def test_earlier_overlapping_dictation_does_not_claim_later_recovery(self):
+    def test_restart_waits_for_all_overlapping_finalizations(self):
         recovery = self.module.AudioBackendRecovery()
-        recovery.note_close_timeout()
         events = []
 
-        recovery.finish_then_recover(
+        finish_earlier = recovery.prepare_finish(
             lambda: events.append("earlier dictation finished"),
             lambda: events.append("app restarted"),
-            requested=False,
+        )
+        recovery.note_close_timeout()
+        finish_later = recovery.prepare_finish(
+            lambda: events.append("later dictation finished"),
+            lambda: events.append("app restarted"),
         )
 
+        finish_earlier()
         self.assertEqual(events, ["earlier dictation finished"])
+
+        finish_later()
+
+        self.assertEqual(
+            events,
+            [
+                "earlier dictation finished",
+                "later dictation finished",
+                "app restarted",
+            ],
+        )
 
     def test_only_one_finalizer_can_start_the_restart(self):
         recovery = self.module.AudioBackendRecovery()
@@ -109,12 +141,46 @@ class AudioRecoveryTests(unittest.TestCase):
             recovery.finish_then_recover(
                 lambda: events.append("dictation finished"),
                 lambda: events.append("app restarted"),
-                requested=True,
             )
 
         self.assertEqual(
             events,
             ["dictation finished", "app restarted", "dictation finished"],
+        )
+
+    def test_key_down_cannot_restart_while_previous_dictation_is_finishing(self):
+        recovery = self.module.AudioBackendRecovery()
+        recovery.note_close_timeout()
+        finish_started = threading.Event()
+        allow_finish = threading.Event()
+        events = []
+
+        def finish():
+            events.append("dictation started")
+            finish_started.set()
+            allow_finish.wait(timeout=2)
+            events.append("dictation finished")
+
+        finish_job = recovery.prepare_finish(
+            finish,
+            lambda: events.append("app restarted"),
+        )
+        thread = threading.Thread(target=finish_job)
+        thread.start()
+        self.assertTrue(finish_started.wait(timeout=2))
+
+        restarted_on_key_down = recovery.recover_if_required(
+            lambda: events.append("restarted on key down"),
+        )
+
+        self.assertFalse(restarted_on_key_down)
+        self.assertNotIn("restarted on key down", events)
+        allow_finish.set()
+        thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(
+            events,
+            ["dictation started", "dictation finished", "app restarted"],
         )
 
 

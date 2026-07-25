@@ -363,6 +363,13 @@ def startup_enabled(vbs_path: str = "") -> bool:
     return os.path.exists(_launch_agent_path())
 
 
+def restart_supervisor_active() -> bool:
+    # A loaded LaunchAgent does not prove that this particular process belongs
+    # to it. Direct/manual launches are supported too, and launchd only sets
+    # XPC_SERVICE_NAME on the process it started.
+    return os.environ.get("XPC_SERVICE_NAME") == _LAUNCH_AGENT_LABEL
+
+
 def set_startup(enable: bool, vbs_path: str = "",
                 log: Callable[[str], None] | None = None) -> None:
     plist_path = _launch_agent_path()

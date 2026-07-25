@@ -8,11 +8,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="$SCRIPT_DIR/.venv"
 LOG="$SCRIPT_DIR/voice-type.log"
 LAUNCHER="$VENV/bin/Voice Type"
+LAUNCHD_SERVICE="gui/$(id -u)/com.mikerosoft.voice-type"
 
 if [ ! -x "$LAUNCHER" ]; then
   echo "ERROR: native launcher not found at $LAUNCHER"
   echo "Run setup first:  bash $SCRIPT_DIR/setup_mac.sh"
   exit 1
+fi
+
+# When the LaunchAgent is loaded, it owns the process lifecycle. Asking
+# launchd for one authoritative restart avoids racing its KeepAlive relaunch
+# against the manual nohup launch below.
+if launchctl print "$LAUNCHD_SERVICE" >/dev/null 2>&1; then
+  echo "Restarting Voice Type via LaunchAgent..."
+  # Remove any manually launched copy as well. kickstart then establishes one
+  # authoritative launchd-owned process even if both kinds were running.
+  pkill -f "voice-type.py" 2>/dev/null || true
+  pkill -f "voice-type-menubar-mac.py" 2>/dev/null || true
+  if launchctl kickstart -k "$LAUNCHD_SERVICE"; then
+    echo "Restarted via LaunchAgent."
+    exit 0
+  fi
+  echo "LaunchAgent restart failed; falling back to a manual relaunch."
 fi
 
 echo "Stopping existing voice-type instances..."

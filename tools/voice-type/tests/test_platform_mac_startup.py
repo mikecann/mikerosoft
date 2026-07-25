@@ -128,6 +128,29 @@ class PlatformMacStartupTests(unittest.TestCase):
 
         ns_app.activateIgnoringOtherApps_.assert_called_once_with(True)
 
+    def test_restart_supervisor_active_identifies_this_launchd_process(self):
+        with mock.patch.dict(
+            self.module.os.environ,
+            {"XPC_SERVICE_NAME": "com.mikerosoft.voice-type"},
+            clear=True,
+        ):
+            self.assertTrue(self.module.restart_supervisor_active())
+
+    def test_loaded_agent_does_not_make_a_manual_process_supervised(self):
+        with mock.patch.dict(self.module.os.environ, {}, clear=True):
+            with mock.patch.object(self.module.subprocess, "run") as run_mock:
+                self.assertFalse(self.module.restart_supervisor_active())
+
+        run_mock.assert_not_called()
+
+    def test_other_launchd_service_does_not_own_this_process(self):
+        with mock.patch.dict(
+            self.module.os.environ,
+            {"XPC_SERVICE_NAME": "com.example.other-service"},
+            clear=True,
+        ):
+            self.assertFalse(self.module.restart_supervisor_active())
+
 
 if __name__ == "__main__":
     unittest.main()

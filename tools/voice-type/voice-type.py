@@ -206,8 +206,13 @@ import numpy as np
 import sounddevice as sd
 from faster_whisper import WhisperModel
 from audio_gate import should_skip_short_low_level_audio
-from runtime_policy import should_keep_mic_stream_open_local
+from runtime_policy import (
+    should_keep_mic_stream_open_local,
+    should_restart_after_loop_gap,
+)
 from audio_recovery import AudioBackendRecovery
+from process_relaunch import restart_current_process, validate_relauncher_files
+from recording_session import AudioFrameBuffer, RecordingSession
 from speech_backends import MlxWhisperModel, resolve_local_mlx_repo
 from text_formatter import (
     DEFAULT_FORMATTER_MODEL,
@@ -934,24 +939,43 @@ def _apply_settings_changes(*, tray, updates: dict) -> None:
     _set_formatter_model(str(updates.get("formatter_model", _settings.get("formatter_model"))))
 
 
-def _restart_app(reason: str = "requested from settings window") -> None:
+def _restart_app(reason: str = "requested from settings window") -> bool:
     """Last-resort restart: spawn the relauncher detached, so it survives this
     process being killed, then kill/relaunch voice-type. Used by the settings
     window's Restart button to recover a wedged overlay."""
     log(f"Restart requested: {reason}.")
-    if sys.platform == "win32":
-        script = os.path.join(_SCRIPT_DIR, "restart.bat")
-        subprocess.Popen(
-            ["cmd", "/c", script], cwd=_SCRIPT_DIR,
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "DETACHED_PROCESS", 0),
-        )
-    else:
-        script = os.path.join(_SCRIPT_DIR, "voice-type-mac.sh")
-        subprocess.Popen(
-            ["bash", script], cwd=_SCRIPT_DIR, start_new_session=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+    def _spawn_relauncher() -> None:
+        if sys.platform == "win32":
+            script = os.path.join(_SCRIPT_DIR, "restart.bat")
+            launcher = os.path.join(_SCRIPT_DIR, "voice-type.vbs")
+            validate_relauncher_files(
+                required_paths=[script, launcher],
+            )
+            subprocess.Popen(
+                ["cmd", "/c", script], cwd=_SCRIPT_DIR,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | getattr(subprocess, "DETACHED_PROCESS", 0),
+            )
+        else:
+            script = os.path.join(_SCRIPT_DIR, "voice-type-mac.sh")
+            launcher = os.path.join(_SCRIPT_DIR, ".venv", "bin", "Voice Type")
+            validate_relauncher_files(
+                required_paths=[script, launcher],
+                executable_paths=[launcher],
+            )
+            subprocess.Popen(
+                ["bash", script], cwd=_SCRIPT_DIR, start_new_session=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+
+    return restart_current_process(
+        managed_by_supervisor=platform.restart_supervisor_active(),
+        spawn=_spawn_relauncher,
+        exit_process=os._exit,
+        on_error=lambda error: log(
+            f"Restart handoff failed; keeping current process alive: {error}"
+        ),
+    )
 
 
 def _show_settings_dialog(overlay: "Overlay", tray) -> None:
@@ -1610,9 +1634,7 @@ class Recorder:
     """
 
     def __init__(self):
-        self._frames: list[np.ndarray] = []
-        self._lock = threading.Lock()
-        self._recording = False
+        self._capture = AudioFrameBuffer()
         self._stream_error = False  # set on any callback status; triggers restart on next key press
         self._keep_stream_open = should_keep_mic_stream_open_local()
         self.audio_recovery = AudioBackendRecovery()
@@ -1691,6 +1713,9 @@ class Recorder:
             raise
 
     def start(self):
+        # A failed stream open must never leave an earlier dictation available
+        # to stop(). This is defense in depth behind RecordingSession.
+        self._capture.reset_for_start_attempt()
         if not self.audio_recovery.can_open_stream:
             log("Recording ignored while automatic CoreAudio recovery is pending.")
             return False
@@ -1705,35 +1730,32 @@ class Recorder:
                 "Voice Type will restart automatically."
             )
             return False
-        with self._lock:
-            self._frames    = []
-            self._recording = True
+        self._capture.mark_started()
         return True
 
     def peek(self) -> np.ndarray:
         """Non-destructive snapshot of all audio recorded so far."""
-        with self._lock:
-            if not self._frames:
-                return np.array([], dtype=np.float32)
-            return np.concatenate(self._frames, axis=0).flatten()
+        frames = self._capture.snapshot()
+        if not frames:
+            return np.array([], dtype=np.float32)
+        return np.concatenate(frames, axis=0).flatten()
 
     def get_rms(self) -> float:
         """RMS of the last ~100 ms of audio — drives the waveform animation."""
-        with self._lock:
-            if not self._frames:
-                return 0.0
-            recent = np.concatenate(self._frames[-2:], axis=0).flatten()
-            if len(recent) == 0:
-                return 0.0
-            return float(np.sqrt(np.mean(recent ** 2)))
+        frames = self._capture.snapshot()
+        if not frames:
+            return 0.0
+        recent = np.concatenate(frames[-2:], axis=0).flatten()
+        if len(recent) == 0:
+            return 0.0
+        return float(np.sqrt(np.mean(recent ** 2)))
 
     def stop(self) -> np.ndarray:
-        with self._lock:
-            self._recording = False
-            if not self._frames:
-                audio = np.array([], dtype=np.float32)
-            else:
-                audio = np.concatenate(self._frames, axis=0).flatten()
+        frames = self._capture.stop()
+        if not frames:
+            audio = np.array([], dtype=np.float32)
+        else:
+            audio = np.concatenate(frames, axis=0).flatten()
 
         if not self._keep_stream_open:
             self._close_stream()
@@ -1751,8 +1773,7 @@ class Recorder:
         if status:
             log(f"Audio status: {status}")
             self._stream_error = True   # flag for restart on next key press
-        if self._recording:
-            self._frames.append(indata.copy())
+        self._capture.append(indata.copy())
 
 
 # ---------------------------------------------------------------------------
@@ -2164,10 +2185,27 @@ def run():
         log(f"Ready. Hold {_hotkey_label} to record.")
 
         was_down = False
+        recording_session = RecordingSession()
         down_since = 0.0
         forced_stop = False
         last_heartbeat = 0.0
+        last_loop_wall = time.time()
         while True:
+            current_wall = time.time()
+            if should_restart_after_loop_gap(
+                platform_name=sys.platform,
+                previous_wall_time=last_loop_wall,
+                current_wall_time=current_wall,
+            ):
+                gap = current_wall - last_loop_wall
+                log(
+                    f"System resume detected after {gap:.1f}s loop gap; "
+                    "restarting before CoreAudio is used."
+                )
+                if _restart_app("system resumed; refreshing the CoreAudio backend"):
+                    return
+            last_loop_wall = current_wall
+
             # Refresh the heartbeat so a freshly-launched instance can tell
             # whether we are alive or wedged. This loop stops ticking if a
             # key-up handler deadlocks (e.g. in CoreAudio), letting the next
@@ -2198,7 +2236,9 @@ def run():
                     platform.snapshot_target_app()
                     tray.set_state("recording")
                     overlay.show_rec()
-                    if recorder.start():
+                    started = recorder.start()
+                    recording_session.note_start_result(started)
+                    if started:
                         streamer.start()
                         mode = _effective_output_mode()
                         if mode == "precompute":
@@ -2216,14 +2256,13 @@ def run():
                         )
 
             elif not is_down and was_down:
-                if tray.enabled:
+                if recording_session.finish_on_release():
                     log("--- Key UP ---")
                     # Stop the streaming preview loop FIRST: if recorder.stop()
                     # deadlocks inside CoreAudio, the streamer is already
                     # halted so the overlay/CPU don't spin forever.
                     streamer.stop()   # signal stream loop; final pass always runs below
                     audio = recorder.stop()
-                    restart_after_finish = recorder.audio_recovery.restart_required
                     mode = _effective_output_mode()
                     if mode == "precompute":
                         precomputer.stop(wait=PRECOMP_STOP_WAIT)
@@ -2270,19 +2309,16 @@ def run():
                         else:
                             _finish_one_shot(audio, overlay, tray, t0, mode)
 
-                    def _finish(
-                        restart_after_finish=restart_after_finish,
-                    ):
-                        recorder.audio_recovery.finish_then_recover(
-                            _finish_dictation,
-                            lambda: _restart_app(
-                                "CoreAudio stream close timed out; relaunching "
-                                "before another microphone stream is opened"
-                            ),
-                            requested=restart_after_finish,
-                        )
-
-                    threading.Thread(target=_finish, daemon=True).start()
+                    finish_job = recorder.audio_recovery.prepare_finish(
+                        _finish_dictation,
+                        lambda: _restart_app(
+                            "CoreAudio stream close timed out; relaunching "
+                            "before another microphone stream is opened"
+                        ),
+                    )
+                    threading.Thread(target=finish_job, daemon=True).start()
+                elif tray.enabled:
+                    log("--- Key UP ignored: recording never started ---")
 
             was_down = is_down
             time.sleep(POLL_INTERVAL)

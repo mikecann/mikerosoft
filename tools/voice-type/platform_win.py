@@ -183,6 +183,10 @@ def startup_enabled(vbs_path: str) -> bool:
         return False
 
 
+def restart_supervisor_active() -> bool:
+    return False
+
+
 def set_startup(enable: bool, vbs_path: str,
                 log: Callable[[str], None] | None = None) -> None:
     try:

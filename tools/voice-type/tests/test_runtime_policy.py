@@ -31,6 +31,42 @@ class RuntimePolicyTests(unittest.TestCase):
     def test_other_platforms_default_to_not_keeping_mic_open(self):
         self.assertFalse(self.module.should_keep_mic_stream_open("linux"))
 
+    def test_long_loop_gap_is_treated_as_system_resume(self):
+        self.assertTrue(
+            self.module.should_restart_after_loop_gap(
+                platform_name="darwin",
+                previous_wall_time=100.0,
+                current_wall_time=131.0,
+            )
+        )
+
+    def test_windows_resume_does_not_force_a_process_restart(self):
+        self.assertFalse(
+            self.module.should_restart_after_loop_gap(
+                platform_name="win32",
+                previous_wall_time=100.0,
+                current_wall_time=131.0,
+            )
+        )
+
+    def test_normal_loop_gap_does_not_restart(self):
+        self.assertFalse(
+            self.module.should_restart_after_loop_gap(
+                platform_name="darwin",
+                previous_wall_time=100.0,
+                current_wall_time=100.02,
+            )
+        )
+
+    def test_clock_adjustment_backwards_does_not_restart(self):
+        self.assertFalse(
+            self.module.should_restart_after_loop_gap(
+                platform_name="darwin",
+                previous_wall_time=100.0,
+                current_wall_time=90.0,
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
