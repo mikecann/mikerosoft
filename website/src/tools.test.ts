@@ -58,3 +58,12 @@ test('publishes Last Window Quits as a documented macOS tool', () => {
   assert.match(tool.header ?? '', /last-window-quits\/docs\/header\.webp$/);
   assert.match(tool.url, /tools\/last-window-quits$/);
 });
+
+test('publishes Token Stats as a documented macOS tool', () => {
+  const tool = tools.find(candidate => candidate.name === 'token-stats');
+
+  assert.ok(tool);
+  assert.deepEqual(tool.platforms, ['macos']);
+  assert.match(tool.header ?? '', /token-stats\/docs\/header\.png$/);
+  assert.match(tool.url, /tools\/token-stats$/);
+});

@@ -195,6 +195,15 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
+    name: 'token-stats',
+    desc: 'Native SwiftUI dashboard for Codex, Claude, and OpenRouter token usage, API-equivalent costs, model breakdowns, and shareable graph exports',
+    icon: `${base}/token-stats/icons/token-stats.png`,
+    header: `${base}/token-stats/docs/header.png`,
+    screenshots: [`${base}/token-stats/docs/ss1.png`],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/token-stats',
+    platforms: ['macos'],
+  },
+  {
     name: 'record-meeting',
     desc: 'Always-on-top meeting recorder with system audio and microphone capture, live waveform, synchronized speaker-labelled transcript review, MP3 export, and Notion publishing',
     icon: `${base}/record-meeting/icons/record-meeting.png`,

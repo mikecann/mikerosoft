@@ -93,6 +93,7 @@ link_tool video-hq tools/video-hq/video-hq
 link_tool taskbar tools/taskbar/taskbar
 link_tool last-window-quits tools/last-window-quits/last-window-quits
 link_tool record-it tools/record-it/record-it
+link_tool token-stats tools/token-stats/token-stats
 link_tool record-meeting tools/record-meeting/record-meeting
 link_tool 3d-viewer tools/3d-viewer/3d-viewer
 link_tool face-swap tools/face-swap/face-swap
@@ -117,6 +118,7 @@ echo "Still need: bun (Bun tools), python3, repo-root .env with OPENROUTER_API_K
 echo "Transcribe (Mac): run bash tools/transcribe/deps.sh once (ffmpeg + faster-whisper)."
 echo "Video HQ: run bash tools/video-hq/setup_mac.sh once to install ~/Applications/Video HQ.app."
 echo "Record Meeting: run bash tools/record-meeting/setup_mac.sh once to install ~/Applications/Record Meeting.app."
+echo "Token Stats: run bash tools/token-stats/setup_mac.sh once to install ~/Applications/Token Stats.app."
 echo "Last Window Quits: run bash tools/last-window-quits/setup_mac.sh once to install its menu-bar app."
 echo "Electrobun apps: use 3d-viewer, face-swap, img-gen, video-gen from PATH after bun install (see --with-bun-install)."
 echo "Per-tool Python deps: run each tools/<name>/deps.ps1 under PowerShell on Windows,"

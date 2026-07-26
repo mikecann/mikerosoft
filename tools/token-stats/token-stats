@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# This launcher is normally reached through ~/.local/bin/token-stats.
+# Resolve the symlink so subcommands still find the scripts in this tool.
+SCRIPT_DIR="$(python3 -c 'import os,sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "${BASH_SOURCE[0]}")"
+APP_DIR="${TOKEN_STATS_APP_DIR:-$HOME/Applications/Token Stats.app}"
+
+case "${1:-start}" in
+  start)
+    if [[ ! -d "$APP_DIR" ]]; then
+      bash "$SCRIPT_DIR/setup_mac.sh"
+    fi
+    open "$APP_DIR"
+    ;;
+  restart)
+    exec bash "$SCRIPT_DIR/restart.sh"
+    ;;
+  stop|kill)
+    exec bash "$SCRIPT_DIR/kill.sh"
+    ;;
+  setup|install)
+    exec bash "$SCRIPT_DIR/setup_mac.sh"
+    ;;
+  *)
+    echo "Usage: token-stats [start|restart|stop|setup]" >&2
+    exit 2
+    ;;
+esac
