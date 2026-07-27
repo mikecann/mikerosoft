@@ -3,6 +3,7 @@ import QuartzCore
 
 final class TaskbarPanel {
     let screenID: UInt32
+    let monitorID: String
     let panel: NSPanel
     let containerView: TaskbarContainerView
     let view: TaskbarView
@@ -19,8 +20,10 @@ final class TaskbarPanel {
         requestWidgetRepaint: @escaping (TaskbarView) -> Void = { $0.needsDisplay = true }
     ) {
         screenID = screen.id
+        monitorID = screen.persistentID
         self.screen = screen
         self.values = values
+        let capturedMonitorID = screen.persistentID
         let height = CGFloat(values.taskbarHeight)
 
         let frame = NSRect(
@@ -62,16 +65,23 @@ final class TaskbarPanel {
             controller?.makeSettingsMenu(screenID: screenID) ?? NSMenu()
         }
         view.onItemMenu = { [weak controller, screenID] item in
-            controller?.makeItemMenu(for: item, screenID: screenID)
+            controller?.makeItemMenu(for: item, screenID: screenID, monitorID: capturedMonitorID)
         }
         view.onWidgetMenu = { [weak controller, screenID] widgetID in
-            controller?.makeWidgetMenu(for: widgetID, screenID: screenID)
+            controller?.makeWidgetMenu(for: widgetID, screenID: screenID, monitorID: capturedMonitorID)
         }
         view.onWidgetActivate = { [weak controller, screenID] widgetID, statsMetric, rect, view in
-            controller?.activateWidget(widgetID, statsMetric: statsMetric, screenID: screenID, relativeTo: rect, of: view)
+            controller?.activateWidget(
+                widgetID,
+                statsMetric: statsMetric,
+                screenID: screenID,
+                monitorID: capturedMonitorID,
+                relativeTo: rect,
+                of: view
+            )
         }
         view.onMovePinnedItem = { [weak controller, screenID] item, target in
-            controller?.movePinnedItem(item, before: target, screenID: screenID)
+            controller?.movePinnedItem(item, before: target, screenID: screenID, monitorID: capturedMonitorID)
         }
         panel.contentView = containerView
     }
@@ -196,6 +206,10 @@ final class TaskbarPanel {
     }
 }
 
+func taskbarPanelNeedsReplacement(existingMonitorID: String, screen: ScreenInfo) -> Bool {
+    existingMonitorID != screen.persistentID
+}
+
 typealias InitialWindowProviderWarmup = (
     _ screens: [ScreenInfo],
     _ includeMinimized: Bool,
@@ -224,8 +238,8 @@ final class TaskbarController: NSObject {
     private var statsPopoverPanel: NSPanel?
     private var statsPopoverMetric: StatsWidgetMetric?
     private var statsPopoverEventMonitors: [Any] = []
-    private var menuItemContext: (screenID: UInt32, item: TaskbarItem)?
-    private var menuWidgetContext: (screenID: UInt32, widgetID: TaskbarWidgetID)?
+    private var menuItemContext: (screenID: UInt32, monitorID: String, item: TaskbarItem)?
+    private var menuWidgetContext: (screenID: UInt32, monitorID: String, widgetID: TaskbarWidgetID)?
     private var menuScreenContext: UInt32?
     private let commandFileURL = URL(fileURLWithPath: "/tmp/mikerosoft-taskbar-command")
 
@@ -271,7 +285,7 @@ final class TaskbarController: NSObject {
         performanceWatchdog.start()
         startAtLoginSync(settings.preferences.startAtLogin)
         let screens = screenCollector()
-        let includeMinimized = screens.contains { settings.values(for: $0.id).showMinimizedWindows }
+        let includeMinimized = screens.contains { settings.values(for: $0.persistentID).showMinimizedWindows }
         log("screens=\(screens.map { "\($0.name):\($0.appKitFrame)" }.joined(separator: " | "))")
         isWaitingForInitialWindowProviderWarmup = true
         initialWindowProviderWarmup(screens, includeMinimized) { [weak self] in
@@ -329,7 +343,7 @@ final class TaskbarController: NSObject {
         let screens = screenCollector()
         let screenIDs = Set(screens.map(\.id))
         let valuesByScreen = screens.reduce(into: [UInt32: TaskbarSettingValues]()) { result, screen in
-            result[screen.id] = settings.values(for: screen.id)
+            result[screen.id] = settings.values(for: screen.persistentID)
         }
 
         for staleID in panels.keys where !screenIDs.contains(staleID) {
@@ -337,8 +351,25 @@ final class TaskbarController: NSObject {
             panels.removeValue(forKey: staleID)
         }
 
+        // macOS may recycle a CGDirectDisplayID for a different physical display
+        // after a dock or cable reconnect. Recreate that panel so its menu
+        // callbacks capture the new display's persistent settings identity.
+        for screen in screens {
+            guard let panel = panels[screen.id],
+                  taskbarPanelNeedsReplacement(existingMonitorID: panel.monitorID, screen: screen)
+            else {
+                continue
+            }
+            panel.close()
+            panels.removeValue(forKey: screen.id)
+        }
+
         for screen in screens where panels[screen.id] == nil {
-            panels[screen.id] = TaskbarPanel(screen: screen, values: settings.values(for: screen.id), controller: self)
+            panels[screen.id] = TaskbarPanel(
+                screen: screen,
+                values: settings.values(for: screen.persistentID),
+                controller: self
+            )
         }
 
         let currentProcessID = currentPID()
@@ -375,7 +406,7 @@ final class TaskbarController: NSObject {
         }
 
         for screen in screens {
-            let values = valuesByScreen[screen.id] ?? settings.values(for: screen.id)
+            let values = valuesByScreen[screen.id] ?? settings.values(for: screen.persistentID)
             let taskbarWindows = visibleWindows(
                 records,
                 currentPID: currentProcessID,
@@ -490,8 +521,8 @@ final class TaskbarController: NSObject {
         return menu
     }
 
-    func makeItemMenu(for item: TaskbarItem, screenID: UInt32) -> NSMenu {
-        menuItemContext = (screenID, item)
+    func makeItemMenu(for item: TaskbarItem, screenID: UInt32, monitorID: String? = nil) -> NSMenu {
+        menuItemContext = (screenID, monitorID ?? String(screenID), item)
         menuScreenContext = screenID
 
         let menu = NSMenu(title: item.owner)
@@ -515,30 +546,47 @@ final class TaskbarController: NSObject {
         return menu
     }
 
-    func makeWidgetMenu(for widgetID: TaskbarWidgetID, screenID: UInt32) -> NSMenu? {
-        menuWidgetContext = (screenID, widgetID)
+    func makeWidgetMenu(
+        for widgetID: TaskbarWidgetID,
+        screenID: UInt32,
+        monitorID: String? = nil
+    ) -> NSMenu? {
+        let monitorID = monitorID ?? String(screenID)
+        menuWidgetContext = (screenID, monitorID, widgetID)
         menuScreenContext = screenID
 
         switch widgetID {
         case .stats:
-            return makeStatsWidgetMenu(screenID: screenID)
+            return makeStatsWidgetMenu(monitorID: monitorID)
         case .battery:
-            return makeBatteryWidgetMenu(screenID: screenID)
+            return makeBatteryWidgetMenu(monitorID: monitorID)
         case .dateTime:
-            return makeDateTimeWidgetMenu(screenID: screenID)
+            return makeDateTimeWidgetMenu(monitorID: monitorID)
         }
     }
 
-    func activateWidget(_ widgetID: TaskbarWidgetID, statsMetric: StatsWidgetMetric?, screenID: UInt32, relativeTo rect: NSRect, of view: NSView) {
+    func activateWidget(
+        _ widgetID: TaskbarWidgetID,
+        statsMetric: StatsWidgetMetric?,
+        screenID: UInt32,
+        monitorID: String? = nil,
+        relativeTo rect: NSRect,
+        of view: NSView
+    ) {
         switch widgetID {
         case .stats:
-            showStatsPopover(metric: statsMetric ?? .cpu, screenID: screenID, relativeTo: rect, of: view)
+            showStatsPopover(
+                metric: statsMetric ?? .cpu,
+                monitorID: monitorID ?? String(screenID),
+                relativeTo: rect,
+                of: view
+            )
         case .battery, .dateTime:
             break
         }
     }
 
-    private func showStatsPopover(metric: StatsWidgetMetric, screenID: UInt32, relativeTo rect: NSRect, of view: NSView) {
+    private func showStatsPopover(metric: StatsWidgetMetric, monitorID: String, relativeTo rect: NSRect, of view: NSView) {
         if statsPopoverPanel?.isVisible == true, statsPopoverMetric == metric {
             closeStatsPopover()
             return
@@ -577,7 +625,7 @@ final class TaskbarController: NSObject {
         panel.contentViewController = StatsPopoverViewController(
             metric: metric,
             size: size,
-            cpuCoreColors: settings.values(for: screenID).statsWidget.cpuCoreColors
+            cpuCoreColors: settings.values(for: monitorID).statsWidget.cpuCoreColors
         )
         statsPopoverMetric = metric
         statsPopoverPanel = panel
@@ -627,8 +675,8 @@ final class TaskbarController: NSObject {
         statsPopoverEventMonitors.removeAll()
     }
 
-    private func makeStatsWidgetMenu(screenID: UInt32) -> NSMenu {
-        let value = settings.values(for: screenID).statsWidget
+    private func makeStatsWidgetMenu(monitorID: String) -> NSMenu {
+        let value = settings.values(for: monitorID).statsWidget
         let snapshot = TaskbarStatsSampler.shared.snapshot(demand: .menuSummary)
         let menu = NSMenu(title: "Stats")
 
@@ -720,8 +768,8 @@ final class TaskbarController: NSObject {
         return menu
     }
 
-    private func makeDateTimeWidgetMenu(screenID: UInt32) -> NSMenu {
-        let value = settings.values(for: screenID).dateTimeWidget
+    private func makeDateTimeWidgetMenu(monitorID: String) -> NSMenu {
+        let value = settings.values(for: monitorID).dateTimeWidget
         let menu = NSMenu(title: "Date & Time")
 
         let showItem = NSMenuItem(title: "Show Date & Time", action: #selector(toggleDateTimeWidgetFromMenu), keyEquivalent: "")
@@ -768,8 +816,8 @@ final class TaskbarController: NSObject {
         return menu
     }
 
-    private func makeBatteryWidgetMenu(screenID: UInt32) -> NSMenu {
-        let value = settings.values(for: screenID).batteryWidget
+    private func makeBatteryWidgetMenu(monitorID: String) -> NSMenu {
+        let value = settings.values(for: monitorID).batteryWidget
         let snapshot = TaskbarBatteryMonitor.shared.snapshot()
         let menu = NSMenu(title: "Battery")
 
@@ -896,17 +944,22 @@ final class TaskbarController: NSObject {
         )
 
         if context.item.isPinned {
-            settings.unpin(app, for: context.screenID)
+            settings.unpin(app, forMonitor: context.monitorID)
         } else {
-            settings.pin(app, for: context.screenID)
+            settings.pin(app, forMonitor: context.monitorID)
         }
     }
 
-    func movePinnedItem(_ item: TaskbarItem, before target: TaskbarItem?, screenID: UInt32) {
+    func movePinnedItem(
+        _ item: TaskbarItem,
+        before target: TaskbarItem?,
+        screenID: UInt32,
+        monitorID: String? = nil
+    ) {
         settings.movePinnedApp(
             movingIdentity: item.identity,
             beforeIdentity: target?.identity,
-            for: screenID
+            forMonitor: monitorID ?? String(screenID)
         )
     }
 
@@ -985,17 +1038,17 @@ final class TaskbarController: NSObject {
 
     private func updateDateTimeWidgetFromMenu(_ transform: (inout DateTimeWidgetSettings) -> Void) {
         guard let context = menuWidgetContext, context.widgetID == .dateTime else { return }
-        settings.updateDateTimeWidget(for: context.screenID, transform)
+        settings.updateDateTimeWidget(for: context.monitorID, transform)
     }
 
     private func updateStatsWidgetFromMenu(_ transform: (inout StatsWidgetSettings) -> Void) {
         guard let context = menuWidgetContext, context.widgetID == .stats else { return }
-        settings.updateStatsWidget(for: context.screenID, transform)
+        settings.updateStatsWidget(for: context.monitorID, transform)
     }
 
     private func updateBatteryWidgetFromMenu(_ transform: (inout BatteryWidgetSettings) -> Void) {
         guard let context = menuWidgetContext, context.widgetID == .battery else { return }
-        settings.updateBatteryWidget(for: context.screenID, transform)
+        settings.updateBatteryWidget(for: context.monitorID, transform)
     }
 
     @objc private func quit() {

@@ -3,6 +3,70 @@ import XCTest
 @testable import TaskbarApp
 
 final class ScreenInfoTests: XCTestCase {
+    func testPersistentDisplayIdentitySurvivesRuntimeIDChanges() throws {
+        let persistentID = persistentDisplayID(
+            runtimeID: 8,
+            displayUUID: "F789AF50-D4FE-4B92-A7C8-54531F60D818"
+        )
+        let reconnectedPersistentID = persistentDisplayID(
+            runtimeID: 5,
+            displayUUID: "f789af50-d4fe-4b92-a7c8-54531f60d818"
+        )
+
+        XCTAssertEqual(persistentID, reconnectedPersistentID)
+        XCTAssertEqual(
+            persistentID,
+            "display:f789af50-d4fe-4b92-a7c8-54531f60d818"
+        )
+
+        let screen = try XCTUnwrap(
+            screenInfos(
+                from: [
+                    ScreenSnapshot(
+                        id: 5,
+                        name: "Reconnected",
+                        appKitFrame: .zero,
+                        displayBounds: .zero,
+                        persistentID: persistentID
+                    )
+                ]
+            ).first
+        )
+
+        XCTAssertEqual(screen.id, 5)
+        XCTAssertEqual(screen.persistentID, persistentID)
+    }
+
+    func testMissingDisplayUUIDUsesExplicitRuntimeOnlyIdentity() {
+        XCTAssertEqual(
+            persistentDisplayID(runtimeID: 19, displayUUID: nil),
+            "runtime:19"
+        )
+    }
+
+    func testReusedRuntimeIDReplacesPanelWhenPhysicalDisplayChanges() {
+        let replacement = ScreenInfo(
+            id: 5,
+            name: "Different Display",
+            appKitFrame: .zero,
+            quartzFrame: .zero,
+            persistentID: "display:new"
+        )
+
+        XCTAssertTrue(
+            taskbarPanelNeedsReplacement(
+                existingMonitorID: "display:old",
+                screen: replacement
+            )
+        )
+        XCTAssertFalse(
+            taskbarPanelNeedsReplacement(
+                existingMonitorID: "display:new",
+                screen: replacement
+            )
+        )
+    }
+
     func testElevatedSecondaryUsesDisplayBoundsForWindowAttribution() {
         let screens = screenInfos(
             from: [

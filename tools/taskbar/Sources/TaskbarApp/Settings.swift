@@ -684,8 +684,8 @@ struct TaskbarPreferences: Codable, Equatable {
         try container.encode(monitorOverrides, forKey: .monitorOverrides)
     }
 
-    func resolvedValues(for screenID: UInt32) -> TaskbarSettingValues {
-        guard let override = monitorOverrides[String(screenID)] else {
+    func resolvedValues(for monitorID: String) -> TaskbarSettingValues {
+        guard let override = monitorOverrides[monitorID] else {
             return clamped(general)
         }
 
@@ -741,6 +741,10 @@ struct TaskbarPreferences: Codable, Equatable {
             values.pinnedApps = pinnedApps
         }
         return clamped(values)
+    }
+
+    func resolvedValues(for screenID: UInt32) -> TaskbarSettingValues {
+        resolvedValues(for: String(screenID))
     }
 
     private func clamped(_ values: TaskbarSettingValues) -> TaskbarSettingValues {
@@ -834,12 +838,20 @@ final class TaskbarSettings {
         changeObservers.removeValue(forKey: id)
     }
 
+    func values(for monitorID: String) -> TaskbarSettingValues {
+        preferences.resolvedValues(for: monitorID)
+    }
+
     func values(for screenID: UInt32) -> TaskbarSettingValues {
-        preferences.resolvedValues(for: screenID)
+        values(for: String(screenID))
+    }
+
+    func overrides(for monitorID: String) -> TaskbarMonitorOverrides {
+        preferences.monitorOverrides[monitorID] ?? TaskbarMonitorOverrides()
     }
 
     func overrides(for screenID: UInt32) -> TaskbarMonitorOverrides {
-        preferences.monitorOverrides[String(screenID)] ?? TaskbarMonitorOverrides()
+        overrides(for: String(screenID))
     }
 
     func updateGeneral(_ transform: (inout TaskbarSettingValues) -> Void) {
@@ -851,8 +863,8 @@ final class TaskbarSettings {
         settingsDidChange()
     }
 
-    func updateOverrides(for screenID: UInt32, _ transform: (inout TaskbarMonitorOverrides) -> Void) {
-        let key = String(screenID)
+    func updateOverrides(for monitorID: String, _ transform: (inout TaskbarMonitorOverrides) -> Void) {
+        let key = monitorID
         var override = preferences.monitorOverrides[key] ?? TaskbarMonitorOverrides()
         transform(&override)
         if let height = override.taskbarHeight {
@@ -891,12 +903,16 @@ final class TaskbarSettings {
         settingsDidChange()
     }
 
-    func updateDateTimeWidget(for screenID: UInt32, _ transform: (inout DateTimeWidgetSettings) -> Void) {
-        let override = overrides(for: screenID)
+    func updateOverrides(for screenID: UInt32, _ transform: (inout TaskbarMonitorOverrides) -> Void) {
+        updateOverrides(for: String(screenID), transform)
+    }
+
+    func updateDateTimeWidget(for monitorID: String, _ transform: (inout DateTimeWidgetSettings) -> Void) {
+        let override = overrides(for: monitorID)
         if override.dateTimeWidget != nil || override.clockMode != nil {
-            var value = values(for: screenID).dateTimeWidget
+            var value = values(for: monitorID).dateTimeWidget
             transform(&value)
-            updateOverrides(for: screenID) { override in
+            updateOverrides(for: monitorID) { override in
                 override.dateTimeWidget = value
                 override.clockMode = nil
             }
@@ -907,9 +923,13 @@ final class TaskbarSettings {
         }
     }
 
-    func updateStatsWidget(for screenID: UInt32, _ transform: (inout StatsWidgetSettings) -> Void) {
-        if overrides(for: screenID).statsWidget != nil {
-            updateOverrides(for: screenID) { override in
+    func updateDateTimeWidget(for screenID: UInt32, _ transform: (inout DateTimeWidgetSettings) -> Void) {
+        updateDateTimeWidget(for: String(screenID), transform)
+    }
+
+    func updateStatsWidget(for monitorID: String, _ transform: (inout StatsWidgetSettings) -> Void) {
+        if overrides(for: monitorID).statsWidget != nil {
+            updateOverrides(for: monitorID) { override in
                 var value = override.statsWidget ?? .defaults
                 transform(&value)
                 override.statsWidget = value
@@ -921,9 +941,13 @@ final class TaskbarSettings {
         }
     }
 
-    func updateBatteryWidget(for screenID: UInt32, _ transform: (inout BatteryWidgetSettings) -> Void) {
-        if overrides(for: screenID).batteryWidget != nil {
-            updateOverrides(for: screenID) { override in
+    func updateStatsWidget(for screenID: UInt32, _ transform: (inout StatsWidgetSettings) -> Void) {
+        updateStatsWidget(for: String(screenID), transform)
+    }
+
+    func updateBatteryWidget(for monitorID: String, _ transform: (inout BatteryWidgetSettings) -> Void) {
+        if overrides(for: monitorID).batteryWidget != nil {
+            updateOverrides(for: monitorID) { override in
                 var value = override.batteryWidget ?? .defaults
                 transform(&value)
                 override.batteryWidget = value
@@ -935,28 +959,51 @@ final class TaskbarSettings {
         }
     }
 
+    func updateBatteryWidget(for screenID: UInt32, _ transform: (inout BatteryWidgetSettings) -> Void) {
+        updateBatteryWidget(for: String(screenID), transform)
+    }
+
     func pin(_ app: PinnedApp, for screenID: UInt32? = nil) {
-        updatePinnedApps(for: screenID) { apps in
+        updatePinnedApps(forMonitor: screenID.map(String.init)) { apps in
+            guard !apps.contains(where: { $0.identity == app.identity }) else { return }
+            apps.append(app)
+        }
+    }
+
+    func pin(_ app: PinnedApp, forMonitor monitorID: String?) {
+        updatePinnedApps(forMonitor: monitorID) { apps in
             guard !apps.contains(where: { $0.identity == app.identity }) else { return }
             apps.append(app)
         }
     }
 
     func unpin(_ app: PinnedApp, for screenID: UInt32? = nil) {
-        updatePinnedApps(for: screenID) { apps in
+        updatePinnedApps(forMonitor: screenID.map(String.init)) { apps in
+            apps.removeAll { $0.identity == app.identity }
+        }
+    }
+
+    func unpin(_ app: PinnedApp, forMonitor monitorID: String?) {
+        updatePinnedApps(forMonitor: monitorID) { apps in
             apps.removeAll { $0.identity == app.identity }
         }
     }
 
     func movePinnedApp(movingIdentity: String, beforeIdentity: String?, for screenID: UInt32? = nil) {
-        updatePinnedApps(for: screenID) { apps in
+        updatePinnedApps(forMonitor: screenID.map(String.init)) { apps in
             apps = movedPinnedApps(apps, movingIdentity: movingIdentity, beforeIdentity: beforeIdentity)
         }
     }
 
-    private func updatePinnedApps(for screenID: UInt32?, _ transform: (inout [PinnedApp]) -> Void) {
-        if let screenID, overrides(for: screenID).pinnedApps != nil {
-            updateOverrides(for: screenID) { override in
+    func movePinnedApp(movingIdentity: String, beforeIdentity: String?, forMonitor monitorID: String?) {
+        updatePinnedApps(forMonitor: monitorID) { apps in
+            apps = movedPinnedApps(apps, movingIdentity: movingIdentity, beforeIdentity: beforeIdentity)
+        }
+    }
+
+    private func updatePinnedApps(forMonitor monitorID: String?, _ transform: (inout [PinnedApp]) -> Void) {
+        if let monitorID, overrides(for: monitorID).pinnedApps != nil {
+            updateOverrides(for: monitorID) { override in
                 var apps = override.pinnedApps ?? []
                 transform(&apps)
                 override.pinnedApps = apps

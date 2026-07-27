@@ -228,6 +228,59 @@ final class TaskbarSettingsPersistenceTests: XCTestCase {
         XCTAssertFalse(reloaded.preferences.startAtLogin)
     }
 
+    func testStableMonitorOverrideSurvivesRuntimeDisplayIDChange() {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let monitorID = "display:f789af50-d4fe-4b92-a7c8-54531f60d818"
+
+        settings.updateOverrides(for: monitorID) { override in
+            override.autoHide = true
+        }
+
+        let originalConnection = ScreenInfo(
+            id: 8,
+            name: "LG Monitor",
+            appKitFrame: .zero,
+            quartzFrame: .zero,
+            persistentID: monitorID
+        )
+        let reconnected = ScreenInfo(
+            id: 5,
+            name: "LG Monitor",
+            appKitFrame: .zero,
+            quartzFrame: .zero,
+            persistentID: monitorID
+        )
+
+        XCTAssertTrue(settings.values(for: originalConnection.persistentID).autoHide)
+        XCTAssertTrue(settings.values(for: reconnected.persistentID).autoHide)
+        XCTAssertNil(settings.preferences.monitorOverrides["8"])
+        XCTAssertNil(settings.preferences.monitorOverrides["5"])
+    }
+
+    func testLegacyNumericOverridesArePreservedButNotAppliedToStableMonitorIdentity() {
+        let store = RecordingTaskbarSettingsStore()
+        let settings = TaskbarSettings(store: store)
+        let monitorID = "display:f789af50-d4fe-4b92-a7c8-54531f60d818"
+
+        settings.updateOverrides(for: 8) { override in
+            override.autoHide = true
+        }
+
+        XCTAssertFalse(settings.values(for: monitorID).autoHide)
+        XCTAssertEqual(settings.preferences.monitorOverrides["8"]?.autoHide, true)
+
+        settings.updateOverrides(for: monitorID) { override in
+            override.taskbarHeight = 42
+        }
+        settings.flushPendingPersistence()
+
+        let reloaded = TaskbarSettings(store: store)
+        XCTAssertEqual(reloaded.preferences.monitorOverrides["8"]?.autoHide, true)
+        XCTAssertEqual(reloaded.values(for: monitorID).taskbarHeight, 42)
+        XCTAssertFalse(reloaded.values(for: monitorID).autoHide)
+    }
+
     func testControllerSyncsStartAtLoginOnlyWhenFlagChanges() {
         let store = RecordingTaskbarSettingsStore()
         let settings = TaskbarSettings(store: store)

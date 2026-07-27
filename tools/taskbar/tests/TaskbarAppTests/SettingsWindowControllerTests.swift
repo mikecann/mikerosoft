@@ -104,7 +104,13 @@ final class SettingsWindowControllerTests: XCTestCase {
     }
 
     func testExternalSettingsChangeUpdatesOverrideOnVisibleMonitorWidgetPage() throws {
-        let screen = ScreenInfo(id: 7, name: "Studio Display", appKitFrame: .zero, quartzFrame: .zero)
+        let screen = ScreenInfo(
+            id: 7,
+            name: "Studio Display",
+            appKitFrame: .zero,
+            quartzFrame: .zero,
+            persistentID: "display:studio"
+        )
         let settings = TaskbarSettings(store: RecordingSettingsStore())
         let controller = SettingsWindowController(settings: settings, screens: [screen])
         controller.selectWidget(.stats, screenID: screen.id)
@@ -114,7 +120,7 @@ final class SettingsWindowControllerTests: XCTestCase {
 
         var externalValue = StatsWidgetSettings.defaults
         externalValue.isEnabled = false
-        settings.updateOverrides(for: screen.id) { $0.statsWidget = externalValue }
+        settings.updateOverrides(for: screen.persistentID) { $0.statsWidget = externalValue }
 
         let refreshedOverride = try XCTUnwrap(button(actionNamed: "toggleMonitorStatsOverride:", in: contentView))
         let refreshedEnabled = try XCTUnwrap(button(actionNamed: "setMonitorStatsEnabled:", in: contentView))
@@ -185,7 +191,13 @@ final class SettingsWindowControllerTests: XCTestCase {
     }
 
     func testMonitorWidgetSpacingCanBeOverridden() throws {
-        let screen = ScreenInfo(id: 7, name: "Studio Display", appKitFrame: .zero, quartzFrame: .zero)
+        let screen = ScreenInfo(
+            id: 7,
+            name: "Studio Display",
+            appKitFrame: .zero,
+            quartzFrame: .zero,
+            persistentID: "display:studio"
+        )
         let settings = TaskbarSettings(store: RecordingSettingsStore())
         let controller = SettingsWindowController(settings: settings, screens: [screen])
         controller.selectMonitor(screenID: screen.id)
@@ -198,7 +210,7 @@ final class SettingsWindowControllerTests: XCTestCase {
         control.doubleValue = 5
         XCTAssertTrue(NSApplication.shared.sendAction(try XCTUnwrap(control.action), to: control.target, from: control))
 
-        XCTAssertEqual(settings.preferences.monitorOverrides["7"]?.widgetSpacing, 5)
+        XCTAssertEqual(settings.preferences.monitorOverrides[screen.persistentID]?.widgetSpacing, 5)
     }
 
     func testClosingWindowStopsExternalSettingsRerenders() throws {

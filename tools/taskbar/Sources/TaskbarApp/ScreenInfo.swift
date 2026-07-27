@@ -1,11 +1,29 @@
 import AppKit
+import ColorSync
 import CoreGraphics
 
 struct ScreenInfo: Equatable {
+    /// CoreGraphics' connection-local ID. Use this for live window and display APIs only.
     let id: UInt32
     let name: String
     let appKitFrame: CGRect
     let quartzFrame: CGRect
+    /// Stable display identity used for persisted per-monitor settings.
+    let persistentID: String
+
+    init(
+        id: UInt32,
+        name: String,
+        appKitFrame: CGRect,
+        quartzFrame: CGRect,
+        persistentID: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.appKitFrame = appKitFrame
+        self.quartzFrame = quartzFrame
+        self.persistentID = persistentID ?? persistentDisplayID(runtimeID: id, displayUUID: nil)
+    }
 }
 
 struct ScreenSnapshot: Equatable {
@@ -13,6 +31,36 @@ struct ScreenSnapshot: Equatable {
     let name: String
     let appKitFrame: CGRect
     let displayBounds: CGRect?
+    let persistentID: String
+
+    init(
+        id: UInt32,
+        name: String,
+        appKitFrame: CGRect,
+        displayBounds: CGRect?,
+        persistentID: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.appKitFrame = appKitFrame
+        self.displayBounds = displayBounds
+        self.persistentID = persistentID ?? persistentDisplayID(runtimeID: id, displayUUID: nil)
+    }
+}
+
+func persistentDisplayID(runtimeID: UInt32, displayUUID: String?) -> String {
+    guard let displayUUID else {
+        // This fallback is intentionally labelled as runtime-only. It avoids
+        // pretending that vendor/model/zero-serial tuples uniquely identify
+        // identical displays.
+        return "runtime:\(runtimeID)"
+    }
+
+    let normalizedUUID = displayUUID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !normalizedUUID.isEmpty else {
+        return "runtime:\(runtimeID)"
+    }
+    return "display:\(normalizedUUID)"
 }
 
 func screenInfos(from snapshots: [ScreenSnapshot]) -> [ScreenInfo] {
@@ -31,7 +79,8 @@ func screenInfos(from snapshots: [ScreenSnapshot]) -> [ScreenInfo] {
             id: snapshot.id,
             name: snapshot.name,
             appKitFrame: frame,
-            quartzFrame: snapshot.displayBounds ?? fallbackQuartzFrame
+            quartzFrame: snapshot.displayBounds ?? fallbackQuartzFrame,
+            persistentID: snapshot.persistentID
         )
     }
 }
@@ -43,11 +92,22 @@ func collectScreens() -> [ScreenInfo] {
             id: displayID ?? UInt32(index + 1),
             name: screen.localizedName,
             appKitFrame: screen.frame,
-            displayBounds: displayID.map(CGDisplayBounds)
+            displayBounds: displayID.map(CGDisplayBounds),
+            persistentID: displayID.map {
+                persistentDisplayID(runtimeID: $0, displayUUID: displayUUID(for: $0))
+            }
         )
     }
 
     return screenInfos(from: snapshots)
+}
+
+private func displayUUID(for displayID: UInt32) -> String? {
+    guard let unmanagedUUID = CGDisplayCreateUUIDFromDisplayID(displayID) else {
+        return nil
+    }
+    let uuid = unmanagedUUID.takeRetainedValue()
+    return CFUUIDCreateString(nil, uuid) as String
 }
 
 private func screenID(_ screen: NSScreen) -> UInt32? {

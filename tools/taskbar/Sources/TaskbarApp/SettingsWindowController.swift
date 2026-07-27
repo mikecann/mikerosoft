@@ -559,8 +559,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
     }
 
     private func renderMonitor(_ screen: ScreenInfo, in stack: NSStackView) {
-        let override = settings.overrides(for: screen.id)
-        let resolved = settings.values(for: screen.id)
+        let override = settings.overrides(for: screen.persistentID)
+        let resolved = settings.values(for: screen.persistentID)
         addHeader(screen.name, subtitle: "Enable an override to use a monitor-specific value.", to: stack)
 
         stack.addArrangedSubview(overrideBoolRow(
@@ -691,8 +691,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     private func renderBatteryWidget(screen: ScreenInfo?, in stack: NSStackView) {
         if let screen {
-            let override = settings.overrides(for: screen.id)
-            let resolved = settings.values(for: screen.id)
+            let override = settings.overrides(for: screen.persistentID)
+            let resolved = settings.values(for: screen.persistentID)
             addHeader("Battery", subtitle: "\(screen.name) override for the Battery widget.", to: stack)
             stack.addArrangedSubview(overrideBatteryWidgetRow(
                 isOverridden: override.batteryWidget != nil,
@@ -717,8 +717,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     private func renderStatsWidget(screen: ScreenInfo?, in stack: NSStackView) {
         if let screen {
-            let override = settings.overrides(for: screen.id)
-            let resolved = settings.values(for: screen.id)
+            let override = settings.overrides(for: screen.persistentID)
+            let resolved = settings.values(for: screen.persistentID)
             addHeader("Stats", subtitle: "\(screen.name) override for the Stats widget.", to: stack)
             stack.addArrangedSubview(overrideStatsWidgetRow(
                 isOverridden: override.statsWidget != nil,
@@ -750,8 +750,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     private func renderDateTimeWidget(screen: ScreenInfo?, in stack: NSStackView) {
         if let screen {
-            let override = settings.overrides(for: screen.id)
-            let resolved = settings.values(for: screen.id)
+            let override = settings.overrides(for: screen.persistentID)
+            let resolved = settings.values(for: screen.persistentID)
             addHeader("Date & Time", subtitle: "\(screen.name) override for the Date & Time widget.", to: stack)
             stack.addArrangedSubview(overrideDateTimeWidgetRow(
                 isOverridden: override.dateTimeWidget != nil || override.clockMode != nil,
@@ -1562,24 +1562,37 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         }
     }
 
+    private func monitorID(for screenID: UInt32) -> String {
+        screens.first(where: { $0.id == screenID })?.persistentID
+            ?? persistentDisplayID(runtimeID: screenID, displayUUID: nil)
+    }
+
+    private func values(for screenID: UInt32) -> TaskbarSettingValues {
+        settings.values(for: monitorID(for: screenID))
+    }
+
+    private func overrides(for screenID: UInt32) -> TaskbarMonitorOverrides {
+        settings.overrides(for: monitorID(for: screenID))
+    }
+
     private func updateOverrides(
         for screenID: UInt32,
         _ transform: (inout TaskbarMonitorOverrides) -> Void
     ) {
         mutateSettings {
-            settings.updateOverrides(for: screenID, transform)
+            settings.updateOverrides(for: monitorID(for: screenID), transform)
         }
     }
 
     private func pin(_ app: PinnedApp, for screenID: UInt32?) {
         mutateSettings {
-            settings.pin(app, for: screenID)
+            settings.pin(app, forMonitor: screenID.map(monitorID(for:)))
         }
     }
 
     private func unpin(_ app: PinnedApp, for screenID: UInt32?) {
         mutateSettings {
-            settings.unpin(app, for: screenID)
+            settings.unpin(app, forMonitor: screenID.map(monitorID(for:)))
         }
     }
 
@@ -1713,14 +1726,14 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     @objc private func toggleMonitorVisibleOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).isVisible
+        let value = values(for: id).isVisible
         updateOverrides(for: id) { $0.isVisible = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorDateTimeOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).dateTimeWidget
+        let value = values(for: id).dateTimeWidget
         updateOverrides(for: id) {
             $0.dateTimeWidget = sender.state == .on ? value : nil
             $0.clockMode = nil
@@ -1730,98 +1743,98 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     @objc private func toggleMonitorStatsOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).statsWidget
+        let value = values(for: id).statsWidget
         updateOverrides(for: id) { $0.statsWidget = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorBatteryOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).batteryWidget
+        let value = values(for: id).batteryWidget
         updateOverrides(for: id) { $0.batteryWidget = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorHeightOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).taskbarHeight
+        let value = values(for: id).taskbarHeight
         updateOverrides(for: id) { $0.taskbarHeight = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorMinimumItemWidthOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).minimumItemWidth
+        let value = values(for: id).minimumItemWidth
         updateOverrides(for: id) { $0.minimumItemWidth = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorMaximumItemWidthOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).maximumItemWidth
+        let value = values(for: id).maximumItemWidth
         updateOverrides(for: id) { $0.maximumItemWidth = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorItemSpacingOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).itemSpacing
+        let value = values(for: id).itemSpacing
         updateOverrides(for: id) { $0.itemSpacing = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorWidgetSpacingOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).widgetSpacing
+        let value = values(for: id).widgetSpacing
         updateOverrides(for: id) { $0.widgetSpacing = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorBackgroundOpacityOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).backgroundOpacity
+        let value = values(for: id).backgroundOpacity
         updateOverrides(for: id) { $0.backgroundOpacity = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorAvoidOverlappingWindowsOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).avoidOverlappingWindows
+        let value = values(for: id).avoidOverlappingWindows
         updateOverrides(for: id) { $0.avoidOverlappingWindows = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorShowMinimizedWindowsOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).showMinimizedWindows
+        let value = values(for: id).showMinimizedWindows
         updateOverrides(for: id) { $0.showMinimizedWindows = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorAutoHideOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).autoHide
+        let value = values(for: id).autoHide
         updateOverrides(for: id) { $0.autoHide = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorRevealAnimationOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).revealAnimation
+        let value = values(for: id).revealAnimation
         updateOverrides(for: id) { $0.revealAnimation = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorRevealDurationOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).revealAnimationDuration
+        let value = values(for: id).revealAnimationDuration
         updateOverrides(for: id) { $0.revealAnimationDuration = sender.state == .on ? value : nil }
         renderDetail()
     }
 
     @objc private func toggleMonitorPinnedAppsOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
-        let value = settings.values(for: id).pinnedApps
+        let value = values(for: id).pinnedApps
         updateOverrides(for: id) { $0.pinnedApps = sender.state == .on ? value : nil }
         renderDetail()
     }
@@ -1833,7 +1846,7 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     private func updateMonitorDateTimeWidget(_ transform: (inout DateTimeWidgetSettings) -> Void) {
         guard let id = selectedMonitorID else { return }
-        let current = settings.overrides(for: id).dateTimeWidget ?? settings.values(for: id).dateTimeWidget
+        let current = overrides(for: id).dateTimeWidget ?? values(for: id).dateTimeWidget
         updateOverrides(for: id) { override in
             var value = current
             transform(&value)
@@ -1865,7 +1878,7 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     private func updateMonitorStatsWidget(_ transform: (inout StatsWidgetSettings) -> Void) {
         guard let id = selectedMonitorID else { return }
-        let current = settings.overrides(for: id).statsWidget ?? settings.values(for: id).statsWidget
+        let current = overrides(for: id).statsWidget ?? values(for: id).statsWidget
         updateOverrides(for: id) { override in
             var value = current
             transform(&value)
@@ -1895,7 +1908,7 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     private func updateMonitorBatteryWidget(_ transform: (inout BatteryWidgetSettings) -> Void) {
         guard let id = selectedMonitorID else { return }
-        let current = settings.overrides(for: id).batteryWidget ?? settings.values(for: id).batteryWidget
+        let current = overrides(for: id).batteryWidget ?? values(for: id).batteryWidget
         updateOverrides(for: id) { override in
             var value = current
             transform(&value)
