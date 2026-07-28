@@ -336,4 +336,13 @@ export const tools: Tool[] = [
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/mac-screenshot',
     platforms: ['macos'],
   },
+  {
+    name: 'filmora-hotkey',
+    desc: 'Press F16 to toggle Filmora playback globally without bringing Filmora forward or sending keystrokes to the focused application',
+    icon: `${base}/filmora-hotkey/icons/filmora-hotkey.svg`,
+    header: `${base}/filmora-hotkey/docs/header.jpg`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/filmora-hotkey',
+    platforms: ['macos'],
+  },
 ];

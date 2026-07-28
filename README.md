@@ -48,6 +48,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/voice-type/docs/header.webp" width="220"><br>[voice-type](tools/voice-type/README.md) | Taskbar + macOS daemon | Push-to-talk local voice transcription on Windows and macOS. On Apple Silicon it uses MLX for faster final transcription |
 | <img src="tools/video-titles/docs/header.webp" width="220"><br>[video-titles](tools/video-titles/README.md) | Context menu | Chat with an AI agent to ideate YouTube titles using the Compelling Title Matrix; right-click any video in Explorer (requires `OPENROUTER_API_KEY` in `.env`) |
 | <img src="tools/video-description/docs/header.webp" width="220"><br>[video-description](tools/video-description/README.md) | CLI + context menu | Generate a YouTube description via Gemini; auto-loads or generates a transcript, then drops into an interactive chat for revisions; right-click any video in Explorer (requires `OPENROUTER_API_KEY` in `.env`) |
+| <img src="tools/filmora-hotkey/docs/header.jpg" width="220"><br>[filmora-hotkey](tools/filmora-hotkey/README.md) | Mac - global hotkey daemon | Press `F16` to toggle Filmora playback while another application remains focused |
 | <img src="tools/generate-from-image/docs/header.webp" width="220"><br>[generate-from-image](tools/generate-from-image/README.md) | Context menu | AI image generation from a reference image; right-click any image in Explorer, describe what you want, and Gemini generates a new image (requires `OPENROUTER_API_KEY` in `.env`) |
 | <img src="tools/svg-to-png/docs/header.webp" width="220"><br>[svg-to-png](tools/svg-to-png/README.md) | Context menu | Render an SVG to PNG at high resolution; right-click any `.svg` file in Explorer; output is always at least 2048px on its smallest dimension |
 | <img src="tools/img-to-svg/docs/header.webp" width="220"><br>[img-to-svg](tools/img-to-svg/README.md) | CLI + context menu | Convert a raster image to SVG vector using vtracer; right-click any image file in Explorer |
@@ -87,6 +88,8 @@ For macOS, set tools up individually where mac support exists:
   `bash tools/voice-type/setup_mac.sh`
 - `mac-screenshot`:
   `bash tools/mac-screenshot/setup_mac.sh`
+- `filmora-hotkey`:
+  `bash tools/filmora-hotkey/setup_mac.sh`
 - `ghopen`:
   `bash tools/ghopen/setup_mac.sh`
 - `worktrees` (needs [Bun](https://bun.sh) on your PATH): see [tools/worktrees/README.md](tools/worktrees/README.md) for setup (`install-to-path.sh` plus `~/.local/bin` on `PATH`).
@@ -113,6 +116,7 @@ while still not covering the Windows-only integrations.
 | --- | --- | --- | --- | --- |
 | `voice-type` | Supported | `bash tools/voice-type/setup_mac.sh` | `bash tools/voice-type/voice-type-mac.sh` | Push-to-talk voice typing on macOS. On Apple Silicon it prefers `MLX Whisper` for supported final models. Settings can be opened with `bash tools/voice-type/open-settings-mac.sh` or via Spotlight `Voice Type` |
 | `mac-screenshot` | Supported | `bash tools/mac-screenshot/setup_mac.sh` | `bash tools/mac-screenshot/restart.sh` | Global screenshot hotkey daemon for macOS. Optional login-item install via `bash tools/mac-screenshot/install-launchagent.sh` |
+| `filmora-hotkey` | Supported | `bash tools/filmora-hotkey/setup_mac.sh` | `bash tools/filmora-hotkey/restart.sh` | F16 toggles Filmora's Play / Pause command without bringing Filmora forward. Optional login-item install via `bash tools/filmora-hotkey/install-launchagent.sh` |
 | `ghopen` | Supported | `bash tools/ghopen/setup_mac.sh` | `ghopen` | Opens the current repo on GitHub. With `gh` installed it opens the PR page first when the branch has one |
 | `worktrees` | Supported | See [tools/worktrees/README.md](tools/worktrees/README.md) | `worktrees` | Needs `~/.local/bin` on `PATH` (or run `bash tools/worktrees/run.sh`). Uses the checkout you are in to find `tools/worktrees`; run `bun install` in that folder per clone if deps are missing |
 | `taskbar` | Supported | `bash tools/taskbar/setup_mac.sh` | `taskbar restart` | Swift/AppKit taskbar for macOS. Run `bash install_mac.sh` if you want the `taskbar` launcher on `PATH` |
