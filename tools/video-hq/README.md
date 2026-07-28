@@ -38,19 +38,36 @@ manually.
   takes, and review items on a playable timeline. When `script.md` exists it is
   supplied as optional context, while the recording remains the source of
   truth. The same Codex pass also proposes likely joins for interrupted
-  sentences. Step 1 marks those joins on the timeline and provides the
+  sentences. The rough-cut screen marks those joins on the timeline and provides the
   non-destructive preview, inline approval, rejection, and undo workflow
   directly. Dragging across the
   analysis timeline continuously scrubs the video and scrolls to highlight the
-  matching detected section. Filters can narrow the list by detected type or
-  show only review items that still need an explicit decision. Every section has
-  persistent **Auto**, **Keep**, and **Cut** controls. Approved joins become
-  non-destructive story beats and flow straight into Step 2. Merged previews
+  matching detected section. The multi-select filters can show or hide any
+  combination of detected types and are saved per analysis. Filtered-out clips
+  remain faintly visible on the Dialogue track. Clicking a visible row plays
+  from that clip through the remaining visible sequence with source gaps and
+  silence skipped. Filters can also show only review items that still need an
+  explicit decision. Every section has
+  persistent **Auto**, **Keep**, and **Cut** controls. Step 1 is dedicated to
+  choosing dialogue clips, resolving review calls, and approving or manually
+  creating joins. Approved joins
+  become expandable parent clips in the section list and matching boundaries
+  for visual planning. Accepted clips can also be selected and joined or
+  unjoined manually. Expanding a parent reveals its original child clips and
+  their individual decisions. Merged previews
   trim to spoken word edges with small room-tone handles and a 40 ms audio
-  crossfade, removing the thinking pause without clipping the sentence. In
-  Step 2, each beat can be assigned a talking-head, camera-cutout, B-roll,
-  screen-recording, AI B-roll, or screencast layout with its media reference or
-  generation note. This process is saved beside the analysis. Filmora export
+  crossfade, removing the thinking pause without clipping the sentence. Step 2
+  lists only the accepted clip boundaries and shows the Visuals track above its
+  Dialogue reference track. Both use the edited programme timeline, with
+  rejected sections and source-recording gaps removed. Each clip can be assigned a talking-head,
+  camera-cutout, B-roll, screen-recording, AI B-roll, or screencast layout with
+  its media reference or generation note. Unassigned clips leave the Visuals
+  track empty. **Suggest remaining visuals** asks Codex to learn from the
+  existing human-authored choices and plan only the unassigned clips using the
+  complete ordered dialogue. Suggested choices are saved with AI provenance,
+  shown with dashed blocks on the Visuals timeline, and labelled in the clip
+  list. Editing or applying one converts it into a human-authored choice. This
+  process is saved beside the analysis. Filmora export
   currently writes the reviewed dialogue cut as a separate plan and new `.wfp`.
   Video HQ automatically finds a clean single-source Filmora project for the
   selected recording, so export only asks for the new project name and location.
@@ -97,7 +114,8 @@ another macOS app launcher.
 - `ffmpeg` and `faster-whisper` for transcription
 - `/Users/m5-mike/dev/me/automate-filmora` for transcription, silence detection,
   and Filmora project generation
-- Codex CLI, signed in locally, for Step 1 transcript review and join suggestions
+- Codex CLI, signed in locally, for Step 1 transcript review and join
+  suggestions, plus Step 2 visual planning
 - `OPENROUTER_API_KEY` in the repo-root `.env` for video descriptions
 - `NOTION_API_KEY` in the repo-root `.env` for Notion search and script download
 

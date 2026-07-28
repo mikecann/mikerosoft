@@ -87,6 +87,17 @@ enum RoughCutTimelineInteraction {
               abs(seconds - final.end) < 0.000_001 else { return nil }
         return final.id
     }
+
+    static func groupID(
+        at seconds: Double,
+        regions: [RoughCutRegion],
+        groups: [RoughCutStoryBeat]
+    ) -> String? {
+        guard let regionID = regionID(at: seconds, regions: regions) else {
+            return nil
+        }
+        return groups.first(where: { $0.regionIDs.contains(regionID) })?.id
+    }
 }
 
 enum RoughCutAnalysisError: LocalizedError {

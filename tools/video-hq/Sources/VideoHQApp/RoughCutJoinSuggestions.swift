@@ -43,11 +43,133 @@ struct RoughCutPlaybackClip: Equatable {
     var duration: Double { max(0, sourceEnd - sourceStart) }
 }
 
+struct RoughCutPlaybackTimelineClip: Equatable, Identifiable {
+    let regionID: String
+    let start: Double
+    let end: Double
+
+    var id: String { regionID }
+    var duration: Double { max(0, end - start) }
+}
+
+struct RoughCutPlaybackTimelineRange: Equatable {
+    let start: Double
+    let end: Double
+}
+
 struct RoughCutPlaybackPlan: Equatable {
     let clips: [RoughCutPlaybackClip]
 
     var duration: Double {
         clips.reduce(0) { $0 + $1.duration - $1.crossfadeAfter }
+    }
+
+    var timelineClips: [RoughCutPlaybackTimelineClip] {
+        var cursor = 0.0
+        return clips.map { clip in
+            let start = cursor
+            cursor += max(0, clip.duration - clip.crossfadeAfter)
+            return RoughCutPlaybackTimelineClip(
+                regionID: clip.regionID,
+                start: start,
+                end: cursor
+            )
+        }
+    }
+
+    func playbackRange(
+        forRegionIDs regionIDs: [String]
+    ) -> RoughCutPlaybackTimelineRange? {
+        let regionIDs = Set(regionIDs)
+        let matching = timelineClips.filter { regionIDs.contains($0.regionID) }
+        guard let first = matching.first, let last = matching.last else { return nil }
+        return RoughCutPlaybackTimelineRange(start: first.start, end: last.end)
+    }
+
+    func playbackBoundaries(
+        forRegionGroups regionGroups: [[String]]
+    ) -> [Double] {
+        regionGroups.dropFirst().compactMap {
+            playbackRange(forRegionIDs: $0)?.start
+        }
+    }
+
+    func sourceTime(at playbackTime: Double) -> Double {
+        guard let lastClip = clips.last else { return 0 }
+        var editedCursor = 0.0
+        for clip in clips {
+            let editedDuration = max(0, clip.duration - clip.crossfadeAfter)
+            if playbackTime < editedCursor + editedDuration {
+                return min(
+                    clip.sourceEnd,
+                    clip.sourceStart + max(0, playbackTime - editedCursor)
+                )
+            }
+            editedCursor += editedDuration
+        }
+        return lastClip.sourceEnd
+    }
+
+    func playbackTime(forSourceTime sourceTime: Double) -> Double? {
+        var editedCursor = 0.0
+        for clip in clips {
+            let editedDuration = max(0, clip.duration - clip.crossfadeAfter)
+            if sourceTime >= clip.sourceStart, sourceTime <= clip.sourceEnd {
+                return editedCursor + min(
+                    editedDuration,
+                    max(0, sourceTime - clip.sourceStart)
+                )
+            }
+            editedCursor += editedDuration
+        }
+        return nil
+    }
+
+    func nearestPlaybackTime(forSourceTime sourceTime: Double) -> Double {
+        guard !clips.isEmpty else { return 0 }
+        var editedCursor = 0.0
+        var nearestTime = 0.0
+        var nearestDistance = Double.greatestFiniteMagnitude
+
+        for clip in clips {
+            let editedDuration = max(0, clip.duration - clip.crossfadeAfter)
+            let candidates = [
+                (clip.sourceStart, editedCursor),
+                (clip.sourceEnd, editedCursor + editedDuration),
+            ]
+            for (sourceBoundary, playbackBoundary) in candidates {
+                let distance = abs(sourceTime - sourceBoundary)
+                if distance < nearestDistance {
+                    nearestDistance = distance
+                    nearestTime = playbackBoundary
+                }
+            }
+            editedCursor += editedDuration
+        }
+        return nearestTime
+    }
+
+    func playbackStartTime(forRegionID regionID: String?) -> Double {
+        guard let regionID,
+              let clip = clips.first(where: { $0.regionID == regionID }) else {
+            return 0
+        }
+        return playbackTime(forSourceTime: clip.sourceStart) ?? 0
+    }
+
+    func playbackStartTime(forSourceTime sourceTime: Double) -> Double {
+        playbackTime(forSourceTime: sourceTime)
+            ?? nearestPlaybackTime(forSourceTime: sourceTime)
+    }
+}
+
+enum RoughCutPlaybackReuse {
+    static func shouldReuse(
+        isPlayingComposition: Bool,
+        activePlan: RoughCutPlaybackPlan?,
+        requestedPlan: RoughCutPlaybackPlan
+    ) -> Bool {
+        isPlayingComposition && activePlan == requestedPlan
     }
 }
 
@@ -98,6 +220,119 @@ enum RoughCutSpeechJoinPlanner {
         }
 
         return RoughCutPlaybackPlan(clips: clips)
+    }
+}
+
+enum RoughCutReviewedCutPlanner {
+    static func plan(
+        regions: [RoughCutRegion],
+        words: [RoughCutTranscript.Word],
+        process: RoughCutProcessDocument
+    ) -> RoughCutPlaybackPlan {
+        let regionsByID = Dictionary(uniqueKeysWithValues: regions.map { ($0.id, $0) })
+        let clips = process.groups.flatMap { group -> [RoughCutPlaybackClip] in
+            let groupRegions = group.regionIDs.compactMap { regionsByID[$0] }
+            guard groupRegions.count > 1 else {
+                return groupRegions.map {
+                    RoughCutPlaybackClip(
+                        regionID: $0.id,
+                        sourceStart: $0.start,
+                        sourceEnd: $0.end,
+                        crossfadeAfter: 0
+                    )
+                }
+            }
+
+            let joinedPairs = Set(zip(groupRegions, groupRegions.dropFirst()).map {
+                RoughCutRegionPair(left: $0.id, right: $1.id)
+            })
+            return RoughCutSpeechJoinPlanner.plan(
+                regions: groupRegions,
+                words: words,
+                joinedPairs: joinedPairs
+            ).clips
+        }
+        return RoughCutPlaybackPlan(clips: clips)
+    }
+}
+
+enum RoughCutFilteredPlaybackPlanner {
+    static func plan(
+        regions: [RoughCutRegion],
+        words: [RoughCutTranscript.Word],
+        process: RoughCutProcessDocument,
+        visibleRegionIDs: Set<String>,
+        startingAt startRegionID: String? = nil
+    ) -> RoughCutPlaybackPlan {
+        let groupByRegionID = Dictionary(
+            uniqueKeysWithValues: process.groups.flatMap { group in
+                group.regionIDs.map { ($0, group.id) }
+            }
+        )
+        let groupIndexByRegionID = Dictionary(
+            uniqueKeysWithValues: process.groups.flatMap { group in
+                group.regionIDs.enumerated().map { ($0.element, $0.offset) }
+            }
+        )
+        var visibleRegions = regions
+            .filter { visibleRegionIDs.contains($0.id) }
+            .sorted { $0.start < $1.start }
+        if let startRegionID {
+            let exactStartIndex = visibleRegions.firstIndex {
+                $0.id == startRegionID
+            }
+            let startGroupID = groupByRegionID[startRegionID]
+            let groupFallbackIndex = visibleRegions.firstIndex { region in
+                startGroupID != nil && groupByRegionID[region.id] == startGroupID
+            }
+            let startIndex = exactStartIndex ?? groupFallbackIndex
+            if let startIndex {
+                visibleRegions = Array(visibleRegions[startIndex...])
+            }
+        }
+
+        var clips: [RoughCutPlaybackClip] = []
+        var index = 0
+        while index < visibleRegions.count {
+            let region = visibleRegions[index]
+            guard let groupID = groupByRegionID[region.id] else {
+                clips.append(rawClip(for: region))
+                index += 1
+                continue
+            }
+
+            var endIndex = index + 1
+            while endIndex < visibleRegions.count,
+                  groupByRegionID[visibleRegions[endIndex].id] == groupID,
+                  groupIndexByRegionID[visibleRegions[endIndex].id]
+                    == groupIndexByRegionID[visibleRegions[endIndex - 1].id].map({ $0 + 1 }) {
+                endIndex += 1
+            }
+            let run = Array(visibleRegions[index..<endIndex])
+            if run.count > 1 {
+                let joinedPairs = Set(zip(run, run.dropFirst()).map {
+                    RoughCutRegionPair(left: $0.id, right: $1.id)
+                })
+                clips.append(contentsOf: RoughCutSpeechJoinPlanner.plan(
+                    regions: run,
+                    words: words,
+                    joinedPairs: joinedPairs
+                ).clips)
+            } else {
+                clips.append(rawClip(for: region))
+            }
+            index = endIndex
+        }
+        return RoughCutPlaybackPlan(clips: clips)
+    }
+
+    private static func rawClip(for region: RoughCutRegion) -> RoughCutPlaybackClip {
+        RoughCutPlaybackClip(
+            regionID: region.id,
+            sourceStart: region.start,
+            sourceEnd: region.end,
+            crossfadeAfter: 0
+        )
     }
 }
 

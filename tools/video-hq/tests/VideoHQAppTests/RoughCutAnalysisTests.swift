@@ -1,12 +1,336 @@
+import AVFoundation
+import AppKit
 import Foundation
 import XCTest
 @testable import VideoHQApp
 
 final class RoughCutAnalysisTests: XCTestCase {
-    func testRoughCutProcessMovesDirectlyFromReviewToVisuals() {
+    func testSpacebarShortcutOnlyHandlesUnmodifiedSpaceOutsideTextEditing() {
+        XCTAssertTrue(
+            RoughCutPlaybackShortcut.shouldHandle(
+                keyCode: 49,
+                modifiers: [],
+                isEditingText: false
+            )
+        )
+        XCTAssertFalse(
+            RoughCutPlaybackShortcut.shouldHandle(
+                keyCode: 49,
+                modifiers: [],
+                isEditingText: true
+            )
+        )
+        XCTAssertFalse(
+            RoughCutPlaybackShortcut.shouldHandle(
+                keyCode: 49,
+                modifiers: [.command],
+                isEditingText: false
+            )
+        )
+        XCTAssertFalse(
+            RoughCutPlaybackShortcut.shouldHandle(
+                keyCode: 36,
+                modifiers: [],
+                isEditingText: false
+            )
+        )
+    }
+
+    func testRoughCutProcessSeparatesClipReviewFromVisualPlanning() {
         XCTAssertEqual(RoughCutProcessStage.allCases, [.review, .visuals])
-        XCTAssertEqual(RoughCutProcessStage.review.label, "1. Review")
+        XCTAssertEqual(RoughCutProcessStage.review.label, "1. Clips")
         XCTAssertEqual(RoughCutProcessStage.visuals.label, "2. Visuals")
+    }
+
+    @MainActor
+    func testPlaybackClockReattachesWithoutRecreatingItsOwner() {
+        let firstPlayer = AVPlayer()
+        let secondPlayer = AVPlayer()
+        let clock = RoughCutPlaybackClock(player: firstPlayer)
+
+        clock.attach(to: secondPlayer)
+
+        XCTAssertTrue(clock.observedPlayer === secondPlayer)
+    }
+
+    @MainActor
+    func testPlaybackClockSynchronizesImmediatelyAfterAPausedSeek() {
+        let clock = RoughCutPlaybackClock(player: AVPlayer())
+
+        clock.synchronize(to: 27)
+
+        XCTAssertEqual(clock.currentTime, 27, accuracy: 0.001)
+    }
+
+    func testExpandedJoinedClipShowsOneListPlayheadOnItsActiveChild() {
+        XCTAssertTrue(
+            RoughCutListPlayheadVisibility.showOnParent(
+                isActive: true,
+                isExpanded: false
+            )
+        )
+        XCTAssertFalse(
+            RoughCutListPlayheadVisibility.showOnParent(
+                isActive: true,
+                isExpanded: true
+            )
+        )
+        XCTAssertTrue(RoughCutListPlayheadVisibility.showOnChild(isActive: true))
+        XCTAssertFalse(RoughCutListPlayheadVisibility.showOnChild(isActive: false))
+    }
+
+    func testLiveScrubPositionOverridesThePeriodicPlayerClock() {
+        XCTAssertEqual(
+            RoughCutDisplayedPlaybackPosition.sourceTime(
+                scrubbedSourceTime: 42,
+                clockSourceTime: 10
+            ),
+            42
+        )
+        XCTAssertEqual(
+            RoughCutDisplayedPlaybackPosition.sourceTime(
+                scrubbedSourceTime: nil,
+                clockSourceTime: 10
+            ),
+            10
+        )
+    }
+
+    func testVisualDraftOnlyPersistsAfterAnActualUserEdit() {
+        XCTAssertFalse(
+            RoughCutVisualDraftPersistence.shouldPersist(
+                isDirty: false,
+                selectedGroupCount: 2
+            )
+        )
+        XCTAssertTrue(
+            RoughCutVisualDraftPersistence.shouldPersist(
+                isDirty: true,
+                selectedGroupCount: 2
+            )
+        )
+        XCTAssertFalse(
+            RoughCutVisualDraftPersistence.shouldPersist(
+                isDirty: true,
+                selectedGroupCount: 0
+            )
+        )
+    }
+
+    func testAutoplayCompletionOnlyAppliesToTheCurrentAuthorizedBuild() {
+        XCTAssertTrue(
+            RoughCutAutoplayAuthorization.isCurrent(
+                expectedGeneration: 4,
+                playbackGeneration: 4,
+                authorizedGeneration: 4
+            )
+        )
+        XCTAssertFalse(
+            RoughCutAutoplayAuthorization.isCurrent(
+                expectedGeneration: 4,
+                playbackGeneration: 5,
+                authorizedGeneration: 4
+            )
+        )
+        XCTAssertFalse(
+            RoughCutAutoplayAuthorization.isCurrent(
+                expectedGeneration: 4,
+                playbackGeneration: 4,
+                authorizedGeneration: nil
+            )
+        )
+    }
+
+    func testTimelineTracksUseTheSameSourceTimeCoordinate() {
+        XCTAssertEqual(
+            RoughCutTimelineGeometry.normalizedPosition(
+                time: 170.5,
+                duration: 1_057.6
+            ),
+            170.5 / 1_057.6,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            RoughCutTimelineGeometry.normalizedRange(
+                start: 170.5,
+                end: 180.5,
+                duration: 1_057.6
+            ).start,
+            170.5 / 1_057.6,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testFilteredCompositionCanBeReusedWhenOnlyTheStartingClipChanges() {
+        let plan = RoughCutPlaybackPlan(clips: [
+            RoughCutPlaybackClip(
+                regionID: "one",
+                sourceStart: 5,
+                sourceEnd: 8,
+                crossfadeAfter: 0
+            ),
+            RoughCutPlaybackClip(
+                regionID: "two",
+                sourceStart: 20,
+                sourceEnd: 24,
+                crossfadeAfter: 0
+            ),
+        ])
+
+        XCTAssertTrue(
+            RoughCutPlaybackReuse.shouldReuse(
+                isPlayingComposition: true,
+                activePlan: plan,
+                requestedPlan: plan
+            )
+        )
+        XCTAssertFalse(
+            RoughCutPlaybackReuse.shouldReuse(
+                isPlayingComposition: false,
+                activePlan: plan,
+                requestedPlan: plan
+            )
+        )
+        XCTAssertEqual(
+            plan.playbackStartTime(forRegionID: "two"),
+            3,
+            accuracy: 0.001
+        )
+    }
+
+    func testEditedTimelineRemovesSourceGapsAndIncludesCrossfades() {
+        let plan = RoughCutPlaybackPlan(clips: [
+            RoughCutPlaybackClip(
+                regionID: "one",
+                sourceStart: 5,
+                sourceEnd: 8,
+                crossfadeAfter: 0.04
+            ),
+            RoughCutPlaybackClip(
+                regionID: "two",
+                sourceStart: 20,
+                sourceEnd: 24,
+                crossfadeAfter: 0
+            ),
+            RoughCutPlaybackClip(
+                regionID: "three",
+                sourceStart: 50,
+                sourceEnd: 52,
+                crossfadeAfter: 0
+            ),
+        ])
+
+        XCTAssertEqual(plan.timelineClips[0].start, 0, accuracy: 0.001)
+        XCTAssertEqual(plan.timelineClips[0].end, 2.96, accuracy: 0.001)
+        XCTAssertEqual(plan.timelineClips[1].start, 2.96, accuracy: 0.001)
+        XCTAssertEqual(plan.timelineClips[1].end, 6.96, accuracy: 0.001)
+        XCTAssertEqual(plan.timelineClips[2].start, 6.96, accuracy: 0.001)
+        XCTAssertEqual(plan.timelineClips[2].end, 8.96, accuracy: 0.001)
+
+        let joinedRange = plan.playbackRange(forRegionIDs: ["one", "two"])
+        XCTAssertEqual(joinedRange?.start ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(joinedRange?.end ?? -1, 6.96, accuracy: 0.001)
+        XCTAssertEqual(
+            plan.playbackBoundaries(
+                forRegionGroups: [["one", "two"], ["three"]]
+            ),
+            [6.96]
+        )
+        XCTAssertEqual(
+            plan.playbackStartTime(forSourceTime: 50),
+            6.96,
+            accuracy: 0.001
+        )
+    }
+
+    func testReviewedCutPlaybackMapsEditedTimeBackOntoTheSourceTimeline() {
+        let plan = RoughCutPlaybackPlan(clips: [
+            RoughCutPlaybackClip(
+                regionID: "one",
+                sourceStart: 10,
+                sourceEnd: 12,
+                crossfadeAfter: 0
+            ),
+            RoughCutPlaybackClip(
+                regionID: "two",
+                sourceStart: 20,
+                sourceEnd: 23,
+                crossfadeAfter: 0
+            ),
+        ])
+
+        XCTAssertEqual(plan.sourceTime(at: 0.5), 10.5, accuracy: 0.001)
+        XCTAssertEqual(plan.sourceTime(at: 2.0), 20.0, accuracy: 0.001)
+        XCTAssertEqual(plan.sourceTime(at: 2.5), 20.5, accuracy: 0.001)
+        XCTAssertEqual(plan.sourceTime(at: 99), 23, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(plan.playbackTime(forSourceTime: 20.5)), 2.5, accuracy: 0.001)
+        XCTAssertNil(plan.playbackTime(forSourceTime: 15))
+        XCTAssertEqual(plan.nearestPlaybackTime(forSourceTime: 15), 2, accuracy: 0.001)
+        XCTAssertEqual(plan.nearestPlaybackTime(forSourceTime: 19), 2, accuracy: 0.001)
+
+        let regions = [
+            RoughCutRegion(
+                id: "one",
+                start: 10,
+                end: 12,
+                text: "One",
+                decision: "keep",
+                confidence: 1,
+                reason: "keep",
+                duplicateOf: nil,
+                hasTranscriptEvidence: true
+            ),
+            RoughCutRegion(
+                id: "two",
+                start: 20,
+                end: 23,
+                text: "Two",
+                decision: "keep",
+                confidence: 1,
+                reason: "keep",
+                duplicateOf: nil,
+                hasTranscriptEvidence: true
+            ),
+        ]
+        XCTAssertEqual(
+            RoughCutTimelineInteraction.regionID(
+                at: plan.sourceTime(at: 0.1),
+                regions: regions
+            ),
+            "one"
+        )
+        XCTAssertEqual(
+            RoughCutTimelineInteraction.regionID(
+                at: plan.sourceTime(at: 2.0),
+                regions: regions
+            ),
+            "two"
+        )
+    }
+
+    func testPlaybackTimeMappingAccountsForCrossfadeOverlap() throws {
+        let plan = RoughCutPlaybackPlan(clips: [
+            RoughCutPlaybackClip(
+                regionID: "one",
+                sourceStart: 10,
+                sourceEnd: 12,
+                crossfadeAfter: 0.25
+            ),
+            RoughCutPlaybackClip(
+                regionID: "two",
+                sourceStart: 20,
+                sourceEnd: 22,
+                crossfadeAfter: 0
+            ),
+        ])
+
+        XCTAssertEqual(plan.duration, 3.75, accuracy: 0.001)
+        XCTAssertEqual(plan.sourceTime(at: 1.75), 20, accuracy: 0.001)
+        XCTAssertEqual(
+            try XCTUnwrap(plan.playbackTime(forSourceTime: 20.5)),
+            2.25,
+            accuracy: 0.001
+        )
     }
 
     func testDecodesPlannerRegionsAndClassifiesReviewSegments() throws {
@@ -468,6 +792,28 @@ final class RoughCutAnalysisTests: XCTestCase {
             ).map(\.id),
             ["review"]
         )
+
+        let combined = RoughCutRegionFilterSelection(
+            filters: [.valid, .awaitingDecision]
+        )
+        XCTAssertEqual(
+            combined.apply(to: regions, manualDecisions: decisions).map(\.id),
+            ["valid", "review"]
+        )
+    }
+
+    func testRegionFilterSelectionPersistsBesideTheAnalysis() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = RoughCutViewStateStore(analysisDirectoryURL: root)
+        let selection = RoughCutRegionFilterSelection(
+            filters: [.valid, .falseStart, .awaitingDecision]
+        )
+
+        try store.save(selection)
+
+        XCTAssertEqual(try store.load(), selection)
     }
 
     func testRoughCutProcessStartsWithOneStoryBeatPerAcceptedRegion() {
@@ -485,6 +831,57 @@ final class RoughCutAnalysisTests: XCTestCase {
             .unassigned,
             .unassigned,
         ])
+    }
+
+    func testClipClickSelectionReplacesNormallyAndAddsWithShift() {
+        XCTAssertEqual(
+            RoughCutClipSelection.select(
+                "three",
+                in: ["one", "two"],
+                additive: false
+            ),
+            ["three"]
+        )
+        XCTAssertEqual(
+            RoughCutClipSelection.select(
+                "three",
+                in: ["one", "two"],
+                additive: true
+            ),
+            ["one", "two", "three"]
+        )
+    }
+
+    func testClipClickOnlyContinuesPlaybackWhenPlaybackWasAlreadyRunning() {
+        XCTAssertFalse(
+            RoughCutPlaybackStartBehavior.rowSelection(
+                wasPlaying: false
+            ).shouldAutoplay
+        )
+        XCTAssertTrue(
+            RoughCutPlaybackStartBehavior.rowSelection(
+                wasPlaying: true
+            ).shouldAutoplay
+        )
+        XCTAssertTrue(RoughCutPlaybackStartBehavior.explicitPlay.shouldAutoplay)
+        XCTAssertTrue(
+            RoughCutPlaybackContinuation.shouldContinue(
+                isPlayerPlaying: false,
+                isAutoplayBuildPending: true
+            )
+        )
+    }
+
+    func testUncheckingTheFocusedClipMovesFocusToAStillSelectedClip() {
+        let updated = RoughCutClipSelection.toggle(
+            "one",
+            in: ["one", "two"],
+            focusedGroupID: "one",
+            orderedGroupIDs: ["one", "two", "three"]
+        )
+
+        XCTAssertEqual(updated.selectedGroupIDs, ["two"])
+        XCTAssertEqual(updated.focusedGroupID, "two")
     }
 
     func testRoughCutProcessMergesAndUnmergesContiguousStoryBeats() throws {
@@ -507,6 +904,27 @@ final class RoughCutAnalysisTests: XCTestCase {
             ["three"],
             ["four"],
         ])
+    }
+
+    func testReviewHierarchyReplacesJoinedClipsWithExpandableParent() throws {
+        let process = try RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["one", "two", "three"]
+        ).merging(groupIDs: ["one", "two"])
+
+        let items = RoughCutReviewHierarchy.items(
+            regionIDsInSourceOrder: ["one", "rejected", "two", "three"],
+            visibleRegionIDs: ["one", "rejected", "two", "three"],
+            process: process
+        )
+
+        XCTAssertEqual(items.map(\.regionIDs), [
+            ["one", "two"],
+            ["rejected"],
+            ["three"],
+        ])
+        XCTAssertTrue(items[0].isJoinedParent)
+        XCTAssertEqual(items[0].groupID, process.groups[0].id)
+        XCTAssertNil(items[1].groupID)
     }
 
     func testCodexJoinSuggestionsKeepOnlyContiguousAcceptedClips() throws {
@@ -762,6 +1180,212 @@ final class RoughCutAnalysisTests: XCTestCase {
         XCTAssertEqual(plan.duration, 5.52, accuracy: 0.001)
     }
 
+    func testReviewedCutPlannerOmitsRejectedSectionsAndPreservesApprovedJoins() throws {
+        let regions = try RoughCutPlan.decode(
+            from: Data(
+                """
+                {
+                  "schema_version": 1,
+                  "source": {"filename": "camera.mov", "duration_seconds": 20},
+                  "regions": [
+                    {
+                      "id": "one", "start": 1.00, "end": 4.20,
+                      "text": "This sentence is", "decision": "keep", "confidence": 1,
+                      "reason": "keep", "duplicate_of": null,
+                      "has_transcript_evidence": true
+                    },
+                    {
+                      "id": "rejected", "start": 4.20, "end": 8.00,
+                      "text": "A false start", "decision": "drop", "confidence": 1,
+                      "reason": "false_start", "duplicate_of": "one",
+                      "has_transcript_evidence": true
+                    },
+                    {
+                      "id": "two", "start": 8.00, "end": 10.40,
+                      "text": "continued here.", "decision": "keep", "confidence": 1,
+                      "reason": "keep", "duplicate_of": null,
+                      "has_transcript_evidence": true
+                    },
+                    {
+                      "id": "three", "start": 12.00, "end": 14.00,
+                      "text": "A complete next sentence.", "decision": "keep", "confidence": 1,
+                      "reason": "keep", "duplicate_of": null,
+                      "has_transcript_evidence": true
+                    }
+                  ]
+                }
+                """.utf8
+            )
+        ).regions
+        let transcript = try RoughCutTranscript.decode(
+            from: Data(
+                """
+                {
+                  "schema_version": 1,
+                  "segments": [
+                    {
+                      "start": 1.08, "end": 4.10, "text": "This sentence is",
+                      "words": [
+                        {"start": 1.08, "end": 1.30, "text": "This"},
+                        {"start": 3.80, "end": 4.10, "text": "is"}
+                      ]
+                    },
+                    {
+                      "start": 8.07, "end": 10.31, "text": "continued here.",
+                      "words": [
+                        {"start": 8.07, "end": 8.50, "text": "continued"},
+                        {"start": 10.00, "end": 10.31, "text": "here."}
+                      ]
+                    }
+                  ]
+                }
+                """.utf8
+            )
+        )
+        let process = try RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["one", "two", "three"]
+        ).merging(groupIDs: ["one", "two"])
+
+        let plan = RoughCutReviewedCutPlanner.plan(
+            regions: regions,
+            words: transcript.words,
+            process: process
+        )
+
+        XCTAssertEqual(plan.clips.map(\.regionID), ["one", "two", "three"])
+        XCTAssertEqual(plan.clips[0].crossfadeAfter, 0.04, accuracy: 0.001)
+        XCTAssertEqual(plan.clips[1].sourceStart, 8.01, accuracy: 0.001)
+        XCTAssertEqual(plan.clips[2].sourceStart, 12.00, accuracy: 0.001)
+        XCTAssertEqual(plan.clips[2].sourceEnd, 14.00, accuracy: 0.001)
+        XCTAssertEqual(plan.duration, 7.52, accuracy: 0.001)
+    }
+
+    func testFilteredPlaybackUsesOnlyVisibleClipsAndStartsAtClickedClip() {
+        let regions = [
+            region(id: "one", text: "First"),
+            RoughCutRegion(
+                id: "hidden",
+                start: 4,
+                end: 6,
+                text: "Hidden",
+                decision: "drop",
+                confidence: 1,
+                reason: "false_start",
+                duplicateOf: nil,
+                hasTranscriptEvidence: true
+            ),
+            RoughCutRegion(
+                id: "three",
+                start: 8,
+                end: 10,
+                text: "Third",
+                decision: "keep",
+                confidence: 1,
+                reason: "keep",
+                duplicateOf: nil,
+                hasTranscriptEvidence: true
+            ),
+        ]
+        let process = RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["one", "three"]
+        )
+
+        let plan = RoughCutFilteredPlaybackPlanner.plan(
+            regions: regions,
+            words: [],
+            process: process,
+            visibleRegionIDs: ["one", "three"],
+            startingAt: "three"
+        )
+
+        XCTAssertEqual(plan.clips.map(\.regionID), ["three"])
+        XCTAssertEqual(plan.clips[0].sourceStart, 8, accuracy: 0.001)
+        XCTAssertEqual(plan.clips[0].sourceEnd, 10, accuracy: 0.001)
+    }
+
+    func testFilteredPlaybackStartsAtFirstVisibleChildWhenClickedJoinChildIsHidden() throws {
+        let regions = [
+            region(id: "before", text: "Before"),
+            RoughCutRegion(
+                id: "hidden-child",
+                start: 4,
+                end: 6,
+                text: "Hidden",
+                decision: "keep",
+                confidence: 1,
+                reason: "keep",
+                duplicateOf: nil,
+                hasTranscriptEvidence: true
+            ),
+            RoughCutRegion(
+                id: "visible-child",
+                start: 8,
+                end: 10,
+                text: "Visible",
+                decision: "keep",
+                confidence: 1,
+                reason: "keep",
+                duplicateOf: nil,
+                hasTranscriptEvidence: true
+            ),
+        ]
+        let process = try RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["before", "hidden-child", "visible-child"]
+        ).merging(groupIDs: ["hidden-child", "visible-child"])
+
+        let plan = RoughCutFilteredPlaybackPlanner.plan(
+            regions: regions,
+            words: [],
+            process: process,
+            visibleRegionIDs: ["before", "visible-child"],
+            startingAt: "hidden-child"
+        )
+
+        XCTAssertEqual(plan.clips.map(\.regionID), ["visible-child"])
+    }
+
+    func testFilteredPlaybackStartsAtTheClickedVisibleChildInsideAJoin() throws {
+        let regions = [
+            region(id: "one", text: "One"),
+            region(id: "two", text: "Two", start: 4, end: 6),
+            region(id: "three", text: "Three", start: 8, end: 10),
+        ]
+        let process = try RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["one", "two", "three"]
+        ).merging(groupIDs: ["one", "two", "three"])
+
+        let plan = RoughCutFilteredPlaybackPlanner.plan(
+            regions: regions,
+            words: [],
+            process: process,
+            visibleRegionIDs: ["one", "two", "three"],
+            startingAt: "two"
+        )
+
+        XCTAssertEqual(plan.clips.map(\.regionID), ["two", "three"])
+    }
+
+    func testFilteredPlaybackDoesNotInventAJoinAcrossAHiddenMiddleChild() throws {
+        let regions = [
+            region(id: "one", text: "One"),
+            region(id: "two", text: "Two", start: 4, end: 6),
+            region(id: "three", text: "Three", start: 8, end: 10),
+        ]
+        let process = try RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["one", "two", "three"]
+        ).merging(groupIDs: ["one", "two", "three"])
+
+        let plan = RoughCutFilteredPlaybackPlanner.plan(
+            regions: regions,
+            words: [],
+            process: process,
+            visibleRegionIDs: ["one", "three"]
+        )
+
+        XCTAssertEqual(plan.clips.map(\.regionID), ["one", "three"])
+        XCTAssertEqual(plan.clips[0].crossfadeAfter, 0, accuracy: 0.001)
+    }
+
     func testRoughCutProcessReconcilesDecisionsAndPersistsVisualPlans() throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -820,6 +1444,176 @@ final class RoughCutAnalysisTests: XCTestCase {
         let migrated = try store.loadOrCreate(acceptedRegionIDs: ["legacy"])
         XCTAssertEqual(migrated.groups[0].regionIDs, ["legacy"])
         XCTAssertEqual(migrated.groups[0].visual, .unassigned)
+    }
+
+    func testSelectingAVisualLayoutBuildsThePlanThatIsSavedImmediately() {
+        XCTAssertEqual(
+            RoughCutVisualEditor.plan(
+                selecting: .screencastWithCamera,
+                detail: "Dashboard walkthrough.mov"
+            ),
+            RoughCutVisualPlan(
+                layout: .screencastWithCamera,
+                detail: "Dashboard walkthrough.mov"
+            )
+        )
+        XCTAssertEqual(
+            RoughCutVisualEditor.plan(
+                selecting: .talkingHeadFullScreen,
+                detail: "stale media.mov"
+            ),
+            RoughCutVisualPlan(
+                layout: .talkingHeadFullScreen,
+                detail: ""
+            )
+        )
+    }
+
+    func testVisualPlansTrackAISuggestionsAndManualOverrides() throws {
+        let legacy = try JSONDecoder().decode(
+            RoughCutVisualPlan.self,
+            from: Data(
+                """
+                {"layout":"talkingHeadFullScreen","detail":""}
+                """.utf8
+            )
+        )
+        XCTAssertEqual(legacy.origin, .human)
+        XCTAssertFalse(legacy.isAISuggested)
+
+        let suggested = RoughCutVisualPlan(
+            layout: .aiBRollFullScreen,
+            detail: "Show an agent tangled in spaghetti.",
+            origin: .aiSuggested
+        )
+        XCTAssertTrue(suggested.isAISuggested)
+
+        let overridden = RoughCutVisualEditor.plan(
+            selecting: suggested.layout,
+            detail: "Show an agent choosing a safer path."
+        )
+        XCTAssertEqual(overridden.origin, .human)
+        XCTAssertFalse(overridden.isAISuggested)
+    }
+
+    func testVisualSuggestionsPreserveHumansAndCanRefreshPreviousAISuggestions() {
+        let process = RoughCutProcessDocument.initial(
+            acceptedRegionIDs: ["human", "old-ai", "empty"]
+        ).assigningVisual(
+            RoughCutVisualPlan(layout: .talkingHeadFullScreen, detail: ""),
+            toGroupIDs: ["human"]
+        ).assigningSuggestedVisuals(
+            [
+                "old-ai": RoughCutVisualPlan(
+                    layout: .aiBRollFullScreen,
+                    detail: "Old suggestion.",
+                    origin: .aiSuggested
+                ),
+            ]
+        )
+        let updated = process.assigningSuggestedVisuals([
+            "human": RoughCutVisualPlan(
+                layout: .aiBRollFullScreen,
+                detail: "Do not replace this.",
+                origin: .aiSuggested
+            ),
+            "old-ai": RoughCutVisualPlan(
+                layout: .screenRecordingFullScreen,
+                detail: "Replacement suggestion.",
+                origin: .aiSuggested
+            ),
+            "empty": RoughCutVisualPlan(
+                layout: .screenRecordingFullScreen,
+                detail: "Show the relevant documentation page.",
+                origin: .aiSuggested
+            ),
+        ])
+
+        XCTAssertEqual(updated.groups[0].visual.layout, .talkingHeadFullScreen)
+        XCTAssertEqual(updated.groups[0].visual.origin, .human)
+        XCTAssertEqual(updated.groups[1].visual.detail, "Replacement suggestion.")
+        XCTAssertEqual(updated.groups[1].visual.origin, .aiSuggested)
+        XCTAssertEqual(updated.groups[2].visual.layout, .screenRecordingFullScreen)
+        XCTAssertEqual(updated.groups[2].visual.origin, .aiSuggested)
+    }
+
+    func testVisualSuggestionValidatorRejectsUnknownInvalidAndDuplicateResults() {
+        let suggestions = [
+            RoughCutVisualSuggestion(
+                groupID: "one",
+                layout: .screenRecordingFullScreen,
+                detail: "Show the Convex documentation."
+            ),
+            RoughCutVisualSuggestion(
+                groupID: "one",
+                layout: .aiBRollFullScreen,
+                detail: "Duplicate."
+            ),
+            RoughCutVisualSuggestion(
+                groupID: "two",
+                layout: .unassigned,
+                detail: ""
+            ),
+            RoughCutVisualSuggestion(
+                groupID: "three",
+                layout: .talkingHeadFullScreen,
+                detail: ""
+            ),
+        ]
+
+        let validated = RoughCutVisualSuggestionValidator.validated(
+            suggestions,
+            targetGroupIDs: ["one", "two"]
+        )
+
+        XCTAssertEqual(validated.count, 1)
+        XCTAssertEqual(validated["one"]?.layout, .screenRecordingFullScreen)
+        XCTAssertEqual(validated["one"]?.origin, .aiSuggested)
+    }
+
+    func testVisualSuggestionRequestIncludesHumanExamplesAndUnplannedTargets() throws {
+        let clips = [
+            RoughCutVisualSuggestionClip(
+                groupID: "one",
+                clipNumber: 1,
+                transcript: "Show the index documentation.",
+                currentVisual: RoughCutVisualPlan(
+                    layout: .screenRecordingFullScreen,
+                    detail: "Show the Convex index docs."
+                )
+            ),
+            RoughCutVisualSuggestionClip(
+                groupID: "two",
+                clipNumber: 2,
+                transcript: "This unlocks realtime updates.",
+                currentVisual: .unassigned
+            ),
+        ]
+
+        let data = try CodexVisualSuggestionRunner.requestData(clips: clips)
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let encodedClips = try XCTUnwrap(json["clips"] as? [[String: Any]])
+
+        XCTAssertEqual(encodedClips.count, 2)
+        XCTAssertEqual(encodedClips[0]["group_id"] as? String, "one")
+        XCTAssertEqual(
+            (encodedClips[0]["current_visual"] as? [String: Any])?["layout"] as? String,
+            RoughCutVisualLayout.screenRecordingFullScreen.rawValue
+        )
+        XCTAssertEqual(encodedClips[1]["current_visual"] as? NSNull, NSNull())
+    }
+
+    func testVisualSuggestionPromptIncludesProductionSafetyAndContinuityRules() {
+        let prompt = CodexVisualSuggestionRunner.prompt.lowercased()
+
+        XCTAssertTrue(prompt.contains("never invent product ui"))
+        XCTAssertTrue(prompt.contains("one continuous recording session"))
+        XCTAssertTrue(prompt.contains("shared visual system"))
+        XCTAssertTrue(prompt.contains("sourcing note"))
+        XCTAssertTrue(prompt.contains("screen recording"))
+        XCTAssertTrue(prompt.contains("real reproduction plan"))
     }
 
     func testReviewedPlanPreservesPlannerDataAndRebuildsKeepRanges() throws {
@@ -1000,6 +1794,49 @@ final class RoughCutAnalysisTests: XCTestCase {
         XCTAssertNil(RoughCutTimelineInteraction.regionID(at: 4.5, regions: regions))
         XCTAssertEqual(RoughCutTimelineInteraction.regionID(at: 5, regions: regions), "two")
         XCTAssertEqual(RoughCutTimelineInteraction.regionID(at: 8, regions: regions), "two")
+    }
+
+    func testTimelineInteractionFindsTheVisualClipUnderThePlayhead() {
+        let regions = [
+            region(id: "one", text: "First", start: 0, end: 4),
+            region(id: "two", text: "Second", start: 5, end: 8),
+        ]
+        let groups = [
+            RoughCutStoryBeat(
+                id: "clip-one",
+                regionIDs: ["one"],
+                visual: .unassigned
+            ),
+            RoughCutStoryBeat(
+                id: "clip-two",
+                regionIDs: ["two"],
+                visual: .unassigned
+            ),
+        ]
+
+        XCTAssertEqual(
+            RoughCutTimelineInteraction.groupID(
+                at: 2,
+                regions: regions,
+                groups: groups
+            ),
+            "clip-one"
+        )
+        XCTAssertEqual(
+            RoughCutTimelineInteraction.groupID(
+                at: 6,
+                regions: regions,
+                groups: groups
+            ),
+            "clip-two"
+        )
+        XCTAssertNil(
+            RoughCutTimelineInteraction.groupID(
+                at: 4.5,
+                regions: regions,
+                groups: groups
+            )
+        )
     }
 
     private func region(

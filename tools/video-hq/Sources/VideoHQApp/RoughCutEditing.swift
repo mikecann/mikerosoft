@@ -14,7 +14,7 @@ enum RoughCutManualDecision: String, Codable, CaseIterable, Equatable {
     }
 }
 
-enum RoughCutRegionFilter: String, CaseIterable, Equatable {
+enum RoughCutRegionFilter: String, CaseIterable, Codable, Equatable, Hashable {
     case all
     case valid
     case falseStart
@@ -59,6 +59,88 @@ enum RoughCutRegionFilter: String, CaseIterable, Equatable {
                     && (manualDecisions[region.id] ?? .automatic) == .automatic
             }
         }
+    }
+}
+
+struct RoughCutRegionFilterSelection: Equatable {
+    static let sectionTypes: Set<RoughCutRegionFilter> = [
+        .valid,
+        .falseStart,
+        .badTake,
+        .noTranscriptSkip,
+        .needsReview,
+    ]
+    static let selectableFilters: [RoughCutRegionFilter] = [
+        .valid,
+        .falseStart,
+        .badTake,
+        .noTranscriptSkip,
+        .needsReview,
+        .awaitingDecision,
+    ]
+    static let all = RoughCutRegionFilterSelection(filters: sectionTypes)
+
+    var filters: Set<RoughCutRegionFilter>
+
+    var isShowingAllSections: Bool {
+        Self.sectionTypes.isSubset(of: filters)
+    }
+
+    var label: String {
+        if isShowingAllSections { return RoughCutRegionFilter.all.label }
+        if filters.isEmpty { return "No sections" }
+        if filters.count == 1 { return filters.first?.label ?? "No sections" }
+        return "\(filters.count) filters"
+    }
+
+    func apply(
+        to regions: [RoughCutRegion],
+        manualDecisions: [String: RoughCutManualDecision]
+    ) -> [RoughCutRegion] {
+        guard !filters.isEmpty else { return [] }
+        let visibleIDs = Set(filters.flatMap { filter in
+            filter.apply(to: regions, manualDecisions: manualDecisions).map(\.id)
+        })
+        return regions.filter { visibleIDs.contains($0.id) }
+    }
+}
+
+private struct RoughCutViewStateDocument: Codable {
+    let schemaVersion: Int
+    let visibleFilters: [RoughCutRegionFilter]
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case visibleFilters = "visible_filters"
+    }
+}
+
+struct RoughCutViewStateStore {
+    let analysisDirectoryURL: URL
+
+    var stateURL: URL {
+        analysisDirectoryURL.appendingPathComponent("video-hq-view.json")
+    }
+
+    func load() throws -> RoughCutRegionFilterSelection {
+        guard FileManager.default.fileExists(atPath: stateURL.path) else {
+            return .all
+        }
+        let document = try JSONDecoder().decode(
+            RoughCutViewStateDocument.self,
+            from: Data(contentsOf: stateURL)
+        )
+        return RoughCutRegionFilterSelection(filters: Set(document.visibleFilters))
+    }
+
+    func save(_ selection: RoughCutRegionFilterSelection) throws {
+        let document = RoughCutViewStateDocument(
+            schemaVersion: 1,
+            visibleFilters: selection.filters.sorted { $0.rawValue < $1.rawValue }
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(document).write(to: stateURL, options: .atomic)
     }
 }
 
