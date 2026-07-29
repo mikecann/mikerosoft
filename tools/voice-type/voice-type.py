@@ -239,7 +239,12 @@ from runtime_policy import (
 from audio_recovery import AudioBackendRecovery
 from process_relaunch import restart_current_process, validate_relauncher_files
 from recording_session import AudioFrameBuffer, RecordingSession
-from speech_backends import MlxWhisperModel, resolve_local_mlx_repo
+from speech_backends import (
+    MlxWhisperModel,
+    load_local_mlx_model,
+    resolve_local_default_whisper_model,
+    resolve_local_mlx_repo,
+)
 from text_formatter import (
     DEFAULT_FORMATTER_MODEL,
     DEFAULT_FORMATTER_SYSTEM_PROMPT,
@@ -273,8 +278,8 @@ FORMATTER_TIMEOUT = 6.0   # soft timeout for local text cleanup
 GPU_MODEL    = "large-v3-turbo"
 CPU_MODEL    = "small.en"
 
-# Streaming preview model (speed over accuracy — visual feedback only):
-# tiny.en runs in ~0.1s on CPU so it never meaningfully blocks the final pass.
+# CPU-only streaming fallback. Accelerated systems use GPU_MODEL for the
+# preview too, avoiding a second lower-quality model on capable hardware.
 STREAM_MODEL = "tiny.en"
 
 SAMPLE_RATE  = 16000
@@ -287,7 +292,7 @@ COMPUTE_TYPE = "float16"  # float16 on GPU; overridden to int8 on CPU
 # Final model: accuracy matters most; stream model: speed matters most.
 FINAL_MODEL_OPTIONS  = ["tiny.en", "base.en", "small.en", "medium.en",
                         "large-v2", "large-v3", "large-v3-turbo", "parakeet-tdt-0.6b"]
-STREAM_MODEL_OPTIONS = ["tiny.en", "base.en", "small.en"]
+STREAM_MODEL_OPTIONS = ["tiny.en", "base.en", "small.en", "large-v3-turbo"]
 
 MODEL_LABELS = {
     "tiny.en":          "Whisper: tiny",
@@ -322,8 +327,22 @@ def _load_settings():
             _settings = {}
     # Defaults are resolved after CUDA detection so the right model is chosen.
     cuda = platform.cuda_available()
-    _settings.setdefault("final_model",  GPU_MODEL if cuda else CPU_MODEL)
-    _settings.setdefault("stream_model", GPU_MODEL if cuda else STREAM_MODEL)
+    _settings.setdefault(
+        "final_model",
+        resolve_local_default_whisper_model(
+            accelerated_model=GPU_MODEL,
+            fallback_model=CPU_MODEL,
+            cuda_available=cuda,
+        ),
+    )
+    _settings.setdefault(
+        "stream_model",
+        resolve_local_default_whisper_model(
+            accelerated_model=GPU_MODEL,
+            fallback_model=STREAM_MODEL,
+            cuda_available=cuda,
+        ),
+    )
     _settings.setdefault("output_mode",  "final_only")
     _settings.setdefault("formatter_enabled", False)
     _settings.setdefault("formatter_model", DEFAULT_FORMATTER_MODEL)
@@ -362,10 +381,9 @@ _OUTPUT_MODE_LABELS = {
 # ---------------------------------------------------------------------------
 # Models
 #
-# Two separate instances so streaming never contends with final transcription:
-#   _stream_model  tiny.en   CPU int8  ~0.1s/pass  — live preview only
-#   _model         small.en  CPU int8  ~0.5–1.5s   — accurate final result
-#                  (large-v3-turbo on CUDA for both)
+# CPU-only systems keep separate preview and final models. Accelerated systems
+# use large-v3-turbo for both. On Apple Silicon the preview reuses the warmed
+# final MLX model, so the weights are loaded only once.
 # ---------------------------------------------------------------------------
 
 import re
@@ -480,28 +498,48 @@ def get_model():
     return _model
 
 
-_stream_model: WhisperModel | None = None
+_stream_model: WhisperModel | MlxWhisperModel | None = None
 _stream_model_lock = threading.Lock()
 
 
-def get_stream_model() -> WhisperModel | None:
+def get_stream_model() -> WhisperModel | MlxWhisperModel | None:
     """Returns the streaming preview model, or None if not yet loaded."""
     return _stream_model
 
 
 def _load_stream_model():
     """Load the stream model in the background. Waits for the final model first
-    to avoid competing for CPU during initial warm-up."""
+    so Apple Silicon can reuse the warmed MLX model when both names match."""
     global _stream_model
-    get_model()   # ensure final model finishes first
+    final_model = get_model()
     with _stream_model_lock:
         if _stream_model is None:
-            cuda   = platform.cuda_available()
-            name   = _settings.get("stream_model", STREAM_MODEL)
-            device = "cuda" if cuda else "cpu"
-            ct     = COMPUTE_TYPE if cuda else "int8"
-            log(f"Loading stream model {name!r} on {device} ({ct})...")
-            _stream_model = WhisperModel(name, device=device, compute_type=ct)
+            name = _settings.get("stream_model", STREAM_MODEL)
+            final_name = _settings.get("final_model", CPU_MODEL)
+
+            if name == final_name and isinstance(final_model, MlxWhisperModel):
+                log(f"Reusing final model {name!r} on mlx for stream previews.")
+                _stream_model = final_model
+                log("Stream model ready.")
+                return
+
+            mlx_repo = resolve_local_mlx_repo(model_name=name)
+            if mlx_repo:
+                try:
+                    log(f"Loading stream model {name!r} on mlx ({mlx_repo})...")
+                    _stream_model = load_local_mlx_model(model_name=name)
+                except Exception as e:
+                    log(
+                        f"MLX stream load failed for {name!r}: {e}. "
+                        "Falling back to faster-whisper."
+                    )
+
+            if _stream_model is None:
+                cuda = platform.cuda_available()
+                device = "cuda" if cuda else "cpu"
+                ct = COMPUTE_TYPE if cuda else "int8"
+                log(f"Loading stream model {name!r} on {device} ({ct})...")
+                _stream_model = WhisperModel(name, device=device, compute_type=ct)
             log("Stream model ready.")
 
 

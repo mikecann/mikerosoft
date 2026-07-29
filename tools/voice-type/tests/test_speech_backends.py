@@ -60,6 +60,74 @@ class SpeechBackendsTests(unittest.TestCase):
         )
         self.assertIsNone(repo)
 
+    def test_default_stream_model_uses_accelerated_model_on_apple_silicon(self):
+        model_name = self.module.resolve_default_whisper_model(
+            accelerated_model="large-v3-turbo",
+            fallback_model="tiny.en",
+            cuda_available=False,
+            system="darwin",
+            machine="arm64",
+            has_mlx=True,
+        )
+        self.assertEqual("large-v3-turbo", model_name)
+
+    def test_default_stream_model_uses_fallback_without_gpu_backend(self):
+        model_name = self.module.resolve_default_whisper_model(
+            accelerated_model="large-v3-turbo",
+            fallback_model="tiny.en",
+            cuda_available=False,
+            system="darwin",
+            machine="x86_64",
+            has_mlx=False,
+        )
+        self.assertEqual("tiny.en", model_name)
+
+    def test_default_stream_model_uses_accelerated_model_with_cuda(self):
+        model_name = self.module.resolve_default_whisper_model(
+            accelerated_model="large-v3-turbo",
+            fallback_model="tiny.en",
+            cuda_available=True,
+            system="win32",
+            machine="amd64",
+            has_mlx=False,
+        )
+        self.assertEqual("large-v3-turbo", model_name)
+
+    def test_load_local_mlx_model_selects_turbo_repo_and_warms_model(self):
+        warmed = []
+
+        class FakeModel:
+            def __init__(self, *, repo_id):
+                self.repo_id = repo_id
+
+            def warm(self):
+                warmed.append(self.repo_id)
+
+        model = self.module.load_local_mlx_model(
+            model_name="large-v3-turbo",
+            repo_resolver=lambda *, model_name: (
+                self.module.MLX_REPOS_BY_MODEL[model_name]
+            ),
+            model_factory=FakeModel,
+        )
+
+        self.assertEqual(
+            "mlx-community/whisper-large-v3-turbo",
+            model.repo_id,
+        )
+        self.assertEqual(
+            ["mlx-community/whisper-large-v3-turbo"],
+            warmed,
+        )
+
+    def test_load_local_mlx_model_returns_none_when_mlx_is_unavailable(self):
+        model = self.module.load_local_mlx_model(
+            model_name="large-v3-turbo",
+            repo_resolver=lambda *, model_name: None,
+            model_factory=mock.Mock(side_effect=AssertionError("must not load")),
+        )
+        self.assertIsNone(model)
+
     def test_mlx_transcribe_releases_cached_working_memory(self):
         cleared = []
         fake_mlx_whisper = SimpleNamespace(
