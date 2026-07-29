@@ -53,6 +53,43 @@ def resolve_local_mlx_repo(*, model_name: str) -> str | None:
     )
 
 
+def resolve_default_whisper_model(
+    *,
+    accelerated_model: str,
+    fallback_model: str,
+    cuda_available: bool,
+    system: str,
+    machine: str,
+    has_mlx: bool | None = None,
+) -> str:
+    """Choose the accelerated model when the current hardware supports it."""
+    if cuda_available:
+        return accelerated_model
+
+    mlx_repo = resolve_mlx_repo(
+        system=system,
+        machine=machine,
+        model_name=accelerated_model,
+        has_mlx=has_mlx,
+    )
+    return accelerated_model if mlx_repo else fallback_model
+
+
+def resolve_local_default_whisper_model(
+    *,
+    accelerated_model: str,
+    fallback_model: str,
+    cuda_available: bool,
+) -> str:
+    return resolve_default_whisper_model(
+        accelerated_model=accelerated_model,
+        fallback_model=fallback_model,
+        cuda_available=cuda_available,
+        system=host_platform.system().lower(),
+        machine=host_platform.machine(),
+    )
+
+
 @dataclass(frozen=True)
 class MlxSegment:
     text: str
@@ -118,3 +155,24 @@ class MlxWhisperModel:
         if not text:
             return []
         return [MlxSegment(text)]
+
+
+def load_local_mlx_model(
+    *,
+    model_name: str,
+    repo_resolver=None,
+    model_factory=None,
+):
+    """Load and warm an MLX Whisper model, or return None off Apple Silicon."""
+    if repo_resolver is None:
+        repo_resolver = resolve_local_mlx_repo
+    if model_factory is None:
+        model_factory = MlxWhisperModel
+
+    repo_id = repo_resolver(model_name=model_name)
+    if not repo_id:
+        return None
+
+    model = model_factory(repo_id=repo_id)
+    model.warm()
+    return model

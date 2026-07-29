@@ -7,7 +7,7 @@ Runs entirely locally, no cloud, no subscription.
 
 - **Windows**: hold **Right Ctrl**, speak, release to paste
 - **macOS**: hold **F12** or **Right Ctrl**, speak, release to paste
-- **Apple Silicon macOS**: uses **MLX Whisper** for the final transcription path when available for much better performance than the old CPU-only path
+- **Apple Silicon macOS**: uses **MLX Whisper large-v3-turbo** for both live preview and final transcription when available
 
 [![voice type](https://thumbs.video-to-markdown.com/dd2eac67.jpg)](https://youtu.be/lYjgJ8KIh-Y)
 
@@ -180,15 +180,14 @@ macOS does not currently use the Windows tray flow.
   key is held so the system does not also handle it. Left Ctrl remains untouched.
 - **Audio capture** — `sounddevice` streams 16 kHz mono float32 from the
   default microphone into a NumPy buffer.
-- **Streaming preview** — while the key is held, a background thread uses
-  `tiny.en` to transcribe accumulated audio every 0.5 s and updates the
-  overlay. This model is loaded as a separate instance so it never blocks
-  the final transcription.
+- **Streaming preview** — while the key is held, a background thread
+  transcribes accumulated audio every 0.5 s and updates the overlay. Accelerated
+  systems default to `large-v3-turbo`; CPU-only systems use `tiny.en`.
 - **Final transcription** — on key release, the final model transcribes the
   full audio for accuracy. On Windows this is `faster-whisper` on CPU or CUDA.
-  On Apple Silicon macOS, `voice-type` now prefers **MLX Whisper** for supported
-  final models, which makes the final pass much faster than the previous CPU-only
-  macOS path.
+  On Apple Silicon macOS, `voice-type` prefers **MLX Whisper** for supported
+  models, which makes both preview and final passes much faster than the
+  previous CPU-only macOS path.
 - **Text injection** — Windows injects text via `SendInput` with
   `KEYEVENTF_UNICODE`. macOS re-activates the target app and pastes with a
   clipboard-preserving `pbcopy` + `Cmd+V` flow.
@@ -199,9 +198,10 @@ macOS does not currently use the Windows tray flow.
   falls back to the raw transcript on validator failures, backend errors, or
   timeout. `stabilized` skips this step on purpose because it types partial
   segments before the full sentence exists.
-- **Two-model design** — `tiny.en` (~75 MB, ~0.1 s/pass) for live preview;
-  `small.en` (~244 MB, ~0.5–1.5 s) for final. No lock contention, so the
-  streaming never delays the paste.
+- **Hardware-aware model design** — Apple Silicon uses one warmed MLX
+  `large-v3-turbo` model for preview and final transcription. CUDA uses turbo
+  for both paths with separate CTranslate2 instances. CPU-only systems keep
+  `tiny.en` for preview and `small.en` for the final pass.
 - **Monitor detection** — each platform finds the monitor containing the
   focused window, then centres the overlay at its bottom edge.
 - **Waveform animation** — the overlay canvas polls `Recorder.get_rms()` at
@@ -223,12 +223,13 @@ macOS does not currently use the Windows tray flow.
 Windows auto-detects CUDA (`ctranslate2.get_cuda_device_count()` +
 `cublas64_12.dll` load check) and falls back to CPU automatically.
 
-On Apple Silicon, `voice-type` prefers MLX for supported **final** models and
-falls back safely if MLX is unavailable. The streaming preview path remains a
-separate `faster-whisper` model for now. MLX scratch buffers are released after
-each transcription so memory use returns to the loaded-model baseline instead
-of growing across recordings. Larger final models still have a larger baseline;
-choose a smaller final model in settings when memory matters more than accuracy.
+On Apple Silicon, `voice-type` prefers MLX for supported preview and final
+models and falls back safely if MLX is unavailable. When both settings select
+`large-v3-turbo`, the preview reuses the warmed final model rather than loading
+the weights twice. MLX scratch buffers are released after each transcription so
+memory use returns to the loaded-model baseline instead of growing across
+recordings. Larger models still have a larger baseline; choose a smaller model
+in settings when memory matters more than accuracy.
 
 On Intel Macs, expect the fallback path rather than the MLX speedup.
 
@@ -260,7 +261,7 @@ Useful keys:
 | Setting              | Default          | Description |
 | -------------------- | ---------------- | ----------- |
 | `final_model`        | `"small.en"` / `"large-v3-turbo"` | Final transcription model. On Apple Silicon, supported values can use MLX |
-| `stream_model`       | `"tiny.en"`      | Preview model |
+| `stream_model`       | `"tiny.en"` / `"large-v3-turbo"` | Preview model. Accelerated systems default to turbo |
 | `output_mode`        | `"final_only"`   | Finalise strategy |
 | `formatter_enabled`  | `false`          | Turn local transcript cleanup on/off |
 | `formatter_model`    | `"qwen2.5-0.5b"` | Local cleanup model preset |
@@ -273,8 +274,8 @@ If you want to tweak hardcoded behaviour, edit the constants near the top of
 | --- | --- | --- |
 | `HOTKEY_VK` | `0xA3` | Windows virtual key for push-to-talk (Right Ctrl) |
 | `CPU_MODEL` | `"small.en"` | Final transcription model on CPU |
-| `GPU_MODEL` | `"large-v3-turbo"` | Final transcription model on CUDA |
-| `STREAM_MODEL` | `"tiny.en"` | Preview model (separate instance) |
+| `GPU_MODEL` | `"large-v3-turbo"` | Accelerated transcription model on CUDA or MLX |
+| `STREAM_MODEL` | `"tiny.en"` | CPU-only preview fallback |
 | `STREAM_INTERVAL` | `0.5` | Seconds between streaming preview passes |
 | `DEVICE` | `None` | Mic device (`None` = system default) |
 
@@ -310,8 +311,8 @@ llama-cpp-python local GGUF inference for transcript cleanup
 Installed automatically by `setup_mac.sh`:
 
 ```
-mlx-whisper      Apple Silicon Whisper backend for fast final transcription
-faster-whisper   speech-to-text engine for preview and fallback transcription
+mlx-whisper      Apple Silicon Whisper backend for preview and final transcription
+faster-whisper   fallback speech-to-text engine
 sounddevice      microphone capture
 numpy            audio buffer maths
 Pillow           overlay drawing

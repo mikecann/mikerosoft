@@ -1,6 +1,6 @@
 {
   "final_model": "large-v3-turbo",
-  "stream_model": "small.en",
+  "stream_model": "large-v3-turbo",
   "output_mode": "final_only",
   "formatter_enabled": false,
   "formatter_model": "qwen2.5-0.5b",
