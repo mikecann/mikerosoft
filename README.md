@@ -111,7 +111,7 @@ while still not covering the Windows-only integrations.
 
 | Tool | Status | Setup | Daily command | Notes |
 | --- | --- | --- | --- | --- |
-| `voice-type` | Supported | `bash tools/voice-type/setup_mac.sh` | `bash tools/voice-type/voice-type-mac.sh` | Push-to-talk voice typing on macOS. On Apple Silicon it prefers `MLX Whisper` for supported final models. Settings can be opened with `bash tools/voice-type/open-settings-mac.sh` or via Spotlight `Voice Type` |
+| `voice-type` | Supported | `bash tools/voice-type/setup_mac.sh` | `bash tools/voice-type/voice-type-mac.sh` | Push-to-talk voice typing on macOS. It runs from a stable Application Support installation rather than the active Git worktree. Diagnose it with `bash tools/voice-type/voice-type-mac.sh status`; open settings with `bash tools/voice-type/open-settings-mac.sh` or Spotlight `Voice Type` |
 | `mac-screenshot` | Supported | `bash tools/mac-screenshot/setup_mac.sh` | `bash tools/mac-screenshot/restart.sh` | Global screenshot hotkey daemon for macOS. Optional login-item install via `bash tools/mac-screenshot/install-launchagent.sh` |
 | `ghopen` | Supported | `bash tools/ghopen/setup_mac.sh` | `ghopen` | Opens the current repo on GitHub. With `gh` installed it opens the PR page first when the branch has one |
 | `worktrees` | Supported | See [tools/worktrees/README.md](tools/worktrees/README.md) | `worktrees` | Needs `~/.local/bin` on `PATH` (or run `bash tools/worktrees/run.sh`). Uses the checkout you are in to find `tools/worktrees`; run `bun install` in that folder per clone if deps are missing |

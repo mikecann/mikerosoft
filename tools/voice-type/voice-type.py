@@ -16,6 +16,7 @@ import time
 import math
 import json
 import signal
+import atexit
 import subprocess
 import threading
 import queue
@@ -46,8 +47,16 @@ platform.setup_dll_paths()
 # Logging
 # ---------------------------------------------------------------------------
 
-_LOG_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice-type.log")
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+if sys.platform == "darwin":
+    _LOG_DIR = os.path.realpath(os.path.expanduser(os.environ.get(
+        "VOICE_TYPE_LOG_DIR",
+        "~/Library/Logs/Voice Type",
+    )))
+    os.makedirs(_LOG_DIR, exist_ok=True)
+    _LOG_PATH = os.path.join(_LOG_DIR, "voice-type.log")
+else:
+    _LOG_PATH = os.path.join(_SCRIPT_DIR, "voice-type.log")
 _CONTROL_SOCKET_PATH = os.path.join(_SCRIPT_DIR, "voice-type-control.sock")
 _INSTANCE_LOCK_PATH = os.path.join(_SCRIPT_DIR, "voice-type.instance.lock")
 _HEARTBEAT_PATH = os.path.join(_SCRIPT_DIR, "voice-type.heartbeat")
@@ -192,7 +201,7 @@ _log_file   = open(_LOG_PATH, "a", encoding="utf-8", buffering=1)
 
 
 def log(msg: str):
-    ts = time.strftime("%H:%M:%S")
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"{ts}  {msg}"
     with _log_lock:
         _log_file.write(line + "\n")
@@ -200,7 +209,24 @@ def log(msg: str):
     print(line, flush=True)
 
 
-log(f"=== voice-type started === log: {_LOG_PATH}")
+log(
+    "=== voice-type started === "
+    f"pid={os.getpid()} script={os.path.realpath(__file__)} "
+    f"supervised={platform.restart_supervisor_active()} log={_LOG_PATH}"
+)
+
+
+def _log_process_exit() -> None:
+    log(f"=== voice-type exited === pid={os.getpid()}")
+
+
+def _handle_sigterm(signum, _frame) -> None:
+    log(f"Signal {signal.Signals(signum).name} received; shutting down.")
+    raise SystemExit(0)
+
+
+atexit.register(_log_process_exit)
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 import numpy as np
 import sounddevice as sd
@@ -908,6 +934,11 @@ def _build_control_state(tray) -> dict:
         "formatter_model": _settings.get("formatter_model"),
         "startup_enabled": platform.startup_enabled(_VBS_PATH),
         "log_path": _LOG_PATH,
+        "hotkey_listener": (
+            platform.hotkey_listener_status()
+            if sys.platform == "darwin"
+            else "windows"
+        ),
         "final_model_options": FINAL_MODEL_OPTIONS,
         "stream_model_options": STREAM_MODEL_OPTIONS,
         "output_mode_options": OUTPUT_MODE_OPTIONS,

@@ -32,6 +32,14 @@ class PlatformMacHotkeyTests(unittest.TestCase):
         self.assertFalse(hotkeys.handle_event("flags_changed", 0x3B, True))
         self.assertFalse(hotkeys.is_down())
 
+    def test_hotkey_listener_status_is_exposed_for_readiness_checks(self):
+        original = self.module.hotkey_listener_status()
+        try:
+            self.module._set_hotkey_listener_status("event-tap")
+            self.assertEqual("event-tap", self.module.hotkey_listener_status())
+        finally:
+            self.module._set_hotkey_listener_status(original)
+
     def test_f12_remains_active_when_right_control_is_released(self):
         hotkeys = self.module.MacPushToTalkHotkeys()
 

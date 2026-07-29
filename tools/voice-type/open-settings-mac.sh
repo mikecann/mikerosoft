@@ -4,8 +4,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="${VOICE_TYPE_INSTALL_DIR:-$HOME/Library/Application Support/Voice Type}"
+
+mkdir -p "$INSTALL_DIR"
+INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
+
+if [[ "$SCRIPT_DIR" != "$INSTALL_DIR" ]]; then
+  bash "$SCRIPT_DIR/install-runtime-mac.sh" >/dev/null
+  exec env VOICE_TYPE_INSTALL_DIR="$INSTALL_DIR" \
+    bash "$INSTALL_DIR/open-settings-mac.sh" "$@"
+fi
+
 VENV="$SCRIPT_DIR/.venv"
 SOCKET_PATH="$SCRIPT_DIR/voice-type-control.sock"
+LOG_PATH="${VOICE_TYPE_LOG_DIR:-$HOME/Library/Logs/Voice Type}/voice-type.log"
 
 if [ ! -f "$VENV/bin/python3" ]; then
   echo "ERROR: venv not found at $VENV"
@@ -43,7 +55,7 @@ if [ ! -S "$SOCKET_PATH" ]; then
   bash "$SCRIPT_DIR/voice-type-mac.sh" >/dev/null
   wait_for_socket || {
     echo "ERROR: voice-type control socket did not appear."
-    echo "Check the log: tail -f $SCRIPT_DIR/voice-type.log"
+    echo "Check the log: tail -f \"$LOG_PATH\""
     exit 1
   }
 fi
@@ -55,7 +67,7 @@ if ! send_settings_request; then
   bash "$SCRIPT_DIR/voice-type-mac.sh" >/dev/null
   wait_for_socket || {
     echo "ERROR: voice-type did not restart successfully."
-    echo "Check the log: tail -f $SCRIPT_DIR/voice-type.log"
+    echo "Check the log: tail -f \"$LOG_PATH\""
     exit 1
   }
   send_settings_request

@@ -27,27 +27,50 @@ class PlatformMacStartupTests(unittest.TestCase):
     def test_set_startup_enable_writes_launch_agent_and_loads_service(self):
         with tempfile.TemporaryDirectory() as tmp_home:
             agents_dir = os.path.join(tmp_home, "Library", "LaunchAgents")
+            install_dir = os.path.join(
+                tmp_home,
+                "Library",
+                "Application Support",
+                "Voice Type",
+            )
+            log_dir = os.path.join(tmp_home, "Library", "Logs", "Voice Type")
+            install_dir = os.path.realpath(install_dir)
+            log_dir = os.path.realpath(log_dir)
             expected_plist = os.path.join(
                 agents_dir,
                 "com.mikerosoft.voice-type.plist",
             )
-            expected_script_dir = str(pathlib.Path(tmp_home) / "voice-type")
-            os.makedirs(os.path.join(expected_script_dir, ".venv", "bin"))
+            os.makedirs(os.path.join(install_dir, ".venv", "bin"))
             expected_launcher = os.path.join(
-                expected_script_dir,
+                install_dir,
                 ".venv",
                 "bin",
                 "Voice Type",
             )
             pathlib.Path(expected_launcher).touch()
-            expected_app = os.path.join(expected_script_dir, "voice-type.py")
-            expected_log = os.path.join(expected_script_dir, "voice-type-launchd.log")
+            expected_app = os.path.join(install_dir, "voice-type.py")
+            pathlib.Path(expected_app).touch()
+            expected_wrapper = os.path.join(install_dir, "launch-voice-type-mac.sh")
+            pathlib.Path(expected_wrapper).touch()
+            pathlib.Path(expected_wrapper).chmod(0o755)
+            expected_log = os.path.join(log_dir, "launchd.log")
             domain = "gui/501"
             service = "gui/501/com.mikerosoft.voice-type"
 
-            with mock.patch.object(self.module.os.path, "expanduser", return_value=agents_dir):
+            with mock.patch.object(
+                self.module.os.path,
+                "expanduser",
+                side_effect=lambda value: value if os.path.isabs(value) else agents_dir,
+            ):
                 with mock.patch.object(self.module.os, "getuid", return_value=501, create=True):
-                    with mock.patch.object(self.module, "_script_dir", return_value=expected_script_dir):
+                    with mock.patch.dict(
+                        self.module.os.environ,
+                        {
+                            "VOICE_TYPE_INSTALL_DIR": install_dir,
+                            "VOICE_TYPE_LOG_DIR": log_dir,
+                        },
+                        clear=False,
+                    ):
                         with mock.patch.object(self.module.subprocess, "run") as run_mock:
                             self.module.set_startup(True, log=None)
 
@@ -55,13 +78,15 @@ class PlatformMacStartupTests(unittest.TestCase):
             with open(expected_plist, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            self.assertIn(f"<string>{expected_launcher}</string>", content)
-            self.assertIn(f"<string>{expected_app}</string>", content)
+            self.assertIn(f"<string>{expected_wrapper}</string>", content)
+            self.assertNotIn(f"<string>{expected_app}</string>", content)
             self.assertIn(f"<string>{expected_log}</string>", content)
+            self.assertNotIn(".codex/worktrees", content)
             self.assertIn("<key>RunAtLoad</key>", content)
             self.assertIn("<key>KeepAlive</key>", content)
             self.assertIn("<key>SuccessfulExit</key>", content)
             self.assertIn("<false/>", content)
+            self.assertIn("<key>ThrottleInterval</key>", content)
 
             run_mock.assert_has_calls(
                 [
@@ -75,17 +100,54 @@ class PlatformMacStartupTests(unittest.TestCase):
     def test_set_startup_enable_rejects_missing_native_launcher(self):
         with tempfile.TemporaryDirectory() as tmp_home:
             agents_dir = os.path.join(tmp_home, "Library", "LaunchAgents")
-            script_dir = str(pathlib.Path(tmp_home) / "voice-type")
+            install_dir = str(pathlib.Path(tmp_home) / "voice-type")
             messages = []
 
-            with mock.patch.object(self.module.os.path, "expanduser", return_value=agents_dir):
+            with mock.patch.object(
+                self.module.os.path,
+                "expanduser",
+                side_effect=lambda value: value if os.path.isabs(value) else agents_dir,
+            ):
                 with mock.patch.object(self.module.os, "getuid", return_value=501, create=True):
-                    with mock.patch.object(self.module, "_script_dir", return_value=script_dir):
+                    with mock.patch.dict(
+                        self.module.os.environ,
+                        {"VOICE_TYPE_INSTALL_DIR": install_dir},
+                        clear=False,
+                    ):
                         with mock.patch.object(self.module.subprocess, "run") as run_mock:
                             self.module.set_startup(True, log=messages.append)
 
             self.assertEqual(0, run_mock.call_count)
             self.assertTrue(any("Run setup first" in message for message in messages))
+
+    def test_set_startup_enable_rejects_missing_installed_worker(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            agents_dir = os.path.join(tmp_home, "Library", "LaunchAgents")
+            install_dir = str(pathlib.Path(tmp_home) / "voice-type")
+            launcher = pathlib.Path(install_dir) / ".venv" / "bin" / "Voice Type"
+            launcher.parent.mkdir(parents=True)
+            launcher.touch()
+            wrapper = pathlib.Path(install_dir) / "launch-voice-type-mac.sh"
+            wrapper.touch()
+            wrapper.chmod(0o755)
+            messages = []
+
+            with mock.patch.object(
+                self.module.os.path,
+                "expanduser",
+                side_effect=lambda value: value if os.path.isabs(value) else agents_dir,
+            ):
+                with mock.patch.object(self.module.os, "getuid", return_value=501, create=True):
+                    with mock.patch.dict(
+                        self.module.os.environ,
+                        {"VOICE_TYPE_INSTALL_DIR": install_dir},
+                        clear=False,
+                    ):
+                        with mock.patch.object(self.module.subprocess, "run") as run_mock:
+                            self.module.set_startup(True, log=messages.append)
+
+            self.assertEqual(0, run_mock.call_count)
+            self.assertTrue(any("installed worker missing" in message for message in messages))
 
     def test_set_startup_disable_unloads_and_deletes_plist(self):
         with tempfile.TemporaryDirectory() as tmp_home:

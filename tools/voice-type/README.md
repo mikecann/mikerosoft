@@ -62,11 +62,17 @@ bash tools/voice-type/voice-type-mac.sh
 
 # Open settings
 bash tools/voice-type/open-settings-mac.sh
+
+# Diagnose startup and readiness
+bash tools/voice-type/voice-type-mac.sh status
 ```
 
 On macOS, Spotlight can also open the settings app by typing `Voice Type`.
 `setup_mac.sh` builds a tiny native host so the worker appears as `Voice Type`,
-not `Python`, in Activity Monitor.
+not `Python`, in Activity Monitor. It stages the runnable worker under
+`~/Library/Application Support/Voice Type`; the LaunchAgent never points into
+the repository or a temporary worktree. Runtime logs live under
+`~/Library/Logs/Voice Type`.
 
 ### Permissions on macOS
 
@@ -162,7 +168,10 @@ macOS does not currently use the Windows tray flow.
 - Open settings via Spotlight by typing `Voice Type`
 - Or run `bash tools/voice-type/open-settings-mac.sh`
 - The worker itself runs in the background via `voice-type-mac.sh`
-- `Run on Startup` writes a LaunchAgent so it starts on next login
+- `Run on Startup` writes a LaunchAgent that targets the stable installed
+  runtime, so deleting a development worktree cannot break the next login
+- `voice-type-mac.sh` waits for the control server before reporting a successful
+  restart
 
 ## How it works
 
@@ -324,8 +333,10 @@ pyobjc-framework-Cocoa native macOS integration
 | `voice-type.vbs`      | Silent launcher (no console window)                      |
 | `voice-type.ps1`      | PowerShell launcher called by the VBS                    |
 | `deps.ps1`            | Installs Python dependencies                             |
-| `setup_mac.sh`        | Creates the macOS venv and installs Python dependencies  |
+| `setup_mac.sh`        | Installs the stable macOS runtime, venv, and dependencies |
+| `install-runtime-mac.sh` | Stages source into the stable macOS runtime           |
+| `launch-voice-type-mac.sh` | Validated, rotating LaunchAgent entry point         |
 | `voice-type-launcher.c` | Native host so Activity Monitor shows `Voice Type`    |
-| `voice-type-mac.sh`   | macOS restart script                                     |
+| `voice-type-mac.sh`   | Verified macOS restart and status script                 |
 | `open-settings-mac.sh`| Opens the macOS settings window                          |
-| `voice-type.log`      | Runtime log (gitignored, auto-rotates at 1 MB)           |
+| `~/Library/Logs/Voice Type/voice-type.log` | Runtime log, auto-rotates at 1 MB |

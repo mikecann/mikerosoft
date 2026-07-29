@@ -8,9 +8,10 @@ import threading
 from typing import Callable
 
 _LAUNCH_AGENT_LABEL = "com.mikerosoft.voice-type"
-_LAUNCHD_LOG_NAME = "voice-type-launchd.log"
 
 _listener_started = False
+_hotkey_listener_state = "not-started"
+_hotkey_listener_state_lock = threading.Lock()
 
 # The app that was frontmost when the push-to-talk key went down.
 # Saved before our overlay can steal focus; re-activated before pasting.
@@ -66,6 +67,17 @@ class MacPushToTalkHotkeys:
 
 
 _hotkeys = MacPushToTalkHotkeys()
+
+
+def _set_hotkey_listener_status(state: str) -> None:
+    global _hotkey_listener_state
+    with _hotkey_listener_state_lock:
+        _hotkey_listener_state = state
+
+
+def hotkey_listener_status() -> str:
+    with _hotkey_listener_state_lock:
+        return _hotkey_listener_state
 
 
 def handle_quartz_hotkey_event(
@@ -162,6 +174,7 @@ def _run_cg_event_tap() -> None:
     loop   = Quartz.CFRunLoopGetCurrent()
     Quartz.CFRunLoopAddSource(loop, source, Quartz.kCFRunLoopDefaultMode)
     Quartz.CGEventTapEnable(tap, True)
+    _set_hotkey_listener_status("event-tap")
     Quartz.CFRunLoopRun()   # blocks until CFRunLoopStop is called
 
 
@@ -187,15 +200,24 @@ def _run_pynput_fallback() -> None:
 
 def _start_hotkey_listener() -> None:
     def _thread_fn():
+        _set_hotkey_listener_status("starting")
         try:
             _run_cg_event_tap()
         except Exception as exc:
+            _set_hotkey_listener_status("fallback")
             print(
                 f"[voice-type] CGEventTap failed ({exc}); "
                 "using pynput fallback (hotkey events will not be suppressed).",
                 flush=True,
             )
-            _run_pynput_fallback()
+            try:
+                _run_pynput_fallback()
+            except Exception as fallback_exc:
+                _set_hotkey_listener_status("failed")
+                print(
+                    f"[voice-type] pynput hotkey fallback failed ({fallback_exc}).",
+                    flush=True,
+                )
 
     t = threading.Thread(target=_thread_fn, daemon=True, name="voice-type-hotkey")
     t.start()
@@ -343,12 +365,27 @@ def restore_target_app_focus() -> None:
 # ---------------------------------------------------------------------------
 
 def _launch_agent_path() -> str:
+    override = os.environ.get("VOICE_TYPE_LAUNCH_AGENT_PATH")
+    if override:
+        return os.path.realpath(os.path.expanduser(override))
     agents_dir = os.path.expanduser("~/Library/LaunchAgents")
     return os.path.join(agents_dir, f"{_LAUNCH_AGENT_LABEL}.plist")
 
 
-def _script_dir() -> str:
-    return os.path.dirname(os.path.abspath(__file__))
+def _install_dir() -> str:
+    configured = os.environ.get(
+        "VOICE_TYPE_INSTALL_DIR",
+        "~/Library/Application Support/Voice Type",
+    )
+    return os.path.realpath(os.path.expanduser(configured))
+
+
+def _log_dir() -> str:
+    configured = os.environ.get(
+        "VOICE_TYPE_LOG_DIR",
+        "~/Library/Logs/Voice Type",
+    )
+    return os.path.realpath(os.path.expanduser(configured))
 
 
 def _launchd_domain() -> str:
@@ -376,19 +413,38 @@ def set_startup(enable: bool, vbs_path: str = "",
     domain = _launchd_domain()
     service = _launchd_service(domain)
     if enable:
-        script_dir = _script_dir()
-        launcher_bin = os.path.join(script_dir, ".venv", "bin", "Voice Type")
-        app_path = os.path.join(script_dir, "voice-type.py")
-        log_path = os.path.join(script_dir, _LAUNCHD_LOG_NAME)
+        install_dir = _install_dir()
+        launcher_bin = os.path.join(install_dir, ".venv", "bin", "Voice Type")
+        app_path = os.path.join(install_dir, "voice-type.py")
+        launch_wrapper = os.path.join(install_dir, "launch-voice-type-mac.sh")
+        log_path = os.path.join(_log_dir(), "launchd.log")
         if not os.path.exists(launcher_bin):
-            setup_path = os.path.join(script_dir, "setup_mac.sh")
+            setup_path = os.path.join(install_dir, "setup_mac.sh")
             message = (
                 f"voice-type launcher missing at '{launcher_bin}'. "
-                f"Run setup first: bash {setup_path}"
+                f"Run setup first from the repository: bash tools/voice-type/setup_mac.sh "
+                f"(installed helper: {setup_path})"
             )
             if log:
                 log(message)
             return
+        if not os.path.isfile(app_path):
+            message = (
+                f"voice-type installed worker missing at '{app_path}'. "
+                "Run setup again: bash tools/voice-type/setup_mac.sh"
+            )
+            if log:
+                log(message)
+            return
+        if not os.access(launch_wrapper, os.X_OK):
+            message = (
+                f"voice-type launch wrapper missing at '{launch_wrapper}'. "
+                "Run setup again: bash tools/voice-type/setup_mac.sh"
+            )
+            if log:
+                log(message)
+            return
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
         plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -398,17 +454,18 @@ def set_startup(enable: bool, vbs_path: str = "",
   <string>{_LAUNCH_AGENT_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{launcher_bin}</string>
-    <string>{app_path}</string>
+    <string>{launch_wrapper}</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>{script_dir}</string>
+  <string>{install_dir}</string>
   <key>StandardOutPath</key>
   <string>{log_path}</string>
   <key>StandardErrorPath</key>
   <string>{log_path}</string>
   <key>RunAtLoad</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
   <key>KeepAlive</key>
   <dict>
     <key>SuccessfulExit</key>

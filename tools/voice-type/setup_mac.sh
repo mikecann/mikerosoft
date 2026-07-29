@@ -5,28 +5,60 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV="$SCRIPT_DIR/.venv"
+INSTALL_DIR="${VOICE_TYPE_INSTALL_DIR:-$HOME/Library/Application Support/Voice Type}"
+TRUSTED_LAUNCHER="${VOICE_TYPE_TRUSTED_LAUNCHER:-}"
+
+# Preserve the path macOS has already approved for Accessibility when upgrading
+# an existing installation. The worker and LaunchAgent still live under the
+# durable install directory; only the tiny native host uses its approved path.
+if [[ -z "$TRUSTED_LAUNCHER" && -x "$SCRIPT_DIR/.venv/bin/Voice Type" ]]; then
+  TRUSTED_LAUNCHER="$SCRIPT_DIR/.venv/bin/Voice Type"
+fi
+if [[ -z "$TRUSTED_LAUNCHER" && -f "$HOME/Library/LaunchAgents/com.mikerosoft.voice-type.plist" ]]; then
+  existing_program="$(/usr/libexec/PlistBuddy \
+    -c "Print :ProgramArguments:0" \
+    "$HOME/Library/LaunchAgents/com.mikerosoft.voice-type.plist" 2>/dev/null || true)"
+  if [[ "$(basename "$existing_program")" == "Voice Type" && -x "$existing_program" ]]; then
+    TRUSTED_LAUNCHER="$existing_program"
+  fi
+fi
+
+bash "$SCRIPT_DIR/install-runtime-mac.sh"
+INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
+VENV="$INSTALL_DIR/.venv"
+
+if [[ -n "$TRUSTED_LAUNCHER" && "$TRUSTED_LAUNCHER" != "$VENV/bin/Voice Type" ]]; then
+  printf '%s\n' "$TRUSTED_LAUNCHER" > "$INSTALL_DIR/trusted-launcher-path"
+  chmod 0600 "$INSTALL_DIR/trusted-launcher-path"
+  echo "==> Preserving approved Accessibility launcher path: $TRUSTED_LAUNCHER"
+fi
 
 # ---------------------------------------------------------------------------
 # Find a usable Python 3.10+
 # ---------------------------------------------------------------------------
 PYTHON=""
-for candidate in \
-    /opt/homebrew/bin/python3.13 \
-    /opt/homebrew/bin/python3.12 \
-    /opt/homebrew/bin/python3.11 \
-    /opt/homebrew/bin/python3.10 \
-    /usr/local/bin/python3 \
-    python3; do
-  if command -v "$candidate" &>/dev/null; then
-    major=$("$candidate" -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "0")
-    minor=$("$candidate" -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
-    if [[ "$major" == "3" ]] && [[ "$minor" -ge "10" ]] && [[ "$candidate" != "/usr/bin/python3" ]]; then
-      PYTHON="$candidate"
-      break
+if command -v uv &>/dev/null; then
+  PYTHON="$(uv python find 3.12 2>/dev/null || true)"
+fi
+
+if [[ -z "$PYTHON" ]]; then
+  for candidate in \
+      /opt/homebrew/bin/python3.13 \
+      /opt/homebrew/bin/python3.12 \
+      /opt/homebrew/bin/python3.11 \
+      /opt/homebrew/bin/python3.10 \
+      /usr/local/bin/python3 \
+      python3; do
+    if command -v "$candidate" &>/dev/null; then
+      major=$("$candidate" -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "0")
+      minor=$("$candidate" -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
+      if [[ "$major" == "3" ]] && [[ "$minor" -ge "10" ]] && [[ "$candidate" != "/usr/bin/python3" ]]; then
+        PYTHON="$candidate"
+        break
+      fi
     fi
-  fi
-done
+  done
+fi
 
 if [ -z "$PYTHON" ]; then
   echo "ERROR: No suitable Python 3.10+ found."
@@ -52,11 +84,9 @@ else
   echo "==> Virtual environment already exists, updating packages..."
 fi
 
-PIP="$VENV/bin/pip"
-
 echo ""
 echo "==> Installing Python packages..."
-"$PIP" install --quiet --upgrade pip
+"$VENV/bin/python3" -m pip install --quiet --upgrade pip
 
 packages=(
   "faster-whisper"
@@ -75,7 +105,7 @@ packages=(
 
 for pkg in "${packages[@]}"; do
   echo "  -> $pkg"
-  "$PIP" install --quiet "$pkg"
+  "$VENV/bin/python3" -m pip install --quiet "$pkg"
 done
 
 echo ""
@@ -103,15 +133,24 @@ if [[ -n "$PYTHON_LIBDIR" ]] && [[ -f "$PYTHON_LIBDIR/libpython${PYTHON_VERSION:
 fi
 LAUNCHER="$VENV/bin/Voice Type"
 
-xcrun clang "$SCRIPT_DIR/voice-type-launcher.c" \
-  "${PYTHON_CFLAGS[@]}" \
-  "${PYTHON_LDFLAGS[@]}" \
-  -o "$LAUNCHER"
-codesign --force --sign - --identifier com.mikerosoft.voice-type "$LAUNCHER"
+if [[ -x "$LAUNCHER" && "${VOICE_TYPE_REBUILD_LAUNCHER:-0}" != "1" ]]; then
+  # Accessibility permission follows the launcher's code requirement. An
+  # unnecessary ad-hoc rebuild changes its cdhash and silently loses TCC trust.
+  echo "==> Preserving existing native launcher identity."
+else
+  xcrun clang "$INSTALL_DIR/voice-type-launcher.c" \
+    "${PYTHON_CFLAGS[@]}" \
+    "${PYTHON_LDFLAGS[@]}" \
+    -o "$LAUNCHER"
+  codesign --force --sign - \
+    --identifier com.mikerosoft.voice-type \
+    --requirements '=designated => identifier "com.mikerosoft.voice-type"' \
+    "$LAUNCHER"
+fi
 
 echo ""
 echo "==> Installing Spotlight application..."
-bash "$SCRIPT_DIR/install-spotlight-app.sh"
+bash "$INSTALL_DIR/install-spotlight-app.sh"
 
 echo ""
 echo "==> All packages installed."
@@ -129,6 +168,6 @@ echo "  Launch with:"
 echo "    bash $SCRIPT_DIR/voice-type-mac.sh"
 echo ""
 echo "  Or directly:"
-echo "    '$LAUNCHER' $SCRIPT_DIR/voice-type.py"
+echo "    '$LAUNCHER' '$INSTALL_DIR/voice-type.py'"
 echo ""
 echo "  Open settings from Spotlight by searching for Voice Type."
