@@ -106,6 +106,30 @@ final class TeleprompterWindowTests: XCTestCase {
         )
     }
 
+    func testParserRecognizesNotionToggleAttributesOnSectionHeadings() {
+        let document = """
+        # Notes {toggle="true"}
+            This production note should not appear.
+        # Script {toggle="true"}
+            First spoken paragraph.
+            <callout icon="💡" color="gray_bg">
+                back to me
+            </callout>
+            Final spoken paragraph.
+        # Links {toggle="true"}
+            This link should not appear either.
+        """
+
+        XCTAssertEqual(
+            TeleprompterScriptParser.parse(document),
+            [
+                .spoken("First spoken paragraph."),
+                .callout("back to me"),
+                .spoken("Final spoken paragraph."),
+            ]
+        )
+    }
+
     func testParserFallsBackToWholeDocumentWithoutAScriptHeading() {
         XCTAssertEqual(
             TeleprompterScriptParser.parse("A plain script.\nAnother paragraph."),

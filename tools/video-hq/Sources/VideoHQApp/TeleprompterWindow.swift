@@ -123,7 +123,7 @@ enum TeleprompterScriptParser {
     private static func scriptSection(in document: String) -> String {
         let lines = document.components(separatedBy: .newlines)
         guard let headingIndex = lines.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespaces).lowercased() == "# script"
+            topLevelHeadingTitle(in: $0) == "script"
         }) else {
             // Plain text scripts and older files without section headings should
             // remain useful instead of producing an empty Prompter window.
@@ -132,9 +132,26 @@ enum TeleprompterScriptParser {
 
         let contentStart = lines.index(after: headingIndex)
         let contentEnd = lines[contentStart...].firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespaces).hasPrefix("# ")
+            topLevelHeadingTitle(in: $0) != nil
         }) ?? lines.endIndex
         return lines[contentStart..<contentEnd].joined(separator: "\n")
+    }
+
+    private static func topLevelHeadingTitle(in line: String) -> String? {
+        let heading = line.trimmingCharacters(in: .whitespaces)
+        guard heading.hasPrefix("# ") else { return nil }
+
+        var title = String(heading.dropFirst(2))
+        // Notion's enhanced Markdown exporter annotates toggle headings as
+        // `# Script {toggle="true"}`. The annotation describes the source UI,
+        // not part of the heading title the teleprompter should match.
+        if let attributes = title.range(
+            of: #"\s+\{[^{}]*\}\s*$"#,
+            options: .regularExpression
+        ) {
+            title.removeSubrange(attributes)
+        }
+        return title.trimmingCharacters(in: .whitespaces).lowercased()
     }
 
     private static func appendSpace(to blocks: inout [TeleprompterScriptBlock]) {
