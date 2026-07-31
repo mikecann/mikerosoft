@@ -105,7 +105,7 @@ struct RecordItView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Record It")
                     .font(.system(size: 25, weight: .bold, design: .rounded))
-                Text("Native screen and camera capture")
+                Text("Native screen, camera, and audio capture")
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -149,7 +149,9 @@ struct RecordItView: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Waiting for the first written video sample…")
+                    Text(model.mode == .audio
+                         ? "Waiting for the first written audio sample…"
+                         : "Waiting for the first written video sample…")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 120)
@@ -160,7 +162,9 @@ struct RecordItView: View {
             }
 
             Label(
-                "Record It will stop automatically if video callbacks cease or the encoder stops accepting frames.",
+                model.mode == .audio
+                    ? "Record It will stop automatically if the selected input stops supplying audio."
+                    : "Record It will stop automatically if video callbacks cease or the encoder stops accepting frames.",
                 systemImage: "shield.checkered"
             )
             .font(.caption)
@@ -189,7 +193,7 @@ struct RecordItView: View {
     private func recordingSourceCard(_ telemetry: RecordingTelemetry) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label(telemetry.source.displayName, systemImage: telemetry.source == .screen ? "display" : "video")
+                Label(telemetry.source.displayName, systemImage: sourceIcon(telemetry.source))
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Label(telemetry.healthMessage, systemImage: healthIcon(telemetry.health))
@@ -197,18 +201,43 @@ struct RecordItView: View {
                     .foregroundStyle(healthColor(telemetry.health))
             }
 
-            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
-                GridRow {
-                    telemetryValue("Video timeline", formattedMediaDuration(telemetry.mediaDuration))
-                    telemetryValue("File size", formattedByteCount(telemetry.fileSizeBytes))
+            if telemetry.source == .audio {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text("Input waveform")
+                        Spacer()
+                        Text("Live")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                    AudioWaveformView(levels: telemetry.audioWaveformLevels)
                 }
-                GridRow {
-                    telemetryValue("Video samples written", telemetry.videoSamplesWritten.formatted())
-                    telemetryValue("Audio samples written", telemetry.audioSamplesWritten.formatted())
+
+                Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
+                    GridRow {
+                        telemetryValue("Audio timeline", formattedMediaDuration(telemetry.mediaDuration))
+                        telemetryValue("File size", formattedByteCount(telemetry.fileSizeBytes))
+                    }
+                    GridRow {
+                        telemetryValue("Audio samples written", telemetry.audioSamplesWritten.formatted())
+                        telemetryValue("Format", telemetry.codecName)
+                    }
                 }
-                GridRow {
-                    telemetryValue("Output", telemetry.resolutionLabel)
-                    telemetryValue("Encoder", telemetry.codecName)
+            } else {
+                Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
+                    GridRow {
+                        telemetryValue("Video timeline", formattedMediaDuration(telemetry.mediaDuration))
+                        telemetryValue("File size", formattedByteCount(telemetry.fileSizeBytes))
+                    }
+                    GridRow {
+                        telemetryValue("Video samples written", telemetry.videoSamplesWritten.formatted())
+                        telemetryValue("Audio samples written", telemetry.audioSamplesWritten.formatted())
+                    }
+                    GridRow {
+                        telemetryValue("Output", telemetry.resolutionLabel)
+                        telemetryValue("Encoder", telemetry.codecName)
+                    }
                 }
             }
 
@@ -254,9 +283,11 @@ struct RecordItView: View {
                 fileNameEditor
             }
 
-            GridRow {
-                rowLabel("Encoder", systemImage: "slider.horizontal.3")
-                encoderSettingsControl
+            if model.mode.requiresVideoEncoder {
+                GridRow {
+                    rowLabel("Encoder", systemImage: "slider.horizontal.3")
+                    encoderSettingsControl
+                }
             }
 
             if model.mode.capturesScreen {
@@ -279,7 +310,14 @@ struct RecordItView: View {
 
                 GridRow {
                     rowLabel("Camera audio", systemImage: "mic")
-                    microphonePicker
+                    microphonePicker(title: "Camera Audio", allowsNone: true)
+                }
+            }
+
+            if model.mode.capturesAudio {
+                GridRow {
+                    rowLabel("Audio input", systemImage: "mic")
+                    microphonePicker(title: "Audio Input", allowsNone: false)
                 }
             }
 
@@ -387,6 +425,8 @@ struct RecordItView: View {
             return "\(baseName)-camera.mov"
         case .both:
             return "\(baseName)-screen.mov + \(baseName)-camera.mov"
+        case .audio:
+            return "\(baseName)-audio.m4a"
         }
     }
 
@@ -444,10 +484,12 @@ struct RecordItView: View {
         }
     }
 
-    private var microphonePicker: some View {
+    private func microphonePicker(title: String, allowsNone: Bool) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Picker("Camera Audio", selection: $model.selectedMicrophoneID) {
-                Text("None").tag("")
+            Picker(title, selection: $model.selectedMicrophoneID) {
+                if allowsNone {
+                    Text("None").tag("")
+                }
                 ForEach(model.microphones) { microphone in
                     Text(microphone.name).tag(microphone.id)
                 }
@@ -457,7 +499,9 @@ struct RecordItView: View {
 
             Text(model.selectedMicrophone.map {
                 "Records microphone audio from \($0.name)"
-            } ?? "The camera recording will have no audio track")
+            } ?? (allowsNone
+                  ? "The camera recording will have no audio track"
+                  : "Choose an input device before recording"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -509,6 +553,58 @@ struct RecordItView: View {
         Label(title, systemImage: systemImage)
             .font(.subheadline.weight(.medium))
             .frame(width: 104, alignment: .leading)
+    }
+
+    private func sourceIcon(_ source: CaptureSource) -> String {
+        switch source {
+        case .screen: "display"
+        case .camera: "video"
+        case .audio: "waveform"
+        }
+    }
+}
+
+private struct AudioWaveformView: View {
+    let levels: [Float]
+    private let sampleCapacity = 72
+
+    var body: some View {
+        Canvas { context, size in
+            var centreLine = Path()
+            centreLine.move(to: CGPoint(x: 0, y: size.height / 2))
+            centreLine.addLine(to: CGPoint(x: size.width, y: size.height / 2))
+            context.stroke(centreLine, with: .color(.secondary.opacity(0.2)), lineWidth: 1)
+
+            let visibleLevels = Array(levels.suffix(sampleCapacity))
+            let slotWidth = size.width / CGFloat(sampleCapacity)
+            let firstSlot = sampleCapacity - visibleLevels.count
+            for (index, rawLevel) in visibleLevels.enumerated() {
+                let level = CGFloat(min(1, max(0, rawLevel)))
+                let height = max(2, level * (size.height - 10))
+                let width = max(1, slotWidth * 0.58)
+                let x = (CGFloat(firstSlot + index) + 0.5) * slotWidth - width / 2
+                let bar = CGRect(
+                    x: x,
+                    y: (size.height - height) / 2,
+                    width: width,
+                    height: height
+                )
+                context.fill(
+                    Path(roundedRect: bar, cornerRadius: width / 2),
+                    with: .color(.accentColor)
+                )
+            }
+        }
+        .frame(height: 64)
+        .padding(.horizontal, 6)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Live input waveform")
+        .accessibilityValue("\(Int((levels.last ?? 0) * 100)) percent")
     }
 }
 
@@ -698,9 +794,9 @@ private func overallHealthTitle(_ health: RecordingHealth) -> String {
 
 private func overallHealthDetail(_ health: RecordingHealth) -> String {
     switch health {
-    case .starting: "Waiting for confirmed video writes"
-    case .healthy: "Video samples are reaching the output file"
-    case .warning: "Video activity has slowed; the watchdog is still monitoring it"
-    case .failed: "The recording will stop so you do not continue with a broken video"
+    case .starting: "Waiting for confirmed media writes"
+    case .healthy: "Media samples are reaching the output file"
+    case .warning: "Capture activity has slowed; the watchdog is still monitoring it"
+    case .failed: "The recording will stop so you do not continue with a broken file"
     }
 }

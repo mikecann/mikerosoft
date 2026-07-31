@@ -6,6 +6,24 @@ func defaultProjectsRoot(homeDirectory: URL = FileManager.default.homeDirectoryF
     homeDirectory.appendingPathComponent("dev/convex/convex-videos", isDirectory: true)
 }
 
+func recordingPrerequisitesAreAvailable(
+    mode: RecordingMode,
+    hasDestination: Bool,
+    hasValidFileName: Bool,
+    hasVideoEncoder: Bool,
+    hasDisplay: Bool,
+    hasCamera: Bool,
+    hasAudioInput: Bool,
+    isBusy: Bool
+) -> Bool {
+    guard hasDestination, hasValidFileName, !isBusy else { return false }
+    if mode.requiresVideoEncoder && !hasVideoEncoder { return false }
+    if mode.capturesScreen && !hasDisplay { return false }
+    if mode.capturesCamera && !hasCamera { return false }
+    if mode.capturesAudio && !hasAudioInput { return false }
+    return true
+}
+
 @MainActor
 final class RecordingViewModel: ObservableObject {
     @Published var mode: RecordingMode {
@@ -87,16 +105,20 @@ final class RecordingViewModel: ObservableObject {
     }
 
     var canRecord: Bool {
-        guard selectedDestination != nil, resolvedFileName != nil, encoderConfiguration != nil, !isBusy else {
-            return false
-        }
-        if mode.capturesScreen && selectedDisplay == nil { return false }
-        if mode.capturesCamera && selectedCamera == nil { return false }
-        return true
+        recordingPrerequisitesAreAvailable(
+            mode: mode,
+            hasDestination: selectedDestination != nil,
+            hasValidFileName: resolvedFileName != nil,
+            hasVideoEncoder: encoderConfiguration != nil,
+            hasDisplay: selectedDisplay != nil,
+            hasCamera: selectedCamera != nil,
+            hasAudioInput: selectedMicrophone != nil,
+            isBusy: isBusy
+        )
     }
 
     var activeTelemetry: [RecordingTelemetry] {
-        [.screen, .camera].compactMap { recordingTelemetry[$0] }
+        [.screen, .camera, .audio].compactMap { recordingTelemetry[$0] }
     }
 
     var recordingHealth: RecordingHealth {
@@ -143,8 +165,7 @@ final class RecordingViewModel: ObservableObject {
         guard
             canRecord,
             let destination = selectedDestination,
-            let outputBaseName = resolvedFileName,
-            let encoderConfiguration
+            let outputBaseName = resolvedFileName
         else { return }
         isBusy = true
         statusMessage = "Starting…"
@@ -164,7 +185,11 @@ final class RecordingViewModel: ObservableObject {
             let startGate = mode == .both ? RecordingStartGate() : nil
 
             if mode.capturesScreen {
-                guard let display = selectedDisplay, let outputURL = outputs[.screen] else {
+                guard
+                    let display = selectedDisplay,
+                    let outputURL = outputs[.screen],
+                    let encoderConfiguration
+                else {
                     throw RecordItError.message("Choose a display before recording.")
                 }
                 recorders.append(
@@ -176,7 +201,7 @@ final class RecordingViewModel: ObservableObject {
                         startGate: startGate,
                         onFailure: { [weak self] error in
                             Task { @MainActor [weak self] in
-                                await self?.handleCaptureFailure(error)
+                                await self?.handleCaptureFailure(error, source: .screen)
                             }
                         },
                         onTelemetry: { [weak self] telemetry in
@@ -188,7 +213,11 @@ final class RecordingViewModel: ObservableObject {
                 )
             }
             if mode.capturesCamera {
-                guard let camera = selectedCamera, let outputURL = outputs[.camera] else {
+                guard
+                    let camera = selectedCamera,
+                    let outputURL = outputs[.camera],
+                    let encoderConfiguration
+                else {
                     throw RecordItError.message("Choose a camera before recording.")
                 }
                 recorders.append(
@@ -200,12 +229,33 @@ final class RecordingViewModel: ObservableObject {
                         startGate: startGate,
                         onFailure: { [weak self] error in
                             Task { @MainActor [weak self] in
-                                await self?.handleCaptureFailure(error)
+                                await self?.handleCaptureFailure(error, source: .camera)
                             }
                         },
                         onTelemetry: { [weak self] telemetry in
                             Task { @MainActor [weak self] in
                                 self?.recordingTelemetry[.camera] = telemetry
+                            }
+                        }
+                    )
+                )
+            }
+            if mode.capturesAudio {
+                guard let audioDevice = selectedMicrophone, let outputURL = outputs[.audio] else {
+                    throw RecordItError.message("Choose an audio input before recording.")
+                }
+                recorders.append(
+                    AudioRecorder(
+                        audioDevice: audioDevice,
+                        outputURL: outputURL,
+                        onFailure: { [weak self] error in
+                            Task { @MainActor [weak self] in
+                                await self?.handleCaptureFailure(error, source: .audio)
+                            }
+                        },
+                        onTelemetry: { [weak self] telemetry in
+                            Task { @MainActor [weak self] in
+                                self?.recordingTelemetry[.audio] = telemetry
                             }
                         }
                     )
@@ -218,7 +268,7 @@ final class RecordingViewModel: ObservableObject {
             activeOutputURLs = Array(outputs.values)
             recordingStartedAt = startedAt
             isRecording = true
-            statusMessage = "Recording at 30 fps"
+            statusMessage = mode == .audio ? "Recording audio" : "Recording at 30 fps"
         } catch {
             activeSession = nil
             activeOutputURLs = []
@@ -261,10 +311,10 @@ final class RecordingViewModel: ObservableObject {
             ?? 0
     }
 
-    private func handleCaptureFailure(_ error: Error) async {
+    private func handleCaptureFailure(_ error: Error, source: CaptureSource) async {
         guard isRecording, !isBusy else { return }
         await stopRecording(revealInFinder: false)
-        presentedError = "Screen capture failed and the recording was stopped immediately: \(error.localizedDescription)"
+        presentedError = "\(source.displayName) capture failed and the recording was stopped immediately: \(error.localizedDescription)"
     }
 
     private func resetActiveRecording() {

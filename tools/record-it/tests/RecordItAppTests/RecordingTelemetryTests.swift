@@ -76,4 +76,53 @@ final class RecordingTelemetryTests: XCTestCase {
         XCTAssertEqual(overallRecordingHealth([.healthy, .failed]), .failed)
         XCTAssertEqual(overallRecordingHealth([.healthy, .healthy]), .healthy)
     }
+
+    func testAudioTelemetryBecomesHealthyAfterReceivingInputSamples() {
+        let telemetry = RecordingTelemetry(
+            source: .audio,
+            outputURL: URL(fileURLWithPath: "/tmp/voice-over-audio.m4a"),
+            width: 0,
+            height: 0,
+            codecName: "AAC",
+            videoSamplesWritten: 0,
+            audioSamplesWritten: 42,
+            mediaDuration: 1.25,
+            fileSizeBytes: 4_096,
+            lastVideoActivityAt: 100,
+            consecutiveRejectedVideoSamples: 0,
+            writerStatus: .writing,
+            now: 101,
+            audioWaveformLevels: [0.1, 0.5, 0.9]
+        )
+
+        XCTAssertEqual(telemetry.health, .healthy)
+        XCTAssertEqual(telemetry.healthMessage, "Audio and file output are active")
+        XCTAssertEqual(telemetry.resolutionLabel, "Audio only")
+        XCTAssertEqual(telemetry.audioWaveformLevels, [0.1, 0.5, 0.9])
+    }
+
+    func testAudioTelemetryWarnsWhenTheInputHasStayedSilent() {
+        let telemetry = RecordingTelemetry(
+            source: .audio,
+            outputURL: URL(fileURLWithPath: "/tmp/voice-over-audio.m4a"),
+            width: 0,
+            height: 0,
+            codecName: "AAC",
+            videoSamplesWritten: 0,
+            audioSamplesWritten: 300,
+            mediaDuration: 3,
+            fileSizeBytes: 4_096,
+            lastVideoActivityAt: 100,
+            consecutiveRejectedVideoSamples: 0,
+            writerStatus: .writing,
+            now: 100,
+            audioWaveformLevels: Array(repeating: 0.02, count: 30)
+        )
+
+        XCTAssertEqual(telemetry.health, .warning)
+        XCTAssertEqual(
+            telemetry.healthMessage,
+            "Input is silent. Check the selected microphone, mute, and gain"
+        )
+    }
 }

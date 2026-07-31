@@ -76,3 +76,4 @@ struct RecordingSession: Sendable {
 
 extension ScreenRecorder: CaptureRecording {}
 extension CameraRecorder: CaptureRecording {}
+extension AudioRecorder: CaptureRecording {}

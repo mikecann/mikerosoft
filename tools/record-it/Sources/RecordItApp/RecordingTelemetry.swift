@@ -45,12 +45,15 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
     let lastVideoActivityAt: TimeInterval?
     let consecutiveRejectedVideoSamples: Int
     let writerStatus: RecordingWriterStatus
+    let audioWaveformLevels: [Float]
     let health: RecordingHealth
     let healthMessage: String
 
     var id: CaptureSource { source }
     var outputFileName: String { outputURL.lastPathComponent }
-    var resolutionLabel: String { "\(width) × \(height)" }
+    var resolutionLabel: String {
+        source == .audio ? "Audio only" : "\(width) × \(height)"
+    }
 
     init(
         source: CaptureSource,
@@ -66,6 +69,7 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
         consecutiveRejectedVideoSamples: Int,
         writerStatus: RecordingWriterStatus,
         now: TimeInterval,
+        audioWaveformLevels: [Float] = [],
         failureMessage: String? = nil
     ) {
         self.source = source
@@ -80,13 +84,31 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
         self.lastVideoActivityAt = lastVideoActivityAt
         self.consecutiveRejectedVideoSamples = consecutiveRejectedVideoSamples
         self.writerStatus = writerStatus
+        self.audioWaveformLevels = audioWaveformLevels
 
         if let failureMessage {
             health = .failed
             healthMessage = failureMessage
         } else if writerStatus == .failed || writerStatus == .cancelled {
             health = .failed
-            healthMessage = "The movie writer has stopped"
+            healthMessage = source == .audio ? "The audio writer has stopped" : "The movie writer has stopped"
+        } else if source == .audio {
+            if let lastVideoActivityAt, now - lastVideoActivityAt >= 10 {
+                health = .failed
+                healthMessage = "No audio input for 10 seconds"
+            } else if let lastVideoActivityAt, now - lastVideoActivityAt >= 3 {
+                health = .warning
+                healthMessage = "Waiting for the next audio sample"
+            } else if audioSamplesWritten == 0 || lastVideoActivityAt == nil {
+                health = .starting
+                healthMessage = "Waiting for the first audio sample"
+            } else if hasSustainedAudioSilence(audioWaveformLevels) {
+                health = .warning
+                healthMessage = "Input is silent. Check the selected microphone, mute, and gain"
+            } else {
+                health = .healthy
+                healthMessage = "Audio and file output are active"
+            }
         } else if consecutiveRejectedVideoSamples >= 60 {
             health = .failed
             healthMessage = "Video encoder is not accepting frames"
@@ -104,6 +126,13 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
             healthMessage = "Video and file output are active"
         }
     }
+}
+
+private func hasSustainedAudioSilence(_ levels: [Float]) -> Bool {
+    // The recorder samples the waveform at 10 Hz, so 30 quiet values means the
+    // selected input has stayed below roughly -54 dB for 3 seconds.
+    let recentLevels = levels.suffix(30)
+    return recentLevels.count == 30 && recentLevels.allSatisfy { $0 <= 0.1 }
 }
 
 func shouldShowRecordingDashboard(isRecording: Bool, isBusy: Bool) -> Bool {

@@ -2,7 +2,7 @@
 
 # record-it
 
-A small native macOS screen and camera recorder built with SwiftUI,
+A small native macOS screen, camera, and audio recorder built with SwiftUI,
 ScreenCaptureKit, and AVFoundation.
 
 ## Screenshots
@@ -13,7 +13,7 @@ ScreenCaptureKit, and AVFoundation.
 
 ## What it records
 
-- Screen, camera, or both
+- Screen, camera, both, or audio only
 - The selected screen at 30 fps, encoded with the selected hardware H.264 or
   HEVC encoder
 - `HG584T05` by default, preserving its active framebuffer resolution without
@@ -27,6 +27,8 @@ ScreenCaptureKit, and AVFoundation.
   playback from music, browsers, videos, and other Mac apps, not a microphone
 - Selectable camera microphone, defaulting to the first input with `Yeti` in its
   name. Choose **None** for a silent camera file
+- Audio-only mode records the selected input as stereo 48 kHz, 192 kbps AAC in
+  an `audio.m4a` file. It does not require a display, camera, or video encoder
 - Separate `screen.mov` and `camera.mov` files when recording both, preserving each source's full resolution
 
 ## Encoder settings
@@ -43,7 +45,7 @@ shows modes supported by the selected encoder:
 The selected encoder, rate-control mode, bitrates, and CQP level are saved
 automatically and restored on the next launch.
 
-The selected recording mode, **Screen**, **Camera**, or **Both**, is also saved
+The selected recording mode, **Screen**, **Camera**, **Both**, or **Audio**, is also saved
 immediately and restored the next time Record It opens.
 
 ## Display resolution
@@ -62,9 +64,10 @@ extension:
 2026-07-15_115705
 ```
 
-You can replace it before recording. Record It adds `-screen.mov` and/or
-`-camera.mov` automatically, strips an accidentally entered `.mov` extension,
-and resets the field to a fresh timestamp after every recording.
+You can replace it before recording. Record It adds `-screen.mov`,
+`-camera.mov`, or `-audio.m4a` automatically, strips an accidentally entered
+`.mov` or `.m4a` extension, and resets the field to a fresh timestamp after every
+recording.
 
 ## Output folders
 
@@ -89,9 +92,13 @@ is enabled by default and persists between launches.
 
 While recording, the setup form is replaced with a live dashboard for each
 active source. It shows the actual video and audio samples accepted by the
-movie writer, media timeline, current file size, resolution, encoder, output
-file name, and pipeline health. This is writer telemetry, not just a recording
-timer, so a green state confirms that video is reaching the output file.
+writer, media timeline, current file size, output format, output file name, and
+pipeline health. This is writer telemetry, not just a recording timer, so a
+green state confirms that media is reaching the output file.
+
+Audio-only recordings also show a live waveform from the selected input. It
+updates ten times per second and keeps a short rolling history so speech and
+silence are visible without retaining extra audio outside the recording file.
 
 Screen recordings use variable-duration frames, so a static screen does not
 create a huge duplicate-frame backlog in the 4K hardware encoder. Record It
@@ -115,7 +122,8 @@ bash install_mac.sh
 record-it
 ```
 
-The first recording prompts for Screen Recording, Camera, and Microphone access.
+The first use of each capture source prompts for Screen Recording, Camera, or
+Microphone access.
 If macOS asks you to restart the app after granting Screen Recording access, quit
 and run `record-it` again.
 
