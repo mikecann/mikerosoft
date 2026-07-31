@@ -231,7 +231,12 @@ signal.signal(signal.SIGTERM, _handle_sigterm)
 import numpy as np
 import sounddevice as sd
 from faster_whisper import WhisperModel
-from audio_gate import should_skip_short_low_level_audio
+from audio_gate import (
+    FLATLINE_RECORDING_MESSAGE,
+    FLATLINE_RECOVERY_MESSAGE,
+    is_flatline_audio_capture,
+    should_skip_short_low_level_audio,
+)
 from runtime_policy import (
     should_keep_mic_stream_open_local,
     should_restart_after_loop_gap,
@@ -1922,6 +1927,21 @@ class StreamingTranscriber:
             if len(audio) >= SAMPLE_RATE * STREAM_MIN_AUDIO:
                 if not self._active:
                     break
+                duration = len(audio) / SAMPLE_RATE
+                rms = float(np.sqrt(np.mean(audio ** 2)))
+                peak = float(np.max(np.abs(audio)))
+                if is_flatline_audio_capture(
+                    duration_sec=duration,
+                    rms=rms,
+                    peak=peak,
+                ):
+                    # Whisper commonly hallucinates "Thank you" from a stream
+                    # of zeros. Keep that text out of the preview and wait for
+                    # finalization to mark the CoreAudio backend for restart.
+                    self._last_text = ""
+                    self._overlay.show_rec(FLATLINE_RECORDING_MESSAGE)
+                    time.sleep(STREAM_INTERVAL)
+                    continue
                 t0 = time.perf_counter()
                 # Use the dedicated stream model — never contends with _model_lock
                 segs, _ = model.transcribe(
@@ -2353,6 +2373,23 @@ def run():
                             duration = len(audio) / SAMPLE_RATE
                             rms = float(np.sqrt(np.mean(audio ** 2)))
                             peak = float(np.max(np.abs(audio)))
+                        if is_flatline_audio_capture(
+                            duration_sec=duration,
+                            rms=rms,
+                            peak=peak,
+                        ):
+                            recorder.audio_recovery.note_flatline_capture()
+                            overlay.show_processing(FLATLINE_RECOVERY_MESSAGE)
+                            tray.set_state("processing")
+                            log(
+                                "Detected flatline microphone capture; skipping "
+                                f"transcription and restarting the audio backend: "
+                                f"{duration:.2f}s rms={rms:.6f} peak={peak:.6f}"
+                            )
+                            # Give the overlay's main-thread queue enough time
+                            # to render the explanation before restart exits.
+                            time.sleep(1.5)
+                            return
                         if should_skip_short_low_level_audio(
                             duration_sec=duration,
                             rms=rms,
@@ -2381,7 +2418,7 @@ def run():
                     finish_job = recorder.audio_recovery.prepare_finish(
                         _finish_dictation,
                         lambda: _restart_app(
-                            "CoreAudio stream close timed out; relaunching "
+                            "CoreAudio capture needs recovery; relaunching "
                             "before another microphone stream is opened"
                         ),
                     )

@@ -48,6 +48,13 @@ class AudioBackendRecovery:
         with self._lock:
             self._restart_required = True
 
+    def note_flatline_capture(self) -> None:
+        # CoreAudio can report a healthy active stream after wake while every
+        # callback contains zeros. Treat that silent failure like an open
+        # failure so the next attempt starts from a fresh process/backend.
+        with self._lock:
+            self._restart_required = True
+
     def recover_if_required(self, restart: Callable[[], object]) -> bool:
         """Claim and run the automatic restart once."""
         if not self._claim_restart():

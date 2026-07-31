@@ -39,6 +39,14 @@ class AudioRecoveryTests(unittest.TestCase):
         self.assertFalse(recovery.can_open_stream)
         self.assertTrue(recovery.restart_required)
 
+    def test_flatline_capture_blocks_retry_until_process_restart(self):
+        recovery = self.module.AudioBackendRecovery()
+
+        recovery.note_flatline_capture()
+
+        self.assertFalse(recovery.can_open_stream)
+        self.assertTrue(recovery.restart_required)
+
     def test_open_failure_claims_only_one_automatic_restart(self):
         recovery = self.module.AudioBackendRecovery()
         recovery.note_open_failure()
