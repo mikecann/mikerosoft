@@ -1,54 +1,96 @@
 import AVFoundation
+import CoreMedia
+import Foundation
 
 final class AudioWriter {
     private let outputURL: URL
-    private let writer: AVAssetWriter
-    private let audioInput: AVAssetWriterInput
+    private var audioFile: AVAudioFile?
+    private let processingFormat: AVAudioFormat
     private var sessionStartTime: CMTime?
     private var latestAudioTimestamp: CMTime?
     private var audioSamplesWritten = 0
+    private var status: RecordingWriterStatus = .writing
 
-    init(outputURL: URL) throws {
+    init(
+        outputURL: URL,
+        sourceFormatHint: CMAudioFormatDescription
+    ) throws {
         self.outputURL = outputURL
         try? FileManager.default.removeItem(at: outputURL)
 
-        writer = try AVAssetWriter(outputURL: outputURL, fileType: .m4a)
-        audioInput = AVAssetWriterInput(
-            mediaType: .audio,
-            outputSettings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48_000,
-                AVNumberOfChannelsKey: 2,
-                AVEncoderBitRateKey: 192_000
-            ]
-        )
-        audioInput.expectsMediaDataInRealTime = true
-        guard writer.canAdd(audioInput) else {
-            throw RecordItError.message("AAC audio output could not be configured.")
+        let sourceFormat = AVAudioFormat(cmAudioFormatDescription: sourceFormatHint)
+        guard sourceFormat.sampleRate > 0, sourceFormat.channelCount > 0 else {
+            throw RecordItError.message("The selected input did not provide a usable audio format.")
         }
-        writer.add(audioInput)
+        processingFormat = sourceFormat
+        let channelCount = Int(sourceFormat.channelCount)
+        let outputSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: sourceFormat.sampleRate,
+            AVNumberOfChannelsKey: channelCount,
+            AVEncoderBitRateKey: channelCount == 1 ? 96_000 : 192_000
+        ]
 
-        guard writer.startWriting() else {
-            throw writer.error ?? RecordItError.message("The audio writer failed to start.")
+        do {
+            audioFile = try AVAudioFile(
+                forWriting: outputURL,
+                settings: outputSettings,
+                commonFormat: sourceFormat.commonFormat,
+                interleaved: sourceFormat.isInterleaved
+            )
+        } catch {
+            throw RecordItError.message(
+                "AAC audio output could not be configured. \(detailedErrorDescription(error))"
+            )
         }
     }
 
     @discardableResult
-    func appendAudio(_ sampleBuffer: CMSampleBuffer) -> Bool {
-        guard
-            CMSampleBufferDataIsReady(sampleBuffer),
-            writer.status == .writing,
-            audioInput.isReadyForMoreMediaData
-        else { return false }
+    func appendAudio(_ sampleBuffer: CMSampleBuffer) throws -> Bool {
+        guard CMSampleBufferDataIsReady(sampleBuffer), status == .writing else { return false }
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frameCount > 0 else { return false }
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: processingFormat,
+            frameCapacity: frameCount
+        ) else {
+            throw RecordItError.message("An audio buffer could not be allocated.")
+        }
+        buffer.frameLength = frameCount
+
+        let copyStatus = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: buffer.mutableAudioBufferList
+        )
+        guard copyStatus == noErr else {
+            status = .failed
+            throw RecordItError.message(
+                "Audio samples could not be copied from the selected input. "
+                    + "Core Media returned OSStatus \(copyStatus)."
+            )
+        }
+
+        do {
+            guard let audioFile else {
+                throw RecordItError.message("The audio output file is already closed.")
+            }
+            try audioFile.write(from: buffer)
+        } catch {
+            status = .failed
+            throw RecordItError.message(
+                "The AAC encoder rejected an audio sample. \(detailedErrorDescription(error))"
+            )
+        }
 
         let sourceTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         if sessionStartTime == nil {
             sessionStartTime = sourceTimestamp
-            writer.startSession(atSourceTime: sourceTimestamp)
         }
-
-        guard audioInput.append(sampleBuffer) else { return false }
-        latestAudioTimestamp = sourceTimestamp + CMSampleBufferGetDuration(sampleBuffer)
+        let timeScale = CMTimeScale(processingFormat.sampleRate.rounded())
+        latestAudioTimestamp = sourceTimestamp
+            + CMTime(value: CMTimeValue(frameCount), timescale: timeScale)
         audioSamplesWritten += 1
         return true
     }
@@ -62,27 +104,29 @@ final class AudioWriter {
             videoTimelineDuration: 0,
             audioTimelineDuration: timelineDuration,
             fileSizeBytes: size,
-            writerStatus: recordingWriterStatus
+            writerStatus: status
         )
     }
 
     func finish() async throws {
         guard sessionStartTime != nil, audioSamplesWritten > 0 else {
-            writer.cancelWriting()
+            status = .cancelled
+            closeAudioFile()
             try? FileManager.default.removeItem(at: outputURL)
             throw RecordItError.message("No audio samples were received.")
         }
-
-        audioInput.markAsFinished()
-        await withCheckedContinuation { continuation in
-            writer.finishWriting {
-                continuation.resume()
-            }
+        guard status == .writing else {
+            throw RecordItError.message("The AAC encoder stopped before the recording could be finalized.")
         }
 
-        guard writer.status == .completed else {
-            throw writer.error ?? RecordItError.message("The audio recording could not be finalized.")
+        closeAudioFile()
+        let size = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? NSNumber)?
+            .int64Value ?? 0
+        guard size > 0 else {
+            status = .failed
+            throw RecordItError.message("The audio recording finalized as an empty file.")
         }
+        status = .completed
     }
 
     private var timelineDuration: TimeInterval {
@@ -90,14 +134,10 @@ final class AudioWriter {
         return max(0, CMTimeGetSeconds(latestAudioTimestamp - sessionStartTime))
     }
 
-    private var recordingWriterStatus: RecordingWriterStatus {
-        switch writer.status {
-        case .unknown: .unknown
-        case .writing: .writing
-        case .completed: .completed
-        case .failed: .failed
-        case .cancelled: .cancelled
-        @unknown default: .failed
+    private func closeAudioFile() {
+        if #available(macOS 15.0, *) {
+            audioFile?.close()
         }
+        audioFile = nil
     }
 }

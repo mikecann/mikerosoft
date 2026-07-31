@@ -16,6 +16,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     private var lastAudioActivityAt: TimeInterval?
     private var lastWaveformSampleAt: TimeInterval?
     private var waveform = AudioWaveformBuffer(capacity: 72)
+    private var hasLoggedSampleDiagnostics = false
     private var isStopping = false
     private var captureError: Error?
 
@@ -70,9 +71,17 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             }
         }
         writerQueue.sync {}
-        guard let audioWriter else { return }
+        guard let audioWriter else {
+            if let captureError { throw captureError }
+            throw RecordItError.message("No audio samples were received.")
+        }
         self.audioWriter = nil
-        try await audioWriter.finish()
+        do {
+            try await audioWriter.finish()
+        } catch {
+            RecordingDiagnostics.shared.log("audio.stop error=\(detailedErrorDescription(error))")
+            throw error
+        }
         RecordingDiagnostics.shared.log("audio.stop error=\(captureError?.localizedDescription ?? "none")")
         if let captureError { throw captureError }
     }
@@ -84,7 +93,25 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     ) {
         let now = ProcessInfo.processInfo.systemUptime
         lastAudioActivityAt = now
-        _ = audioWriter?.appendAudio(sampleBuffer)
+        if !hasLoggedSampleDiagnostics {
+            hasLoggedSampleDiagnostics = true
+            RecordingDiagnostics.shared.log(audioSampleBufferDiagnosticSummary(sampleBuffer))
+        }
+        do {
+            if audioWriter == nil {
+                guard let sourceFormatHint = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+                    throw RecordItError.message("The selected input did not provide an audio format.")
+                }
+                audioWriter = try AudioWriter(
+                    outputURL: outputURL,
+                    sourceFormatHint: sourceFormatHint
+                )
+            }
+            _ = try audioWriter?.appendAudio(sampleBuffer)
+        } catch {
+            reportFailure(error)
+            return
+        }
         if lastWaveformSampleAt == nil || now - (lastWaveformSampleAt ?? 0) >= 0.1 {
             let decibels = connection.audioChannels.map(\.averagePowerLevel).max() ?? -160
             waveform.append(decibels: decibels)
@@ -107,7 +134,6 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         }
         captureSession.addInput(input)
         captureSession.addOutput(audioOutput)
-        audioWriter = try AudioWriter(outputURL: outputURL)
     }
 
     private func startHealthMonitor() {
@@ -164,4 +190,38 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         emitTelemetry(at: ProcessInfo.processInfo.systemUptime, failureMessage: error.localizedDescription)
         onFailure?(error)
     }
+}
+
+private func audioSampleBufferDiagnosticSummary(_ sampleBuffer: CMSampleBuffer) -> String {
+    var timingEntries: CMItemCount = 0
+    let timingStatus = CMSampleBufferGetSampleTimingInfoArray(
+        sampleBuffer,
+        entryCount: 0,
+        arrayToFill: nil,
+        entriesNeededOut: &timingEntries
+    )
+    var sizeEntries: CMItemCount = 0
+    let sizeStatus = CMSampleBufferGetSampleSizeArray(
+        sampleBuffer,
+        entryCount: 0,
+        arrayToFill: nil,
+        entriesNeededOut: &sizeEntries
+    )
+    var audioBufferListSize = 0
+    var retainedBlockBuffer: CMBlockBuffer?
+    let audioBufferListStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+        sampleBuffer,
+        bufferListSizeNeededOut: &audioBufferListSize,
+        bufferListOut: nil,
+        bufferListSize: 0,
+        blockBufferAllocator: kCFAllocatorDefault,
+        blockBufferMemoryAllocator: kCFAllocatorDefault,
+        flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
+        blockBufferOut: &retainedBlockBuffer
+    )
+    return "audio.sample diagnostics samples=\(CMSampleBufferGetNumSamples(sampleBuffer)) "
+        + "timingEntries=\(timingEntries) timingStatus=\(timingStatus) "
+        + "sizeEntries=\(sizeEntries) sizeStatus=\(sizeStatus) "
+        + "audioBufferListBytes=\(audioBufferListSize) audioBufferListStatus=\(audioBufferListStatus) "
+        + "totalBytes=\(CMSampleBufferGetTotalSampleSize(sampleBuffer))"
 }

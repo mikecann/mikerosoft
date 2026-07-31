@@ -8,10 +8,16 @@ final class AudioWriterIntegrationTests: XCTestCase {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("record-it-audio-\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: outputURL) }
-        let writer = try AudioWriter(outputURL: outputURL)
+        let firstSample = try audioSampleBuffer(startingFrame: 0)
+        let sourceFormatHint = try XCTUnwrap(CMSampleBufferGetFormatDescription(firstSample))
+        let writer = try AudioWriter(
+            outputURL: outputURL,
+            sourceFormatHint: sourceFormatHint
+        )
 
-        for startingFrame in [0, 480, 960] {
-            XCTAssertTrue(writer.appendAudio(try audioSampleBuffer(startingFrame: startingFrame)))
+        XCTAssertTrue(try writer.appendAudio(firstSample))
+        for startingFrame in [480, 960] {
+            XCTAssertTrue(try writer.appendAudio(try audioSampleBuffer(startingFrame: startingFrame)))
         }
         try await writer.finish()
 
@@ -27,11 +33,41 @@ final class AudioWriterIntegrationTests: XCTestCase {
             0
         )
     }
+
+    func testWriterPreservesAMonoCaptureSourceInsteadOfForcingStereo() async throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("record-it-mono-audio-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+        let firstSample = try audioSampleBuffer(startingFrame: 0, channelCount: 1)
+        let sourceFormatHint = try XCTUnwrap(CMSampleBufferGetFormatDescription(firstSample))
+        let writer = try AudioWriter(
+            outputURL: outputURL,
+            sourceFormatHint: sourceFormatHint
+        )
+
+        XCTAssertTrue(try writer.appendAudio(firstSample))
+        XCTAssertTrue(try writer.appendAudio(audioSampleBuffer(startingFrame: 480, channelCount: 1)))
+        try await writer.finish()
+
+        let asset = AVURLAsset(url: outputURL)
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        let track = try XCTUnwrap(tracks.first)
+        let formatDescriptions = try await track.load(.formatDescriptions)
+        let formatDescription = try XCTUnwrap(formatDescriptions.first)
+        let streamDescription = try XCTUnwrap(
+            CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+        )
+        XCTAssertEqual(streamDescription.pointee.mChannelsPerFrame, 1)
+    }
 }
 
-private func audioSampleBuffer(startingFrame: Int, frameCount: Int = 480) throws -> CMSampleBuffer {
+private func audioSampleBuffer(
+    startingFrame: Int,
+    frameCount: Int = 480,
+    channelCount: UInt32 = 2
+) throws -> CMSampleBuffer {
     let sampleRate: Int32 = 48_000
-    let bytesPerFrame = 4
+    let bytesPerFrame = Int(channelCount) * MemoryLayout<Int16>.size
     var streamDescription = AudioStreamBasicDescription(
         mSampleRate: Float64(sampleRate),
         mFormatID: kAudioFormatLinearPCM,
@@ -39,7 +75,7 @@ private func audioSampleBuffer(startingFrame: Int, frameCount: Int = 480) throws
         mBytesPerPacket: UInt32(bytesPerFrame),
         mFramesPerPacket: 1,
         mBytesPerFrame: UInt32(bytesPerFrame),
-        mChannelsPerFrame: 2,
+        mChannelsPerFrame: channelCount,
         mBitsPerChannel: 16,
         mReserved: 0
     )
