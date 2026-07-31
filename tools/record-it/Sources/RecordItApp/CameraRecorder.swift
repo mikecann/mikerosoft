@@ -20,6 +20,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var healthTimer: DispatchSourceTimer?
     private var isStopping = false
     private var captureError: Error?
+    private var configurationLockedDevice: AVCaptureDevice?
 
     init(
         camera: CaptureCamera,
@@ -57,8 +58,19 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                         "camera.start device=\(camera.name) output=\(camera.width)x\(camera.height) "
                             + "audio=\(microphone != nil) encoder=\(encoderConfiguration.encoder.displayName)"
                     )
+                    let activeFormat = configurationLockedDevice?.activeFormat
+                    if let activeFormat {
+                        let dimensions = CMVideoFormatDescriptionGetDimensions(activeFormat.formatDescription)
+                        let duration = configurationLockedDevice?.activeVideoMinFrameDuration ?? .invalid
+                        let frameRate = duration.seconds > 0 ? 1 / duration.seconds : 0
+                        RecordingDiagnostics.shared.log(
+                            "camera.running format=\(dimensions.width)x\(dimensions.height) "
+                                + "fps=\(String(format: "%.6f", frameRate))"
+                        )
+                    }
                     continuation.resume()
                 } catch {
+                    releaseDeviceConfigurationLock()
                     continuation.resume(throwing: error)
                 }
             }
@@ -76,6 +88,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                 if captureSession.isRunning {
                     captureSession.stopRunning()
                 }
+                releaseDeviceConfigurationLock()
                 continuation.resume()
             }
         }
@@ -182,7 +195,9 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             captureSession.addInput(videoInput)
         } applyFormat: {
             try device.lockForConfiguration()
-            defer { device.unlockForConfiguration() }
+            configurationLockedDevice = device
+            // macOS may replace an explicitly selected format when the session
+            // starts unless the device stays locked for the capture lifetime.
             device.activeFormat = format
             device.activeVideoMinFrameDuration = frameRateRange.minFrameDuration
             device.activeVideoMaxFrameDuration = frameRateRange.minFrameDuration
@@ -222,6 +237,11 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             encoderConfiguration: encoderConfiguration,
             startGate: startGate
         )
+    }
+
+    private func releaseDeviceConfigurationLock() {
+        configurationLockedDevice?.unlockForConfiguration()
+        configurationLockedDevice = nil
     }
 }
 

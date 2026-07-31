@@ -5,6 +5,17 @@ import XCTest
 
 @MainActor
 final class CameraPreviewTests: XCTestCase {
+    func testPreviewAppliesThePreferredCameraFormatAfterAddingTheInput() {
+        var configurationSteps: [String] = []
+
+        addPreviewCameraInputThenApplySelectedFormat(
+            addInput: { configurationSteps.append("input") },
+            applyFormat: { configurationSteps.append("format") }
+        )
+
+        XCTAssertEqual(configurationSteps, ["input", "format"])
+    }
+
     func testPreviewUsesAStandardMovableResizableWindow() {
         XCTAssertTrue(cameraPreviewWindowStyleMask.contains(.titled))
         XCTAssertTrue(cameraPreviewWindowStyleMask.contains(.closable))

@@ -59,6 +59,16 @@ final class CaptureSelectionTests: XCTestCase {
         XCTAssertEqual(preferredCameraFormat(in: formats), formats[1])
     }
 
+    func testCameraFrameRateRangeUsesTheHardwareTimingClosestTo30FPS() {
+        let ranges = [
+            CameraFrameRateRangeOption(minimumFrameRate: 60.000_12, maximumFrameRate: 60.000_12),
+            CameraFrameRateRangeOption(minimumFrameRate: 30.000_031, maximumFrameRate: 30.000_031),
+            CameraFrameRateRangeOption(minimumFrameRate: 24.000_024, maximumFrameRate: 24.000_024)
+        ]
+
+        XCTAssertEqual(preferredCameraFrameRateRangeIndex(in: ranges), 1)
+    }
+
     func testPreferredCameraChoosesA4K30Device() {
         let cameras = [
             CaptureCamera(id: "facetime", name: "FaceTime HD Camera", width: 1920, height: 1080),

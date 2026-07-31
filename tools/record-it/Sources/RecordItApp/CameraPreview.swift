@@ -75,7 +75,7 @@ final class SystemCameraPreviewSessionController: CameraPreviewSessionControllin
     let session = AVCaptureSession()
 
     private let sessionQueue = DispatchQueue(label: "com.mikerosoft.record-it.camera-preview")
-    private var configuredCameraID: String?
+    private var configurationLockedDevice: AVCaptureDevice?
 
     func start(cameraID: String) async throws {
         guard await requestCameraPreviewAccess() else {
@@ -87,17 +87,32 @@ final class SystemCameraPreviewSessionController: CameraPreviewSessionControllin
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async { [self] in
                 do {
-                    if configuredCameraID != cameraID {
-                        try configureSession(cameraID: cameraID)
-                    }
+                    // Reapply the exact format every time the preview opens. Another
+                    // camera app may have changed the device format since the last run.
+                    try configureSession(cameraID: cameraID)
                     if !session.isRunning {
                         session.startRunning()
                     }
                     guard session.isRunning else {
                         throw RecordItError.message("The camera preview could not be started.")
                     }
+                    if let activeInput = session.inputs
+                        .compactMap({ $0 as? AVCaptureDeviceInput })
+                        .first(where: { $0.device.hasMediaType(.video) }) {
+                        let activeFormat = activeInput.device.activeFormat
+                        let dimensions = CMVideoFormatDescriptionGetDimensions(
+                            activeFormat.formatDescription
+                        )
+                        let duration = activeInput.device.activeVideoMinFrameDuration
+                        let frameRate = duration.seconds > 0 ? 1 / duration.seconds : 0
+                        RecordingDiagnostics.shared.log(
+                            "camera.preview running format=\(dimensions.width)x\(dimensions.height) "
+                                + "fps=\(String(format: "%.6f", frameRate))"
+                        )
+                    }
                     continuation.resume()
                 } catch {
+                    releaseDeviceConfigurationLock()
                     continuation.resume(throwing: error)
                 }
             }
@@ -110,6 +125,7 @@ final class SystemCameraPreviewSessionController: CameraPreviewSessionControllin
                 if session.isRunning {
                     session.stopRunning()
                 }
+                releaseDeviceConfigurationLock()
                 continuation.resume()
             }
         }
@@ -119,22 +135,63 @@ final class SystemCameraPreviewSessionController: CameraPreviewSessionControllin
         guard let device = CaptureDeviceCatalog.camera(withID: cameraID) else {
             throw RecordItError.message("The selected camera is no longer available.")
         }
+        guard let format = CaptureDeviceCatalog.preferredDeviceFormat(for: device) else {
+            throw RecordItError.message("The selected camera has no format that supports 30 fps.")
+        }
+        let frameRateRanges = format.videoSupportedFrameRateRanges
+        let frameRateOptions = frameRateRanges.map {
+            CameraFrameRateRangeOption(
+                minimumFrameRate: $0.minFrameRate,
+                maximumFrameRate: $0.maxFrameRate
+            )
+        }
+        guard let frameRateRangeIndex = preferredCameraFrameRateRangeIndex(in: frameRateOptions) else {
+            throw RecordItError.message("The selected camera did not report a usable frame duration.")
+        }
+        let frameRateRange = frameRateRanges[frameRateRangeIndex]
 
         session.beginConfiguration()
         defer { session.commitConfiguration() }
 
         session.inputs.forEach(session.removeInput)
-        if session.canSetSessionPreset(.high) {
-            session.sessionPreset = .high
-        }
 
         let input = try AVCaptureDeviceInput(device: device)
-        guard session.canAddInput(input) else {
-            throw RecordItError.message("The selected camera could not be added to the preview.")
+        try addPreviewCameraInputThenApplySelectedFormat {
+            guard session.canAddInput(input) else {
+                throw RecordItError.message("The selected camera could not be added to the preview.")
+            }
+            session.addInput(input)
+        } applyFormat: {
+            try device.lockForConfiguration()
+            configurationLockedDevice = device
+
+            // On macOS, setting activeFormat directly makes the selected input
+            // format authoritative only while the configuration lock is held.
+            // Keep the lock until Preview closes, otherwise startRunning() is
+            // allowed to silently replace 4K30 with a lower format.
+            device.activeFormat = format
+            // Use the duration reported by the hardware rather than constructing
+            // an idealized 1/30 value. Some UVC cameras advertise a slightly
+            // different timing and raise an Objective-C exception for 1/30.
+            device.activeVideoMinFrameDuration = frameRateRange.minFrameDuration
+            device.activeVideoMaxFrameDuration = frameRateRange.minFrameDuration
         }
-        session.addInput(input)
-        configuredCameraID = cameraID
     }
+
+    private func releaseDeviceConfigurationLock() {
+        configurationLockedDevice?.unlockForConfiguration()
+        configurationLockedDevice = nil
+    }
+}
+
+func addPreviewCameraInputThenApplySelectedFormat(
+    addInput: () throws -> Void,
+    applyFormat: () throws -> Void
+) rethrows {
+    // AVCaptureDevice can reject or replace an active format until its input
+    // belongs to the session, so keep this ordering explicit and tested.
+    try addInput()
+    try applyFormat()
 }
 
 @MainActor

@@ -68,6 +68,21 @@ func preferredCameraFormat(in formats: [CameraFormatOption]) -> CameraFormatOpti
         ?? candidates.max { $0.width * $0.height < $1.width * $1.height }
 }
 
+struct CameraFrameRateRangeOption {
+    let minimumFrameRate: Double
+    let maximumFrameRate: Double
+}
+
+func preferredCameraFrameRateRangeIndex(
+    in ranges: [CameraFrameRateRangeOption],
+    targetFrameRate: Double = 30
+) -> Int? {
+    ranges.indices.min {
+        abs(ranges[$0].maximumFrameRate - targetFrameRate)
+            < abs(ranges[$1].maximumFrameRate - targetFrameRate)
+    }
+}
+
 struct CaptureCamera: Identifiable, Hashable {
     let id: String
     let name: String
