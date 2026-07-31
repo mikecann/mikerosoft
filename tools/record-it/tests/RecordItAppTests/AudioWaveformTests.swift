@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import RecordItApp
 
@@ -27,5 +28,26 @@ final class AudioWaveformTests: XCTestCase {
     func testInvalidMeterReadingsBecomeSilence() {
         XCTAssertEqual(normalizedAudioLevel(decibels: -.infinity), 0)
         XCTAssertEqual(normalizedAudioLevel(decibels: .nan), 0)
+    }
+
+    func testPeakLevelComesFromThePCMBufferThatWillBeWritten() throws {
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 48_000,
+            channels: 2,
+            interleaved: true
+        ))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: 4
+        ))
+        buffer.frameLength = 4
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        let samples = try XCTUnwrap(audioBuffers.first?.mData?.assumingMemoryBound(to: Int16.self))
+        for index in 0 ..< 8 {
+            samples[index] = index == 3 ? 16_384 : 0
+        }
+
+        XCTAssertEqual(peakDecibels(in: buffer), -6.02, accuracy: 0.05)
     }
 }

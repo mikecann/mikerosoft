@@ -8,7 +8,7 @@ final class AudioWriterIntegrationTests: XCTestCase {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("record-it-audio-\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: outputURL) }
-        let firstSample = try audioSampleBuffer(startingFrame: 0)
+        let firstSample = try audioSampleBuffer(startingFrame: 0, sampleValue: 12_000)
         let sourceFormatHint = try XCTUnwrap(CMSampleBufferGetFormatDescription(firstSample))
         let writer = try AudioWriter(
             outputURL: outputURL,
@@ -17,7 +17,10 @@ final class AudioWriterIntegrationTests: XCTestCase {
 
         XCTAssertTrue(try writer.appendAudio(firstSample))
         for startingFrame in [480, 960] {
-            XCTAssertTrue(try writer.appendAudio(try audioSampleBuffer(startingFrame: startingFrame)))
+            XCTAssertTrue(try writer.appendAudio(try audioSampleBuffer(
+                startingFrame: startingFrame,
+                sampleValue: 12_000
+            )))
         }
         try await writer.finish()
 
@@ -31,6 +34,11 @@ final class AudioWriterIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(
             try FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int ?? 0,
             0
+        )
+        XCTAssertEqual(
+            try decodedPeakAmplitude(at: outputURL),
+            Float(12_000) / Float(Int16.max),
+            accuracy: 0.1
         )
     }
 
@@ -64,7 +72,8 @@ final class AudioWriterIntegrationTests: XCTestCase {
 private func audioSampleBuffer(
     startingFrame: Int,
     frameCount: Int = 480,
-    channelCount: UInt32 = 2
+    channelCount: UInt32 = 2,
+    sampleValue: Int16 = 0
 ) throws -> CMSampleBuffer {
     let sampleRate: Int32 = 48_000
     let bytesPerFrame = Int(channelCount) * MemoryLayout<Int16>.size
@@ -110,12 +119,15 @@ private func audioSampleBuffer(
     guard let blockBuffer else {
         throw RecordItError.message("Could not create a test audio block buffer.")
     }
-    try checkAudioOSStatus(CMBlockBufferFillDataBytes(
-        with: 0,
-        blockBuffer: blockBuffer,
-        offsetIntoDestination: 0,
-        dataLength: dataLength
-    ))
+    let samples = [Int16](repeating: sampleValue, count: frameCount * Int(channelCount))
+    try samples.withUnsafeBytes { bytes in
+        try checkAudioOSStatus(CMBlockBufferReplaceDataBytes(
+            with: bytes.baseAddress!,
+            blockBuffer: blockBuffer,
+            offsetIntoDestination: 0,
+            dataLength: dataLength
+        ))
+    }
 
     var timing = CMSampleTimingInfo(
         duration: CMTime(value: 1, timescale: sampleRate),
@@ -139,6 +151,29 @@ private func audioSampleBuffer(
         throw RecordItError.message("Could not create a test audio sample.")
     }
     return sampleBuffer
+}
+
+private func decodedPeakAmplitude(at url: URL) throws -> Float {
+    let file = try AVAudioFile(forReading: url)
+    let frameCount = AVAudioFrameCount(file.length)
+    guard let buffer = AVAudioPCMBuffer(
+        pcmFormat: file.processingFormat,
+        frameCapacity: frameCount
+    ) else {
+        throw RecordItError.message("Could not allocate a decoded test audio buffer.")
+    }
+    try file.read(into: buffer)
+    guard let channels = buffer.floatChannelData else {
+        throw RecordItError.message("Decoded test audio was not floating-point PCM.")
+    }
+
+    var peak: Float = 0
+    for channel in 0 ..< Int(buffer.format.channelCount) {
+        for frame in 0 ..< Int(buffer.frameLength) {
+            peak = max(peak, abs(channels[channel][frame]))
+        }
+    }
+    return peak
 }
 
 private func checkAudioOSStatus(_ status: OSStatus) throws {

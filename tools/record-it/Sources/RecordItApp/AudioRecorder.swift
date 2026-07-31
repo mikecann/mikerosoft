@@ -89,7 +89,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     func captureOutput(
         _ output: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
+        from _: AVCaptureConnection
     ) {
         let now = ProcessInfo.processInfo.systemUptime
         lastAudioActivityAt = now
@@ -113,7 +113,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             return
         }
         if lastWaveformSampleAt == nil || now - (lastWaveformSampleAt ?? 0) >= 0.1 {
-            let decibels = connection.audioChannels.map(\.averagePowerLevel).max() ?? -160
+            let decibels = audioWriter?.latestPeakDecibels ?? -160
             waveform.append(decibels: decibels)
             lastWaveformSampleAt = now
         }
@@ -193,6 +193,9 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
 }
 
 private func audioSampleBufferDiagnosticSummary(_ sampleBuffer: CMSampleBuffer) -> String {
+    let streamDescription = CMSampleBufferGetFormatDescription(sampleBuffer)
+        .flatMap(CMAudioFormatDescriptionGetStreamBasicDescription)?
+        .pointee
     var timingEntries: CMItemCount = 0
     let timingStatus = CMSampleBufferGetSampleTimingInfoArray(
         sampleBuffer,
@@ -223,5 +226,9 @@ private func audioSampleBufferDiagnosticSummary(_ sampleBuffer: CMSampleBuffer) 
         + "timingEntries=\(timingEntries) timingStatus=\(timingStatus) "
         + "sizeEntries=\(sizeEntries) sizeStatus=\(sizeStatus) "
         + "audioBufferListBytes=\(audioBufferListSize) audioBufferListStatus=\(audioBufferListStatus) "
-        + "totalBytes=\(CMSampleBufferGetTotalSampleSize(sampleBuffer))"
+        + "totalBytes=\(CMSampleBufferGetTotalSampleSize(sampleBuffer)) "
+        + "formatFlags=\(streamDescription?.mFormatFlags ?? 0) "
+        + "bytesPerFrame=\(streamDescription?.mBytesPerFrame ?? 0) "
+        + "channels=\(streamDescription?.mChannelsPerFrame ?? 0) "
+        + "bitsPerChannel=\(streamDescription?.mBitsPerChannel ?? 0)"
 }

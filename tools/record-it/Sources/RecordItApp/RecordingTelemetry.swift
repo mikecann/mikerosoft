@@ -102,6 +102,9 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
             } else if audioSamplesWritten == 0 || lastVideoActivityAt == nil {
                 health = .starting
                 healthMessage = "Waiting for the first audio sample"
+            } else if hasSustainedAudioSilence(audioWaveformLevels) {
+                health = .warning
+                healthMessage = "Input is silent. Check the selected microphone, mute, and gain"
             } else {
                 health = .healthy
                 healthMessage = "Audio and file output are active"
@@ -123,6 +126,13 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
             healthMessage = "Video and file output are active"
         }
     }
+}
+
+private func hasSustainedAudioSilence(_ levels: [Float]) -> Bool {
+    // The recorder samples the waveform at 10 Hz, so 30 quiet values means the
+    // selected input has stayed below roughly -54 dB for 3 seconds.
+    let recentLevels = levels.suffix(30)
+    return recentLevels.count == 30 && recentLevels.allSatisfy { $0 <= 0.1 }
 }
 
 func shouldShowRecordingDashboard(isRecording: Bool, isBusy: Bool) -> Bool {

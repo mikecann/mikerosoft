@@ -10,6 +10,7 @@ final class AudioWriter {
     private var latestAudioTimestamp: CMTime?
     private var audioSamplesWritten = 0
     private var status: RecordingWriterStatus = .writing
+    private(set) var latestPeakDecibels: Float = -160
 
     init(
         outputURL: URL,
@@ -58,19 +59,13 @@ final class AudioWriter {
         }
         buffer.frameLength = frameCount
 
-        let copyStatus = CMSampleBufferCopyPCMDataIntoAudioBufferList(
-            sampleBuffer,
-            at: 0,
-            frameCount: Int32(frameCount),
-            into: buffer.mutableAudioBufferList
-        )
-        guard copyStatus == noErr else {
+        do {
+            try copyPCMData(from: sampleBuffer, into: buffer)
+        } catch {
             status = .failed
-            throw RecordItError.message(
-                "Audio samples could not be copied from the selected input. "
-                    + "Core Media returned OSStatus \(copyStatus)."
-            )
+            throw error
         }
+        latestPeakDecibels = peakDecibels(in: buffer)
 
         do {
             guard let audioFile else {
@@ -139,5 +134,49 @@ final class AudioWriter {
             audioFile?.close()
         }
         audioFile = nil
+    }
+
+    private func copyPCMData(
+        from sampleBuffer: CMSampleBuffer,
+        into destinationBuffer: AVAudioPCMBuffer
+    ) throws {
+        guard let sourceBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
+            throw RecordItError.message("The selected input did not provide PCM audio data.")
+        }
+        let sourceByteCount = CMBlockBufferGetDataLength(sourceBuffer)
+        let destinationBuffers = UnsafeMutableAudioBufferListPointer(
+            destinationBuffer.mutableAudioBufferList
+        )
+        let destinationByteCount = destinationBuffers.reduce(0) {
+            $0 + Int($1.mDataByteSize)
+        }
+        guard sourceByteCount >= destinationByteCount else {
+            throw RecordItError.message(
+                "The selected input supplied less PCM audio data than its format described."
+            )
+        }
+
+        var sourceOffset = 0
+        for destination in destinationBuffers {
+            let byteCount = Int(destination.mDataByteSize)
+            guard let destinationData = destination.mData else {
+                throw RecordItError.message(
+                    "The audio encoder did not allocate PCM buffer storage."
+                )
+            }
+            let copyStatus = CMBlockBufferCopyDataBytes(
+                sourceBuffer,
+                atOffset: sourceOffset,
+                dataLength: byteCount,
+                destination: destinationData
+            )
+            guard copyStatus == noErr else {
+                throw RecordItError.message(
+                    "Audio samples could not be read from the selected input. "
+                        + "Core Media returned OSStatus \(copyStatus)."
+                )
+            }
+            sourceOffset += byteCount
+        }
     }
 }
