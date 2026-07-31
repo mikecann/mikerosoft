@@ -12,6 +12,7 @@ maximising underneath the bar.
 
 - Shows one taskbar per monitor
 - Shows every window individually instead of grouping by app
+- Opens an app after files are dragged over its taskbar item for half a second
 - Minimises the active window when its item is clicked again, and restores it on the next click
 - Keeps the selected app highlighted with a sliding pill
 - Pins apps so they stay visible when closed

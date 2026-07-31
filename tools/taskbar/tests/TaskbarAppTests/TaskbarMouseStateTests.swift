@@ -273,4 +273,30 @@ final class TaskbarMouseStateTests: XCTestCase {
 
         XCTAssertTrue(activatedWidgets.isEmpty)
     }
+
+    func testFileDragHoverFindsTaskbarItemAcrossFullBarHeight() {
+        let safari = mouseStateItem(owner: "Safari")
+        let notes = mouseStateItem(owner: "Notes", pinOrder: 1)
+
+        let target = taskbarSpringLoadTarget(
+            at: NSPoint(x: 110, y: 29),
+            tileRects: [
+                (rect: firstRect, item: safari),
+                (rect: secondRect, item: notes)
+            ],
+            bounds: bounds
+        )
+
+        XCTAssertEqual(target, notes)
+    }
+
+    func testFileDragHoverIgnoresWidgetsAndEmptySpace() {
+        let safari = mouseStateItem(owner: "Safari")
+
+        XCTAssertNil(taskbarSpringLoadTarget(
+            at: NSPoint(x: 250, y: 15),
+            tileRects: [(rect: firstRect, item: safari)],
+            bounds: bounds
+        ))
+    }
 }

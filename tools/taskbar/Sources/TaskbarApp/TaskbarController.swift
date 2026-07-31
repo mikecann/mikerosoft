@@ -61,6 +61,9 @@ final class TaskbarPanel {
         view.onActivate = { [weak controller] item in
             controller?.activate(item: item)
         }
+        view.onSpringLoad = { [weak controller] item in
+            controller?.springLoad(item: item)
+        }
         view.onMenu = { [weak controller, screenID] in
             controller?.makeSettingsMenu(screenID: screenID) ?? NSMenu()
         }
@@ -445,6 +448,38 @@ final class TaskbarController: NSObject {
         case .minimize:
             pendingFrontmostWindowExpectation = nil
             minimizeApplicationWindowAsync(item: item)
+        case .restore:
+            pendingFrontmostWindowExpectation = frontmostWindowExpectation(
+                afterActivating: item,
+                now: ProcessInfo.processInfo.systemUptime
+            )
+            if let pid = item.pid {
+                unminimizeApplicationWindowAsync(pid: pid, title: item.title)
+            }
+            activateApplicationWindowAsync(item: item)
+        case .activate:
+            pendingFrontmostWindowExpectation = frontmostWindowExpectation(
+                afterActivating: item,
+                now: ProcessInfo.processInfo.systemUptime
+            )
+            activateApplicationWindowAsync(item: item)
+        case .launch:
+            pendingFrontmostWindowExpectation = nil
+            _ = launchApplication(appPath: item.appPath, bundleID: item.bundleID)
+        }
+        scheduleRefreshSoon()
+    }
+
+    func springLoad(item: TaskbarItem) {
+        let pidText = item.pid.map(String.init) ?? "not-running"
+        let action = taskbarItemSpringLoadAction(for: item)
+        log("taskbar file-drag hover \(action) \(item.owner) pid=\(pidText) windows=\(item.windowIDs)")
+
+        switch action {
+        case .minimize:
+            // taskbarItemSpringLoadAction never returns this. Keeping the case
+            // explicit makes that safety property visible if the enum changes.
+            return
         case .restore:
             pendingFrontmostWindowExpectation = frontmostWindowExpectation(
                 afterActivating: item,

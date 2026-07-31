@@ -6,6 +6,7 @@ final class FrontmostWindowResolutionTests: XCTestCase {
     func taskbarItem(
         pid: pid_t? = 739,
         windowIDs: [Int] = [16_416],
+        isFrontmost: Bool = false,
         isMinimized: Bool = false
     ) -> TaskbarItem {
         TaskbarItem(
@@ -16,7 +17,7 @@ final class FrontmostWindowResolutionTests: XCTestCase {
             windowIDs: windowIDs,
             windowBounds: nil,
             accessibilitySignature: "profile-window",
-            isFrontmost: false,
+            isFrontmost: isFrontmost,
             isMinimized: isMinimized,
             bundleID: "com.google.Chrome",
             appPath: "/Applications/Google Chrome.app",
@@ -160,6 +161,27 @@ final class FrontmostWindowResolutionTests: XCTestCase {
 
     func testClickingClosedPinnedAppLaunchesIt() {
         XCTAssertEqual(taskbarItemClickAction(for: taskbarItem(pid: nil, windowIDs: [])), .launch)
+    }
+
+    func testDraggingFilesOverFrontmostWindowActivatesWithoutMinimizing() {
+        XCTAssertEqual(
+            taskbarItemSpringLoadAction(for: taskbarItem(isFrontmost: true)),
+            .activate
+        )
+    }
+
+    func testDraggingFilesOverMinimizedWindowRestoresIt() {
+        XCTAssertEqual(
+            taskbarItemSpringLoadAction(for: taskbarItem(isMinimized: true)),
+            .restore
+        )
+    }
+
+    func testDraggingFilesOverClosedPinnedAppLaunchesIt() {
+        XCTAssertEqual(
+            taskbarItemSpringLoadAction(for: taskbarItem(pid: nil, windowIDs: [])),
+            .launch
+        )
     }
 
     func testResolvedOptimisticWindowIDMarksClickedTaskbarItemFrontmost() {

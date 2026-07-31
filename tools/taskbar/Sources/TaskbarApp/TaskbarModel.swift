@@ -114,6 +114,14 @@ func taskbarItemClickAction(for item: TaskbarItem) -> TaskbarItemClickAction {
     return .activate
 }
 
+func taskbarItemSpringLoadAction(for item: TaskbarItem) -> TaskbarItemClickAction {
+    guard item.pid != nil else { return .launch }
+    if item.isMinimized { return .restore }
+    // A drag hover must never inherit the click-to-minimise behaviour. The
+    // dragged files need the target app to stay visible when it is already active.
+    return .activate
+}
+
 func frontmostWindowExpectation(
     afterActivating item: TaskbarItem,
     now: TimeInterval,

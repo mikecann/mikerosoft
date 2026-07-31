@@ -4,6 +4,7 @@ final class TaskbarView: NSView {
     var items: [TaskbarItem] = []
     var settings: TaskbarSettingValues = .defaults
     var onActivate: ((TaskbarItem) -> Void)?
+    var onSpringLoad: ((TaskbarItem) -> Void)?
     var onMenu: (() -> NSMenu)?
     var onItemMenu: ((TaskbarItem) -> NSMenu?)?
     var onWidgetMenu: ((TaskbarWidgetID) -> NSMenu?)?
@@ -17,11 +18,27 @@ final class TaskbarView: NSView {
     private var mouseDownPoint: NSPoint?
     private var mouseDownWidget: (rect: NSRect, id: TaskbarWidgetID, statsMetric: StatsWidgetMetric?)?
     private var didDragPinnedItem = false
+    private var pendingSpringLoad: DispatchWorkItem?
+    private var springLoadTargetKey: String?
     private var tileHeight: CGFloat {
         max(18, bounds.height - 8)
     }
 
     override var acceptsFirstResponder: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    deinit {
+        pendingSpringLoad?.cancel()
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
@@ -143,6 +160,64 @@ final class TaskbarView: NSView {
 
         guard let menu = onMenu?() else { return }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateSpringLoadTarget(for: sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        updateSpringLoadTarget(for: sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        cancelSpringLoad()
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        // The taskbar opens the destination but does not consume the files.
+        // Returning false keeps an accidental drop on the bar from moving them.
+        cancelSpringLoad()
+        return false
+    }
+
+    private func updateSpringLoadTarget(for sender: NSDraggingInfo) -> NSDragOperation {
+        let point = convert(sender.draggingLocation, from: nil)
+        guard let item = taskbarSpringLoadTarget(
+            at: point,
+            tileRects: tileRects.map { (rect: $0.0, item: $0.1) },
+            bounds: bounds
+        ) else {
+            cancelSpringLoad()
+            return []
+        }
+
+        scheduleSpringLoad(for: item)
+        return .copy
+    }
+
+    private func scheduleSpringLoad(for item: TaskbarItem) {
+        let key = taskbarSpringLoadTargetKey(item)
+        guard key != springLoadTargetKey else { return }
+
+        pendingSpringLoad?.cancel()
+        springLoadTargetKey = key
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.springLoadTargetKey == key else { return }
+            self.pendingSpringLoad = nil
+            self.onSpringLoad?(item)
+        }
+        pendingSpringLoad = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + taskbarSpringLoadDelay,
+            execute: workItem
+        )
+    }
+
+    private func cancelSpringLoad() {
+        pendingSpringLoad?.cancel()
+        pendingSpringLoad = nil
+        springLoadTargetKey = nil
     }
 
     private func widgetHit(at point: NSPoint) -> (rect: NSRect, id: TaskbarWidgetID, statsMetric: StatsWidgetMetric?)? {
@@ -352,6 +427,22 @@ func taskbarInteractionRect(for visualRect: NSRect, in bounds: NSRect) -> NSRect
         width: visualRect.width,
         height: bounds.height
     )
+}
+
+let taskbarSpringLoadDelay: TimeInterval = 0.5
+
+func taskbarSpringLoadTarget(
+    at point: NSPoint,
+    tileRects: [(rect: NSRect, item: TaskbarItem)],
+    bounds: NSRect
+) -> TaskbarItem? {
+    tileRects.first {
+        taskbarInteractionRect(for: $0.rect, in: bounds).contains(point)
+    }?.item
+}
+
+private func taskbarSpringLoadTargetKey(_ item: TaskbarItem) -> String {
+    "\(item.identity)#\(item.windowIDs.first.map(String.init) ?? "pinned")"
 }
 
 func taskbarWidgetSpacing(widgetSpacing: CGFloat) -> CGFloat {
