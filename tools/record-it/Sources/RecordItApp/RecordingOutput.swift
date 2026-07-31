@@ -3,11 +3,13 @@ import Foundation
 enum CaptureSource: Hashable, Sendable {
     case screen
     case camera
+    case audio
 
     var filenameSuffix: String {
         switch self {
         case .screen: "screen"
         case .camera: "camera"
+        case .audio: "audio"
         }
     }
 
@@ -15,13 +17,18 @@ enum CaptureSource: Hashable, Sendable {
         switch self {
         case .screen: "Screen"
         case .camera: "Camera"
+        case .audio: "Audio"
         }
+    }
+
+    var fileExtension: String {
+        self == .audio ? "m4a" : "mov"
     }
 }
 
 func normalizedRecordingBaseName(_ candidate: String) -> String? {
     var name = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-    if name.lowercased().hasSuffix(".mov") {
+    if name.lowercased().hasSuffix(".mov") || name.lowercased().hasSuffix(".m4a") {
         name.removeLast(4)
         name = name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -53,11 +60,20 @@ func recordingOutputURLs(
     let prefix = baseName ?? defaultRecordingBaseName(startedAt: startedAt, timeZone: timeZone)
 
     var outputs: [CaptureSource: URL] = [:]
+    func outputURL(for source: CaptureSource) -> URL {
+        directory.appendingPathComponent(
+            "\(prefix)-\(source.filenameSuffix).\(source.fileExtension)"
+        )
+    }
+
     if mode.capturesScreen {
-        outputs[.screen] = directory.appendingPathComponent("\(prefix)-screen.mov")
+        outputs[.screen] = outputURL(for: .screen)
     }
     if mode.capturesCamera {
-        outputs[.camera] = directory.appendingPathComponent("\(prefix)-camera.mov")
+        outputs[.camera] = outputURL(for: .camera)
+    }
+    if mode.capturesAudio {
+        outputs[.audio] = outputURL(for: .audio)
     }
     return outputs
 }

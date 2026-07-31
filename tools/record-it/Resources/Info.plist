@@ -27,7 +27,7 @@
     <key>NSCameraUsageDescription</key>
     <string>Record It uses the selected camera to record video.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Record It uses the default microphone for camera recording audio.</string>
+    <string>Record It uses the selected audio input for camera audio and audio-only recordings.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Record It uses Screen Recording access to capture the selected display.</string>
     <key>NSHighResolutionCapable</key>

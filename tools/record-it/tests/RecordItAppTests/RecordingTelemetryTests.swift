@@ -76,4 +76,26 @@ final class RecordingTelemetryTests: XCTestCase {
         XCTAssertEqual(overallRecordingHealth([.healthy, .failed]), .failed)
         XCTAssertEqual(overallRecordingHealth([.healthy, .healthy]), .healthy)
     }
+
+    func testAudioTelemetryBecomesHealthyAfterReceivingInputSamples() {
+        let telemetry = RecordingTelemetry(
+            source: .audio,
+            outputURL: URL(fileURLWithPath: "/tmp/voice-over-audio.m4a"),
+            width: 0,
+            height: 0,
+            codecName: "AAC",
+            videoSamplesWritten: 0,
+            audioSamplesWritten: 42,
+            mediaDuration: 1.25,
+            fileSizeBytes: 4_096,
+            lastVideoActivityAt: 100,
+            consecutiveRejectedVideoSamples: 0,
+            writerStatus: .writing,
+            now: 101
+        )
+
+        XCTAssertEqual(telemetry.health, .healthy)
+        XCTAssertEqual(telemetry.healthMessage, "Audio and file output are active")
+        XCTAssertEqual(telemetry.resolutionLabel, "Audio only")
+    }
 }

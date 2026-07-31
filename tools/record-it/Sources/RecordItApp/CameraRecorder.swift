@@ -233,7 +233,7 @@ func addCameraInputThenApplySelectedFormat(
     try applyFormat()
 }
 
-private func requestAccess(for mediaType: AVMediaType) async -> Bool {
+func requestAccess(for mediaType: AVMediaType) async -> Bool {
     switch AVCaptureDevice.authorizationStatus(for: mediaType) {
     case .authorized:
         return true

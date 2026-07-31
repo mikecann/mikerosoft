@@ -34,8 +34,24 @@ final class RecordingOutputTests: XCTestCase {
         XCTAssertEqual(outputs[.camera]?.lastPathComponent, "episode-42-camera.mov")
     }
 
+    func testAudioModeCreatesAnM4AAudioFileWithoutVideoOutputs() {
+        let directory = URL(fileURLWithPath: "/tmp/ai-tips/source", isDirectory: true)
+
+        let outputs = recordingOutputURLs(
+            mode: .audio,
+            directory: directory,
+            startedAt: Date(timeIntervalSince1970: 1_721_035_800),
+            baseName: "voice-over"
+        )
+
+        XCTAssertEqual(outputs, [
+            .audio: directory.appendingPathComponent("voice-over-audio.m4a")
+        ])
+    }
+
     func testRecordingBaseNameTrimsWhitespaceAndAnAccidentalMovExtension() {
         XCTAssertEqual(normalizedRecordingBaseName("  launch demo.MOV  "), "launch demo")
+        XCTAssertEqual(normalizedRecordingBaseName("  voice over.M4A  "), "voice over")
     }
 
     func testRecordingBaseNameRejectsPathSeparators() {

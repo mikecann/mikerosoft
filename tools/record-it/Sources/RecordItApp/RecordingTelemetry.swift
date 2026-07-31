@@ -50,7 +50,9 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
 
     var id: CaptureSource { source }
     var outputFileName: String { outputURL.lastPathComponent }
-    var resolutionLabel: String { "\(width) × \(height)" }
+    var resolutionLabel: String {
+        source == .audio ? "Audio only" : "\(width) × \(height)"
+    }
 
     init(
         source: CaptureSource,
@@ -86,7 +88,21 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
             healthMessage = failureMessage
         } else if writerStatus == .failed || writerStatus == .cancelled {
             health = .failed
-            healthMessage = "The movie writer has stopped"
+            healthMessage = source == .audio ? "The audio writer has stopped" : "The movie writer has stopped"
+        } else if source == .audio {
+            if let lastVideoActivityAt, now - lastVideoActivityAt >= 10 {
+                health = .failed
+                healthMessage = "No audio input for 10 seconds"
+            } else if let lastVideoActivityAt, now - lastVideoActivityAt >= 3 {
+                health = .warning
+                healthMessage = "Waiting for the next audio sample"
+            } else if audioSamplesWritten == 0 || lastVideoActivityAt == nil {
+                health = .starting
+                healthMessage = "Waiting for the first audio sample"
+            } else {
+                health = .healthy
+                healthMessage = "Audio and file output are active"
+            }
         } else if consecutiveRejectedVideoSamples >= 60 {
             health = .failed
             healthMessage = "Video encoder is not accepting frames"

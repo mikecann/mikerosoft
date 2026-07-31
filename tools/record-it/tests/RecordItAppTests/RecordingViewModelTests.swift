@@ -57,4 +57,27 @@ final class RecordingViewModelTests: XCTestCase {
 
         XCTAssertEqual(model.fileName, "2024-07-15_093000")
     }
+
+    func testAudioModeNeedsAnInputButDoesNotNeedVideoDevicesOrAnEncoder() {
+        XCTAssertTrue(recordingPrerequisitesAreAvailable(
+            mode: .audio,
+            hasDestination: true,
+            hasValidFileName: true,
+            hasVideoEncoder: false,
+            hasDisplay: false,
+            hasCamera: false,
+            hasAudioInput: true,
+            isBusy: false
+        ))
+        XCTAssertFalse(recordingPrerequisitesAreAvailable(
+            mode: .audio,
+            hasDestination: true,
+            hasValidFileName: true,
+            hasVideoEncoder: false,
+            hasDisplay: false,
+            hasCamera: false,
+            hasAudioInput: false,
+            isBusy: false
+        ))
+    }
 }
