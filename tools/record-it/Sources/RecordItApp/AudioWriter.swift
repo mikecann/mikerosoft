@@ -1,43 +1,43 @@
 import AVFoundation
-import CoreMedia
 import Foundation
 
 final class AudioWriter {
     private let outputURL: URL
     private var audioFile: AVAudioFile?
+    private let inputFormat: AVAudioFormat
     private let processingFormat: AVAudioFormat
-    private var sessionStartTime: CMTime?
-    private var latestAudioTimestamp: CMTime?
+    private var converter: AVAudioConverter
+    private var audioFramesWritten: AVAudioFramePosition = 0
     private var audioSamplesWritten = 0
     private var status: RecordingWriterStatus = .writing
     private(set) var latestPeakDecibels: Float = -160
 
     init(
         outputURL: URL,
-        sourceFormatHint: CMAudioFormatDescription
+        processingFormat: AVAudioFormat
     ) throws {
         self.outputURL = outputURL
         try? FileManager.default.removeItem(at: outputURL)
 
-        let sourceFormat = AVAudioFormat(cmAudioFormatDescription: sourceFormatHint)
-        guard sourceFormat.sampleRate > 0, sourceFormat.channelCount > 0 else {
+        guard processingFormat.sampleRate > 0, processingFormat.channelCount > 0 else {
             throw RecordItError.message("The selected input did not provide a usable audio format.")
         }
-        processingFormat = sourceFormat
-        let channelCount = Int(sourceFormat.channelCount)
-        let outputSettings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: sourceFormat.sampleRate,
-            AVNumberOfChannelsKey: channelCount,
-            AVEncoderBitRateKey: channelCount == 1 ? 96_000 : 192_000
-        ]
+        inputFormat = processingFormat
+        guard let canonicalFormat = AVAudioFormat(
+            standardFormatWithSampleRate: processingFormat.sampleRate,
+            channels: processingFormat.channelCount
+        ), let converter = AVAudioConverter(from: processingFormat, to: canonicalFormat) else {
+            throw RecordItError.message("The selected input could not be converted to standard PCM audio.")
+        }
+        self.processingFormat = canonicalFormat
+        self.converter = converter
 
         do {
             audioFile = try AVAudioFile(
                 forWriting: outputURL,
-                settings: outputSettings,
-                commonFormat: sourceFormat.commonFormat,
-                interleaved: sourceFormat.isInterleaved
+                settings: audioOutputSettings(for: canonicalFormat),
+                commonFormat: canonicalFormat.commonFormat,
+                interleaved: canonicalFormat.isInterleaved
             )
         } catch {
             throw RecordItError.message(
@@ -47,31 +47,50 @@ final class AudioWriter {
     }
 
     @discardableResult
-    func appendAudio(_ sampleBuffer: CMSampleBuffer) throws -> Bool {
-        guard CMSampleBufferDataIsReady(sampleBuffer), status == .writing else { return false }
-        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
-        guard frameCount > 0 else { return false }
-        guard let buffer = AVAudioPCMBuffer(
-            pcmFormat: processingFormat,
-            frameCapacity: frameCount
-        ) else {
-            throw RecordItError.message("An audio buffer could not be allocated.")
+    func appendAudio(_ buffer: AVAudioPCMBuffer) throws -> Bool {
+        guard status == .writing, buffer.frameLength > 0 else { return false }
+        guard buffer.format.sampleRate == inputFormat.sampleRate,
+              buffer.format.channelCount == inputFormat.channelCount else {
+            status = .failed
+            throw RecordItError.message("The selected input changed its audio format while recording.")
         }
-        buffer.frameLength = frameCount
-
+        if converter.inputFormat != buffer.format {
+            guard let matchingConverter = AVAudioConverter(
+                from: buffer.format,
+                to: processingFormat
+            ) else {
+                status = .failed
+                throw RecordItError.message("The selected input's PCM layout could not be converted.")
+            }
+            converter = matchingConverter
+        }
+        let frameRatio = processingFormat.sampleRate / buffer.format.sampleRate
+        let outputFrameCapacity = AVAudioFrameCount(
+            ceil(Double(buffer.frameLength) * frameRatio)
+        )
+        guard let convertedBuffer = AVAudioPCMBuffer(
+            pcmFormat: processingFormat,
+            frameCapacity: max(1, outputFrameCapacity)
+        ) else {
+            status = .failed
+            throw RecordItError.message("A standard PCM audio buffer could not be allocated.")
+        }
         do {
-            try copyPCMData(from: sampleBuffer, into: buffer)
+            try converter.convert(to: convertedBuffer, from: buffer)
         } catch {
             status = .failed
-            throw error
+            throw RecordItError.message(
+                "The selected input's PCM audio could not be converted. \(detailedErrorDescription(error))"
+            )
         }
-        latestPeakDecibels = peakDecibels(in: buffer)
+        guard convertedBuffer.frameLength > 0 else { return false }
+        latestPeakDecibels = peakDecibels(in: convertedBuffer)
 
         do {
             guard let audioFile else {
                 throw RecordItError.message("The audio output file is already closed.")
             }
-            try audioFile.write(from: buffer)
+            try audioFile.write(from: convertedBuffer)
         } catch {
             status = .failed
             throw RecordItError.message(
@@ -79,13 +98,7 @@ final class AudioWriter {
             )
         }
 
-        let sourceTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if sessionStartTime == nil {
-            sessionStartTime = sourceTimestamp
-        }
-        let timeScale = CMTimeScale(processingFormat.sampleRate.rounded())
-        latestAudioTimestamp = sourceTimestamp
-            + CMTime(value: CMTimeValue(frameCount), timescale: timeScale)
+        audioFramesWritten += AVAudioFramePosition(convertedBuffer.frameLength)
         audioSamplesWritten += 1
         return true
     }
@@ -104,7 +117,7 @@ final class AudioWriter {
     }
 
     func finish() async throws {
-        guard sessionStartTime != nil, audioSamplesWritten > 0 else {
+        guard audioFramesWritten > 0, audioSamplesWritten > 0 else {
             status = .cancelled
             closeAudioFile()
             try? FileManager.default.removeItem(at: outputURL)
@@ -125,8 +138,8 @@ final class AudioWriter {
     }
 
     private var timelineDuration: TimeInterval {
-        guard let sessionStartTime, let latestAudioTimestamp else { return 0 }
-        return max(0, CMTimeGetSeconds(latestAudioTimestamp - sessionStartTime))
+        guard processingFormat.sampleRate > 0 else { return 0 }
+        return TimeInterval(audioFramesWritten) / processingFormat.sampleRate
     }
 
     private func closeAudioFile() {
@@ -135,48 +148,14 @@ final class AudioWriter {
         }
         audioFile = nil
     }
+}
 
-    private func copyPCMData(
-        from sampleBuffer: CMSampleBuffer,
-        into destinationBuffer: AVAudioPCMBuffer
-    ) throws {
-        guard let sourceBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
-            throw RecordItError.message("The selected input did not provide PCM audio data.")
-        }
-        let sourceByteCount = CMBlockBufferGetDataLength(sourceBuffer)
-        let destinationBuffers = UnsafeMutableAudioBufferListPointer(
-            destinationBuffer.mutableAudioBufferList
-        )
-        let destinationByteCount = destinationBuffers.reduce(0) {
-            $0 + Int($1.mDataByteSize)
-        }
-        guard sourceByteCount >= destinationByteCount else {
-            throw RecordItError.message(
-                "The selected input supplied less PCM audio data than its format described."
-            )
-        }
-
-        var sourceOffset = 0
-        for destination in destinationBuffers {
-            let byteCount = Int(destination.mDataByteSize)
-            guard let destinationData = destination.mData else {
-                throw RecordItError.message(
-                    "The audio encoder did not allocate PCM buffer storage."
-                )
-            }
-            let copyStatus = CMBlockBufferCopyDataBytes(
-                sourceBuffer,
-                atOffset: sourceOffset,
-                dataLength: byteCount,
-                destination: destinationData
-            )
-            guard copyStatus == noErr else {
-                throw RecordItError.message(
-                    "Audio samples could not be read from the selected input. "
-                        + "Core Media returned OSStatus \(copyStatus)."
-                )
-            }
-            sourceOffset += byteCount
-        }
-    }
+func audioOutputSettings(for processingFormat: AVAudioFormat) -> [String: Any] {
+    let channelCount = Int(processingFormat.channelCount)
+    return [
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVSampleRateKey: processingFormat.sampleRate,
+        AVNumberOfChannelsKey: channelCount,
+        AVEncoderBitRateKey: channelCount == 1 ? 96_000 : 128_000
+    ]
 }

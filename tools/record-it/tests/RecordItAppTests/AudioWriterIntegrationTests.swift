@@ -8,18 +8,21 @@ final class AudioWriterIntegrationTests: XCTestCase {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("record-it-audio-\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: outputURL) }
-        let firstSample = try audioSampleBuffer(startingFrame: 0, sampleValue: 12_000)
-        let sourceFormatHint = try XCTUnwrap(CMSampleBufferGetFormatDescription(firstSample))
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 2,
+            interleaved: false
+        ))
         let writer = try AudioWriter(
             outputURL: outputURL,
-            sourceFormatHint: sourceFormatHint
+            processingFormat: format
         )
 
-        XCTAssertTrue(try writer.appendAudio(firstSample))
-        for startingFrame in [480, 960] {
-            XCTAssertTrue(try writer.appendAudio(try audioSampleBuffer(
-                startingFrame: startingFrame,
-                sampleValue: 12_000
+        for _ in 0 ..< 100 {
+            XCTAssertTrue(try writer.appendAudio(try floatAudioBuffer(
+                format: format,
+                sampleValue: 0.25
             )))
         }
         try await writer.finish()
@@ -37,8 +40,8 @@ final class AudioWriterIntegrationTests: XCTestCase {
         )
         XCTAssertEqual(
             try decodedPeakAmplitude(at: outputURL),
-            Float(12_000) / Float(Int16.max),
-            accuracy: 0.1
+            0.25,
+            accuracy: 0.08
         )
     }
 
@@ -46,15 +49,19 @@ final class AudioWriterIntegrationTests: XCTestCase {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("record-it-mono-audio-\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: outputURL) }
-        let firstSample = try audioSampleBuffer(startingFrame: 0, channelCount: 1)
-        let sourceFormatHint = try XCTUnwrap(CMSampleBufferGetFormatDescription(firstSample))
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ))
         let writer = try AudioWriter(
             outputURL: outputURL,
-            sourceFormatHint: sourceFormatHint
+            processingFormat: format
         )
 
-        XCTAssertTrue(try writer.appendAudio(firstSample))
-        XCTAssertTrue(try writer.appendAudio(audioSampleBuffer(startingFrame: 480, channelCount: 1)))
+        XCTAssertTrue(try writer.appendAudio(floatAudioBuffer(format: format)))
+        XCTAssertTrue(try writer.appendAudio(floatAudioBuffer(format: format)))
         try await writer.finish()
 
         let asset = AVURLAsset(url: outputURL)
@@ -67,90 +74,42 @@ final class AudioWriterIntegrationTests: XCTestCase {
         )
         XCTAssertEqual(streamDescription.pointee.mChannelsPerFrame, 1)
     }
+
+    func testOutputSettingsUseACompactVoiceAppropriateAACBitrate() throws {
+        let mono = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ))
+        let stereo = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 2,
+            interleaved: false
+        ))
+
+        XCTAssertEqual(audioOutputSettings(for: mono)[AVEncoderBitRateKey] as? Int, 96_000)
+        XCTAssertEqual(audioOutputSettings(for: stereo)[AVEncoderBitRateKey] as? Int, 128_000)
+    }
 }
 
-private func audioSampleBuffer(
-    startingFrame: Int,
-    frameCount: Int = 480,
-    channelCount: UInt32 = 2,
-    sampleValue: Int16 = 0
-) throws -> CMSampleBuffer {
-    let sampleRate: Int32 = 48_000
-    let bytesPerFrame = Int(channelCount) * MemoryLayout<Int16>.size
-    var streamDescription = AudioStreamBasicDescription(
-        mSampleRate: Float64(sampleRate),
-        mFormatID: kAudioFormatLinearPCM,
-        mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
-        mBytesPerPacket: UInt32(bytesPerFrame),
-        mFramesPerPacket: 1,
-        mBytesPerFrame: UInt32(bytesPerFrame),
-        mChannelsPerFrame: channelCount,
-        mBitsPerChannel: 16,
-        mReserved: 0
-    )
-    var formatDescription: CMAudioFormatDescription?
-    try checkAudioOSStatus(CMAudioFormatDescriptionCreate(
-        allocator: kCFAllocatorDefault,
-        asbd: &streamDescription,
-        layoutSize: 0,
-        layout: nil,
-        magicCookieSize: 0,
-        magicCookie: nil,
-        extensions: nil,
-        formatDescriptionOut: &formatDescription
-    ))
-    guard let formatDescription else {
-        throw RecordItError.message("Could not create a test audio format.")
+private func floatAudioBuffer(
+    format: AVAudioFormat,
+    frameCount: AVAudioFrameCount = 480,
+    sampleValue: Float = 0
+) throws -> AVAudioPCMBuffer {
+    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
+          let channels = buffer.floatChannelData else {
+        throw RecordItError.message("Could not create a floating-point test audio buffer.")
     }
-
-    let dataLength = frameCount * bytesPerFrame
-    var blockBuffer: CMBlockBuffer?
-    try checkAudioOSStatus(CMBlockBufferCreateWithMemoryBlock(
-        allocator: kCFAllocatorDefault,
-        memoryBlock: nil,
-        blockLength: dataLength,
-        blockAllocator: kCFAllocatorDefault,
-        customBlockSource: nil,
-        offsetToData: 0,
-        dataLength: dataLength,
-        flags: 0,
-        blockBufferOut: &blockBuffer
-    ))
-    guard let blockBuffer else {
-        throw RecordItError.message("Could not create a test audio block buffer.")
+    buffer.frameLength = frameCount
+    for channel in 0 ..< Int(format.channelCount) {
+        for frame in 0 ..< Int(frameCount) {
+            channels[channel][frame] = sampleValue
+        }
     }
-    let samples = [Int16](repeating: sampleValue, count: frameCount * Int(channelCount))
-    try samples.withUnsafeBytes { bytes in
-        try checkAudioOSStatus(CMBlockBufferReplaceDataBytes(
-            with: bytes.baseAddress!,
-            blockBuffer: blockBuffer,
-            offsetIntoDestination: 0,
-            dataLength: dataLength
-        ))
-    }
-
-    var timing = CMSampleTimingInfo(
-        duration: CMTime(value: 1, timescale: sampleRate),
-        presentationTimeStamp: CMTime(value: CMTimeValue(startingFrame), timescale: sampleRate),
-        decodeTimeStamp: .invalid
-    )
-    var sampleSize = bytesPerFrame
-    var sampleBuffer: CMSampleBuffer?
-    try checkAudioOSStatus(CMSampleBufferCreateReady(
-        allocator: kCFAllocatorDefault,
-        dataBuffer: blockBuffer,
-        formatDescription: formatDescription,
-        sampleCount: frameCount,
-        sampleTimingEntryCount: 1,
-        sampleTimingArray: &timing,
-        sampleSizeEntryCount: 1,
-        sampleSizeArray: &sampleSize,
-        sampleBufferOut: &sampleBuffer
-    ))
-    guard let sampleBuffer else {
-        throw RecordItError.message("Could not create a test audio sample.")
-    }
-    return sampleBuffer
+    return buffer
 }
 
 private func decodedPeakAmplitude(at url: URL) throws -> Float {
@@ -174,10 +133,4 @@ private func decodedPeakAmplitude(at url: URL) throws -> Float {
         }
     }
     return peak
-}
-
-private func checkAudioOSStatus(_ status: OSStatus) throws {
-    guard status == noErr else {
-        throw RecordItError.message("Core Media returned OSStatus \(status).")
-    }
 }
