@@ -14,6 +14,8 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     private var healthTimer: DispatchSourceTimer?
     private var startedAt: TimeInterval?
     private var lastAudioActivityAt: TimeInterval?
+    private var lastWaveformSampleAt: TimeInterval?
+    private var waveform = AudioWaveformBuffer(capacity: 72)
     private var isStopping = false
     private var captureError: Error?
 
@@ -83,6 +85,11 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         let now = ProcessInfo.processInfo.systemUptime
         lastAudioActivityAt = now
         _ = audioWriter?.appendAudio(sampleBuffer)
+        if lastWaveformSampleAt == nil || now - (lastWaveformSampleAt ?? 0) >= 0.1 {
+            let decibels = connection.audioChannels.map(\.averagePowerLevel).max() ?? -160
+            waveform.append(decibels: decibels)
+            lastWaveformSampleAt = now
+        }
     }
 
     private func configureSession() throws {
@@ -108,7 +115,11 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             guard let self, !isStopping else { return }
             startedAt = ProcessInfo.processInfo.systemUptime
             let timer = DispatchSource.makeTimerSource(queue: writerQueue)
-            timer.schedule(deadline: .now() + 1, repeating: 1)
+            timer.schedule(
+                deadline: .now() + .milliseconds(100),
+                repeating: .milliseconds(100),
+                leeway: .milliseconds(20)
+            )
             timer.setEventHandler { [weak self] in
                 guard let self else { return }
                 let now = ProcessInfo.processInfo.systemUptime
@@ -139,6 +150,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             consecutiveRejectedVideoSamples: 0,
             writerStatus: progress.writerStatus,
             now: time,
+            audioWaveformLevels: waveform.levels,
             failureMessage: failureMessage
         ))
     }

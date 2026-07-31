@@ -202,6 +202,18 @@ struct RecordItView: View {
             }
 
             if telemetry.source == .audio {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text("Input waveform")
+                        Spacer()
+                        Text("Live")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                    AudioWaveformView(levels: telemetry.audioWaveformLevels)
+                }
+
                 Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
                     GridRow {
                         telemetryValue("Audio timeline", formattedMediaDuration(telemetry.mediaDuration))
@@ -549,6 +561,50 @@ struct RecordItView: View {
         case .camera: "video"
         case .audio: "waveform"
         }
+    }
+}
+
+private struct AudioWaveformView: View {
+    let levels: [Float]
+    private let sampleCapacity = 72
+
+    var body: some View {
+        Canvas { context, size in
+            var centreLine = Path()
+            centreLine.move(to: CGPoint(x: 0, y: size.height / 2))
+            centreLine.addLine(to: CGPoint(x: size.width, y: size.height / 2))
+            context.stroke(centreLine, with: .color(.secondary.opacity(0.2)), lineWidth: 1)
+
+            let visibleLevels = Array(levels.suffix(sampleCapacity))
+            let slotWidth = size.width / CGFloat(sampleCapacity)
+            let firstSlot = sampleCapacity - visibleLevels.count
+            for (index, rawLevel) in visibleLevels.enumerated() {
+                let level = CGFloat(min(1, max(0, rawLevel)))
+                let height = max(2, level * (size.height - 10))
+                let width = max(1, slotWidth * 0.58)
+                let x = (CGFloat(firstSlot + index) + 0.5) * slotWidth - width / 2
+                let bar = CGRect(
+                    x: x,
+                    y: (size.height - height) / 2,
+                    width: width,
+                    height: height
+                )
+                context.fill(
+                    Path(roundedRect: bar, cornerRadius: width / 2),
+                    with: .color(.accentColor)
+                )
+            }
+        }
+        .frame(height: 64)
+        .padding(.horizontal, 6)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Live input waveform")
+        .accessibilityValue("\(Int((levels.last ?? 0) * 100)) percent")
     }
 }
 

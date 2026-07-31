@@ -45,6 +45,7 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
     let lastVideoActivityAt: TimeInterval?
     let consecutiveRejectedVideoSamples: Int
     let writerStatus: RecordingWriterStatus
+    let audioWaveformLevels: [Float]
     let health: RecordingHealth
     let healthMessage: String
 
@@ -68,6 +69,7 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
         consecutiveRejectedVideoSamples: Int,
         writerStatus: RecordingWriterStatus,
         now: TimeInterval,
+        audioWaveformLevels: [Float] = [],
         failureMessage: String? = nil
     ) {
         self.source = source
@@ -82,6 +84,7 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
         self.lastVideoActivityAt = lastVideoActivityAt
         self.consecutiveRejectedVideoSamples = consecutiveRejectedVideoSamples
         self.writerStatus = writerStatus
+        self.audioWaveformLevels = audioWaveformLevels
 
         if let failureMessage {
             health = .failed

@@ -91,11 +91,13 @@ final class RecordingTelemetryTests: XCTestCase {
             lastVideoActivityAt: 100,
             consecutiveRejectedVideoSamples: 0,
             writerStatus: .writing,
-            now: 101
+            now: 101,
+            audioWaveformLevels: [0.1, 0.5, 0.9]
         )
 
         XCTAssertEqual(telemetry.health, .healthy)
         XCTAssertEqual(telemetry.healthMessage, "Audio and file output are active")
         XCTAssertEqual(telemetry.resolutionLabel, "Audio only")
+        XCTAssertEqual(telemetry.audioWaveformLevels, [0.1, 0.5, 0.9])
     }
 }

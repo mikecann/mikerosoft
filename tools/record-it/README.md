@@ -96,6 +96,10 @@ writer, media timeline, current file size, output format, output file name, and
 pipeline health. This is writer telemetry, not just a recording timer, so a
 green state confirms that media is reaching the output file.
 
+Audio-only recordings also show a live waveform from the selected input. It
+updates ten times per second and keeps a short rolling history so speech and
+silence are visible without retaining extra audio outside the recording file.
+
 Screen recordings use variable-duration frames, so a static screen does not
 create a huge duplicate-frame backlog in the 4K hardware encoder. Record It
 also watches screen and camera callbacks plus sustained encoder backpressure.
