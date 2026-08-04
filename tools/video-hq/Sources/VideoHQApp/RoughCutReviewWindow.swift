@@ -926,6 +926,7 @@ final class RoughCutReviewModel: ObservableObject {
         errorMessage = nil
         statusMessage = "Finding the matching Filmora source and creating a new project..."
         let decisions = manualDecisions
+        let exportPlaybackPlan = reviewedPlaybackPlan
         let exporter = exportRunner
         let projectDirectoryURL = project.directoryURL
         Task {
@@ -941,7 +942,8 @@ final class RoughCutReviewModel: ObservableObject {
                         sourcePlanURL: analysis.planURL,
                         outputURL: reviewedPlanURL,
                         overrides: decisions,
-                        filmoraSourceDurationSeconds: seed.sourceDurationSeconds
+                        filmoraSourceDurationSeconds: seed.sourceDurationSeconds,
+                        playbackPlan: exportPlaybackPlan
                     )
                     return try exporter.run(
                         seedURL: seed.projectURL,

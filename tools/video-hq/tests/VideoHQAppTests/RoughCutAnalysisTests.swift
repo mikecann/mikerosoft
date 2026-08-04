@@ -1705,6 +1705,66 @@ final class RoughCutAnalysisTests: XCTestCase {
         XCTAssertEqual(review["filmora_source_duration_seconds"] as? Double, 8.0)
     }
 
+    func testReviewedPlanUsesSpeechTightBoundariesForJoinedFilmoraExport() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = root.appendingPathComponent("rough-cut-plan.json")
+        let output = root.appendingPathComponent("reviewed-plan.json")
+        let sourceData = Data(
+            """
+            {
+              "schema_version": 1,
+              "source": {"filename": "camera.mov", "duration_seconds": 20.0},
+              "keep_ranges": [{"start": 1.0, "end": 4.2}, {"start": 8.0, "end": 10.4}],
+              "regions": [
+                {"id": "one", "start": 1.0, "end": 4.2, "text": "This sentence is", "decision": "keep", "confidence": 1.0, "reason": "keep", "duplicate_of": null, "has_transcript_evidence": true},
+                {"id": "two", "start": 8.0, "end": 10.4, "text": "continued here.", "decision": "keep", "confidence": 1.0, "reason": "keep", "duplicate_of": null, "has_transcript_evidence": true}
+              ]
+            }
+            """.utf8
+        )
+        try sourceData.write(to: source)
+        let joinedPlan = RoughCutPlaybackPlan(clips: [
+            RoughCutPlaybackClip(
+                regionID: "one",
+                sourceStart: 1.0,
+                sourceEnd: 4.18,
+                crossfadeAfter: 0.04
+            ),
+            RoughCutPlaybackClip(
+                regionID: "two",
+                sourceStart: 8.01,
+                sourceEnd: 10.39,
+                crossfadeAfter: 0
+            ),
+        ])
+
+        try RoughCutReviewedPlanWriter().write(
+            sourcePlanURL: source,
+            outputURL: output,
+            overrides: [:],
+            playbackPlan: joinedPlan
+        )
+
+        XCTAssertEqual(try Data(contentsOf: source), sourceData)
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: output)) as? [String: Any]
+        )
+        let keepRanges = try XCTUnwrap(payload["keep_ranges"] as? [[String: Any]])
+        XCTAssertEqual(keepRanges.count, 2)
+        XCTAssertEqual(keepRanges[0]["start"] as? Double ?? -1, 1.0, accuracy: 0.001)
+        XCTAssertEqual(keepRanges[0]["end"] as? Double ?? -1, 4.18, accuracy: 0.001)
+        XCTAssertEqual(keepRanges[1]["start"] as? Double ?? -1, 8.01, accuracy: 0.001)
+        XCTAssertEqual(keepRanges[1]["end"] as? Double ?? -1, 10.39, accuracy: 0.001)
+
+        // Keep the planner evidence intact. The export-only source ranges belong
+        // in keep_ranges, not in the original detected region boundaries.
+        let regions = try XCTUnwrap(payload["regions"] as? [[String: Any]])
+        XCTAssertEqual(regions[0]["end"] as? Double, 4.2)
+        XCTAssertEqual(regions[1]["start"] as? Double, 8.0)
+    }
+
     func testFilmoraExportCommandsInspectSeedThenWriteAndValidateNewProject() {
         let seed = URL(fileURLWithPath: "/project/clean-seed.wfp")
         let plan = URL(fileURLWithPath: "/project/reviewed-plan.json")

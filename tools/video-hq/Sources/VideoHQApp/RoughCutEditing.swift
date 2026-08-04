@@ -233,7 +233,8 @@ struct RoughCutReviewedPlanWriter {
         sourcePlanURL: URL,
         outputURL: URL,
         overrides: [String: RoughCutManualDecision],
-        filmoraSourceDurationSeconds: Double? = nil
+        filmoraSourceDurationSeconds: Double? = nil,
+        playbackPlan: RoughCutPlaybackPlan? = nil
     ) throws {
         guard !FileManager.default.fileExists(atPath: outputURL.path) else {
             throw RoughCutEditingError.outputExists(outputURL)
@@ -292,7 +293,8 @@ struct RoughCutReviewedPlanWriter {
         payload["regions"] = regions
         payload["keep_ranges"] = try rebuiltKeepRanges(
             from: regions,
-            maximumSourceDuration: filmoraSourceDurationSeconds
+            maximumSourceDuration: filmoraSourceDurationSeconds,
+            playbackClips: playbackPlan?.clips ?? []
         )
         payload["review_required"] = true
         payload["video_hq_review"] = reviewMetadata
@@ -313,13 +315,47 @@ struct RoughCutReviewedPlanWriter {
 
     private func rebuiltKeepRanges(
         from regions: [[String: Any]],
-        maximumSourceDuration: Double?
+        maximumSourceDuration: Double?,
+        playbackClips: [RoughCutPlaybackClip]
     ) throws -> [[String: Double]] {
+        var playbackClipsByRegionID: [String: RoughCutPlaybackClip] = [:]
+        for clip in playbackClips {
+            guard playbackClipsByRegionID[clip.regionID] == nil else {
+                throw RoughCutEditingError.invalidPlan(
+                    "the reviewed playback plan contains duplicate region IDs"
+                )
+            }
+            playbackClipsByRegionID[clip.regionID] = clip
+        }
+
+        let knownRegionIDs = Set(regions.compactMap { $0["id"] as? String })
+        guard Set(playbackClipsByRegionID.keys).isSubset(of: knownRegionIDs) else {
+            throw RoughCutEditingError.invalidPlan(
+                "the reviewed playback plan contains an unknown region ID"
+            )
+        }
+
         let retained = try regions.compactMap { region -> (Double, Double)? in
             guard (region["decision"] as? String) != "drop" else { return nil }
-            guard let start = number(region["start"]), var end = number(region["end"]), end > start else {
+            guard let regionID = region["id"] as? String,
+                  let originalStart = number(region["start"]),
+                  let originalEnd = number(region["end"]),
+                  originalEnd > originalStart else {
                 throw RoughCutEditingError.invalidPlan("a retained region has invalid start or end")
             }
+            var start = playbackClipsByRegionID[regionID]?.sourceStart ?? originalStart
+            var end = playbackClipsByRegionID[regionID]?.sourceEnd ?? originalEnd
+            guard start.isFinite, end.isFinite, end > start,
+                  start >= originalStart - 0.000_001,
+                  end <= originalEnd + 0.000_001 else {
+                throw RoughCutEditingError.invalidPlan(
+                    "a speech-tight export range falls outside its detected region"
+                )
+            }
+            // Clamp epsilon-only differences so the generated plan never extends
+            // beyond the source bounds recorded by the original planner.
+            start = max(originalStart, start)
+            end = min(originalEnd, end)
             if let maximumSourceDuration, end > maximumSourceDuration {
                 guard end - maximumSourceDuration <= 0.25, start < maximumSourceDuration else {
                     throw RoughCutEditingError.invalidPlan(

@@ -68,7 +68,8 @@ manually.
   shown with dashed blocks on the Visuals timeline, and labelled in the clip
   list. Editing or applying one converts it into a human-authored choice. This
   process is saved beside the analysis. Filmora export
-  currently writes the reviewed dialogue cut as a separate plan and new `.wfp`.
+  writes the reviewed dialogue cut as a separate plan and new `.wfp`, using the
+  same word-tight source boundaries for approved joined groups as the preview.
   Video HQ automatically finds a clean single-source Filmora project for the
   selected recording, so export only asks for the new project name and location.
   It never overwrites the planner output, source project, or an existing project.
