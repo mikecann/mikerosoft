@@ -167,6 +167,8 @@ macOS does not currently use the Windows tray flow.
 
 - Open settings via Spotlight by typing `Voice Type`
 - Or run `bash tools/voice-type/open-settings-mac.sh`
+- Click **History...** in Settings to open completed transcriptions. Clicking a
+  row copies its full text to the clipboard.
 - The worker itself runs in the background via `voice-type-mac.sh`
 - `Run on Startup` writes a LaunchAgent that targets the stable installed
   runtime, so deleting a development worktree cannot break the next login
@@ -255,6 +257,10 @@ the smaller `Qwen2.5 0.5B` rather than the stronger 1.5B model.
 
 Use the Windows tray menu or the macOS settings window for normal configuration.
 The persisted settings live in `settings.json` beside the script.
+
+Completed transcription text is also kept in a separate, durable history file
+(`transcription-history.jsonl` under Voice Type's application-data directory).
+Entries are retained for 30 days. Voice Type does not keep microphone audio.
 
 Useful keys:
 
