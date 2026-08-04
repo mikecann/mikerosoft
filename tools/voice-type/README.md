@@ -263,6 +263,7 @@ Useful keys:
 | `final_model`        | `"small.en"` / `"large-v3-turbo"` | Final transcription model. On Apple Silicon, supported values can use MLX |
 | `stream_model`       | `"tiny.en"` / `"large-v3-turbo"` | Preview model. Accelerated systems default to turbo |
 | `output_mode`        | `"final_only"`   | Finalise strategy |
+| `microphone_name`    | `""`             | Exact preferred input-device name. After wake, Voice Type waits up to 30 seconds before validating and using the system default instead |
 | `formatter_enabled`  | `false`          | Turn local transcript cleanup on/off |
 | `formatter_model`    | `"qwen2.5-0.5b"` | Local cleanup model preset |
 | `corrections`        | `{...}`          | Exact phrase replacements applied after transcription |

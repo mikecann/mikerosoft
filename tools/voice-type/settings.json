@@ -2,6 +2,7 @@
   "final_model": "large-v3-turbo",
   "stream_model": "large-v3-turbo",
   "output_mode": "final_only",
+  "microphone_name": "Yeti Stereo Microphone",
   "formatter_enabled": false,
   "formatter_model": "qwen2.5-0.5b",
   "corrections": {

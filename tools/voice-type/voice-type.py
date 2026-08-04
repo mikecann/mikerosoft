@@ -242,6 +242,12 @@ from runtime_policy import (
     should_restart_after_loop_gap,
 )
 from audio_recovery import AudioBackendRecovery
+from microphone_readiness import (
+    microphone_candidate,
+    probe_input_device,
+    refresh_audio_devices,
+    resolve_input_device,
+)
 from process_relaunch import restart_current_process, validate_relauncher_files
 from recording_session import AudioFrameBuffer, RecordingSession
 from speech_backends import (
@@ -292,6 +298,9 @@ CHANNELS     = 1
 DTYPE        = "float32"
 DEVICE       = None       # None = system default mic
 COMPUTE_TYPE = "float16"  # float16 on GPU; overridden to int8 on CPU
+MICROPHONE_PROBE_SECONDS = 0.35
+MICROPHONE_RETRY_SECONDS = 1.0
+PREFERRED_MICROPHONE_WAIT_SECONDS = 30.0
 
 # Models available in the tray settings menu.
 # Final model: accuracy matters most; stream model: speed matters most.
@@ -349,6 +358,7 @@ def _load_settings():
         ),
     )
     _settings.setdefault("output_mode",  "final_only")
+    _settings.setdefault("microphone_name", "")
     _settings.setdefault("formatter_enabled", False)
     _settings.setdefault("formatter_model", DEFAULT_FORMATTER_MODEL)
     _settings.setdefault("formatter_system_prompt", DEFAULT_FORMATTER_SYSTEM_PROMPT)
@@ -1711,24 +1721,32 @@ class Recorder:
         self._capture = AudioFrameBuffer()
         self._stream_error = False  # set on any callback status; triggers restart on next key press
         self._keep_stream_open = should_keep_mic_stream_open_local()
+        self._device_name = _settings.get("microphone_name") or DEVICE
         self.audio_recovery = AudioBackendRecovery()
         self._stream: sd.InputStream | None = None
         if self._keep_stream_open:
             self._open_stream()
 
     def _open_stream(self):
-        info = sd.query_devices(DEVICE, "input")
-        log(f"Mic: {info['name']!r}")
+        selected = resolve_input_device(
+            sd,
+            self._device_name,
+        )
+        log(f"Mic: {selected.name!r}")
         # blocksize=256 → 16 ms per callback — low enough that the first
         # captured block is ≤16 ms after the key goes down.
         stream = sd.InputStream(
             samplerate=SAMPLE_RATE, channels=CHANNELS, dtype=DTYPE,
-            device=DEVICE, callback=self._callback, blocksize=256,
+            device=selected.index, callback=self._callback, blocksize=256,
         )
         stream.start()
         # Publish only a fully-started stream. If PortAudio raises above, the
         # recorder remains cleanly disconnected and the process is relaunched.
         self._stream = stream
+
+    def select_microphone(self, name: str) -> None:
+        """Pin recordings to the microphone that passed the readiness probe."""
+        self._device_name = name
 
     def _close_stream(self):
         if self._stream is None:
@@ -2236,6 +2254,7 @@ def run():
         f"final_model={_settings['final_model']!r}  "
         f"stream_model={_settings['stream_model']!r}  "
         f"output_mode={_settings['output_mode']!r}  "
+        f"microphone_name={_settings['microphone_name']!r}  "
         f"formatter_enabled={_settings['formatter_enabled']!r}  "
         f"formatter_model={_settings['formatter_model']!r}"
     )
@@ -2271,6 +2290,75 @@ def run():
         _hotkey_label = (
             "F12 or Right Ctrl" if _sys.platform == "darwin" else "Right Ctrl"
         )
+
+        if _sys.platform == "darwin":
+            microphone_name = _settings.get("microphone_name", "").strip()
+            last_failure = None
+            fallback_announced = False
+            readiness_started = time.monotonic()
+            initial_message = (
+                f"Checking for {microphone_name}..."
+                if microphone_name
+                else "Checking the default microphone..."
+            )
+            overlay.show_processing(initial_message)
+            tray.set_state("processing")
+            while True:
+                elapsed = time.monotonic() - readiness_started
+                candidate = microphone_candidate(
+                    preferred_name=microphone_name,
+                    elapsed_seconds=elapsed,
+                    preferred_wait_seconds=PREFERRED_MICROPHONE_WAIT_SECONDS,
+                )
+                if microphone_name and candidate is None and not fallback_announced:
+                    log(
+                        f"Preferred microphone {microphone_name!r} was not ready "
+                        f"after {PREFERRED_MICROPHONE_WAIT_SECONDS:.0f}s; trying "
+                        "the system default microphone."
+                    )
+                    fallback_announced = True
+                try:
+                    probe = probe_input_device(
+                        sd,
+                        preferred_name=candidate,
+                        sample_rate=SAMPLE_RATE,
+                        channels=CHANNELS,
+                        dtype=DTYPE,
+                        duration_seconds=MICROPHONE_PROBE_SECONDS,
+                        sleep=time.sleep,
+                    )
+                    if probe.ready:
+                        recorder.select_microphone(probe.device.name)
+                        log(f"Microphone ready: {probe.device.name!r}.")
+                        break
+                    failure = f"{probe.device.name}: {probe.reason}"
+                except Exception as error:
+                    failure = str(error)
+
+                if failure != last_failure:
+                    log(
+                        f"Microphone not ready ({failure}); Voice Type will "
+                        "not accept dictation yet."
+                    )
+                    last_failure = failure
+                if candidate:
+                    remaining = max(
+                        1,
+                        int(PREFERRED_MICROPHONE_WAIT_SECONDS - elapsed),
+                    )
+                    overlay.show_processing(
+                        f"Waiting for {candidate}... ({remaining}s)"
+                    )
+                else:
+                    overlay.show_processing("Waiting for the default microphone...")
+                time.sleep(MICROPHONE_RETRY_SECONDS)
+                try:
+                    refresh_audio_devices(sd)
+                except Exception as error:
+                    log(f"Audio device refresh failed; retrying: {error}")
+
+            overlay.hide()
+            tray.set_state("idle")
         log(f"Ready. Hold {_hotkey_label} to record.")
 
         was_down = False
