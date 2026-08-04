@@ -265,6 +265,7 @@ from text_formatter import (
     format_for_injection as format_text_for_injection,
     resolve_system_prompt,
 )
+from transcription_history import TranscriptionHistory
 from preview_format import wrap_preview
 from voice_type_control import ControlServer
 
@@ -328,6 +329,29 @@ FORMATTER_MODEL_OPTIONS = list(FORMATTER_MODEL_PRESETS.keys())
 
 _SETTINGS_PATH = os.path.join(_SCRIPT_DIR, "settings.json")
 _settings: dict = {}
+
+if sys.platform == "darwin":
+    _HISTORY_DIR = os.path.realpath(os.path.expanduser(os.environ.get(
+        "VOICE_TYPE_DATA_DIR",
+        "~/Library/Application Support/Voice Type",
+    )))
+else:
+    _HISTORY_DIR = os.path.join(
+        os.environ.get("LOCALAPPDATA", _SCRIPT_DIR),
+        "Voice Type",
+    )
+_HISTORY_PATH = os.path.join(_HISTORY_DIR, "transcription-history.jsonl")
+_transcription_history = TranscriptionHistory(_HISTORY_PATH)
+
+
+def _remember_transcription(text: str, mode: str) -> None:
+    """Persist completed text before injection so it remains recoverable."""
+    try:
+        _transcription_history.append(text, mode)
+    except Exception as e:
+        # History is a recovery feature, so a disk error must not prevent the
+        # primary voice typing flow from returning the transcription.
+        log(f"Transcription history save failed: {e}")
 
 
 def _load_settings():
@@ -1068,6 +1092,7 @@ def _show_settings_dialog(overlay: "Overlay", tray) -> None:
         state=_build_control_state(tray),
         on_save=lambda updates: _apply_settings_changes(tray=tray, updates=updates),
         on_open_log=lambda: platform.open_log(_LOG_PATH),
+        on_load_history=_transcription_history.load,
         on_restart=_restart_app,
         defer_until_hidden=False,
     )
@@ -1078,6 +1103,7 @@ def _queue_settings_dialog_after_hide(overlay: "Overlay", tray) -> None:
         state=_build_control_state(tray),
         on_save=lambda updates: _apply_settings_changes(tray=tray, updates=updates),
         on_open_log=lambda: platform.open_log(_LOG_PATH),
+        on_load_history=_transcription_history.load,
         on_restart=_restart_app,
         defer_until_hidden=True,
     )
@@ -1248,6 +1274,8 @@ class Overlay:
         self._visible   = False
         self._editor_win = None
         self._settings_win = None
+        self._history_win = None
+        self._history_toast = None
         self._dialog_requested = False
         self._pending_settings_payload = None
         self._cmd_queue: queue.Queue = queue.Queue()
@@ -1277,7 +1305,8 @@ class Overlay:
             },
         ))
 
-    def edit_settings(self, state: dict, on_save, on_open_log, on_restart=None,
+    def edit_settings(self, state: dict, on_save, on_open_log, on_load_history,
+                      on_restart=None,
                       defer_until_hidden: bool = False):
         self._dialog_requested = True
         self._cmd_queue.put((
@@ -1286,6 +1315,7 @@ class Overlay:
                 "state": state,
                 "on_save": on_save,
                 "on_open_log": on_open_log,
+                "on_load_history": on_load_history,
                 "on_restart": on_restart,
                 "defer_until_hidden": defer_until_hidden,
             },
@@ -1371,7 +1401,7 @@ class Overlay:
     def _has_open_dialogs(self) -> bool:
         return any(
             win is not None and win.winfo_exists()
-            for win in (self._editor_win, self._settings_win)
+            for win in (self._editor_win, self._settings_win, self._history_win)
         )
 
     def _has_open_or_pending_dialogs(self) -> bool:
@@ -1511,6 +1541,7 @@ class Overlay:
         state = payload["state"]
         on_save = payload["on_save"]
         on_open_log = payload["on_open_log"]
+        on_load_history = payload["on_load_history"]
         on_restart = payload.get("on_restart")
 
         def _choice_maps(options: list[str], labels: dict[str, str]):
@@ -1646,6 +1677,11 @@ class Overlay:
         left_buttons = ttk.Frame(buttons)
         left_buttons.grid(row=0, column=0, sticky="w")
         ttk.Button(left_buttons, text="Open Log", command=on_open_log).pack(side="left")
+        ttk.Button(
+            left_buttons,
+            text="History...",
+            command=lambda: self._open_history(on_load_history),
+        ).pack(side="left", padx=(8, 0))
 
         if on_restart is not None:
             def _restart():
@@ -1673,6 +1709,194 @@ class Overlay:
         ttk.Button(buttons, text="Save", command=_save).grid(row=0, column=2, sticky="e")
 
         win.protocol("WM_DELETE_WINDOW", _close)
+        win.focus_force()
+        if sys.platform == "darwin":
+            platform.activate_settings_window()
+
+    def _open_history(self, on_load_history) -> None:
+        if self._history_win is not None and self._history_win.winfo_exists():
+            self._history_win.deiconify()
+            self._history_win.lift()
+            self._history_win.focus_force()
+            return
+
+        win = tk.Toplevel(self._root)
+        self._history_win = win
+        win.title("Voice Type Transcription History")
+        win.geometry("760x440")
+        win.minsize(600, 320)
+
+        body = ttk.Frame(win, padding=14)
+        body.pack(fill="both", expand=True)
+        body.rowconfigure(1, weight=1)
+        body.columnconfigure(0, weight=1)
+
+        ttk.Label(
+            body,
+            text=(
+                "Completed transcriptions are saved here. Voice Type does not "
+                "keep microphone audio. Click a row to copy its full text."
+            ),
+            justify="left",
+            wraplength=700,
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 10))
+
+        style = ttk.Style()
+        frame_background = style.lookup("TFrame", "background")
+        label_foreground = style.lookup("TLabel", "foreground")
+        if sys.platform == "darwin":
+            row_background = "systemControlBackgroundColor"
+            selected_background = "#0a84ff"
+            selected_foreground = "#ffffff"
+            toast_background = "#0a84ff"
+            toast_foreground = "#ffffff"
+        else:
+            row_background = "#f3f4f6"
+            selected_background = "#dbeafe"
+            selected_foreground = "#111827"
+            toast_background = "#1f2937"
+            toast_foreground = "#ffffff"
+        history_text = tk.Text(
+            body,
+            wrap="word",
+            state="normal",
+            cursor="arrow",
+            background=frame_background,
+            foreground=label_foreground,
+            borderwidth=0,
+            highlightthickness=0,
+            padx=8,
+            pady=4,
+        )
+        history_text.grid(row=1, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(body, orient="vertical", command=history_text.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        history_text.configure(yscrollcommand=scrollbar.set)
+
+        status_var = tk.StringVar(value="")
+        ttk.Label(body, textvariable=status_var).grid(
+            row=2, column=0, sticky="w", pady=(8, 0)
+        )
+
+        try:
+            entries = on_load_history()
+        except Exception as e:
+            entries = []
+            status_var.set(f"Could not load history: {e}")
+
+        if not entries and not status_var.get():
+            status_var.set("No completed transcriptions have been saved yet.")
+
+        selected_row_tag = [None]
+
+        def _show_copied_toast():
+            if self._history_toast is not None:
+                try:
+                    self._history_toast.destroy()
+                except tk.TclError:
+                    pass
+
+            toast = tk.Toplevel(win)
+            self._history_toast = toast
+            toast.overrideredirect(True)
+            toast.attributes("-topmost", True)
+            tk.Label(
+                toast,
+                text="Copied to clipboard",
+                background=toast_background,
+                foreground=toast_foreground,
+                padx=14,
+                pady=9,
+            ).pack()
+            toast.update_idletasks()
+            x = win.winfo_rootx() + win.winfo_width() - toast.winfo_reqwidth() - 18
+            y = win.winfo_rooty() + win.winfo_height() - toast.winfo_reqheight() - 18
+            toast.geometry(f"+{x}+{y}")
+
+            def _dismiss_toast():
+                if self._history_toast is toast:
+                    self._history_toast = None
+                try:
+                    toast.destroy()
+                except tk.TclError:
+                    pass
+
+            toast.after(1500, _dismiss_toast)
+
+        def _copy_text(text: str, row_tag: str):
+            win.clipboard_clear()
+            win.clipboard_append(text)
+            # update() makes the clipboard ownership available immediately on
+            # platforms where Tk otherwise waits for the next event-loop tick.
+            win.update()
+            status_var.set(f"Copied {len(text)} characters to the clipboard.")
+            if selected_row_tag[0] is not None:
+                history_text.tag_configure(
+                    selected_row_tag[0],
+                    background=row_background,
+                    foreground=label_foreground,
+                )
+            history_text.tag_configure(
+                row_tag,
+                background=selected_background,
+                foreground=selected_foreground,
+            )
+            selected_row_tag[0] = row_tag
+            _show_copied_toast()
+
+        for row_index, entry in enumerate(entries):
+            row_tag = f"history-row-{row_index}"
+            row_start = history_text.index("end-1c")
+            timestamp = entry["created_at"].replace("T", " ", 1)[:19]
+            history_text.insert("end", f"{timestamp}\n{entry['text']}\n")
+            row_end = history_text.index("end-1c")
+            history_text.tag_add(row_tag, row_start, row_end)
+            history_text.tag_configure(
+                row_tag,
+                background=row_background,
+                foreground=label_foreground,
+                borderwidth=1,
+                relief="solid",
+                lmargin1=8,
+                lmargin2=8,
+                rmargin=8,
+                spacing1=6,
+                spacing3=6,
+            )
+            history_text.insert("end", "\n")
+            history_text.tag_bind(
+                row_tag,
+                "<ButtonRelease-1>",
+                lambda _event, text=entry["text"], tag=row_tag: _copy_text(text, tag),
+            )
+            history_text.tag_bind(
+                row_tag,
+                "<Enter>",
+                lambda _event: history_text.configure(cursor="hand2"),
+            )
+            history_text.tag_bind(
+                row_tag,
+                "<Leave>",
+                lambda _event: history_text.configure(cursor="arrow"),
+            )
+
+        history_text.configure(state="disabled")
+
+        def _close_history():
+            if self._history_toast is not None:
+                try:
+                    self._history_toast.destroy()
+                except tk.TclError:
+                    pass
+                self._history_toast = None
+            if win.winfo_exists():
+                win.destroy()
+            self._history_win = None
+            if not self._visible and not self._has_open_or_pending_dialogs():
+                self._root.withdraw()
+
+        win.protocol("WM_DELETE_WINDOW", _close_history)
         win.focus_force()
         if sys.platform == "darwin":
             platform.activate_settings_window()
@@ -2133,6 +2357,7 @@ def _finish_one_shot(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
     tray.set_state("idle")
     if text:
         text = _maybe_format_final_text(text, mode)
+        _remember_transcription(text, mode)
         log(f"Done ({elapsed:.2f}s) [{mode}]: {text!r}")
         paste_text(text)
     else:
@@ -2173,6 +2398,7 @@ def _finish_precompute(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
     tray.set_state("idle")
     if text:
         text = _maybe_format_final_text(text, "precompute")
+        _remember_transcription(text, "precompute")
         log(f"Done ({elapsed:.2f}s) [precompute]: {text!r}")
         paste_text(text)
     else:
@@ -2242,6 +2468,7 @@ def _finish_stabilized(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
     if first_char_t[0] is not None:
         log(f"[stabilized] first char +{first_char_t[0] - t0:.2f}s, total {elapsed:.2f}s")
     if full_text:
+        _remember_transcription(full_text, "stabilized")
         log(f"Done ({elapsed:.2f}s) [stabilized]: {full_text!r}")
     else:
         log(f"Nothing to paste ({elapsed:.2f}s) [stabilized].")
@@ -2256,6 +2483,12 @@ def run():
     # window, before the hotkey loop takes over refreshing it.
     _write_heartbeat()
     _load_settings()
+    try:
+        imported = _transcription_history.import_completed_log(_LOG_PATH)
+        if imported:
+            log(f"Imported {imported} completed transcription(s) from the existing log.")
+    except Exception as e:
+        log(f"Existing log history import failed: {e}")
     log(
         "Settings: "
         f"final_model={_settings['final_model']!r}  "
