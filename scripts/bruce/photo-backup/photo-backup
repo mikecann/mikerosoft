@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUPPORT_DIR="$HOME/Library/Application Support/photo-backup"
+INSTALLED_SOURCE="$SUPPORT_DIR/source"
+INSTALLED_PYTHON="$SUPPORT_DIR/venv/bin/python"
+
+# Once installed, always use the stable Application Support copy. The LaunchAgent
+# must not depend on a particular Git worktree continuing to exist.
+if [[ -f "$INSTALLED_SOURCE/photo_backup.py" ]]; then
+  SCRIPT_DIR="$INSTALLED_SOURCE"
+fi
+
+# Bruce already has a legacy ~/.config/osxphotos file. Keep this tool's state
+# private so installing it never has to rename or delete an existing dotfile.
+export XDG_CONFIG_HOME="$SUPPORT_DIR/xdg/config"
+export XDG_DATA_HOME="$SUPPORT_DIR/xdg/data"
+export XDG_CACHE_HOME="$SUPPORT_DIR/xdg/cache"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
+
+if [[ -x "$INSTALLED_PYTHON" ]]; then
+  PYTHON="$INSTALLED_PYTHON"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON="$(command -v python3)"
+else
+  echo "photo-backup: python3 is required" >&2
+  exit 1
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/photo_backup.py" "$@"
