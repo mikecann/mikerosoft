@@ -115,3 +115,10 @@ def refresh_audio_devices(sounddevice) -> None:
     """Refresh PortAudio's device snapshot after wake or USB enumeration."""
     sounddevice._terminate()
     sounddevice._initialize()
+
+
+def resolve_current_default_input(sounddevice, *, platform_name: str) -> InputDevice:
+    """Resolve the current system default instead of PortAudio's stale cache."""
+    if platform_name == "darwin":
+        refresh_audio_devices(sounddevice)
+    return resolve_input_device(sounddevice, None)

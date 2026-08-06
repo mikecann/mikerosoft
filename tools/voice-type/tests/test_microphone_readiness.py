@@ -163,6 +163,35 @@ class MicrophoneReadinessTests(unittest.TestCase):
         sounddevice._terminate.assert_called_once_with()
         sounddevice._initialize.assert_called_once_with()
 
+    def test_current_macos_default_is_resolved_after_refreshing_portaudio(self):
+        sounddevice = mock.Mock()
+        sounddevice.query_devices.return_value = {
+            "name": "MacBook Pro Microphone",
+        }
+
+        selected = self.module.resolve_current_default_input(
+            sounddevice,
+            platform_name="darwin",
+        )
+
+        sounddevice._terminate.assert_called_once_with()
+        sounddevice._initialize.assert_called_once_with()
+        sounddevice.query_devices.assert_called_once_with(None, "input")
+        self.assertIsNone(selected.index)
+        self.assertEqual("MacBook Pro Microphone", selected.name)
+
+    def test_windows_default_does_not_reinitialize_portaudio(self):
+        sounddevice = mock.Mock()
+        sounddevice.query_devices.return_value = {"name": "Windows Default"}
+
+        self.module.resolve_current_default_input(
+            sounddevice,
+            platform_name="win32",
+        )
+
+        sounddevice._terminate.assert_not_called()
+        sounddevice._initialize.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

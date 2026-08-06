@@ -246,6 +246,7 @@ from microphone_readiness import (
     microphone_candidate,
     probe_input_device,
     refresh_audio_devices,
+    resolve_current_default_input,
     resolve_input_device,
 )
 from process_relaunch import restart_current_process, validate_relauncher_files
@@ -1728,11 +1729,17 @@ class Recorder:
             self._open_stream()
 
     def _open_stream(self):
-        selected = resolve_input_device(
-            sd,
-            self._device_name,
-        )
-        log(f"Mic: {selected.name!r}")
+        if sys.platform == "darwin":
+            # PortAudio caches the macOS default device. Refresh between
+            # streams so USB changes follow the current system selection.
+            selected = resolve_current_default_input(
+                sd,
+                platform_name=sys.platform,
+            )
+            log(f"Mic (system default): {selected.name!r}")
+        else:
+            selected = resolve_input_device(sd, self._device_name)
+            log(f"Mic: {selected.name!r}")
         # blocksize=256 → 16 ms per callback — low enough that the first
         # captured block is ≤16 ms after the key goes down.
         stream = sd.InputStream(
@@ -2292,7 +2299,9 @@ def run():
         )
 
         if _sys.platform == "darwin":
-            microphone_name = _settings.get("microphone_name", "").strip()
+            # macOS owns microphone selection. Always validate the current
+            # system default rather than pinning a device cached in settings.
+            microphone_name = ""
             last_failure = None
             fallback_announced = False
             readiness_started = time.monotonic()
