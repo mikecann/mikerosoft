@@ -187,6 +187,9 @@ class LayoutValidationTests(unittest.TestCase):
 
 
 class CountParsingTests(unittest.TestCase):
+    def test_query_timeout_allows_a_large_external_library_scan(self) -> None:
+        self.assertEqual(PHOTO_BACKUP.QUERY_TIMEOUT_SECONDS, 2 * 60 * 60)
+
     def test_parses_sanitized_osxphotos_count(self) -> None:
         self.assertEqual(PHOTO_BACKUP.parse_count("  12345\n"), 12345)
 

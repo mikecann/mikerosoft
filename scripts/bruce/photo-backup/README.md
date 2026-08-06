@@ -85,7 +85,9 @@ bash "$HOME/Library/Application Support/photo-backup/source/install-automation.s
 It runs once at login and every six hours. Launchd will not overlap instances,
 so a long first export can finish safely. Missing drives and genuine errors are
 logged and retried on the next scheduled run; an incomplete iCloud download is
-a normal successful wait state.
+a normal successful wait state. Library readiness queries have a bounded
+two-hour window because loading a large external Photos library can take well
+over 30 minutes.
 
 Logs contain aggregate counts only:
 

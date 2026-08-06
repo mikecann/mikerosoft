@@ -18,7 +18,10 @@ DEFAULT_VOLUME = Path("/Volumes/CannMedia")
 DEFAULT_VOLUME_UUID = "5CCB1D81-5A98-4C4A-9E2C-3E10B23F1B46"
 DEFAULT_LIBRARY = DEFAULT_VOLUME / "PhotoBackup" / "Photos Library.photoslibrary"
 DEFAULT_ARCHIVE = DEFAULT_VOLUME / "PhotoArchive"
-QUERY_TIMEOUT_SECONDS = 30 * 60
+# A near-complete external Photos library can take well over 30 minutes to
+# load and evaluate. Keep the query bounded, but leave enough room for a real
+# readiness result before the six-hour LaunchAgent schedule runs again.
+QUERY_TIMEOUT_SECONDS = 2 * 60 * 60
 
 
 class PreflightError(RuntimeError):
