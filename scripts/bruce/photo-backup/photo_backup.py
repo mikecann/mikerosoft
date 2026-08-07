@@ -293,14 +293,19 @@ def print_status(config: Config) -> int:
     return 0
 
 
-def export_ready_library(config: Config, total: int, *, quiet: bool = False) -> int:
+def export_ready_library(
+    config: Config, total: Optional[int], *, quiet: bool = False
+) -> int:
     reports = config.archive / ".photo-backup" / "reports"
     reports.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
     report_path = reports / f"export-{timestamp}.json"
     command = build_export_command(config, report_path)
 
-    print(f"Exporting {total} Photos assets to the APFS clone archive...")
+    if total is None:
+        print("Exporting Photos assets to the APFS clone archive...")
+    else:
+        print(f"Exporting {total} Photos assets to the APFS clone archive...")
     completed = subprocess.run(
         command,
         check=False,
@@ -345,16 +350,12 @@ def run_automatic_export(config: Config) -> int:
         print("  State: WAITING_FOR_ORIGINALS", flush=True)
         return 0
 
-    total = query_count(config)
-    print(f"  Assets currently catalogued: {total}", flush=True)
-    if total == 0:
-        print("  State: WAITING_FOR_ICLOUD_LIBRARY", flush=True)
-        return 0
-
     print("  State: ORIGINALS_READY", flush=True)
     # Automated logs stay aggregate-only. The detailed export report remains
     # private inside the archive instead of streaming filenames to launchd.
-    return export_ready_library(config, total, quiet=True)
+    # Do not repeat a second multi-hour catalogue scan after the missing check
+    # has already proved that every original is local.
+    return export_ready_library(config, None, quiet=True)
 
 
 def print_paths(config: Config) -> int:

@@ -66,8 +66,9 @@ PHOTO_BACKUP="$HOME/Library/Application Support/photo-backup/source/photo-backup
   network-accessible archive using originals, edited versions, Live Photo
   movies, RAW companions, XMP sidecars, and AAE adjustment files.
 - `auto` exits successfully while iCloud originals are missing. Once every
-  original is local, it quietly performs the same incremental export and
-  retries any earlier export errors.
+  original is local, it quietly performs the same incremental export without
+  repeating the multi-hour readiness scan, and retries any earlier export
+  errors.
 
 Normal `osxphotos` copies within the same APFS volume are copy-on-write clones,
 so the library and archive initially share physical data blocks while remaining

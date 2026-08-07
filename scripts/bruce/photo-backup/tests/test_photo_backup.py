@@ -70,7 +70,7 @@ class AutomaticExportTests(unittest.TestCase):
         config = self.config()
         with (
             mock.patch.object(PHOTO_BACKUP, "require_runtime"),
-            mock.patch.object(PHOTO_BACKUP, "query_count", side_effect=[0, 100]) as query,
+            mock.patch.object(PHOTO_BACKUP, "query_count", return_value=0) as query,
             mock.patch.object(
                 PHOTO_BACKUP, "export_ready_library", return_value=0
             ) as export,
@@ -78,11 +78,8 @@ class AutomaticExportTests(unittest.TestCase):
             result = PHOTO_BACKUP.run_automatic_export(config)
 
         self.assertEqual(result, 0)
-        self.assertEqual(
-            query.call_args_list,
-            [mock.call(config, "--missing"), mock.call(config)],
-        )
-        export.assert_called_once_with(config, 100, quiet=True)
+        query.assert_called_once_with(config, "--missing")
+        export.assert_called_once_with(config, None, quiet=True)
 
     def test_auto_is_a_supported_command(self) -> None:
         args = PHOTO_BACKUP.build_parser().parse_args(["auto"])
