@@ -292,8 +292,31 @@ struct RecordItView: View {
 
             if model.mode.capturesScreen {
                 GridRow {
-                    rowLabel("Screen", systemImage: "display")
-                    displayPicker
+                    rowLabel("Capture", systemImage: "rectangle.dashed.badge.record")
+                    Picker("Capture", selection: $model.screenCaptureTargetKind) {
+                        ForEach(ScreenCaptureTargetKind.allCases) { targetKind in
+                            Text(targetKind.displayName).tag(targetKind)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .disabled(model.isRecording || model.isBusy)
+                    .onChange(of: model.screenCaptureTargetKind) {
+                        guard model.screenCaptureTargetKind == .window else { return }
+                        Task { await model.refreshWindows() }
+                    }
+                }
+
+                GridRow {
+                    rowLabel(
+                        model.screenCaptureTargetKind == .display ? "Display" : "Window",
+                        systemImage: model.screenCaptureTargetKind == .display ? "display" : "macwindow"
+                    )
+                    if model.screenCaptureTargetKind == .display {
+                        displayPicker
+                    } else {
+                        windowPicker
+                    }
                 }
 
                 GridRow {
@@ -376,6 +399,53 @@ struct RecordItView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                 }
+            }
+        }
+    }
+
+    private var windowPicker: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Picker("Window", selection: $model.selectedWindowID) {
+                    if model.windows.isEmpty {
+                        Text(model.isRefreshingWindows ? "Loading windows…" : "No windows available")
+                            .tag(CGWindowID(0))
+                    }
+                    ForEach(model.windows) { window in
+                        Text(window.displayName).tag(window.id)
+                    }
+                }
+                .labelsHidden()
+                .disabled(model.isRecording || model.isBusy || model.isRefreshingWindows)
+
+                Button {
+                    Task { await model.refreshWindows() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.isRecording || model.isBusy || model.isRefreshingWindows)
+                .help("Refresh available windows")
+            }
+
+            if let window = model.selectedWindow {
+                Text("\(window.sizeLabel) · captured at native window scale · 30 fps")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Label(
+                "The window can be covered or moved off-screen. Do not minimize or close it while recording.",
+                systemImage: "info.circle"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if model.screenAudioSource.capturesSystemAudio {
+                Text("Window audio is isolated by application, not by individual window.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

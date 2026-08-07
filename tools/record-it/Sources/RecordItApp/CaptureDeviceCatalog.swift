@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import CoreMedia
+import ScreenCaptureKit
 
 enum CaptureDeviceCatalog {
     static func displays() -> [CaptureDisplay] {
@@ -26,6 +27,33 @@ enum CaptureDeviceCatalog {
                 sourceHeight: sourceHeight
             )
         }
+    }
+
+    static func windows() async throws -> [CaptureWindow] {
+        let content = try await SCShareableContent.excludingDesktopWindows(
+            true,
+            onScreenWindowsOnly: true
+        )
+        let ownProcessID = ProcessInfo.processInfo.processIdentifier
+        let windows = content.windows.compactMap { window -> CaptureWindow? in
+            guard
+                let application = window.owningApplication,
+                application.processID != ownProcessID,
+                let title = window.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !title.isEmpty,
+                window.frame.width >= 160,
+                window.frame.height >= 100
+            else { return nil }
+
+            return CaptureWindow(
+                id: window.windowID,
+                applicationName: application.applicationName,
+                title: title,
+                width: Int(window.frame.width.rounded()),
+                height: Int(window.frame.height.rounded())
+            )
+        }
+        return sortedCaptureWindows(windows)
     }
 
     static func cameras() -> [CaptureCamera] {

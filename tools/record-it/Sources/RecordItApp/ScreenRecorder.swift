@@ -4,7 +4,7 @@ import CoreVideo
 import ScreenCaptureKit
 
 final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    private let display: CaptureDisplay
+    private let target: ScreenCaptureTarget
     private let audioSource: ScreenAudioSource
     private let outputURL: URL
     private let encoderConfiguration: EncoderConfiguration
@@ -21,9 +21,11 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private var lastFrameStatus: SCFrameStatus?
     private var latestScreenTimestamp: CMTime?
     private var lastHealthLogAt: TimeInterval?
+    private var captureWidth = 0
+    private var captureHeight = 0
 
     init(
-        display: CaptureDisplay,
+        target: ScreenCaptureTarget,
         audioSource: ScreenAudioSource,
         outputURL: URL,
         encoderConfiguration: EncoderConfiguration,
@@ -31,7 +33,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         onFailure: (@Sendable (Error) -> Void)? = nil,
         onTelemetry: (@Sendable (RecordingTelemetry) -> Void)? = nil
     ) {
-        self.display = display
+        self.target = target
         self.audioSource = audioSource
         self.outputURL = outputURL
         self.encoderConfiguration = encoderConfiguration
@@ -48,28 +50,47 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         }
         let content = try await SCShareableContent.excludingDesktopWindows(
             false,
-            onScreenWindowsOnly: true
+            onScreenWindowsOnly: false
         )
-        guard let scDisplay = content.displays.first(where: { $0.displayID == display.id }) else {
-            throw RecordItError.message("The selected display is no longer available.")
+        let filter: SCContentFilter
+        let pixelSize: CapturePixelSize
+        let targetDescription: String
+        switch target {
+        case .display(let display):
+            guard let scDisplay = content.displays.first(where: { $0.displayID == display.id }) else {
+                throw RecordItError.message("The selected display is no longer available.")
+            }
+            filter = SCContentFilter(
+                display: scDisplay,
+                excludingApplications: [],
+                exceptingWindows: []
+            )
+            pixelSize = CapturePixelSize(width: display.width, height: display.height)
+            targetDescription = "display=\(display.name)"
+        case .window(let window):
+            guard let scWindow = content.windows.first(where: { $0.windowID == window.id }) else {
+                throw RecordItError.message("The selected window is no longer available.")
+            }
+            filter = SCContentFilter(desktopIndependentWindow: scWindow)
+            pixelSize = windowCapturePixelSize(
+                widthInPoints: filter.contentRect.width,
+                heightInPoints: filter.contentRect.height,
+                pointPixelScale: filter.pointPixelScale
+            )
+            targetDescription = "window=\(window.applicationName)/\(window.title)"
         }
 
         let writer = try MovieWriter(
             outputURL: outputURL,
-            width: display.width,
-            height: display.height,
+            width: pixelSize.width,
+            height: pixelSize.height,
             includesAudio: audioSource.capturesSystemAudio,
             encoderConfiguration: encoderConfiguration,
             startGate: startGate
         )
-        let filter = SCContentFilter(
-            display: scDisplay,
-            excludingApplications: [],
-            exceptingWindows: []
-        )
         let configuration = SCStreamConfiguration()
-        configuration.width = display.width
-        configuration.height = display.height
+        configuration.width = pixelSize.width
+        configuration.height = pixelSize.height
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         configuration.queueDepth = 8
         configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
@@ -86,11 +107,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         }
 
         movieWriter = writer
+        captureWidth = pixelSize.width
+        captureHeight = pixelSize.height
         self.stream = stream
         try await stream.startCapture()
         startHealthMonitor()
         RecordingDiagnostics.shared.log(
-            "screen.start display=\(display.name) output=\(display.width)x\(display.height) "
+            "screen.start \(targetDescription) output=\(pixelSize.width)x\(pixelSize.height) "
                 + "audio=\(audioSource.capturesSystemAudio) encoder=\(encoderConfiguration.encoder.displayName)"
         )
     }
@@ -212,8 +235,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         onTelemetry?(RecordingTelemetry(
             source: .screen,
             outputURL: outputURL,
-            width: display.width,
-            height: display.height,
+            width: captureWidth,
+            height: captureHeight,
             codecName: encoderConfiguration.encoder.codec.displayName,
             videoSamplesWritten: progress.videoSamplesWritten,
             audioSamplesWritten: progress.audioSamplesWritten,

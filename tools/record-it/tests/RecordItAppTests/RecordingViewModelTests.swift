@@ -61,20 +61,52 @@ final class RecordingViewModelTests: XCTestCase {
     func testAudioModeNeedsAnInputButDoesNotNeedVideoDevicesOrAnEncoder() {
         XCTAssertTrue(recordingPrerequisitesAreAvailable(
             mode: .audio,
+            screenCaptureTargetKind: .display,
             hasDestination: true,
             hasValidFileName: true,
             hasVideoEncoder: false,
             hasDisplay: false,
+            hasWindow: false,
             hasCamera: false,
             hasAudioInput: true,
             isBusy: false
         ))
         XCTAssertFalse(recordingPrerequisitesAreAvailable(
             mode: .audio,
+            screenCaptureTargetKind: .display,
             hasDestination: true,
             hasValidFileName: true,
             hasVideoEncoder: false,
             hasDisplay: false,
+            hasWindow: false,
+            hasCamera: false,
+            hasAudioInput: false,
+            isBusy: false
+        ))
+    }
+
+    func testScreenModeAcceptsASelectedWindowWithoutASelectedDisplay() {
+        XCTAssertTrue(recordingPrerequisitesAreAvailable(
+            mode: .screen,
+            screenCaptureTargetKind: .window,
+            hasDestination: true,
+            hasValidFileName: true,
+            hasVideoEncoder: true,
+            hasDisplay: false,
+            hasWindow: true,
+            hasCamera: false,
+            hasAudioInput: false,
+            isBusy: false
+        ))
+
+        XCTAssertFalse(recordingPrerequisitesAreAvailable(
+            mode: .screen,
+            screenCaptureTargetKind: .window,
+            hasDestination: true,
+            hasValidFileName: true,
+            hasVideoEncoder: true,
+            hasDisplay: true,
+            hasWindow: false,
             hasCamera: false,
             hasAudioInput: false,
             isBusy: false

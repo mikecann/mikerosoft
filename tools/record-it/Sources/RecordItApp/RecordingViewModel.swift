@@ -8,17 +8,25 @@ func defaultProjectsRoot(homeDirectory: URL = FileManager.default.homeDirectoryF
 
 func recordingPrerequisitesAreAvailable(
     mode: RecordingMode,
+    screenCaptureTargetKind: ScreenCaptureTargetKind,
     hasDestination: Bool,
     hasValidFileName: Bool,
     hasVideoEncoder: Bool,
     hasDisplay: Bool,
+    hasWindow: Bool,
     hasCamera: Bool,
     hasAudioInput: Bool,
     isBusy: Bool
 ) -> Bool {
     guard hasDestination, hasValidFileName, !isBusy else { return false }
     if mode.requiresVideoEncoder && !hasVideoEncoder { return false }
-    if mode.capturesScreen && !hasDisplay { return false }
+    if mode.capturesScreen {
+        switch screenCaptureTargetKind {
+        case .display where !hasDisplay: return false
+        case .window where !hasWindow: return false
+        default: break
+        }
+    }
     if mode.capturesCamera && !hasCamera { return false }
     if mode.capturesAudio && !hasAudioInput { return false }
     return true
@@ -33,6 +41,10 @@ final class RecordingViewModel: ObservableObject {
     @Published var selectedDestinationID = ""
     @Published private(set) var displays: [CaptureDisplay] = []
     @Published var selectedDisplayID: CGDirectDisplayID = 0
+    @Published var screenCaptureTargetKind: ScreenCaptureTargetKind = .display
+    @Published private(set) var windows: [CaptureWindow] = []
+    @Published var selectedWindowID: CGWindowID = 0
+    @Published private(set) var isRefreshingWindows = false
     @Published private(set) var cameras: [CaptureCamera] = []
     @Published var selectedCameraID = ""
     @Published private(set) var microphones: [CaptureAudioDevice] = []
@@ -73,6 +85,17 @@ final class RecordingViewModel: ObservableObject {
         displays.first { $0.id == selectedDisplayID }
     }
 
+    var selectedWindow: CaptureWindow? {
+        windows.first { $0.id == selectedWindowID }
+    }
+
+    var selectedScreenCaptureTarget: ScreenCaptureTarget? {
+        switch screenCaptureTargetKind {
+        case .display: selectedDisplay.map(ScreenCaptureTarget.display)
+        case .window: selectedWindow.map(ScreenCaptureTarget.window)
+        }
+    }
+
     var selectedCamera: CaptureCamera? {
         cameras.first { $0.id == selectedCameraID }
     }
@@ -107,10 +130,12 @@ final class RecordingViewModel: ObservableObject {
     var canRecord: Bool {
         recordingPrerequisitesAreAvailable(
             mode: mode,
+            screenCaptureTargetKind: screenCaptureTargetKind,
             hasDestination: selectedDestination != nil,
             hasValidFileName: resolvedFileName != nil,
             hasVideoEncoder: encoderConfiguration != nil,
             hasDisplay: selectedDisplay != nil,
+            hasWindow: selectedWindow != nil,
             hasCamera: selectedCamera != nil,
             hasAudioInput: selectedMicrophone != nil,
             isBusy: isBusy
@@ -161,6 +186,28 @@ final class RecordingViewModel: ObservableObject {
         fileName = defaultRecordingBaseName(startedAt: date, timeZone: timeZone)
     }
 
+    func refreshWindows() async {
+        guard !isRefreshingWindows, !isRecording else { return }
+        guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
+            presentedError = "Screen Recording access is required to list windows. Enable Record It in Privacy & Security → Screen & System Audio Recording, then relaunch the app."
+            return
+        }
+
+        isRefreshingWindows = true
+        defer { isRefreshingWindows = false }
+        let previousID = selectedWindowID
+        do {
+            windows = try await CaptureDeviceCatalog.windows()
+            selectedWindowID = windows.first(where: { $0.id == previousID })?.id
+                ?? windows.first?.id
+                ?? 0
+        } catch {
+            windows = []
+            selectedWindowID = 0
+            presentedError = "Windows could not be loaded: \(error.localizedDescription)"
+        }
+    }
+
     func startRecording() async {
         guard
             canRecord,
@@ -186,15 +233,15 @@ final class RecordingViewModel: ObservableObject {
 
             if mode.capturesScreen {
                 guard
-                    let display = selectedDisplay,
+                    let captureTarget = selectedScreenCaptureTarget,
                     let outputURL = outputs[.screen],
                     let encoderConfiguration
                 else {
-                    throw RecordItError.message("Choose a display before recording.")
+                    throw RecordItError.message("Choose a display or window before recording.")
                 }
                 recorders.append(
                     ScreenRecorder(
-                        display: display,
+                        target: captureTarget,
                         audioSource: screenAudioSource,
                         outputURL: outputURL,
                         encoderConfiguration: encoderConfiguration,

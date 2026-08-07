@@ -1,6 +1,20 @@
 import CoreGraphics
 import Foundation
 
+enum ScreenCaptureTargetKind: String, CaseIterable, Identifiable {
+    case display
+    case window
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .display: "Display"
+        case .window: "Window"
+        }
+    }
+}
+
 struct CaptureDisplay: Identifiable, Hashable {
     let id: CGDirectDisplayID
     let name: String
@@ -33,6 +47,52 @@ struct CaptureDisplay: Identifiable, Hashable {
         guard isOutputScaled else { return nil }
         return "Source \(sourceResolutionLabel) → output \(resolutionLabel). This recording will be upscaled and may look soft."
     }
+}
+
+struct CaptureWindow: Identifiable, Hashable {
+    let id: CGWindowID
+    let applicationName: String
+    let title: String
+    let width: Int
+    let height: Int
+
+    var displayName: String { "\(applicationName) · \(title)" }
+    var sizeLabel: String { "\(width) × \(height) pt" }
+}
+
+enum ScreenCaptureTarget {
+    case display(CaptureDisplay)
+    case window(CaptureWindow)
+}
+
+struct CapturePixelSize: Equatable {
+    let width: Int
+    let height: Int
+}
+
+func sortedCaptureWindows(_ windows: [CaptureWindow]) -> [CaptureWindow] {
+    windows.sorted { left, right in
+        let applicationOrder = left.applicationName.localizedCaseInsensitiveCompare(right.applicationName)
+        if applicationOrder != .orderedSame { return applicationOrder == .orderedAscending }
+        return left.title.localizedCaseInsensitiveCompare(right.title) == .orderedAscending
+    }
+}
+
+func windowCapturePixelSize(
+    widthInPoints: CGFloat,
+    heightInPoints: CGFloat,
+    pointPixelScale: Float
+) -> CapturePixelSize {
+    func evenDimension(_ points: CGFloat) -> Int {
+        let pixels = max(2, Int((points * CGFloat(pointPixelScale)).rounded()))
+        // The recorder uses a 4:2:0 pixel format, which requires even dimensions.
+        return pixels - (pixels % 2)
+    }
+
+    return CapturePixelSize(
+        width: evenDimension(widthInPoints),
+        height: evenDimension(heightInPoints)
+    )
 }
 
 func preferredDisplay(

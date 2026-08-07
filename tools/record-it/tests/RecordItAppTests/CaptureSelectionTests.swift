@@ -22,6 +22,23 @@ final class CaptureSelectionTests: XCTestCase {
         XCTAssertEqual(preferredDisplay(in: displays)?.id, 2)
     }
 
+    func testWindowPickerSortsApplicationsThenWindowTitles() {
+        let windows = [
+            CaptureWindow(id: 3, applicationName: "Safari", title: "Convex", width: 1200, height: 800),
+            CaptureWindow(id: 1, applicationName: "Chrome", title: "Docs", width: 1400, height: 900),
+            CaptureWindow(id: 2, applicationName: "Safari", title: "Apple", width: 1000, height: 700)
+        ]
+
+        XCTAssertEqual(sortedCaptureWindows(windows).map(\.id), [1, 2, 3])
+    }
+
+    func testWindowOutputUsesTheCaptureScaleAndEvenPixelDimensions() {
+        XCTAssertEqual(
+            windowCapturePixelSize(widthInPoints: 1000.6, heightInPoints: 700.4, pointPixelScale: 2),
+            CapturePixelSize(width: 2000, height: 1400)
+        )
+    }
+
     func testDisplayWarnsWhenRecordingOutputUpscalesTheActiveFramebuffer() {
         let display = CaptureDisplay(
             id: 4,
