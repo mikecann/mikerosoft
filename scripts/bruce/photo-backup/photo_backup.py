@@ -18,6 +18,14 @@ DEFAULT_VOLUME = Path("/Volumes/CannMedia")
 DEFAULT_VOLUME_UUID = "5CCB1D81-5A98-4C4A-9E2C-3E10B23F1B46"
 DEFAULT_LIBRARY = DEFAULT_VOLUME / "PhotoBackup" / "Photos Library.photoslibrary"
 DEFAULT_ARCHIVE = DEFAULT_VOLUME / "PhotoArchive"
+DEFAULT_READINESS_MARKER = (
+    Path.home()
+    / "Library"
+    / "Application Support"
+    / "photo-backup"
+    / "state"
+    / "initial-readiness-verified"
+)
 # A near-complete external Photos library can take well over 30 minutes to
 # load and evaluate. Keep the query bounded, but leave enough room for a real
 # readiness result before the six-hour LaunchAgent schedule runs again.
@@ -37,12 +45,14 @@ class Config:
         library: Path,
         archive: Path,
         osxphotos: str,
+        readiness_marker: Optional[Path] = None,
     ) -> None:
         self.volume = volume
         self.volume_uuid = volume_uuid
         self.library = library
         self.archive = archive
         self.osxphotos = osxphotos
+        self.readiness_marker = readiness_marker or DEFAULT_READINESS_MARKER
 
 
 class VolumeInfo:
@@ -81,6 +91,11 @@ def config_from_environment() -> Config:
         library=Path(os.environ.get("PHOTO_BACKUP_LIBRARY", str(DEFAULT_LIBRARY))),
         archive=Path(os.environ.get("PHOTO_BACKUP_ARCHIVE", str(DEFAULT_ARCHIVE))),
         osxphotos=default_osxphotos_path(),
+        readiness_marker=Path(
+            os.environ.get(
+                "PHOTO_BACKUP_READINESS_MARKER", str(DEFAULT_READINESS_MARKER)
+            )
+        ),
     )
 
 
@@ -209,6 +224,10 @@ def build_export_command(config: Config, report_path: Path) -> list[str]:
         str(config.library),
         "--update",
         "--update-errors",
+        # Initial readiness is proved once before the first export. Later
+        # incremental runs can safely ask Photos for any newly missing items
+        # and retry them without blocking every backup on a multi-hour scan.
+        "--download-missing",
         "--directory",
         "{created.year}/{created.mm}",
         "--sidecar",
@@ -234,6 +253,22 @@ def require_runtime(config: Config) -> VolumeInfo:
             "osxphotos is not installed; run scripts/bruce/photo-backup/setup_mac.sh"
         )
     return volume_info
+
+
+def initial_readiness_verified(config: Config) -> bool:
+    return config.readiness_marker.is_file()
+
+
+def record_initial_readiness(config: Config) -> None:
+    marker = config.readiness_marker
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.parent.chmod(0o700)
+    temporary = marker.with_name(f"{marker.name}.tmp-{os.getpid()}")
+    temporary.write_text(
+        f"verified_at={datetime.now().astimezone().isoformat(timespec='seconds')}\n"
+    )
+    temporary.chmod(0o600)
+    temporary.replace(marker)
 
 
 def photos_is_running() -> bool:
@@ -333,6 +368,7 @@ def run_export(config: Config) -> int:
             f"Refusing archive export while {missing} originals are missing locally"
         )
 
+    record_initial_readiness(config)
     return export_ready_library(config, total)
 
 
@@ -341,14 +377,18 @@ def run_automatic_export(config: Config) -> int:
     require_runtime(config)
     started = datetime.now().astimezone().isoformat(timespec="seconds")
     print(f"Automatic photo backup check: {started}", flush=True)
-    # During the initial iCloud ingest, the only decision needed is whether
-    # any original remains missing. Check that first so the scheduled job can
-    # avoid an unnecessary second full database scan while it is still waiting.
-    missing = query_count(config, "--missing")
-    print(f"  Originals missing locally: {missing}", flush=True)
-    if missing:
-        print("  State: WAITING_FOR_ORIGINALS", flush=True)
-        return 0
+    if initial_readiness_verified(config):
+        print("  Initial readiness: previously verified", flush=True)
+    else:
+        # The strict missing-originals gate is required once for the initial
+        # archive. Later incremental exports use --download-missing and retry
+        # errors instead of repeating this multi-hour scan every six hours.
+        missing = query_count(config, "--missing")
+        print(f"  Originals missing locally: {missing}", flush=True)
+        if missing:
+            print("  State: WAITING_FOR_ORIGINALS", flush=True)
+            return 0
+        record_initial_readiness(config)
 
     print("  State: ORIGINALS_READY", flush=True)
     # Automated logs stay aggregate-only. The detailed export report remains

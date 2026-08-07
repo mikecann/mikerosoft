@@ -65,10 +65,11 @@ PHOTO_BACKUP="$HOME/Library/Application Support/photo-backup/source/photo-backup
 - `export` refuses to run until no originals are missing, then updates the
   network-accessible archive using originals, edited versions, Live Photo
   movies, RAW companions, XMP sidecars, and AAE adjustment files.
-- `auto` exits successfully while iCloud originals are missing. Once every
-  original is local, it quietly performs the same incremental export without
-  repeating the multi-hour readiness scan, and retries any earlier export
-  errors.
+- `auto` uses a strict missing-originals check before the first archive. Once
+  that check succeeds it records private initial-readiness evidence, performs
+  the incremental export, and does not repeat the multi-hour scan every six
+  hours. Later exports ask Photos to download any newly missing items and retry
+  earlier export errors.
 
 Normal `osxphotos` copies within the same APFS volume are copy-on-write clones,
 so the library and archive initially share physical data blocks while remaining
@@ -85,10 +86,10 @@ bash "$HOME/Library/Application Support/photo-backup/source/install-automation.s
 
 It runs once at login and every six hours. Launchd will not overlap instances,
 so a long first export can finish safely. Missing drives and genuine errors are
-logged and retried on the next scheduled run; an incomplete iCloud download is
-a normal successful wait state. Library readiness queries have a bounded
-two-hour window because loading a large external Photos library can take well
-over 30 minutes.
+logged and retried on the next scheduled run; an incomplete initial iCloud
+download is a normal successful wait state. The one-time initial readiness
+query has a bounded two-hour window because loading a large external Photos
+library can take well over 30 minutes.
 
 Logs contain aggregate counts only:
 

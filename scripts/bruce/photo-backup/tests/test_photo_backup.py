@@ -38,6 +38,7 @@ class ExportCommandTests(unittest.TestCase):
         self.assertIn("XMP", command)
         self.assertIn("--export-aae", command)
         self.assertIn("--retry", command)
+        self.assertIn("--download-missing", command)
         self.assertNotIn("--cleanup", command)
         self.assertNotIn("--convert-to-jpeg", command)
         self.assertNotIn("--export-as-hardlink", command)
@@ -57,20 +58,29 @@ class AutomaticExportTests(unittest.TestCase):
         config = self.config()
         with (
             mock.patch.object(PHOTO_BACKUP, "require_runtime"),
+            mock.patch.object(
+                PHOTO_BACKUP, "initial_readiness_verified", return_value=False
+            ),
             mock.patch.object(PHOTO_BACKUP, "query_count", return_value=7) as query,
+            mock.patch.object(PHOTO_BACKUP, "record_initial_readiness") as record,
             mock.patch.object(PHOTO_BACKUP, "export_ready_library") as export,
         ):
             result = PHOTO_BACKUP.run_automatic_export(config)
 
         self.assertEqual(result, 0)
         query.assert_called_once_with(config, "--missing")
+        record.assert_not_called()
         export.assert_not_called()
 
     def test_exports_when_every_original_is_local(self) -> None:
         config = self.config()
         with (
             mock.patch.object(PHOTO_BACKUP, "require_runtime"),
+            mock.patch.object(
+                PHOTO_BACKUP, "initial_readiness_verified", return_value=False
+            ),
             mock.patch.object(PHOTO_BACKUP, "query_count", return_value=0) as query,
+            mock.patch.object(PHOTO_BACKUP, "record_initial_readiness") as record,
             mock.patch.object(
                 PHOTO_BACKUP, "export_ready_library", return_value=0
             ) as export,
@@ -79,12 +89,55 @@ class AutomaticExportTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         query.assert_called_once_with(config, "--missing")
+        record.assert_called_once_with(config)
+        export.assert_called_once_with(config, None, quiet=True)
+
+    def test_verified_initial_download_skips_the_multi_hour_query(self) -> None:
+        config = self.config()
+        with (
+            mock.patch.object(PHOTO_BACKUP, "require_runtime"),
+            mock.patch.object(
+                PHOTO_BACKUP, "initial_readiness_verified", return_value=True
+            ),
+            mock.patch.object(PHOTO_BACKUP, "query_count") as query,
+            mock.patch.object(PHOTO_BACKUP, "record_initial_readiness") as record,
+            mock.patch.object(
+                PHOTO_BACKUP, "export_ready_library", return_value=0
+            ) as export,
+        ):
+            result = PHOTO_BACKUP.run_automatic_export(config)
+
+        self.assertEqual(result, 0)
+        query.assert_not_called()
+        record.assert_not_called()
         export.assert_called_once_with(config, None, quiet=True)
 
     def test_auto_is_a_supported_command(self) -> None:
         args = PHOTO_BACKUP.build_parser().parse_args(["auto"])
 
         self.assertEqual(args.command, "auto")
+
+
+class ReadinessMarkerTests(unittest.TestCase):
+    def test_records_private_initial_readiness_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            marker = Path(temp_dir) / "state" / "initial-readiness-verified"
+            config = PHOTO_BACKUP.Config(
+                volume=Path("/Volumes/CannMedia"),
+                volume_uuid="expected-uuid",
+                library=Path(
+                    "/Volumes/CannMedia/PhotoBackup/Photos Library.photoslibrary"
+                ),
+                archive=Path("/Volumes/CannMedia/PhotoArchive"),
+                osxphotos="osxphotos",
+                readiness_marker=marker,
+            )
+
+            PHOTO_BACKUP.record_initial_readiness(config)
+
+            self.assertTrue(PHOTO_BACKUP.initial_readiness_verified(config))
+            self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
+            self.assertIn("verified_at=", marker.read_text())
 
 
 class AutomationInstallerTests(unittest.TestCase):
