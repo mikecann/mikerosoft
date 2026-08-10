@@ -31,6 +31,16 @@ class RuntimePolicyTests(unittest.TestCase):
     def test_other_platforms_default_to_not_keeping_mic_open(self):
         self.assertFalse(self.module.should_keep_mic_stream_open("linux"))
 
+    def test_final_only_still_streams_preview_text(self):
+        # "Final only" controls when text is injected into the target app.
+        # It must not disable the live transcript shown in the overlay.
+        self.assertTrue(self.module.should_stream_preview("final_only"))
+
+    def test_all_output_modes_stream_preview_text(self):
+        for mode in ("hybrid", "stabilized", "precompute"):
+            with self.subTest(mode=mode):
+                self.assertTrue(self.module.should_stream_preview(mode))
+
     def test_long_loop_gap_is_treated_as_system_resume(self):
         self.assertTrue(
             self.module.should_restart_after_loop_gap(

@@ -264,6 +264,7 @@ from audio_gate import (
 from runtime_policy import (
     should_keep_mic_stream_open_local,
     should_restart_after_loop_gap,
+    should_stream_preview,
 )
 from audio_recovery import AudioBackendRecovery
 from microphone_readiness import (
@@ -2871,13 +2872,13 @@ def run():
                     recording_session.note_start_result(started)
                     if started:
                         mode = _effective_output_mode()
-                        # final_only does not need speculative full-buffer
-                        # inference. Skipping it removes both O(n^2) work and
-                        # the highest-risk overlap with final MLX inference.
-                        if mode == "final_only":
-                            streamer.reset()
-                        else:
+                        # Output mode controls finalization and injection, not
+                        # whether the user sees live transcript feedback. MLX
+                        # preview/final calls are serialized by the model lock.
+                        if should_stream_preview(mode):
                             streamer.start()
+                        else:
+                            streamer.reset()
                         if mode == "precompute":
                             precomputer.start()
                         else:
