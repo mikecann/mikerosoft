@@ -69,11 +69,13 @@ class ControlServer:
         get_state: Callable[[], JsonDict],
         commands: dict[str, Callable[[JsonDict], Any]],
         log: Callable[[str], None],
+        client_timeout_seconds: float = 2.0,
     ):
         self._socket_path = socket_path
         self._get_state = get_state
         self._commands = commands
         self._log = log
+        self._client_timeout_seconds = client_timeout_seconds
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._server: socket.socket | None = None
@@ -113,7 +115,12 @@ class ControlServer:
                 except OSError:
                     break
                 with conn:
-                    request = self._read_request(conn)
+                    conn.settimeout(self._client_timeout_seconds)
+                    try:
+                        request = self._read_request(conn)
+                    except (TimeoutError, OSError) as exc:
+                        self._log(f"Control client timed out or disconnected: {exc}")
+                        continue
                     response = apply_request(
                         request=request,
                         get_state=self._get_state,

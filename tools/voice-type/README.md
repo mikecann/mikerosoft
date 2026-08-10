@@ -177,7 +177,13 @@ macOS does not currently use the Windows tray flow.
 - `Run on Startup` writes a LaunchAgent that targets the stable installed
   runtime, so deleting a development worktree cannot break the next login
 - `voice-type-mac.sh` waits for the control server before reporting a successful
-  restart
+  restart, and verifies that the app is idle with its final model ready
+- Short sleep/wake cycles are detected from macOS lifecycle notifications.
+  Dock/display changes are tracked, and the current default microphone is
+  resolved again before the next recording.
+- Native model loading and final transcription have watchdog deadlines. If
+  MLX/Metal stops responding, Voice Type writes a thread dump and lets launchd
+  restart a fresh process instead of remaining stuck on Transcribing.
 
 ## How it works
 
@@ -186,9 +192,11 @@ macOS does not currently use the Windows tray flow.
   key is held so the system does not also handle it. Left Ctrl remains untouched.
 - **Audio capture** — `sounddevice` streams 16 kHz mono float32 from the
   default microphone into a NumPy buffer.
-- **Streaming preview** — while the key is held, a background thread
-  transcribes accumulated audio every 0.5 s and updates the overlay. Accelerated
-  systems default to `large-v3-turbo`; CPU-only systems use `tiny.en`.
+- **Streaming preview** — in `hybrid`, `stabilized`, and `precompute`, a
+  background thread transcribes accumulated audio every 0.5 s and updates the
+  overlay. `final_only` deliberately skips speculative preview inference so the
+  final pass gets exclusive access to MLX/Metal. Accelerated systems default to
+  `large-v3-turbo`; CPU-only systems use `tiny.en`.
 - **Final transcription** — on key release, the final model transcribes the
   full audio for accuracy. On Windows this is `faster-whisper` on CPU or CUDA.
   On Apple Silicon macOS, `voice-type` prefers **MLX Whisper** for supported
@@ -205,9 +213,10 @@ macOS does not currently use the Windows tray flow.
   timeout. `stabilized` skips this step on purpose because it types partial
   segments before the full sentence exists.
 - **Hardware-aware model design** — Apple Silicon uses one warmed MLX
-  `large-v3-turbo` model for preview and final transcription. CUDA uses turbo
-  for both paths with separate CTranslate2 instances. CPU-only systems keep
-  `tiny.en` for preview and `small.en` for the final pass.
+  `large-v3-turbo` model for preview and final transcription, with serialized
+  access when preview is enabled. CUDA uses turbo for both paths with separate
+  CTranslate2 instances. CPU-only systems keep `tiny.en` for preview and
+  `small.en` for the final pass.
 - **Monitor detection** — each platform finds the monitor containing the
   focused window, then centres the overlay at its bottom edge.
 - **Waveform animation** — the overlay canvas polls `Recorder.get_rms()` at

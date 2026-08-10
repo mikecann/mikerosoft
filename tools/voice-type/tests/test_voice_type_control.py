@@ -1,5 +1,6 @@
 import importlib.util
 import pathlib
+import socket
 import sys
 import tempfile
 import time
@@ -89,6 +90,37 @@ class VoiceTypeControlTests(unittest.TestCase):
                 self.assertTrue(response["ok"])
                 self.assertEqual("processing", response["state"]["ui_state"])
             finally:
+                server.stop()
+
+    def test_stalled_client_does_not_permanently_block_control_server(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = str(pathlib.Path(tmpdir) / "voice-type.sock")
+            server = self.module.ControlServer(
+                socket_path=socket_path,
+                get_state=lambda: {"ui_state": "idle"},
+                commands={},
+                log=lambda _msg: None,
+                client_timeout_seconds=0.02,
+            )
+            server.start()
+            stalled = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                deadline = time.time() + 1.0
+                while not pathlib.Path(socket_path).exists():
+                    if time.time() > deadline:
+                        self.fail("socket file was not created")
+                    time.sleep(0.01)
+                stalled.connect(socket_path)
+                time.sleep(0.05)
+
+                response = self.module.send_request(
+                    socket_path,
+                    {"command": "get_state"},
+                )
+
+                self.assertTrue(response["ok"])
+            finally:
+                stalled.close()
                 server.stop()
 
 

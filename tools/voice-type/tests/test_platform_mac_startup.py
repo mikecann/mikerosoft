@@ -213,6 +213,17 @@ class PlatformMacStartupTests(unittest.TestCase):
         ):
             self.assertFalse(self.module.restart_supervisor_active())
 
+    def test_wake_and_display_events_have_independent_generations(self):
+        initial_wake, initial_display = self.module.lifecycle_event_snapshot()
+
+        self.module._note_system_wake(None)
+        after_wake = self.module.lifecycle_event_snapshot()
+        self.module._note_display_change(None)
+        after_display = self.module.lifecycle_event_snapshot()
+
+        self.assertEqual((initial_wake + 1, initial_display), after_wake)
+        self.assertEqual((initial_wake + 1, initial_display + 1), after_display)
+
 
 if __name__ == "__main__":
     unittest.main()

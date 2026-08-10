@@ -14,7 +14,12 @@ SCRIPT_PATH = TOOLS_DIR / "voice-type-mac.sh"
 class MacRestartScriptTests(unittest.TestCase):
     def test_readiness_requires_the_native_hotkey_event_tap(self):
         script = SCRIPT_PATH.read_text(encoding="utf-8")
-        self.assertIn('state.get("hotkey_listener") == "event-tap"', script)
+        self.assertIn("is_restart_ready", script)
+
+    def test_restart_never_uses_broad_process_pattern_matching(self):
+        script = SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertNotIn('pkill -f "$APP"', script)
+        self.assertNotIn('pgrep -f "$APP"', script)
 
     def _write_command(self, directory, name, body):
         command = pathlib.Path(directory) / name
@@ -136,7 +141,7 @@ class MacRestartScriptTests(unittest.TestCase):
             result = self._run_script(tmpdir)
 
             self.assertEqual(0, result.returncode, result.stderr)
-            calls = self._wait_for_lines(calls_path, minimum=2)
+            calls = self._wait_for_lines(calls_path, minimum=1)
             self.assertTrue(any(line.startswith("nohup ") for line in calls), calls)
             self.assertIn("Launching Voice Type", result.stdout)
 
@@ -166,7 +171,7 @@ class MacRestartScriptTests(unittest.TestCase):
             result = self._run_script(tmpdir)
 
             self.assertEqual(0, result.returncode, result.stderr)
-            calls = self._wait_for_lines(calls_path, minimum=5)
+            calls = self._wait_for_lines(calls_path, minimum=4)
             self.assertTrue(any(line.startswith("nohup ") for line in calls), calls)
             self.assertIn("LaunchAgent restart failed", result.stdout)
             self.assertNotIn("Restarted via LaunchAgent", result.stdout)

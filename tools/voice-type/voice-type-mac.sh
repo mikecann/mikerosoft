@@ -71,6 +71,7 @@ import sys
 script_dir = os.environ["VOICE_TYPE_SCRIPT_DIR"]
 sys.path.insert(0, script_dir)
 from voice_type_control import send_request
+from runtime_health import is_restart_ready
 
 response = send_request(
     os.path.join(script_dir, "voice-type-control.sock"),
@@ -78,10 +79,7 @@ response = send_request(
     timeout_sec=0.5,
 )
 state = response.get("state") or {}
-healthy = (
-    response.get("ok")
-    and state.get("hotkey_listener") == "event-tap"
-)
+healthy = response.get("ok") and is_restart_ready(state)
 raise SystemExit(0 if healthy else 1)
 PY
 }
@@ -94,6 +92,7 @@ import sys
 script_dir = os.environ["VOICE_TYPE_SCRIPT_DIR"]
 sys.path.insert(0, script_dir)
 from voice_type_control import send_request
+from runtime_health import is_restart_ready
 
 try:
     response = send_request(
@@ -108,9 +107,11 @@ except Exception as error:
 state = response.get("state") or {}
 print("Control server: responsive")
 print(f"Hotkey listener: {state.get('hotkey_listener', 'unknown')}")
+print(f"UI state: {state.get('ui_state', 'unknown')}")
+print(f"Final model: {state.get('final_model_status', 'unknown')}")
+print(f"Backend poisoned: {state.get('backend_poisoned', False)}")
 raise SystemExit(
-    0 if response.get("ok") and state.get("hotkey_listener") == "event-tap"
-    else 1
+    0 if response.get("ok") and is_restart_ready(state) else 1
 )
 PY
 }
@@ -148,7 +149,7 @@ show_status() {
     grep -E "state =|runs =|last exit code|program =|working directory" |
     head -20 || true
   if readiness_probe; then
-    echo "Readiness: healthy (control server and native hotkey event tap active)"
+    echo "Readiness: healthy (idle, final model ready, native event tap active)"
     return 0
   fi
   echo "Readiness: unhealthy"
@@ -189,11 +190,6 @@ if launchctl print "$LAUNCHD_SERVICE" >/dev/null 2>&1; then
   echo "Restarting Voice Type via LaunchAgent..."
   echo "$(date '+%Y-%m-%d %H:%M:%S')  Restart requested by voice-type-mac.sh." \
     >> "$LAUNCHD_LOG"
-  pkill -f "$APP" 2>/dev/null || true
-  for _ in $(seq 1 20); do
-    pgrep -f "$APP" >/dev/null 2>&1 || break
-    sleep 0.1
-  done
   rm -f "$SOCKET_PATH" "$HEARTBEAT_PATH"
   if launchctl kickstart -k "$LAUNCHD_SERVICE"; then
     if wait_for_ready; then
@@ -210,22 +206,37 @@ if launchctl print "$LAUNCHD_SERVICE" >/dev/null 2>&1; then
 fi
 
 echo "Stopping existing Voice Type instances..."
-pkill -f "$APP" 2>/dev/null || true
+LOCK_PATH="$INSTALL_DIR/voice-type.instance.lock"
+WORKER_PID=""
+if [[ -f "$LOCK_PATH" ]]; then
+  candidate_pid="$(head -n 1 "$LOCK_PATH" | tr -cd '0-9')"
+  if [[ -n "$candidate_pid" ]]; then
+    candidate_command="$(ps -p "$candidate_pid" -o command= 2>/dev/null || true)"
+    if [[ "$candidate_command" == "$LAUNCHER $APP" ]]; then
+      WORKER_PID="$candidate_pid"
+      kill "$WORKER_PID" 2>/dev/null || true
+    fi
+  fi
+fi
 rm -f "$SOCKET_PATH" "$HEARTBEAT_PATH"
 
 for _ in $(seq 1 20); do
-  pgrep -f "$APP" >/dev/null 2>&1 || break
+  [[ -z "$WORKER_PID" ]] && break
+  kill -0 "$WORKER_PID" 2>/dev/null || break
   sleep 0.25
 done
-if pgrep -f "$APP" >/dev/null 2>&1; then
+if [[ -n "$WORKER_PID" ]] && kill -0 "$WORKER_PID" 2>/dev/null; then
   echo "Existing instance did not exit; force-killing..."
-  pkill -9 -f "$APP" 2>/dev/null || true
+  kill -9 "$WORKER_PID" 2>/dev/null || true
   sleep 0.5
 fi
 
 echo "Launching Voice Type..."
 nohup "$LAUNCHER" "$APP" > /dev/null 2>> "$LAUNCHD_LOG" &
 MAIN_PID=$!
+# Give the detached launcher a scheduling turn before a very fast test/control
+# probe lets this shell exit and tears down its temporary environment.
+sleep 0.05
 if wait_for_ready; then
   echo "Started main pid $MAIN_PID and verified ready."
   exit 0

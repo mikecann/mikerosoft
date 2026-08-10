@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import platform as host_platform
+import threading
 from dataclasses import dataclass
 
 import numpy as np
@@ -110,6 +111,10 @@ class MlxWhisperModel:
         self._mlx_whisper = mlx_whisper
         self.repo_id = repo_id
         self._is_warmed = False
+        # Preview and final transcription may share this model. MLX cache
+        # cleanup is process-wide native work, so it must remain inside the
+        # same critical section as inference.
+        self._inference_lock = threading.Lock()
 
     def warm(self) -> None:
         if self._is_warmed:
@@ -125,22 +130,23 @@ class MlxWhisperModel:
         self._is_warmed = True
 
     def transcribe(self, audio, **kwargs):
-        try:
-            result = self._mlx_whisper.transcribe(
-                np.asarray(audio, dtype=np.float32),
-                path_or_hf_repo=self.repo_id,
-                language=kwargs.get("language", "en"),
-                condition_on_previous_text=kwargs.get("condition_on_previous_text", False),
-                verbose=kwargs.get("verbose", False),
-            )
-            segments = self._segments_from_result(result)
-            info = MlxInfo(
-                language=str(result.get("language") or "en"),
-                language_probability=float(result.get("language_probability") or 1.0),
-            )
-            return segments, info
-        finally:
-            self._mlx_core.clear_cache()
+        with self._inference_lock:
+            try:
+                result = self._mlx_whisper.transcribe(
+                    np.asarray(audio, dtype=np.float32),
+                    path_or_hf_repo=self.repo_id,
+                    language=kwargs.get("language", "en"),
+                    condition_on_previous_text=kwargs.get("condition_on_previous_text", False),
+                    verbose=kwargs.get("verbose", False),
+                )
+                segments = self._segments_from_result(result)
+                info = MlxInfo(
+                    language=str(result.get("language") or "en"),
+                    language_probability=float(result.get("language_probability") or 1.0),
+                )
+                return segments, info
+            finally:
+                self._mlx_core.clear_cache()
 
     def _segments_from_result(self, result: dict) -> list[MlxSegment]:
         parts = [

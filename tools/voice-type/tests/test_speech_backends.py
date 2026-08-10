@@ -1,6 +1,8 @@
 import importlib.util
 import pathlib
 import sys
+import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -171,6 +173,41 @@ class SpeechBackendsTests(unittest.TestCase):
                 model.transcribe([0.0], language="en")
 
         self.assertEqual([True], cleared)
+
+    def test_mlx_transcription_and_cache_cleanup_are_serialized(self):
+        active = 0
+        max_active = 0
+        active_lock = threading.Lock()
+
+        def transcribe(*_args, **_kwargs):
+            nonlocal active, max_active
+            with active_lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.04)
+            with active_lock:
+                active -= 1
+            return {"text": "hello", "language": "en"}
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "mlx_whisper": SimpleNamespace(transcribe=transcribe),
+                "mlx": SimpleNamespace(core=SimpleNamespace(clear_cache=lambda: None)),
+            },
+        ):
+            model = self.module.MlxWhisperModel(repo_id="test/repo")
+            threads = [
+                threading.Thread(target=model.transcribe, args=([0.0],))
+                for _ in range(2)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=1)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(1, max_active)
 
 
 if __name__ == "__main__":

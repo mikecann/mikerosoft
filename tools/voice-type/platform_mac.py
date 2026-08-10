@@ -12,6 +12,10 @@ _LAUNCH_AGENT_LABEL = "com.mikerosoft.voice-type"
 _listener_started = False
 _hotkey_listener_state = "not-started"
 _hotkey_listener_state_lock = threading.Lock()
+_lifecycle_lock = threading.Lock()
+_wake_generation = 0
+_display_generation = 0
+_lifecycle_observers: list[tuple[object, object]] = []
 
 # The app that was frontmost when the push-to-talk key went down.
 # Saved before our overlay can steal focus; re-activated before pasting.
@@ -78,6 +82,58 @@ def _set_hotkey_listener_status(state: str) -> None:
 def hotkey_listener_status() -> str:
     with _hotkey_listener_state_lock:
         return _hotkey_listener_state
+
+
+def _note_system_wake(_notification) -> None:
+    global _wake_generation
+    with _lifecycle_lock:
+        _wake_generation += 1
+    _hotkeys.reset()
+
+
+def _note_display_change(_notification) -> None:
+    global _display_generation
+    with _lifecycle_lock:
+        _display_generation += 1
+
+
+def lifecycle_event_snapshot() -> tuple[int, int]:
+    """Return wake and display generations without doing work in callbacks."""
+    with _lifecycle_lock:
+        return _wake_generation, _display_generation
+
+
+def _install_lifecycle_observers() -> None:
+    if _lifecycle_observers:
+        return
+    try:
+        from AppKit import (
+            NSApplicationDidChangeScreenParametersNotification,
+            NSWorkspace,
+            NSWorkspaceDidWakeNotification,
+        )
+        from Foundation import NSNotificationCenter
+
+        workspace_center = NSWorkspace.sharedWorkspace().notificationCenter()
+        wake_token = workspace_center.addObserverForName_object_queue_usingBlock_(
+            NSWorkspaceDidWakeNotification,
+            None,
+            None,
+            _note_system_wake,
+        )
+        app_center = NSNotificationCenter.defaultCenter()
+        display_token = app_center.addObserverForName_object_queue_usingBlock_(
+            NSApplicationDidChangeScreenParametersNotification,
+            None,
+            None,
+            _note_display_change,
+        )
+        _lifecycle_observers.extend(
+            [(workspace_center, wake_token), (app_center, display_token)]
+        )
+    except Exception:
+        # The wall-clock gap remains as a fallback on older PyObjC installs.
+        return
 
 
 def handle_quartz_hotkey_event(
@@ -516,6 +572,7 @@ def _apply_accessory_policy() -> None:
 def setup_process() -> None:
     """Called before any GUI init — first chance to set the policy."""
     _apply_accessory_policy()
+    _install_lifecycle_observers()
 
 
 def apply_overlay_no_activate(root) -> None:

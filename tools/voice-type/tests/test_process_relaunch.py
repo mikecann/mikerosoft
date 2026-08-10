@@ -102,6 +102,32 @@ class ProcessRelaunchTests(unittest.TestCase):
                 executable_paths=[str(launcher)],
             )
 
+    def test_worker_command_must_end_with_exact_app_path(self):
+        launcher = "/somewhere/Voice Type"
+        app = "/Users/mike/Library/Application Support/Voice Type/voice-type.py"
+
+        self.assertTrue(
+            self.module.command_targets_worker(
+                launcher + " " + app,
+                launcher_path=launcher,
+                app_path=app,
+            )
+        )
+        self.assertFalse(
+            self.module.command_targets_worker(
+                "zsh -c tail " + app,
+                launcher_path=launcher,
+                app_path=app,
+            )
+        )
+        self.assertFalse(
+            self.module.command_targets_worker(
+                "/somewhere/Voice Type /tmp/voice-type.py",
+                launcher_path=launcher,
+                app_path=app,
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

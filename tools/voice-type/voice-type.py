@@ -17,6 +17,7 @@ import math
 import json
 import signal
 import atexit
+import faulthandler
 import subprocess
 import threading
 import queue
@@ -24,6 +25,8 @@ import tkinter as tk
 from tkinter import messagebox
 from tkinter import scrolledtext
 from tkinter import ttk
+
+from process_relaunch import command_targets_worker
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
@@ -114,6 +117,27 @@ def _read_lock_pid(lock_file) -> int | None:
 
 def _kill_wedged_instance(pid: int) -> None:
     """SIGTERM, then SIGKILL if it lingers, a wedged instance so we can take over."""
+    if sys.platform == "darwin":
+        try:
+            command = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="],
+                check=False,
+                capture_output=True,
+                text=True,
+            ).stdout
+            if not command_targets_worker(
+                command,
+                launcher_path=os.path.realpath(sys.executable),
+                app_path=os.path.realpath(__file__),
+            ):
+                print(
+                    f"voice-type: refusing to kill pid {pid}; command no "
+                    "longer matches this worker.",
+                    flush=True,
+                )
+                return
+        except Exception:
+            return
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -250,6 +274,7 @@ from microphone_readiness import (
     resolve_input_device,
 )
 from process_relaunch import restart_current_process, validate_relauncher_files
+from operation_watchdog import OperationWatchdog, finalization_timeout_seconds
 from recording_session import AudioFrameBuffer, RecordingSession
 from speech_backends import (
     MlxWhisperModel,
@@ -284,6 +309,7 @@ PRECOMP_OVERLAP = 1.2     # seconds of overlap to stitch base+tail safely
 PRECOMP_IDLE_SLEEP = 0.08 # small backoff while waiting for enough new audio
 PRECOMP_STOP_WAIT = 0.75  # wait briefly for in-flight pass to finish on key-up
 FORMATTER_TIMEOUT = 6.0   # soft timeout for local text cleanup
+MODEL_LOAD_TIMEOUT = 180.0  # native MLX/Metal initialization must eventually finish
 
 # Final transcription model (accurate):
 #   CPU → "small.en"        ~0.5–1.5s depending on clip length
@@ -399,12 +425,25 @@ def _load_settings():
     _save_settings()
 
 
+_settings_save_lock = threading.Lock()
+
+
 def _save_settings():
+    temp_path = f"{_SETTINGS_PATH}.{os.getpid()}.tmp"
     try:
-        with open(_SETTINGS_PATH, "w", encoding="utf-8") as f:
-            json.dump(_settings, f, indent=2)
+        with _settings_save_lock:
+            snapshot = dict(_settings)
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(snapshot, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, _SETTINGS_PATH)
     except Exception as e:
         log(f"Settings save failed: {e}")
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
 
 
 # Windows-only: path to the VBS silent launcher (used by startup registration).
@@ -498,6 +537,78 @@ class ParakeetWrapper:
 
 _model = None
 _model_lock = threading.Lock()
+_model_status_lock = threading.Lock()
+_model_status = "not-started"
+_model_status_since = time.monotonic()
+_model_status_error = ""
+_runtime_poisoned = False
+_runtime_recorder = None
+_finalization_state_lock = threading.Lock()
+_finalization_started_at: float | None = None
+_finalization_timeout: float | None = None
+
+
+def _begin_finalization(timeout_seconds: float) -> None:
+    global _finalization_started_at, _finalization_timeout
+    with _finalization_state_lock:
+        _finalization_started_at = time.monotonic()
+        _finalization_timeout = timeout_seconds
+
+
+def _complete_finalization() -> None:
+    global _finalization_started_at, _finalization_timeout
+    with _finalization_state_lock:
+        _finalization_started_at = None
+        _finalization_timeout = None
+
+
+def _finalization_state_snapshot() -> dict:
+    with _finalization_state_lock:
+        started = _finalization_started_at
+        timeout = _finalization_timeout
+    return {
+        "finalize_in_flight": started is not None,
+        "finalize_age_seconds": (
+            max(0.0, time.monotonic() - started) if started is not None else 0.0
+        ),
+        "finalize_timeout_seconds": timeout,
+    }
+
+
+def _set_model_status(status: str, error: str = "") -> None:
+    global _model_status, _model_status_since, _model_status_error
+    with _model_status_lock:
+        _model_status = status
+        _model_status_since = time.monotonic()
+        _model_status_error = error
+
+
+def _model_status_snapshot() -> dict:
+    with _model_status_lock:
+        return {
+            "final_model_status": _model_status,
+            "final_model_status_age_seconds": max(
+                0.0, time.monotonic() - _model_status_since
+            ),
+            "final_model_error": _model_status_error,
+        }
+
+
+def _dump_threads_and_restart(reason: str) -> None:
+    """Capture all Python stacks, then abandon poisoned native process state."""
+    global _runtime_poisoned
+    _runtime_poisoned = True
+    log(reason)
+    try:
+        with _log_lock:
+            _log_file.write("--- Python thread dump follows ---\n")
+            _log_file.flush()
+            faulthandler.dump_traceback(file=_log_file, all_threads=True)
+            _log_file.write("--- End Python thread dump ---\n")
+            _log_file.flush()
+    except Exception as error:
+        log(f"Thread dump failed: {error}")
+    _restart_app(reason)
 
 
 def _load_faster_whisper_model(name: str):
@@ -513,28 +624,44 @@ def get_model():
     if _model is None:
         with _model_lock:
             if _model is None:
-                name = _settings.get("final_model", CPU_MODEL)
-                if name in PARAKEET_REPOS:
-                    log(f"Loading final model {name!r} (sherpa-onnx)...")
-                    repo_id = PARAKEET_REPOS[name]
-                    _model = ParakeetWrapper(repo_id)
+                _set_model_status("loading")
+                watchdog = OperationWatchdog(
+                    timeout_seconds=MODEL_LOAD_TIMEOUT,
+                    on_timeout=lambda: _dump_threads_and_restart(
+                        f"Final model load exceeded {MODEL_LOAD_TIMEOUT:.0f}s; "
+                        "restarting with a fresh native backend"
+                    ),
+                    name="model-load",
+                )
+                watchdog.start()
+                try:
+                    name = _settings.get("final_model", CPU_MODEL)
+                    if name in PARAKEET_REPOS:
+                        log(f"Loading final model {name!r} (sherpa-onnx)...")
+                        repo_id = PARAKEET_REPOS[name]
+                        _model = ParakeetWrapper(repo_id)
+                    else:
+                        mlx_repo = resolve_local_mlx_repo(model_name=name)
+                        if mlx_repo:
+                            try:
+                                log(f"Loading final model {name!r} on mlx ({mlx_repo})...")
+                                mlx_model = MlxWhisperModel(repo_id=mlx_repo)
+                                mlx_model.warm()
+                                _model = mlx_model
+                            except Exception as e:
+                                log(
+                                    f"MLX load failed for {name!r}: {e}. "
+                                    "Falling back to faster-whisper."
+                                )
+                        if _model is None:
+                            _model = _load_faster_whisper_model(name)
+                    _set_model_status("ready")
                     log("Final model ready.")
-                    return _model
-
-                mlx_repo = resolve_local_mlx_repo(model_name=name)
-                if mlx_repo:
-                    try:
-                        log(f"Loading final model {name!r} on mlx ({mlx_repo})...")
-                        mlx_model = MlxWhisperModel(repo_id=mlx_repo)
-                        mlx_model.warm()
-                        _model = mlx_model
-                        log("Final model ready.")
-                        return _model
-                    except Exception as e:
-                        log(f"MLX load failed for {name!r}: {e}. Falling back to faster-whisper.")
-
-                _model = _load_faster_whisper_model(name)
-                log("Final model ready.")
+                except Exception as error:
+                    _set_model_status("failed", str(error))
+                    raise
+                finally:
+                    watchdog.complete()
     return _model
 
 
@@ -632,6 +759,7 @@ def _set_final_model(name: str):
     _save_settings()
     with _model_lock:
         _model = None
+        _set_model_status("not-started")
     threading.Thread(target=get_model, daemon=True).start()
 
 
@@ -799,6 +927,8 @@ class TrayIcon:
         self._overlay = overlay
         self.enabled  = True         # read/written by hotkey thread & tray thread
         self._icon    = None
+        self._state = "idle"
+        self._state_since = time.monotonic()
 
     def start(self):
         import pystray
@@ -947,9 +1077,12 @@ class TrayIcon:
 
     def set_state(self, state: str):
         """Thread-safe: update icon colour and tooltip to reflect current state."""
+        effective = "disabled" if not self.enabled else state
+        if effective != self._state:
+            self._state = effective
+            self._state_since = time.monotonic()
         if self._icon is None:
             return
-        effective = "disabled" if not self.enabled else state
         self._icon.icon  = _make_tray_icon(effective)
         self._icon.title = _TRAY_LABELS.get(effective, "Voice Type")
 
@@ -988,13 +1121,16 @@ class MacTrayIcon:
         self._overlay = overlay
         self.enabled = True
         self._state = "idle"
+        self._state_since = time.monotonic()
 
     def start(self):
         log("macOS settings are available by clicking the overlay.")
 
     def set_state(self, state: str):
         effective = "disabled" if not self.enabled else state
-        self._state = effective
+        if effective != self._state:
+            self._state = effective
+            self._state_since = time.monotonic()
 
     def _on_exit(self, icon, item):
         log("Exit requested via tray.")
@@ -1002,9 +1138,13 @@ class MacTrayIcon:
 
 
 def _build_control_state(tray) -> dict:
-    return {
+    state = {
         "enabled": tray.enabled,
         "ui_state": getattr(tray, "_state", "idle"),
+        "ui_state_age_seconds": max(
+            0.0,
+            time.monotonic() - getattr(tray, "_state_since", time.monotonic()),
+        ),
         "final_model": _settings.get("final_model"),
         "stream_model": _settings.get("stream_model"),
         "output_mode": _settings.get("output_mode"),
@@ -1028,6 +1168,18 @@ def _build_control_state(tray) -> dict:
             for name in FORMATTER_MODEL_OPTIONS
         },
     }
+    state.update(_model_status_snapshot())
+    state.update(_finalization_state_snapshot())
+    if sys.platform == "darwin":
+        wake_generation, display_generation = platform.lifecycle_event_snapshot()
+        state["wake_generation"] = wake_generation
+        state["display_generation"] = display_generation
+    recorder = _runtime_recorder
+    state["backend_poisoned"] = bool(
+        _runtime_poisoned
+        or (recorder is not None and recorder.audio_recovery.restart_required)
+    )
+    return state
 
 
 def _apply_settings_changes(*, tray, updates: dict) -> None:
@@ -2159,6 +2311,11 @@ class StreamingTranscriber:
         """Signal the streaming loop to stop. Final transcription is always done by the caller."""
         self._active = False
 
+    def reset(self):
+        """Discard a previous dictation's preview when previews are disabled."""
+        self._active = False
+        self._last_text = ""
+
     @property
     def last_preview(self) -> str:
         return _wrap_preview(self._last_text)
@@ -2295,14 +2452,20 @@ class FinalPrecomputer:
 # Text injection
 # ---------------------------------------------------------------------------
 
+_injection_lock = threading.Lock()
+
+
 def paste_text(text: str):
     if not text.strip():
         return
-    title = platform.get_foreground_window_title()
-    log(f"Injecting into {title!r}: {text!r}")
-    time.sleep(0.05)
-    platform.inject_text(text, log)
-    time.sleep(0.05)
+    # Clipboard save/copy/paste/restore is one transaction. Two overlapping
+    # finalizers must never interleave those steps.
+    with _injection_lock:
+        title = platform.get_foreground_window_title()
+        log(f"Injecting into {title!r}: {text!r}")
+        time.sleep(0.05)
+        platform.inject_text(text, log)
+        time.sleep(0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -2479,6 +2642,7 @@ def _finish_stabilized(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
 # ---------------------------------------------------------------------------
 
 def run():
+    global _runtime_recorder
     # Keep the heartbeat fresh across the (potentially slow) import + startup
     # window, before the hotkey loop takes over refreshing it.
     _write_heartbeat()
@@ -2500,6 +2664,7 @@ def run():
     )
 
     recorder = Recorder()
+    _runtime_recorder = recorder
     overlay  = Overlay(get_level=recorder.get_rms)
     streamer = StreamingTranscriber(recorder, overlay)
     precomputer = FinalPrecomputer(recorder)
@@ -2516,8 +2681,9 @@ def run():
         platform.setup_process()
 
     def hotkey_worker():
-        # Load main model first, then stream model (sequenced to avoid CPU contention)
-        threading.Thread(target=get_model, daemon=True).start()
+        # _load_stream_model loads the final model first, then either reuses it
+        # or loads the preview model. One loader avoids duplicate waiters on a
+        # native backend that may still be settling after wake.
         threading.Thread(target=_load_stream_model, daemon=True).start()
         if _settings.get("formatter_enabled", False):
             def _warm_formatter_after_startup():
@@ -2583,6 +2749,7 @@ def run():
                         "not accept dictation yet."
                     )
                     last_failure = failure
+                _write_heartbeat()
                 if candidate:
                     remaining = max(
                         1,
@@ -2599,6 +2766,23 @@ def run():
                 except Exception as error:
                     log(f"Audio device refresh failed; retrying: {error}")
 
+            # A live microphone is not enough. The incident on 2026-08-10 had
+            # a healthy mic and event tap while MLX warm-up had been wedged for
+            # hours. Do not advertise Ready until the final model is usable.
+            while True:
+                model_state = _model_status_snapshot()
+                status = model_state["final_model_status"]
+                if status == "ready":
+                    break
+                if status == "failed":
+                    _dump_threads_and_restart(
+                        "Final model failed to load; restarting Voice Type"
+                    )
+                    return
+                overlay.show_processing("Loading the speech model...")
+                _write_heartbeat()
+                time.sleep(0.25)
+
             overlay.hide()
             tray.set_state("idle")
         log(f"Ready. Hold {_hotkey_label} to record.")
@@ -2609,7 +2793,33 @@ def run():
         forced_stop = False
         last_heartbeat = 0.0
         last_loop_wall = time.time()
+        if sys.platform == "darwin":
+            last_wake_generation, last_display_generation = (
+                platform.lifecycle_event_snapshot()
+            )
+        else:
+            last_wake_generation = last_display_generation = 0
         while True:
+            if sys.platform == "darwin":
+                wake_generation, display_generation = (
+                    platform.lifecycle_event_snapshot()
+                )
+                if wake_generation != last_wake_generation:
+                    log(
+                        "macOS wake notification received; restarting before "
+                        "CoreAudio or Metal is reused."
+                    )
+                    if _restart_app(
+                        "system resumed; refreshing CoreAudio and Metal backends"
+                    ):
+                        return
+                if display_generation != last_display_generation:
+                    log(
+                        "Display/dock configuration changed; the next recording "
+                        "will resolve the current system microphone."
+                    )
+                    last_display_generation = display_generation
+
             current_wall = time.time()
             if should_restart_after_loop_gap(
                 platform_name=sys.platform,
@@ -2647,7 +2857,9 @@ def run():
                 is_down = False
 
             if is_down and not was_down:
-                if not tray.enabled:
+                if _finalization_state_snapshot()["finalize_in_flight"]:
+                    log("Recording ignored while the previous dictation is finalizing.")
+                elif not tray.enabled:
                     pass  # silently ignore while disabled
                 else:
                     log("--- Key DOWN ---")
@@ -2658,8 +2870,14 @@ def run():
                     started = recorder.start()
                     recording_session.note_start_result(started)
                     if started:
-                        streamer.start()
                         mode = _effective_output_mode()
+                        # final_only does not need speculative full-buffer
+                        # inference. Skipping it removes both O(n^2) work and
+                        # the highest-risk overlap with final MLX inference.
+                        if mode == "final_only":
+                            streamer.reset()
+                        else:
+                            streamer.start()
                         if mode == "precompute":
                             precomputer.start()
                         else:
@@ -2752,7 +2970,33 @@ def run():
                             "before another microphone stream is opened"
                         ),
                     )
-                    threading.Thread(target=finish_job, daemon=True).start()
+                    duration = len(audio) / SAMPLE_RATE if len(audio) else 0.0
+                    timeout_seconds = finalization_timeout_seconds(duration)
+                    _begin_finalization(timeout_seconds)
+                    watchdog = OperationWatchdog(
+                        timeout_seconds=timeout_seconds,
+                        on_timeout=lambda: _dump_threads_and_restart(
+                            "Final transcription exceeded "
+                            f"{timeout_seconds:.1f}s; restarting with a fresh "
+                            "native backend (automatic retry is disabled to "
+                            "avoid duplicate injection)"
+                        ),
+                        name="finalization",
+                    )
+
+                    def _run_finish_with_watchdog():
+                        watchdog.start()
+                        try:
+                            finish_job()
+                        finally:
+                            watchdog.complete()
+                            _complete_finalization()
+
+                    threading.Thread(
+                        target=_run_finish_with_watchdog,
+                        daemon=True,
+                        name="voice-type-finalize",
+                    ).start()
                 elif tray.enabled:
                     log("--- Key UP ignored: recording never started ---")
 
