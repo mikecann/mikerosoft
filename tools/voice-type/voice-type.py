@@ -292,6 +292,7 @@ from text_formatter import (
     resolve_system_prompt,
 )
 from transcription_history import TranscriptionHistory
+from fast_final import merge_overlapping_transcripts
 from preview_format import wrap_preview
 from voice_type_control import ControlServer
 
@@ -306,7 +307,7 @@ STREAM_INTERVAL  = 0.5    # seconds between streaming preview passes
 STREAM_MIN_AUDIO = 0.8    # don't start streaming until this many seconds recorded
 PRECOMP_MIN_AUDIO = 2.5   # only precompute once enough audio has accumulated
 PRECOMP_MIN_DELTA = 0.8   # minimum new audio before launching another pass
-PRECOMP_OVERLAP = 1.2     # seconds of overlap to stitch base+tail safely
+PRECOMP_OVERLAP = 2.0     # enough repeated speech to prove a safe word-level join
 PRECOMP_IDLE_SLEEP = 0.08 # small backoff while waiting for enough new audio
 PRECOMP_STOP_WAIT = 0.75  # wait briefly for in-flight pass to finish on key-up
 FORMATTER_TIMEOUT = 6.0   # soft timeout for local text cleanup
@@ -454,7 +455,7 @@ _OUTPUT_MODE_LABELS = {
     "final_only": "Final Only (quality)",
     "hybrid": "Hybrid (live overlay)",
     "stabilized": "Stabilized (faster output)",
-    "precompute": "Precompute (faster finalize)",
+    "precompute": "Fast Final (precompute + safe tail)",
 }
 
 
@@ -972,7 +973,7 @@ class TrayIcon:
             "final_only":  "Final Only (quality)",
             "hybrid":      "Hybrid (live overlay)",
             "stabilized":  "Stabilized (faster output)",
-            "precompute":  "Precompute (faster finalize)",
+            "precompute":  "Fast Final (precompute + safe tail)",
         }
 
         def _make_output_mode_action(name):
@@ -2473,31 +2474,6 @@ def paste_text(text: str):
 # Finalize helpers (one per output mode)
 # ---------------------------------------------------------------------------
 
-def _merge_text(base: str, tail: str) -> str:
-    """Merge base + tail transcripts with a simple overlap heuristic."""
-    base = base.strip()
-    tail = tail.strip()
-    if not base:
-        return tail
-    if not tail:
-        return base
-    if tail.startswith(base):
-        return tail
-    if base.endswith(tail):
-        return base
-
-    max_overlap = min(len(base), len(tail), 240)
-    overlap = 0
-    for k in range(max_overlap, 0, -1):
-        if base[-k:].lower() == tail[:k].lower():
-            overlap = k
-            break
-    if overlap > 0:
-        merged = base + tail[overlap:]
-        return merged.strip()
-    return f"{base} {tail}".strip()
-
-
 def _finish_one_shot(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
                      t0: float, mode: str):
     """final_only and hybrid: wait for full transcription then inject once.
@@ -2545,7 +2521,13 @@ def _finish_precompute(audio: np.ndarray, overlay: "Overlay", tray: "TrayIcon",
             log(f"[precompute] base={base_samples / SAMPLE_RATE:.1f}s "
                 f"tail={len(tail_audio) / SAMPLE_RATE:.1f}s")
             tail_text = transcribe(tail_audio)
-            text = _merge_text(base_text, tail_text)
+            text = merge_overlapping_transcripts(base_text, tail_text)
+            if text is None:
+                # Whisper may substantially revise words around a pause or
+                # stutter. Never guess at that boundary: the slower full pass
+                # is preferable to silently duplicating or dropping speech.
+                log("[precompute] uncertain transcript overlap; falling back to full pass.")
+                text = transcribe(audio)
         else:
             if base_text and base_samples >= total_samples:
                 log("[precompute] using full precomputed transcript.")

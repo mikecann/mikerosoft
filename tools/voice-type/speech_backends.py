@@ -9,6 +9,12 @@ import numpy as np
 
 SAMPLE_RATE = 16000
 
+# mlx.core.clear_cache() affects the whole process, not one model instance.
+# Preview and final models therefore share a lock even when they use different
+# Whisper weights. Otherwise one thread can clear native working memory while
+# the other is still running inference.
+_MLX_INFERENCE_LOCK = threading.Lock()
+
 MLX_REPOS_BY_MODEL = {
     "tiny.en": "mlx-community/whisper-tiny.en-mlx",
     "base.en": "mlx-community/whisper-base.en-mlx",
@@ -111,10 +117,7 @@ class MlxWhisperModel:
         self._mlx_whisper = mlx_whisper
         self.repo_id = repo_id
         self._is_warmed = False
-        # Preview and final transcription may share this model. MLX cache
-        # cleanup is process-wide native work, so it must remain inside the
-        # same critical section as inference.
-        self._inference_lock = threading.Lock()
+        self._inference_lock = _MLX_INFERENCE_LOCK
 
     def warm(self) -> None:
         if self._is_warmed:

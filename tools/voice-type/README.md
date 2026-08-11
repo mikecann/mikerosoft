@@ -192,16 +192,19 @@ macOS does not currently use the Windows tray flow.
   key is held so the system does not also handle it. Left Ctrl remains untouched.
 - **Audio capture** — `sounddevice` streams 16 kHz mono float32 from the
   default microphone into a NumPy buffer.
-- **Streaming preview** — in `hybrid`, `stabilized`, and `precompute`, a
-  background thread transcribes accumulated audio every 0.5 s and updates the
-  overlay. `final_only` deliberately skips speculative preview inference so the
-  final pass gets exclusive access to MLX/Metal. Accelerated systems default to
-  `large-v3-turbo`; CPU-only systems use `tiny.en`.
+- **Streaming preview** — a background thread transcribes accumulated audio
+  every 0.5 s and updates the overlay in every output mode. Accelerated systems
+  default to `large-v3-turbo`; CPU-only systems use `tiny.en`.
 - **Final transcription** — on key release, the final model transcribes the
   full audio for accuracy. On Windows this is `faster-whisper` on CPU or CUDA.
   On Apple Silicon macOS, `voice-type` prefers **MLX Whisper** for supported
   models, which makes both preview and final passes much faster than the
   previous CPU-only macOS path.
+- **Fast Final mode** — the accurate final model precomputes a growing
+  transcript while the key is held. On release, only a short overlapping tail
+  is transcribed. The transcripts are joined at a confirmed multi-word
+  boundary; if Whisper revised the boundary around a pause or stutter, Voice
+  Type falls back to a full pass instead of risking missing or duplicated text.
 - **Text injection** — Windows injects text via `SendInput` with
   `KEYEVENTF_UNICODE`. macOS re-activates the target app and pastes with a
   clipboard-preserving `pbcopy` + `Cmd+V` flow.

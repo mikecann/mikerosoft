@@ -209,6 +209,42 @@ class SpeechBackendsTests(unittest.TestCase):
         self.assertTrue(all(not thread.is_alive() for thread in threads))
         self.assertEqual(1, max_active)
 
+    def test_different_mlx_models_share_the_process_wide_inference_lock(self):
+        active = 0
+        max_active = 0
+        active_lock = threading.Lock()
+
+        def transcribe(*_args, **_kwargs):
+            nonlocal active, max_active
+            with active_lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.04)
+            with active_lock:
+                active -= 1
+            return {"text": "hello", "language": "en"}
+
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "mlx_whisper": SimpleNamespace(transcribe=transcribe),
+                "mlx": SimpleNamespace(core=SimpleNamespace(clear_cache=lambda: None)),
+            },
+        ):
+            preview_model = self.module.MlxWhisperModel(repo_id="test/tiny")
+            final_model = self.module.MlxWhisperModel(repo_id="test/turbo")
+            threads = [
+                threading.Thread(target=preview_model.transcribe, args=([0.0],)),
+                threading.Thread(target=final_model.transcribe, args=([0.0],)),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=1)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(1, max_active)
+
 
 if __name__ == "__main__":
     unittest.main()
