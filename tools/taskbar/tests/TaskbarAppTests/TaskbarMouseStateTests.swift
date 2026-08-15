@@ -340,6 +340,19 @@ final class TaskbarMouseStateTests: XCTestCase {
         XCTAssertNotEqual(view.hoveredItemKey, initialHoveredKey)
     }
 
+    func testFrameResizeRecomputesHoverForAStationaryPointer() {
+        let view = mouseStateView(items: [mouseStateItem(owner: "Safari")])
+        var pointerLocation = NSPoint(x: 20, y: 15)
+        view.pointerLocationProvider = { pointerLocation }
+        view.update(items: view.items, settings: view.settings)
+        XCTAssertNotNil(view.hoveredItemKey)
+
+        pointerLocation = NSPoint(x: 500, y: 15)
+        view.setFrameSize(NSSize(width: 500, height: 30))
+
+        XCTAssertNil(view.hoveredItemKey)
+    }
+
     func testBackgroundCursorPermissionTargetsTheMainWindowServerConnection() {
         var capturedSource: Int32?
         var capturedTarget: Int32?

@@ -41,6 +41,7 @@ final class TaskbarView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         refreshLayout()
+        updateHover(at: currentPointerLocation())
     }
 
     override func draw(_ dirtyRect: NSRect) {
