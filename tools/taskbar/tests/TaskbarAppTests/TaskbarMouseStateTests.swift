@@ -40,6 +40,20 @@ private func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent
     )!
 }
 
+private func trackingEvent(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent {
+    NSEvent.enterExitEvent(
+        with: type,
+        location: point,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 0,
+        trackingNumber: 0,
+        userData: nil
+    )!
+}
+
 private func mouseStateView(items: [TaskbarItem]) -> TaskbarView {
     let view = TaskbarView(frame: NSRect(x: 0, y: 0, width: 600, height: 30))
     var settings = TaskbarSettingValues.defaults
@@ -272,5 +286,94 @@ final class TaskbarMouseStateTests: XCTestCase {
         view.mouseUp(with: mouseEvent(.leftMouseUp, at: NSPoint(x: 550, y: 15)))
 
         XCTAssertTrue(activatedWidgets.isEmpty)
+    }
+
+    func testPointerHoverFindsTaskbarItemAcrossFullBarHeight() {
+        let safari = mouseStateItem(owner: "Safari")
+        let notes = mouseStateItem(owner: "Notes", pinOrder: 1)
+
+        let target = taskbarHoverTarget(
+            at: NSPoint(x: 110, y: 29),
+            tileRects: [
+                (rect: firstRect, item: safari),
+                (rect: secondRect, item: notes)
+            ],
+            bounds: bounds
+        )
+
+        XCTAssertEqual(target, notes)
+    }
+
+    func testPointerHoverIgnoresEmptySpace() {
+        let safari = mouseStateItem(owner: "Safari")
+
+        XCTAssertNil(taskbarHoverTarget(
+            at: NSPoint(x: 250, y: 15),
+            tileRects: [(rect: firstRect, item: safari)],
+            bounds: bounds
+        ))
+    }
+
+    func testTaskbarClaimsTheNormalArrowCursor() {
+        XCTAssertTrue(taskbarPointerCursor() === NSCursor.arrow)
+    }
+
+    func testPointerEntryImmediatelyHighlightsTheItemUnderTheCursor() {
+        let view = mouseStateView(items: [mouseStateItem(owner: "Safari")])
+
+        view.mouseEntered(with: trackingEvent(.mouseEntered, at: NSPoint(x: 20, y: 15)))
+
+        XCTAssertNotNil(view.hoveredItemKey)
+    }
+
+    func testLayoutRefreshRecomputesHoverForAStationaryPointer() {
+        let safari = mouseStateItem(owner: "Safari", pinOrder: 0)
+        let notes = mouseStateItem(owner: "Notes", pinOrder: 1)
+        let view = mouseStateView(items: [safari, notes])
+        view.pointerLocationProvider = { NSPoint(x: 20, y: 15) }
+        view.update(items: [safari, notes], settings: view.settings)
+        let initialHoveredKey = view.hoveredItemKey
+
+        view.update(items: [notes, safari], settings: view.settings)
+
+        XCTAssertNotNil(initialHoveredKey)
+        XCTAssertNotEqual(view.hoveredItemKey, initialHoveredKey)
+    }
+
+    func testFrameResizeRecomputesHoverForAStationaryPointer() {
+        let view = mouseStateView(items: [mouseStateItem(owner: "Safari")])
+        var pointerLocation = NSPoint(x: 20, y: 15)
+        view.pointerLocationProvider = { pointerLocation }
+        view.update(items: view.items, settings: view.settings)
+        XCTAssertNotNil(view.hoveredItemKey)
+
+        pointerLocation = NSPoint(x: 500, y: 15)
+        view.setFrameSize(NSSize(width: 500, height: 30))
+
+        XCTAssertNil(view.hoveredItemKey)
+    }
+
+    func testBackgroundCursorPermissionTargetsTheMainWindowServerConnection() {
+        var capturedSource: Int32?
+        var capturedTarget: Int32?
+        var capturedKey: String?
+        var capturedValue: CFTypeRef?
+
+        let result = enableTaskbarBackgroundCursorUpdates(
+            mainConnectionID: { 42 },
+            setConnectionProperty: { source, target, key, value in
+                capturedSource = source
+                capturedTarget = target
+                capturedKey = key as String
+                capturedValue = value
+                return .success
+            }
+        )
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(capturedSource, 42)
+        XCTAssertEqual(capturedTarget, 42)
+        XCTAssertEqual(capturedKey, "SetsCursorInBackground")
+        XCTAssertTrue(capturedValue === kCFBooleanTrue)
     }
 }

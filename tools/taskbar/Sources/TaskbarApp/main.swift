@@ -50,6 +50,10 @@ log("taskbar starting pid=\(ProcessInfo.processInfo.processIdentifier)")
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.setActivationPolicy(.accessory)
+let backgroundCursorResult = enableTaskbarBackgroundCursorUpdates()
+if backgroundCursorResult != .success {
+    log("could not enable background cursor updates error=\(backgroundCursorResult.rawValue)")
+}
 app.delegate = delegate
 app.run()
 _ = singleInstance
