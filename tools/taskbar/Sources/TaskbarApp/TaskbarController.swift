@@ -45,6 +45,7 @@ final class TaskbarPanel {
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = false
+        panel.acceptsMouseMovedEvents = true
         panel.isReleasedWhenClosed = false
         panel.level = .floating
         // Do not opt into native fullscreen Spaces. Borderless fullscreen games

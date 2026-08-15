@@ -40,6 +40,20 @@ private func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent
     )!
 }
 
+private func trackingEvent(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent {
+    NSEvent.enterExitEvent(
+        with: type,
+        location: point,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 0,
+        trackingNumber: 0,
+        userData: nil
+    )!
+}
+
 private func mouseStateView(items: [TaskbarItem]) -> TaskbarView {
     let view = TaskbarView(frame: NSRect(x: 0, y: 0, width: 600, height: 30))
     var settings = TaskbarSettingValues.defaults
@@ -302,6 +316,28 @@ final class TaskbarMouseStateTests: XCTestCase {
 
     func testTaskbarClaimsTheNormalArrowCursor() {
         XCTAssertTrue(taskbarPointerCursor() === NSCursor.arrow)
+    }
+
+    func testPointerEntryImmediatelyHighlightsTheItemUnderTheCursor() {
+        let view = mouseStateView(items: [mouseStateItem(owner: "Safari")])
+
+        view.mouseEntered(with: trackingEvent(.mouseEntered, at: NSPoint(x: 20, y: 15)))
+
+        XCTAssertNotNil(view.hoveredItemKey)
+    }
+
+    func testLayoutRefreshRecomputesHoverForAStationaryPointer() {
+        let safari = mouseStateItem(owner: "Safari", pinOrder: 0)
+        let notes = mouseStateItem(owner: "Notes", pinOrder: 1)
+        let view = mouseStateView(items: [safari, notes])
+        view.pointerLocationProvider = { NSPoint(x: 20, y: 15) }
+        view.update(items: [safari, notes], settings: view.settings)
+        let initialHoveredKey = view.hoveredItemKey
+
+        view.update(items: [notes, safari], settings: view.settings)
+
+        XCTAssertNotNil(initialHoveredKey)
+        XCTAssertNotEqual(view.hoveredItemKey, initialHoveredKey)
     }
 
     func testBackgroundCursorPermissionTargetsTheMainWindowServerConnection() {

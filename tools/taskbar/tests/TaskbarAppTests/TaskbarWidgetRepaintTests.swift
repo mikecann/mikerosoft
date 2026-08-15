@@ -3,6 +3,12 @@ import XCTest
 @testable import TaskbarApp
 
 final class TaskbarWidgetRepaintTests: XCTestCase {
+    func testTaskbarPanelAcceptsMouseMovedEventsForHoverTracking() {
+        let taskbarPanel = makePanel()
+
+        XCTAssertTrue(taskbarPanel.panel.acceptsMouseMovedEvents)
+    }
+
     func testRepaintTimerRunsOnlyWhenAttachedVisibleAndAWidgetIsEnabled() {
         var values = TaskbarSettingValues.defaults
         values.dateTimeWidget.isEnabled = false

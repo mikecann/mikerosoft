@@ -18,7 +18,8 @@ final class TaskbarView: NSView {
     private var mouseDownWidget: (rect: NSRect, id: TaskbarWidgetID, statsMetric: StatsWidgetMetric?)?
     private var didDragPinnedItem = false
     private var hoverTrackingArea: NSTrackingArea?
-    private var hoveredItemKey: String?
+    private(set) var hoveredItemKey: String?
+    var pointerLocationProvider: (() -> NSPoint?)?
     private var tileHeight: CGFloat {
         max(18, bounds.height - 8)
     }
@@ -32,11 +33,8 @@ final class TaskbarView: NSView {
     func update(items: [TaskbarItem], settings: TaskbarSettingValues) {
         self.items = items
         self.settings = settings
-        if let hoveredItemKey,
-           !items.contains(where: { taskbarItemInteractionKey($0) == hoveredItemKey }) {
-            self.hoveredItemKey = nil
-        }
         refreshLayout()
+        updateHover(at: currentPointerLocation())
         needsDisplay = true
     }
 
@@ -81,27 +79,39 @@ final class TaskbarView: NSView {
         // A neighbouring window can leave its resize cursor active as the
         // pointer crosses directly onto this borderless panel.
         taskbarPointerCursor().set()
+        updateHover(at: convert(event.locationInWindow, from: nil))
     }
 
     override func mouseMoved(with event: NSEvent) {
         taskbarPointerCursor().set()
         let point = convert(event.locationInWindow, from: nil)
-        let item = taskbarHoverTarget(
-            at: point,
-            tileRects: tileRects.map { (rect: $0.0, item: $0.1) },
-            bounds: bounds
-        )
-        setHoveredItemKey(item.map(taskbarItemInteractionKey))
+        updateHover(at: point)
     }
 
     override func mouseExited(with event: NSEvent) {
-        setHoveredItemKey(nil)
+        updateHover(at: nil)
     }
 
-    private func setHoveredItemKey(_ key: String?) {
+    private func updateHover(at point: NSPoint?) {
+        let item = point.flatMap { point in
+            taskbarHoverTarget(
+                at: point,
+                tileRects: tileRects.map { (rect: $0.0, item: $0.1) },
+                bounds: bounds
+            )
+        }
+        let key = item.map(taskbarItemInteractionKey)
         guard key != hoveredItemKey else { return }
         hoveredItemKey = key
         needsDisplay = true
+    }
+
+    private func currentPointerLocation() -> NSPoint? {
+        if let pointerLocationProvider {
+            return pointerLocationProvider()
+        }
+        guard let window else { return nil }
+        return convert(window.mouseLocationOutsideOfEventStream, from: nil)
     }
 
     func frontmostTileLayout() -> (rect: NSRect, item: TaskbarItem)? {
