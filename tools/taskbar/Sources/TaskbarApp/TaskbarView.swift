@@ -17,6 +17,8 @@ final class TaskbarView: NSView {
     private var mouseDownPoint: NSPoint?
     private var mouseDownWidget: (rect: NSRect, id: TaskbarWidgetID, statsMetric: StatsWidgetMetric?)?
     private var didDragPinnedItem = false
+    private var hoverTrackingArea: NSTrackingArea?
+    private var hoveredItemKey: String?
     private var tileHeight: CGFloat {
         max(18, bounds.height - 8)
     }
@@ -30,6 +32,10 @@ final class TaskbarView: NSView {
     func update(items: [TaskbarItem], settings: TaskbarSettingValues) {
         self.items = items
         self.settings = settings
+        if let hoveredItemKey,
+           !items.contains(where: { taskbarItemInteractionKey($0) == hoveredItemKey }) {
+            self.hoveredItemKey = nil
+        }
         refreshLayout()
         needsDisplay = true
     }
@@ -41,10 +47,61 @@ final class TaskbarView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         for (rect, item) in tileRects {
-            drawTile(item: item, rect: rect)
+            drawTile(
+                item: item,
+                rect: rect,
+                isHovered: taskbarItemInteractionKey(item) == hoveredItemKey
+            )
         }
 
         drawWidgets()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        hoverTrackingArea = trackingArea
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: taskbarPointerCursor())
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        // A neighbouring window can leave its resize cursor active as the
+        // pointer crosses directly onto this borderless panel.
+        taskbarPointerCursor().set()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        taskbarPointerCursor().set()
+        let point = convert(event.locationInWindow, from: nil)
+        let item = taskbarHoverTarget(
+            at: point,
+            tileRects: tileRects.map { (rect: $0.0, item: $0.1) },
+            bounds: bounds
+        )
+        setHoveredItemKey(item.map(taskbarItemInteractionKey))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHoveredItemKey(nil)
+    }
+
+    private func setHoveredItemKey(_ key: String?) {
+        guard key != hoveredItemKey else { return }
+        hoveredItemKey = key
+        needsDisplay = true
     }
 
     func frontmostTileLayout() -> (rect: NSRect, item: TaskbarItem)? {
@@ -177,7 +234,17 @@ final class TaskbarView: NSView {
         )
     }
 
-    private func drawTile(item: TaskbarItem, rect: NSRect) {
+    private func drawTile(item: TaskbarItem, rect: NSRect, isHovered: Bool) {
+        if isHovered {
+            let hoverRect = rect.insetBy(dx: 0.5, dy: 0.5)
+            let hoverPath = NSBezierPath(roundedRect: hoverRect, xRadius: 6, yRadius: 6)
+            NSColor.white.withAlphaComponent(0.07).setFill()
+            hoverPath.fill()
+            NSColor.white.withAlphaComponent(0.10).setStroke()
+            hoverPath.lineWidth = 1
+            hoverPath.stroke()
+        }
+
         let preferredIconSize = TaskbarItemMetrics.iconSize(for: rect.height)
         let iconSize = min(preferredIconSize, max(0, rect.width - 2))
         guard iconSize > 0 else { return }
@@ -352,6 +419,24 @@ func taskbarInteractionRect(for visualRect: NSRect, in bounds: NSRect) -> NSRect
         width: visualRect.width,
         height: bounds.height
     )
+}
+
+func taskbarPointerCursor() -> NSCursor {
+    .arrow
+}
+
+func taskbarHoverTarget(
+    at point: NSPoint,
+    tileRects: [(rect: NSRect, item: TaskbarItem)],
+    bounds: NSRect
+) -> TaskbarItem? {
+    tileRects.first {
+        taskbarInteractionRect(for: $0.rect, in: bounds).contains(point)
+    }?.item
+}
+
+private func taskbarItemInteractionKey(_ item: TaskbarItem) -> String {
+    "\(item.identity)#\(item.windowIDs.first.map(String.init) ?? "pinned")"
 }
 
 func taskbarWidgetSpacing(widgetSpacing: CGFloat) -> CGFloat {

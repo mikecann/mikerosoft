@@ -273,4 +273,58 @@ final class TaskbarMouseStateTests: XCTestCase {
 
         XCTAssertTrue(activatedWidgets.isEmpty)
     }
+
+    func testPointerHoverFindsTaskbarItemAcrossFullBarHeight() {
+        let safari = mouseStateItem(owner: "Safari")
+        let notes = mouseStateItem(owner: "Notes", pinOrder: 1)
+
+        let target = taskbarHoverTarget(
+            at: NSPoint(x: 110, y: 29),
+            tileRects: [
+                (rect: firstRect, item: safari),
+                (rect: secondRect, item: notes)
+            ],
+            bounds: bounds
+        )
+
+        XCTAssertEqual(target, notes)
+    }
+
+    func testPointerHoverIgnoresEmptySpace() {
+        let safari = mouseStateItem(owner: "Safari")
+
+        XCTAssertNil(taskbarHoverTarget(
+            at: NSPoint(x: 250, y: 15),
+            tileRects: [(rect: firstRect, item: safari)],
+            bounds: bounds
+        ))
+    }
+
+    func testTaskbarClaimsTheNormalArrowCursor() {
+        XCTAssertTrue(taskbarPointerCursor() === NSCursor.arrow)
+    }
+
+    func testBackgroundCursorPermissionTargetsTheMainWindowServerConnection() {
+        var capturedSource: Int32?
+        var capturedTarget: Int32?
+        var capturedKey: String?
+        var capturedValue: CFTypeRef?
+
+        let result = enableTaskbarBackgroundCursorUpdates(
+            mainConnectionID: { 42 },
+            setConnectionProperty: { source, target, key, value in
+                capturedSource = source
+                capturedTarget = target
+                capturedKey = key as String
+                capturedValue = value
+                return .success
+            }
+        )
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(capturedSource, 42)
+        XCTAssertEqual(capturedTarget, 42)
+        XCTAssertEqual(capturedKey, "SetsCursorInBackground")
+        XCTAssertTrue(capturedValue === kCFBooleanTrue)
+    }
 }
