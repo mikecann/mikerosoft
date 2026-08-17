@@ -693,13 +693,24 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     private func renderControlCenterLightsWidget(screen: ScreenInfo?, in stack: NSStackView) {
         let snapshot = ControlCenterLightsController.shared.snapshot()
-        let subtitle: String
         if let screen {
-            subtitle = "The same one-button lights control is used on every monitor, including \(screen.name)."
-        } else {
-            subtitle = "A single button that toggles all Elgato lights discovered in Control Center."
+            let override = settings.overrides(for: screen.persistentID)
+            let resolved = settings.values(for: screen.persistentID)
+            addHeader("Control Center Lights", subtitle: "\(screen.name) override for the Control Center Lights widget.", to: stack)
+            stack.addArrangedSubview(overrideControlCenterLightsWidgetRow(
+                isOverridden: override.controlCenterLightsWidget != nil,
+                value: resolved.controlCenterLightsWidget,
+                discoveredCount: snapshot.discoveredCount
+            ))
+            return
         }
-        addHeader("Control Center Lights", subtitle: subtitle, to: stack)
+
+        let values = settings.preferences.general
+        addHeader(
+            "Control Center Lights",
+            subtitle: "Default lights button setting used by every monitor unless that monitor has an override.",
+            to: stack
+        )
         stack.addArrangedSubview(settingRow(
             icon: "lightbulb",
             title: "Lights button",
@@ -707,7 +718,7 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
                 ? "Looking for Elgato lights on your local network."
                 : "Found \(snapshot.discoveredCount) Elgato light(s).",
             control: checkbox(
-                state: settings.preferences.general.controlCenterLightsWidget.isEnabled,
+                state: values.controlCenterLightsWidget.isEnabled,
                 action: #selector(setGeneralControlCenterLightsEnabled(_:))
             )
         ))
@@ -1271,6 +1282,41 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         )
     }
 
+    private func overrideControlCenterLightsWidgetRow(
+        isOverridden: Bool,
+        value: ControlCenterLightsWidgetSettings,
+        discoveredCount: Int
+    ) -> NSView {
+        let controls = NSStackView()
+        controls.orientation = .vertical
+        controls.alignment = .leading
+        controls.spacing = 6
+
+        let override = NSButton(
+            checkboxWithTitle: "Override",
+            target: self,
+            action: #selector(toggleMonitorControlCenterLightsOverride(_:))
+        )
+        override.state = isOverridden ? .on : .off
+        override.widthAnchor.constraint(equalToConstant: 92).isActive = true
+
+        controls.addArrangedSubview(override)
+        controls.addArrangedSubview(titledCheckbox(
+            "Show",
+            state: value.isEnabled,
+            enabled: isOverridden,
+            action: #selector(setMonitorControlCenterLightsEnabled(_:))
+        ))
+        return settingRow(
+            icon: "lightbulb",
+            title: "Lights button",
+            description: discoveredCount == 0
+                ? "Looking for Elgato lights on your local network."
+                : "Found \(discoveredCount) Elgato light(s).",
+            control: controls
+        )
+    }
+
     private func overrideHeightRow(isOverridden: Bool, value: Double) -> NSView {
         let controls = horizontalRow()
 
@@ -1783,6 +1829,15 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         renderDetail()
     }
 
+    @objc private func toggleMonitorControlCenterLightsOverride(_ sender: NSButton) {
+        guard let id = selectedMonitorID else { return }
+        let value = values(for: id).controlCenterLightsWidget
+        updateOverrides(for: id) {
+            $0.controlCenterLightsWidget = sender.state == .on ? value : nil
+        }
+        renderDetail()
+    }
+
     @objc private func toggleMonitorHeightOverride(_ sender: NSButton) {
         guard let id = selectedMonitorID else { return }
         let value = values(for: id).taskbarHeight
@@ -1946,6 +2001,23 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     @objc private func setMonitorBatteryEnabled(_ sender: NSButton) {
         updateMonitorBatteryWidget { $0.isEnabled = sender.state == .on }
+    }
+
+    private func updateMonitorControlCenterLightsWidget(
+        _ transform: (inout ControlCenterLightsWidgetSettings) -> Void
+    ) {
+        guard let id = selectedMonitorID else { return }
+        let current = overrides(for: id).controlCenterLightsWidget
+            ?? values(for: id).controlCenterLightsWidget
+        updateOverrides(for: id) { override in
+            var value = current
+            transform(&value)
+            override.controlCenterLightsWidget = value
+        }
+    }
+
+    @objc private func setMonitorControlCenterLightsEnabled(_ sender: NSButton) {
+        updateMonitorControlCenterLightsWidget { $0.isEnabled = sender.state == .on }
     }
 
     @objc private func setMonitorStatsCPUDisplay(_ sender: NSPopUpButton) {

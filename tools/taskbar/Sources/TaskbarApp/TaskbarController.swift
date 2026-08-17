@@ -564,7 +564,7 @@ final class TaskbarController: NSObject {
         case .battery:
             return makeBatteryWidgetMenu(monitorID: monitorID)
         case .controlCenterLights:
-            return makeControlCenterLightsWidgetMenu()
+            return makeControlCenterLightsWidgetMenu(monitorID: monitorID)
         case .dateTime:
             return makeDateTimeWidgetMenu(monitorID: monitorID)
         }
@@ -852,8 +852,9 @@ final class TaskbarController: NSObject {
         return menu
     }
 
-    private func makeControlCenterLightsWidgetMenu() -> NSMenu {
+    private func makeControlCenterLightsWidgetMenu(monitorID: String) -> NSMenu {
         let snapshot = ControlCenterLightsController.shared.snapshot()
+        let value = settings.values(for: monitorID).controlCenterLightsWidget
         let menu = NSMenu(title: "Control Center Lights")
         let statusText: String
         if snapshot.reachableCount == 0 {
@@ -872,7 +873,7 @@ final class TaskbarController: NSObject {
 
         addWidgetToggle(
             title: "Show Lights Button",
-            state: settings.preferences.general.controlCenterLightsWidget.isEnabled,
+            state: value.isEnabled,
             action: #selector(toggleControlCenterLightsWidgetFromMenu),
             to: menu
         )
@@ -1041,7 +1042,7 @@ final class TaskbarController: NSObject {
     }
 
     @objc private func toggleControlCenterLightsWidgetFromMenu() {
-        settings.updateGeneral { $0.controlCenterLightsWidget.isEnabled.toggle() }
+        updateControlCenterLightsWidgetFromMenu { $0.isEnabled.toggle() }
     }
 
     @objc private func toggleStatsCPUFromMenu() {
@@ -1091,6 +1092,13 @@ final class TaskbarController: NSObject {
     private func updateBatteryWidgetFromMenu(_ transform: (inout BatteryWidgetSettings) -> Void) {
         guard let context = menuWidgetContext, context.widgetID == .battery else { return }
         settings.updateBatteryWidget(for: context.monitorID, transform)
+    }
+
+    private func updateControlCenterLightsWidgetFromMenu(
+        _ transform: (inout ControlCenterLightsWidgetSettings) -> Void
+    ) {
+        guard let context = menuWidgetContext, context.widgetID == .controlCenterLights else { return }
+        settings.updateControlCenterLightsWidget(for: context.monitorID, transform)
     }
 
     @objc private func quit() {

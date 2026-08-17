@@ -177,6 +177,32 @@ final class SettingsWindowControllerTests: XCTestCase {
         XCTAssertFalse(settings.preferences.general.batteryWidget.isEnabled)
     }
 
+    func testControlCenterLightsMonitorPageUsesAnOverrideToggle() throws {
+        let screen = ScreenInfo(
+            id: 7,
+            name: "Studio Display",
+            appKitFrame: .zero,
+            quartzFrame: .zero,
+            persistentID: "display:studio"
+        )
+        let settings = TaskbarSettings(store: RecordingSettingsStore())
+        let controller = SettingsWindowController(settings: settings, screens: [screen])
+        controller.selectWidget(.controlCenterLights, screenID: screen.id)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let override = try XCTUnwrap(
+            button(actionNamed: "toggleMonitorControlCenterLightsOverride:", in: contentView)
+        )
+        XCTAssertEqual(override.state, .off)
+
+        override.state = .on
+        XCTAssertTrue(NSApplication.shared.sendAction(try XCTUnwrap(override.action), to: override.target, from: override))
+
+        XCTAssertEqual(
+            settings.preferences.monitorOverrides["display:studio"]?.controlCenterLightsWidget,
+            .defaults
+        )
+    }
+
     func testGeneralWidgetSpacingControlUpdatesOnlyWidgetSpacing() throws {
         let settings = TaskbarSettings(store: RecordingSettingsStore())
         let controller = SettingsWindowController(settings: settings, screens: [])

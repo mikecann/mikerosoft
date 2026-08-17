@@ -523,6 +523,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
     var dateTimeWidget: DateTimeWidgetSettings?
     var statsWidget: StatsWidgetSettings?
     var batteryWidget: BatteryWidgetSettings?
+    var controlCenterLightsWidget: ControlCenterLightsWidgetSettings?
     var taskbarHeight: Double?
     var minimumItemWidth: Double?
     var maximumItemWidth: Double?
@@ -542,6 +543,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
             || dateTimeWidget != nil
             || statsWidget != nil
             || batteryWidget != nil
+            || controlCenterLightsWidget != nil
             || taskbarHeight != nil
             || minimumItemWidth != nil
             || maximumItemWidth != nil
@@ -563,6 +565,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         case dateTimeWidget
         case statsWidget
         case batteryWidget
+        case controlCenterLightsWidget
         case taskbarHeight
         case minimumItemWidth
         case maximumItemWidth
@@ -583,6 +586,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         dateTimeWidget: DateTimeWidgetSettings? = nil,
         statsWidget: StatsWidgetSettings? = nil,
         batteryWidget: BatteryWidgetSettings? = nil,
+        controlCenterLightsWidget: ControlCenterLightsWidgetSettings? = nil,
         taskbarHeight: Double? = nil,
         minimumItemWidth: Double? = nil,
         maximumItemWidth: Double? = nil,
@@ -601,6 +605,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         self.dateTimeWidget = dateTimeWidget
         self.statsWidget = statsWidget
         self.batteryWidget = batteryWidget
+        self.controlCenterLightsWidget = controlCenterLightsWidget
         self.taskbarHeight = taskbarHeight
         self.minimumItemWidth = minimumItemWidth
         self.maximumItemWidth = maximumItemWidth
@@ -628,6 +633,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         dateTimeWidget = try container.decodeIfPresent(DateTimeWidgetSettings.self, forKey: .dateTimeWidget)
         statsWidget = try container.decodeIfPresent(StatsWidgetSettings.self, forKey: .statsWidget)
         batteryWidget = try container.decodeIfPresent(BatteryWidgetSettings.self, forKey: .batteryWidget)
+        controlCenterLightsWidget = try container.decodeIfPresent(ControlCenterLightsWidgetSettings.self, forKey: .controlCenterLightsWidget)
         taskbarHeight = try container.decodeIfPresent(Double.self, forKey: .taskbarHeight)
         minimumItemWidth = try container.decodeIfPresent(Double.self, forKey: .minimumItemWidth)
         maximumItemWidth = try container.decodeIfPresent(Double.self, forKey: .maximumItemWidth)
@@ -649,6 +655,7 @@ struct TaskbarMonitorOverrides: Codable, Equatable {
         try container.encodeIfPresent(dateTimeWidget, forKey: .dateTimeWidget)
         try container.encodeIfPresent(statsWidget, forKey: .statsWidget)
         try container.encodeIfPresent(batteryWidget, forKey: .batteryWidget)
+        try container.encodeIfPresent(controlCenterLightsWidget, forKey: .controlCenterLightsWidget)
         try container.encodeIfPresent(taskbarHeight, forKey: .taskbarHeight)
         try container.encodeIfPresent(minimumItemWidth, forKey: .minimumItemWidth)
         try container.encodeIfPresent(maximumItemWidth, forKey: .maximumItemWidth)
@@ -718,6 +725,9 @@ struct TaskbarPreferences: Codable, Equatable {
         }
         if let batteryWidget = override.batteryWidget {
             values.batteryWidget = batteryWidget
+        }
+        if let controlCenterLightsWidget = override.controlCenterLightsWidget {
+            values.controlCenterLightsWidget = controlCenterLightsWidget
         }
         if let taskbarHeight = override.taskbarHeight {
             values.taskbarHeight = taskbarHeight
@@ -976,6 +986,30 @@ final class TaskbarSettings {
 
     func updateBatteryWidget(for screenID: UInt32, _ transform: (inout BatteryWidgetSettings) -> Void) {
         updateBatteryWidget(for: String(screenID), transform)
+    }
+
+    func updateControlCenterLightsWidget(
+        for monitorID: String,
+        _ transform: (inout ControlCenterLightsWidgetSettings) -> Void
+    ) {
+        if overrides(for: monitorID).controlCenterLightsWidget != nil {
+            updateOverrides(for: monitorID) { override in
+                var value = override.controlCenterLightsWidget ?? .defaults
+                transform(&value)
+                override.controlCenterLightsWidget = value
+            }
+        } else {
+            updateGeneral { values in
+                transform(&values.controlCenterLightsWidget)
+            }
+        }
+    }
+
+    func updateControlCenterLightsWidget(
+        for screenID: UInt32,
+        _ transform: (inout ControlCenterLightsWidgetSettings) -> Void
+    ) {
+        updateControlCenterLightsWidget(for: String(screenID), transform)
     }
 
     func pin(_ app: PinnedApp, for screenID: UInt32? = nil) {

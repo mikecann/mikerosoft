@@ -58,4 +58,41 @@ final class ControlCenterLightsWidgetTests: XCTestCase {
 
         XCTAssertEqual(decoded.controlCenterLightsWidget, .defaults)
     }
+
+    func testMonitorOverrideCanHideLightsButtonWithoutChangingGeneralDefault() {
+        let settings = TaskbarSettings(store: RecordingControlCenterLightsSettingsStore())
+        settings.updateOverrides(for: "display:studio") {
+            $0.controlCenterLightsWidget = ControlCenterLightsWidgetSettings(isEnabled: false)
+        }
+
+        XCTAssertTrue(settings.preferences.general.controlCenterLightsWidget.isEnabled)
+        XCTAssertFalse(settings.values(for: "display:studio").controlCenterLightsWidget.isEnabled)
+        XCTAssertTrue(settings.values(for: "display:other").controlCenterLightsWidget.isEnabled)
+    }
+
+    func testMonitorWidgetMenuUpdatesItsOverrideInsteadOfTheGeneralDefault() throws {
+        let settings = TaskbarSettings(store: RecordingControlCenterLightsSettingsStore())
+        settings.updateOverrides(for: "display:studio") {
+            $0.controlCenterLightsWidget = ControlCenterLightsWidgetSettings(isEnabled: true)
+        }
+        let controller = TaskbarController(settings: settings, startAtLoginSync: { _ in })
+        let menu = try XCTUnwrap(
+            controller.makeWidgetMenu(
+                for: .controlCenterLights,
+                screenID: 7,
+                monitorID: "display:studio"
+            )
+        )
+        let showItem = try XCTUnwrap(menu.items.first { $0.title == "Show Lights Button" })
+
+        _ = controller.perform(try XCTUnwrap(showItem.action), with: showItem)
+
+        XCTAssertTrue(settings.preferences.general.controlCenterLightsWidget.isEnabled)
+        XCTAssertFalse(settings.preferences.monitorOverrides["display:studio"]?.controlCenterLightsWidget?.isEnabled ?? true)
+    }
+}
+
+private final class RecordingControlCenterLightsSettingsStore: TaskbarSettingsStoring {
+    func data(forKey key: String) -> Data? { nil }
+    func set(_ data: Data, forKey key: String) {}
 }
