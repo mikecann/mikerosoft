@@ -203,6 +203,27 @@ final class SettingsWindowControllerTests: XCTestCase {
         )
     }
 
+    func testControlCenterLightsSettingsCanOptInToPrompterControl() throws {
+        let settings = TaskbarSettings(store: RecordingSettingsStore())
+        let controller = SettingsWindowController(settings: settings, screens: [])
+        controller.selectWidget(.controlCenterLights)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let prompter = try XCTUnwrap(
+            button(actionNamed: "setGeneralControlCenterLightsTeleprompter:", in: contentView)
+        )
+        XCTAssertEqual(prompter.title, "Include Elgato Prompter")
+        XCTAssertEqual(prompter.state, .off)
+
+        prompter.state = .on
+        XCTAssertTrue(NSApplication.shared.sendAction(
+            try XCTUnwrap(prompter.action),
+            to: prompter.target,
+            from: prompter
+        ))
+
+        XCTAssertTrue(settings.preferences.general.controlCenterLightsWidget.controlsTeleprompter)
+    }
+
     func testGeneralWidgetSpacingControlUpdatesOnlyWidgetSpacing() throws {
         let settings = TaskbarSettings(store: RecordingSettingsStore())
         let controller = SettingsWindowController(settings: settings, screens: [])

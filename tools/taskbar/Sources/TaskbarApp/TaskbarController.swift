@@ -587,7 +587,17 @@ final class TaskbarController: NSObject {
                 of: view
             )
         case .controlCenterLights:
-            ControlCenterLightsController.shared.toggleAll()
+            let monitorID = monitorID ?? String(screenID)
+            let controlsTeleprompter = settings.values(for: monitorID)
+                .controlCenterLightsWidget.controlsTeleprompter
+            ControlCenterLightsController.shared.toggleAll { target in
+                guard controlsTeleprompter, let target else { return }
+                DisplayLinkTeleprompterController.shared.setEnabled(target) { result in
+                    if case let .failure(error) = result {
+                        log("DisplayLink Elgato Prompter toggle failed: \(error.localizedDescription)")
+                    }
+                }
+            }
         case .battery, .dateTime:
             break
         }
@@ -877,6 +887,12 @@ final class TaskbarController: NSObject {
             action: #selector(toggleControlCenterLightsWidgetFromMenu),
             to: menu
         )
+        addWidgetToggle(
+            title: "Include Elgato Prompter",
+            state: value.controlsTeleprompter,
+            action: #selector(toggleControlCenterLightsPrompterFromMenu),
+            to: menu
+        )
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Lights Settings...", action: #selector(showWidgetSettingsFromMenu), keyEquivalent: ",")
         settingsItem.target = self
@@ -1043,6 +1059,10 @@ final class TaskbarController: NSObject {
 
     @objc private func toggleControlCenterLightsWidgetFromMenu() {
         updateControlCenterLightsWidgetFromMenu { $0.isEnabled.toggle() }
+    }
+
+    @objc private func toggleControlCenterLightsPrompterFromMenu() {
+        updateControlCenterLightsWidgetFromMenu { $0.controlsTeleprompter.toggle() }
     }
 
     @objc private func toggleStatsCPUFromMenu() {

@@ -106,6 +106,14 @@ power button. A click reads every reachable light first. If they are all on it
 turns them all off; otherwise it turns them all on. The request changes only
 power, preserving each light's brightness and colour temperature.
 
+The widget can optionally include the Elgato Prompter in the same action. Turn
+on **Include Elgato Prompter** in the widget settings or its right-click menu.
+Taskbar then uses DisplayLink Manager's own per-display switch, matching the
+Prompter by name, so turning the studio off also stops its DisplayLink display
+stream and turning the studio on reconnects it. This option is off by default
+when upgrading so an existing lights button never unexpectedly disables a
+display.
+
 Stats shows CPU, RAM, and network activity in a compact strip. CPU can show a
 percentage, aggregate usage history, or one live utilisation bar per logical
 CPU. Per-CPU bars use the performance-level names reported by macOS and colour
@@ -134,7 +142,9 @@ real app bundle so macOS can remember the permission consistently.
 
 The lights widget needs Local Network access to discover and control Elgato
 lights. `restart.sh` declares the `_elg._tcp` Bonjour service in the staged app
-bundle so macOS can ask for and retain that permission.
+bundle so macOS can ask for and retain that permission. Prompter control also
+needs Taskbar's existing Accessibility permission so it can operate DisplayLink
+Manager's own display switch.
 
 Logs go to:
 

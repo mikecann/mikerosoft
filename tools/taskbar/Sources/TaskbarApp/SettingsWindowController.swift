@@ -717,9 +717,11 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             description: snapshot.discoveredCount == 0
                 ? "Looking for Elgato lights on your local network."
                 : "Found \(snapshot.discoveredCount) Elgato light(s).",
-            control: checkbox(
-                state: values.controlCenterLightsWidget.isEnabled,
-                action: #selector(setGeneralControlCenterLightsEnabled(_:))
+            control: controlCenterLightsWidgetControls(
+                value: values.controlCenterLightsWidget,
+                enabled: true,
+                enabledAction: #selector(setGeneralControlCenterLightsEnabled(_:)),
+                teleprompterAction: #selector(setGeneralControlCenterLightsTeleprompter(_:))
             )
         ))
     }
@@ -912,6 +914,31 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         let row = horizontalRow()
         row.addArrangedSubview(titledCheckbox("Show", state: value.isEnabled, enabled: enabled, action: enabledAction))
         return row
+    }
+
+    private func controlCenterLightsWidgetControls(
+        value: ControlCenterLightsWidgetSettings,
+        enabled: Bool,
+        enabledAction: Selector,
+        teleprompterAction: Selector
+    ) -> NSView {
+        let controls = NSStackView()
+        controls.orientation = .vertical
+        controls.alignment = .leading
+        controls.spacing = 6
+        controls.addArrangedSubview(titledCheckbox(
+            "Show",
+            state: value.isEnabled,
+            enabled: enabled,
+            action: enabledAction
+        ))
+        controls.addArrangedSubview(titledCheckbox(
+            "Include Elgato Prompter",
+            state: value.controlsTeleprompter,
+            enabled: enabled,
+            action: teleprompterAction
+        ))
+        return controls
     }
 
     private func statsWidgetControls(
@@ -1301,11 +1328,11 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         override.widthAnchor.constraint(equalToConstant: 92).isActive = true
 
         controls.addArrangedSubview(override)
-        controls.addArrangedSubview(titledCheckbox(
-            "Show",
-            state: value.isEnabled,
+        controls.addArrangedSubview(controlCenterLightsWidgetControls(
+            value: value,
             enabled: isOverridden,
-            action: #selector(setMonitorControlCenterLightsEnabled(_:))
+            enabledAction: #selector(setMonitorControlCenterLightsEnabled(_:)),
+            teleprompterAction: #selector(setMonitorControlCenterLightsTeleprompter(_:))
         ))
         return settingRow(
             icon: "lightbulb",
@@ -1771,6 +1798,10 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         updateGeneral { $0.controlCenterLightsWidget.isEnabled = sender.state == .on }
     }
 
+    @objc private func setGeneralControlCenterLightsTeleprompter(_ sender: NSButton) {
+        updateGeneral { $0.controlCenterLightsWidget.controlsTeleprompter = sender.state == .on }
+    }
+
     @objc private func setGeneralBackgroundOpacity(_ sender: NSSlider) {
         refreshSliderLabel(sender)
         updateGeneral { $0.backgroundOpacity = sender.doubleValue }
@@ -2018,6 +2049,10 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     @objc private func setMonitorControlCenterLightsEnabled(_ sender: NSButton) {
         updateMonitorControlCenterLightsWidget { $0.isEnabled = sender.state == .on }
+    }
+
+    @objc private func setMonitorControlCenterLightsTeleprompter(_ sender: NSButton) {
+        updateMonitorControlCenterLightsWidget { $0.controlsTeleprompter = sender.state == .on }
     }
 
     @objc private func setMonitorStatsCPUDisplay(_ sender: NSPopUpButton) {

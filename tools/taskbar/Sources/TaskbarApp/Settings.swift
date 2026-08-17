@@ -91,9 +91,28 @@ struct BatteryWidgetSettings: Codable, Equatable {
 
 struct ControlCenterLightsWidgetSettings: Codable, Equatable {
     var isEnabled: Bool
+    var controlsTeleprompter: Bool
+
+    init(isEnabled: Bool, controlsTeleprompter: Bool = false) {
+        self.isEnabled = isEnabled
+        self.controlsTeleprompter = controlsTeleprompter
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case controlsTeleprompter
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        // Existing users already have this object persisted. Keep the new
+        // DisplayLink control opt-in so an upgrade never disables a display.
+        controlsTeleprompter = try container.decodeIfPresent(Bool.self, forKey: .controlsTeleprompter) ?? false
+    }
 
     static var defaults: ControlCenterLightsWidgetSettings {
-        ControlCenterLightsWidgetSettings(isEnabled: true)
+        ControlCenterLightsWidgetSettings(isEnabled: true, controlsTeleprompter: false)
     }
 }
 
