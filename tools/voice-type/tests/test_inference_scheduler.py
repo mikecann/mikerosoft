@@ -53,18 +53,26 @@ class InferenceSchedulerTests(unittest.TestCase):
         events = []
         info = object()
 
+        class Segment:
+            text = "final"
+
         def lazy_segments():
             events.append("decode-start")
-            yield "final"
+            yield Segment()
+            events.append("after-yield")
             events.append("decode-end")
 
         segments, returned_info = scheduler.run_final_transcription(
-            lambda: (lazy_segments(), info)
+            lambda: (lazy_segments(), info),
+            on_segment=lambda text: events.append(f"callback-{text}"),
         )
 
-        self.assertEqual(["final"], segments)
+        self.assertEqual("final", segments[0].text)
         self.assertIs(info, returned_info)
-        self.assertEqual(["decode-start", "decode-end"], events)
+        self.assertEqual(
+            ["decode-start", "callback-final", "after-yield", "decode-end"],
+            events,
+        )
 
     def test_jobs_never_overlap(self):
         scheduler = InferenceScheduler()

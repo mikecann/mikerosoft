@@ -2286,7 +2286,10 @@ def transcribe(
         )
 
     if priority == "final":
-        segments, info = _inference_scheduler.run_final_transcription(_decode)
+        segments, info = _inference_scheduler.run_final_transcription(
+            _decode,
+            on_segment=on_segment,
+        )
     else:
         ran, result = _inference_scheduler.run_background_transcription(
             priority,
@@ -2300,8 +2303,6 @@ def transcribe(
         text = seg.text.strip()
         if text:
             parts.append(text)
-            if on_segment:
-                on_segment(text)
     result = _apply_corrections(" ".join(parts).strip())
     if verbose:
         log(f"Transcribed {duration:.1f}s → {result!r}  "

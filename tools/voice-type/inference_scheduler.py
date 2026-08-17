@@ -22,10 +22,17 @@ def should_request_precompute(
     return sample_count >= last_requested_samples + delta_samples
 
 
-def _materialize_transcription(callback):
+def _materialize_transcription(callback, on_segment=None):
     """Exhaust lazy decoder segments before the scheduler releases its lock."""
     segments, info = callback()
-    return list(segments), info
+    materialized = []
+    for segment in segments:
+        materialized.append(segment)
+        if on_segment is not None:
+            text = segment.text.strip()
+            if text:
+                on_segment(text)
+    return materialized, info
 
 
 class InferenceScheduler:
@@ -73,10 +80,10 @@ class InferenceScheduler:
                 self._busy = False
                 self._condition.notify_all()
 
-    def run_background_transcription(self, kind: str, callback):
+    def run_background_transcription(self, kind: str, callback, on_segment=None):
         return self.run_background(
             kind,
-            lambda: _materialize_transcription(callback),
+            lambda: _materialize_transcription(callback, on_segment),
         )
 
     def run_final(self, callback: Callable[[], T]) -> T:
@@ -94,5 +101,7 @@ class InferenceScheduler:
                 self._final_requested = False
                 self._condition.notify_all()
 
-    def run_final_transcription(self, callback):
-        return self.run_final(lambda: _materialize_transcription(callback))
+    def run_final_transcription(self, callback, on_segment=None):
+        return self.run_final(
+            lambda: _materialize_transcription(callback, on_segment)
+        )
