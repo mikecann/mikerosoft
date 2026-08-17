@@ -114,7 +114,7 @@ final class ControlCenterLightsController: NSObject, NetServiceBrowserDelegate, 
         }
     }
 
-    func toggleAll() {
+    func toggleAll(completion: @escaping (Bool?) -> Void = { _ in }) {
         let currentEndpoints = stateQueue.sync { () -> [ControlCenterLightEndpoint] in
             guard !isBusy else { return [] }
             isBusy = true
@@ -123,6 +123,7 @@ final class ControlCenterLightsController: NSObject, NetServiceBrowserDelegate, 
         guard !currentEndpoints.isEmpty else {
             stateQueue.async { [weak self] in self?.isBusy = false }
             log("Control Center Lights toggle skipped: no devices discovered")
+            completion(nil)
             return
         }
 
@@ -131,8 +132,13 @@ final class ControlCenterLightsController: NSObject, NetServiceBrowserDelegate, 
             guard let target = controlCenterLightsToggleTarget(for: Array(states.values)) else {
                 self.stateQueue.async { self.isBusy = false }
                 log("Control Center Lights toggle failed: no devices reachable")
+                completion(nil)
                 return
             }
+
+            // The caller can apply the same intent to related studio hardware
+            // while the independent light requests are in flight.
+            completion(target)
 
             let reachableEndpoints = currentEndpoints.filter { states[$0.id] != nil }
             self.setPower(target, on: reachableEndpoints) { updatedIDs in
