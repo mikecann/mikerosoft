@@ -8,6 +8,26 @@ from typing import TypeVar
 T = TypeVar("T")
 
 
+def should_request_precompute(
+    sample_count: int,
+    last_requested_samples: int,
+    minimum_samples: int,
+    delta_samples: int,
+) -> bool:
+    """Start at the minimum duration, then space later growing-buffer passes."""
+    if sample_count < minimum_samples:
+        return False
+    if last_requested_samples == 0:
+        return True
+    return sample_count >= last_requested_samples + delta_samples
+
+
+def _materialize_transcription(callback):
+    """Exhaust lazy decoder segments before the scheduler releases its lock."""
+    segments, info = callback()
+    return list(segments), info
+
+
 class InferenceScheduler:
     """Serialize local model work and keep stale background jobs behind key-up.
 
@@ -53,6 +73,12 @@ class InferenceScheduler:
                 self._busy = False
                 self._condition.notify_all()
 
+    def run_background_transcription(self, kind: str, callback):
+        return self.run_background(
+            kind,
+            lambda: _materialize_transcription(callback),
+        )
+
     def run_final(self, callback: Callable[[], T]) -> T:
         self.request_finalization()
         with self._condition:
@@ -67,3 +93,6 @@ class InferenceScheduler:
                 self._busy = False
                 self._final_requested = False
                 self._condition.notify_all()
+
+    def run_final_transcription(self, callback):
+        return self.run_final(lambda: _materialize_transcription(callback))

@@ -8,10 +8,64 @@ import unittest
 TOOLS_DIR = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS_DIR))
 
-from inference_scheduler import InferenceScheduler
+from inference_scheduler import InferenceScheduler, should_request_precompute
 
 
 class InferenceSchedulerTests(unittest.TestCase):
+    def test_first_precompute_uses_minimum_audio_then_later_passes_use_delta(self):
+        minimum = 250
+        delta = 400
+
+        self.assertFalse(
+            should_request_precompute(249, 0, minimum, delta)
+        )
+        self.assertTrue(
+            should_request_precompute(250, 0, minimum, delta)
+        )
+        self.assertFalse(
+            should_request_precompute(649, 250, minimum, delta)
+        )
+        self.assertTrue(
+            should_request_precompute(650, 250, minimum, delta)
+        )
+
+    def test_background_transcription_materializes_lazy_segments_while_locked(self):
+        scheduler = InferenceScheduler()
+        events = []
+        info = object()
+
+        def lazy_segments():
+            events.append("decode-start")
+            yield "first"
+            events.append("decode-end")
+
+        ran, result = scheduler.run_background_transcription(
+            "preview",
+            lambda: (lazy_segments(), info),
+        )
+
+        self.assertTrue(ran)
+        self.assertEqual((["first"], info), result)
+        self.assertEqual(["decode-start", "decode-end"], events)
+
+    def test_final_transcription_materializes_lazy_segments_while_locked(self):
+        scheduler = InferenceScheduler()
+        events = []
+        info = object()
+
+        def lazy_segments():
+            events.append("decode-start")
+            yield "final"
+            events.append("decode-end")
+
+        segments, returned_info = scheduler.run_final_transcription(
+            lambda: (lazy_segments(), info)
+        )
+
+        self.assertEqual(["final"], segments)
+        self.assertIs(info, returned_info)
+        self.assertEqual(["decode-start", "decode-end"], events)
+
     def test_jobs_never_overlap(self):
         scheduler = InferenceScheduler()
         first_started = threading.Event()

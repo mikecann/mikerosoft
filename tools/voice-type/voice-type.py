@@ -293,7 +293,7 @@ from text_formatter import (
 )
 from transcription_history import TranscriptionHistory
 from fast_final import merge_overlapping_transcripts
-from inference_scheduler import InferenceScheduler
+from inference_scheduler import InferenceScheduler, should_request_precompute
 from preview_format import wrap_preview
 from voice_type_control import ControlServer
 
@@ -2286,9 +2286,12 @@ def transcribe(
         )
 
     if priority == "final":
-        segments, info = _inference_scheduler.run_final(_decode)
+        segments, info = _inference_scheduler.run_final_transcription(_decode)
     else:
-        ran, result = _inference_scheduler.run_background(priority, _decode)
+        ran, result = _inference_scheduler.run_background_transcription(
+            priority,
+            _decode,
+        )
         if not ran or result is None:
             return ""
         segments, info = result
@@ -2368,7 +2371,7 @@ class StreamingTranscriber:
                     time.sleep(STREAM_INTERVAL)
                     continue
                 t0 = time.perf_counter()
-                ran, result = _inference_scheduler.run_background(
+                ran, result = _inference_scheduler.run_background_transcription(
                     "preview",
                     lambda: model.transcribe(
                         audio, language="en", vad_filter=False,
@@ -2441,12 +2444,14 @@ class FinalPrecomputer:
                     break
             audio = self._recorder.peek()
             n_samples = len(audio)
-            if n_samples < min_samples:
-                time.sleep(PRECOMP_IDLE_SLEEP)
-                continue
             with self._lock:
                 last_requested = self._last_requested_samples
-            if n_samples < last_requested + delta_samples:
+            if not should_request_precompute(
+                n_samples,
+                last_requested,
+                min_samples,
+                delta_samples,
+            ):
                 time.sleep(PRECOMP_IDLE_SLEEP)
                 continue
 
@@ -2468,7 +2473,7 @@ class FinalPrecomputer:
                 # Key-up may have cancelled this queued pass before it ran.
                 # Keep the last completed snapshot rather than replacing it
                 # with an empty result from cancelled background work.
-                if self._active and text and n_samples >= self._best_samples:
+                if text and n_samples >= self._best_samples:
                     self._best_samples = n_samples
                     self._best_text = text
                 self._inflight = False
