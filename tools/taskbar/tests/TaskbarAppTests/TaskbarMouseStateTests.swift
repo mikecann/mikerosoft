@@ -60,6 +60,7 @@ private func mouseStateView(items: [TaskbarItem]) -> TaskbarView {
     settings.dateTimeWidget.isEnabled = false
     settings.statsWidget.isEnabled = false
     settings.batteryWidget.isEnabled = false
+    settings.controlCenterLightsWidget.isEnabled = false
     view.update(items: items, settings: settings)
     return view
 }

@@ -163,7 +163,7 @@ export const tools: Tool[] = [
   },
   {
     name: 'taskbar',
-    desc: 'Windows-style taskbar for macOS: one bar per monitor, pinned apps, per-monitor overrides, compact window items, and window avoidance',
+    desc: 'Windows-style taskbar for macOS: one bar per monitor, pinned apps, widgets including a one-button Elgato lights toggle, and window avoidance',
     icon: `${base}/taskbar/icons/taskbar.png`,
     header: `${base}/taskbar/docs/header.webp`,
     screenshots: [

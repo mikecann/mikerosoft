@@ -14,6 +14,7 @@ final class TaskbarWidgetRepaintTests: XCTestCase {
         values.dateTimeWidget.isEnabled = false
         values.statsWidget.isEnabled = false
         values.batteryWidget.isEnabled = false
+        values.controlCenterLightsWidget.isEnabled = false
 
         XCTAssertFalse(shouldRunTaskbarWidgetRepaintTimer(values: values, isAttachedToWindow: true, isPanelVisible: true))
 
@@ -207,6 +208,7 @@ final class TaskbarWidgetRepaintTests: XCTestCase {
         values.dateTimeWidget.isEnabled = false
         values.statsWidget.isEnabled = false
         values.batteryWidget.isEnabled = false
+        values.controlCenterLightsWidget.isEnabled = false
 
         taskbarPanel.update(screen: screen, items: [], values: values)
 

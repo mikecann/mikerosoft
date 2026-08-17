@@ -70,6 +70,12 @@ cat >"$APP_DIR/Contents/Info.plist" <<PLIST
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Find and control your Elgato Control Center lights.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_elg._tcp</string>
+    </array>
 </dict>
 </plist>
 PLIST

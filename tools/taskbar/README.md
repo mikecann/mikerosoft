@@ -17,7 +17,7 @@ maximising underneath the bar.
 - Pins apps so they stay visible when closed
 - Shrinks item widths when the bar is crowded so every item still fits
 - Ellipsises long labels
-- Supports Date & Time, Battery, and Stats taskbar widgets
+- Supports Date & Time, Battery, Stats, and Control Center Lights taskbar widgets
 - Lets widgets own their menu, rendering, and settings surface
 - Auto-hides with configurable animation
 - Hides on any monitor occupied by a foreground fullscreen app or game
@@ -72,6 +72,7 @@ Useful settings:
 - Date & Time widget display
 - Battery widget with the current charge level and charging state
 - Stats widget CPU, RAM, network, and CPU display modes
+- One-button toggle for all reachable Elgato Control Center lights
 - Auto-hide and reveal animation
 - Pinned apps
 - Keep windows above bar
@@ -100,6 +101,11 @@ keeps a charging bolt without replacing the level. It also uses a low-battery
 warning colour. Its right-click menu includes the charging state and remaining
 time when macOS reports one.
 
+Control Center Lights discovers Elgato lights through Bonjour and shows one
+power button. A click reads every reachable light first. If they are all on it
+turns them all off; otherwise it turns them all on. The request changes only
+power, preserving each light's brightness and colour temperature.
+
 Stats shows CPU, RAM, and network activity in a compact strip. CPU can show a
 percentage, aggregate usage history, or one live utilisation bar per logical
 CPU. Per-CPU bars use the performance-level names reported by macOS and colour
@@ -125,6 +131,10 @@ enabled, grant Accessibility access to the same app bundle:
 
 Do not grant the raw SwiftPM binary in `.build`; `restart.sh` stages and signs a
 real app bundle so macOS can remember the permission consistently.
+
+The lights widget needs Local Network access to discover and control Elgato
+lights. `restart.sh` declares the `_elg._tcp` Bonjour service in the staged app
+bundle so macOS can ask for and retain that permission.
 
 Logs go to:
 

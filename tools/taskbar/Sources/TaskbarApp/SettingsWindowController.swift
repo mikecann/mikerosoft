@@ -511,7 +511,7 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         stack.addArrangedSubview(settingRow(
             icon: "square.split.2x1",
             title: "Widget spacing",
-            description: "Set the horizontal gap between Stats, Battery, and Date & Time.",
+            description: "Set the horizontal gap between taskbar widgets.",
             control: widgetSpacingControl(value: values.widgetSpacing, enabled: true, action: #selector(setGeneralWidgetSpacing(_:)))
         ))
         stack.addArrangedSubview(settingRow(
@@ -684,9 +684,33 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             renderStatsWidget(screen: screen, in: stack)
         case .battery:
             renderBatteryWidget(screen: screen, in: stack)
+        case .controlCenterLights:
+            renderControlCenterLightsWidget(screen: screen, in: stack)
         case .dateTime:
             renderDateTimeWidget(screen: screen, in: stack)
         }
+    }
+
+    private func renderControlCenterLightsWidget(screen: ScreenInfo?, in stack: NSStackView) {
+        let snapshot = ControlCenterLightsController.shared.snapshot()
+        let subtitle: String
+        if let screen {
+            subtitle = "The same one-button lights control is used on every monitor, including \(screen.name)."
+        } else {
+            subtitle = "A single button that toggles all Elgato lights discovered in Control Center."
+        }
+        addHeader("Control Center Lights", subtitle: subtitle, to: stack)
+        stack.addArrangedSubview(settingRow(
+            icon: "lightbulb",
+            title: "Lights button",
+            description: snapshot.discoveredCount == 0
+                ? "Looking for Elgato lights on your local network."
+                : "Found \(snapshot.discoveredCount) Elgato light(s).",
+            control: checkbox(
+                state: settings.preferences.general.controlCenterLightsWidget.isEnabled,
+                action: #selector(setGeneralControlCenterLightsEnabled(_:))
+            )
+        ))
     }
 
     private func renderBatteryWidget(screen: ScreenInfo?, in stack: NSStackView) {
@@ -1695,6 +1719,10 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
     @objc private func setGeneralWidgetSpacing(_ sender: NSSlider) {
         refreshSliderLabel(sender)
         updateGeneral { $0.widgetSpacing = sender.doubleValue }
+    }
+
+    @objc private func setGeneralControlCenterLightsEnabled(_ sender: NSButton) {
+        updateGeneral { $0.controlCenterLightsWidget.isEnabled = sender.state == .on }
     }
 
     @objc private func setGeneralBackgroundOpacity(_ sender: NSSlider) {

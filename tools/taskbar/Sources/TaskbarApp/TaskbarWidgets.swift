@@ -3,6 +3,7 @@ import AppKit
 enum TaskbarWidgetID: String, Equatable {
     case stats
     case battery
+    case controlCenterLights
     case dateTime
 }
 
@@ -277,6 +278,7 @@ func installedTaskbarWidgetPlugins() -> [any TaskbarWidgetPlugin] {
     [
         StatsWidgetPlugin(),
         BatteryWidgetPlugin(),
+        ControlCenterLightsWidgetPlugin(),
         DateTimeWidgetPlugin()
     ]
 }

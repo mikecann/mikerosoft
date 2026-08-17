@@ -250,6 +250,7 @@ final class TaskbarLayoutTests: XCTestCase {
     func testWidgetSpacingIsIndependentFromAppItemSpacing() throws {
         var settings = TaskbarSettingValues.defaults
         settings.statsWidget.isEnabled = false
+        settings.controlCenterLightsWidget.isEnabled = false
         settings.itemSpacing = 24
         settings.widgetSpacing = 7
         let layout = taskbarLayout(
@@ -269,6 +270,7 @@ final class TaskbarLayoutTests: XCTestCase {
         var settings = TaskbarSettingValues.defaults
         settings.statsWidget.isEnabled = false
         settings.batteryWidget.isEnabled = false
+        settings.controlCenterLightsWidget.isEnabled = false
         settings.dateTimeWidget.isEnabled = false
         let layout = taskbarLayout(
             bounds: NSRect(x: 0, y: 0, width: 600, height: 30),

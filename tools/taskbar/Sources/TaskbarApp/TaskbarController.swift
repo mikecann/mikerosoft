@@ -284,6 +284,7 @@ final class TaskbarController: NSObject {
     func start() {
         configureTaskbarAccessibilityMessagingTimeout()
         performanceWatchdog.start()
+        ControlCenterLightsController.shared.start()
         startAtLoginSync(settings.preferences.startAtLogin)
         let screens = screenCollector()
         let includeMinimized = screens.contains { settings.values(for: $0.persistentID).showMinimizedWindows }
@@ -323,6 +324,7 @@ final class TaskbarController: NSObject {
     func prepareForTermination() {
         isWaitingForInitialWindowProviderWarmup = false
         pendingRefreshWorkItem?.cancel()
+        ControlCenterLightsController.shared.stop()
         stopObservingScreenChanges()
         settings.flushPendingPersistence()
     }
@@ -561,6 +563,8 @@ final class TaskbarController: NSObject {
             return makeStatsWidgetMenu(monitorID: monitorID)
         case .battery:
             return makeBatteryWidgetMenu(monitorID: monitorID)
+        case .controlCenterLights:
+            return makeControlCenterLightsWidgetMenu()
         case .dateTime:
             return makeDateTimeWidgetMenu(monitorID: monitorID)
         }
@@ -582,6 +586,8 @@ final class TaskbarController: NSObject {
                 relativeTo: rect,
                 of: view
             )
+        case .controlCenterLights:
+            ControlCenterLightsController.shared.toggleAll()
         case .battery, .dateTime:
             break
         }
@@ -846,6 +852,37 @@ final class TaskbarController: NSObject {
         return menu
     }
 
+    private func makeControlCenterLightsWidgetMenu() -> NSMenu {
+        let snapshot = ControlCenterLightsController.shared.snapshot()
+        let menu = NSMenu(title: "Control Center Lights")
+        let statusText: String
+        if snapshot.reachableCount == 0 {
+            statusText = snapshot.discoveredCount == 0 ? "Looking for lights..." : "Lights unavailable"
+        } else if snapshot.allReachableLightsAreOn {
+            statusText = "\(snapshot.reachableCount) light(s) on"
+        } else if snapshot.onCount == 0 {
+            statusText = "\(snapshot.reachableCount) light(s) off"
+        } else {
+            statusText = "\(snapshot.onCount) of \(snapshot.reachableCount) light(s) on"
+        }
+        let status = NSMenuItem(title: statusText, action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        menu.addItem(status)
+        menu.addItem(.separator())
+
+        addWidgetToggle(
+            title: "Show Lights Button",
+            state: settings.preferences.general.controlCenterLightsWidget.isEnabled,
+            action: #selector(toggleControlCenterLightsWidgetFromMenu),
+            to: menu
+        )
+        menu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Lights Settings...", action: #selector(showWidgetSettingsFromMenu), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        return menu
+    }
+
     private func addWidgetToggle(title: String, state: Bool, action: Selector, to menu: NSMenu) {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
@@ -1001,6 +1038,10 @@ final class TaskbarController: NSObject {
 
     @objc private func toggleBatteryWidgetFromMenu() {
         updateBatteryWidgetFromMenu { $0.isEnabled.toggle() }
+    }
+
+    @objc private func toggleControlCenterLightsWidgetFromMenu() {
+        settings.updateGeneral { $0.controlCenterLightsWidget.isEnabled.toggle() }
     }
 
     @objc private func toggleStatsCPUFromMenu() {

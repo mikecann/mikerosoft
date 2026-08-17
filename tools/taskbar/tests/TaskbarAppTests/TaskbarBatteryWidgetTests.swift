@@ -88,9 +88,9 @@ final class TaskbarBatteryWidgetTests: XCTestCase {
     }
 
     func testBatteryWidgetIsInstalledBeforeDateAndTimeAndEnabledByDefault() {
-        XCTAssertEqual(installedTaskbarWidgetIDs(), [.stats, .battery, .dateTime])
+        XCTAssertEqual(installedTaskbarWidgetIDs(), [.stats, .battery, .controlCenterLights, .dateTime])
         XCTAssertTrue(TaskbarSettingValues.defaults.batteryWidget.isEnabled)
-        XCTAssertEqual(activeTaskbarWidgets(for: .defaults).map(\.id), [.stats, .battery, .dateTime])
+        XCTAssertEqual(activeTaskbarWidgets(for: .defaults).map(\.id), [.stats, .battery, .controlCenterLights, .dateTime])
     }
 
     func testBatterySettingsDefaultWhenOlderTaskbarSettingsDoNotContainBatteryKey() throws {
