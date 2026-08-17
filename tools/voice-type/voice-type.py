@@ -293,6 +293,7 @@ from text_formatter import (
 )
 from transcription_history import TranscriptionHistory
 from fast_final import merge_overlapping_transcripts
+from inference_scheduler import InferenceScheduler
 from preview_format import wrap_preview
 from voice_type_control import ControlServer
 
@@ -306,7 +307,7 @@ STREAM_CLOSE_TIMEOUT  = 2.0  # give up on a stream stop/close if CoreAudio deadl
 STREAM_INTERVAL  = 0.5    # seconds between streaming preview passes
 STREAM_MIN_AUDIO = 0.8    # don't start streaming until this many seconds recorded
 PRECOMP_MIN_AUDIO = 2.5   # only precompute once enough audio has accumulated
-PRECOMP_MIN_DELTA = 0.8   # minimum new audio before launching another pass
+PRECOMP_MIN_DELTA = 4.0   # avoid continuously retranscribing long recordings
 PRECOMP_OVERLAP = 2.0     # enough repeated speech to prove a safe word-level join
 PRECOMP_IDLE_SLEEP = 0.08 # small backoff while waiting for enough new audio
 PRECOMP_STOP_WAIT = 0.75  # wait briefly for in-flight pass to finish on key-up
@@ -539,6 +540,7 @@ class ParakeetWrapper:
 
 _model = None
 _model_lock = threading.Lock()
+_inference_scheduler = InferenceScheduler()
 _model_status_lock = threading.Lock()
 _model_status = "not-started"
 _model_status_since = time.monotonic()
@@ -2257,7 +2259,13 @@ class Recorder:
 # Transcription
 # ---------------------------------------------------------------------------
 
-def transcribe(audio: np.ndarray, verbose: bool = True, on_segment=None) -> str:
+def transcribe(
+    audio: np.ndarray,
+    verbose: bool = True,
+    on_segment=None,
+    *,
+    priority: str = "final",
+) -> str:
     """Transcribe audio using the final model.
 
     on_segment: optional callable(text: str) called for each non-empty segment
@@ -2268,13 +2276,22 @@ def transcribe(audio: np.ndarray, verbose: bool = True, on_segment=None) -> str:
     if duration < 0.3:
         return ""
     model    = get_model()
-    segments, info = model.transcribe(
-        audio,
-        language="en",
-        vad_filter=False,
-        beam_size=1,
-        condition_on_previous_text=False,
-    )
+    def _decode():
+        return model.transcribe(
+            audio,
+            language="en",
+            vad_filter=False,
+            beam_size=1,
+            condition_on_previous_text=False,
+        )
+
+    if priority == "final":
+        segments, info = _inference_scheduler.run_final(_decode)
+    else:
+        ran, result = _inference_scheduler.run_background(priority, _decode)
+        if not ran or result is None:
+            return ""
+        segments, info = result
     parts = []
     for seg in segments:
         text = seg.text.strip()
@@ -2351,11 +2368,19 @@ class StreamingTranscriber:
                     time.sleep(STREAM_INTERVAL)
                     continue
                 t0 = time.perf_counter()
-                # Use the dedicated stream model — never contends with _model_lock
-                segs, _ = model.transcribe(
-                    audio, language="en", vad_filter=False,
-                    beam_size=1, condition_on_previous_text=False,
+                ran, result = _inference_scheduler.run_background(
+                    "preview",
+                    lambda: model.transcribe(
+                        audio, language="en", vad_filter=False,
+                        beam_size=1, condition_on_previous_text=False,
+                    ),
                 )
+                if not ran or result is None:
+                    if not self._active:
+                        break
+                    time.sleep(STREAM_INTERVAL)
+                    continue
+                segs, _ = result
                 text = " ".join(s.text.strip() for s in segs).strip()
                 if not self._active:
                     break
@@ -2431,7 +2456,7 @@ class FinalPrecomputer:
 
             t0 = time.perf_counter()
             try:
-                text = transcribe(audio, verbose=False)
+                text = transcribe(audio, verbose=False, priority="precompute")
             except Exception as e:
                 log(f"[precompute] pass failed: {e}")
                 with self._lock:
@@ -2440,7 +2465,10 @@ class FinalPrecomputer:
                 continue
             elapsed = time.perf_counter() - t0
             with self._lock:
-                if n_samples >= self._best_samples:
+                # Key-up may have cancelled this queued pass before it ran.
+                # Keep the last completed snapshot rather than replacing it
+                # with an empty result from cancelled background work.
+                if self._active and text and n_samples >= self._best_samples:
                     self._best_samples = n_samples
                     self._best_text = text
                 self._inflight = False
@@ -2882,6 +2910,10 @@ def run():
                     # deadlocks inside CoreAudio, the streamer is already
                     # halted so the overlay/CPU don't spin forever.
                     streamer.stop()   # signal stream loop; final pass always runs below
+                    # Claim final priority before CoreAudio shutdown. Queued
+                    # preview/precompute work is dropped, so only an already
+                    # running pass can delay final transcription.
+                    _inference_scheduler.request_finalization()
                     audio = recorder.stop()
                     mode = _effective_output_mode()
                     if mode == "precompute":
@@ -2972,6 +3004,10 @@ def run():
                         try:
                             finish_job()
                         finally:
+                            # Early exits such as silent or flatline recordings
+                            # do not call transcribe(), so release final priority
+                            # here as a backstop for every finish path.
+                            _inference_scheduler.cancel_finalization()
                             watchdog.complete()
                             _complete_finalization()
 
