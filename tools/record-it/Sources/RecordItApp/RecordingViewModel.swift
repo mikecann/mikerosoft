@@ -16,6 +16,7 @@ func recordingPrerequisitesAreAvailable(
     hasWindow: Bool,
     hasCamera: Bool,
     hasAudioInput: Bool,
+    hasRecoveryAudioInput: Bool = true,
     isBusy: Bool
 ) -> Bool {
     guard hasDestination, hasValidFileName, !isBusy else { return false }
@@ -28,7 +29,8 @@ func recordingPrerequisitesAreAvailable(
         }
     }
     if mode.capturesCamera && !hasCamera { return false }
-    if mode.capturesAudio && !hasAudioInput { return false }
+    if (mode.capturesCamera || mode.capturesAudio), !hasAudioInput { return false }
+    if (mode.capturesCamera || mode.capturesAudio), !hasRecoveryAudioInput { return false }
     return true
 }
 
@@ -63,14 +65,18 @@ final class RecordingViewModel: ObservableObject {
     let preferences: RecordingPreferences
 
     private let projectCatalog: ProjectCatalog
+    private let displayProvider: () -> [CaptureDisplay]
     private var activeSession: RecordingSession?
+    private var activeRecoveryAudio: RecoveryAudioRecording?
     private var activeOutputURLs: [URL] = []
 
     init(
         preferences: RecordingPreferences = RecordingPreferences(),
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        displayProvider: @escaping () -> [CaptureDisplay] = CaptureDeviceCatalog.displays
     ) {
         self.preferences = preferences
+        self.displayProvider = displayProvider
         mode = preferences.recordingMode
         projectCatalog = ProjectCatalog(
             projectsRoot: defaultProjectsRoot(homeDirectory: homeDirectory),
@@ -103,6 +109,11 @@ final class RecordingViewModel: ObservableObject {
 
     var selectedMicrophone: CaptureAudioDevice? {
         microphones.first { $0.id == selectedMicrophoneID }
+    }
+
+    var recoveryMicrophone: CaptureAudioDevice? {
+        guard let selectedMicrophone else { return nil }
+        return preferredRecoveryAudioDevice(primaryID: selectedMicrophone.id, in: microphones)
     }
 
     var resolvedFileName: String? {
@@ -139,6 +150,7 @@ final class RecordingViewModel: ObservableObject {
             hasWindow: selectedWindow != nil,
             hasCamera: selectedCamera != nil,
             hasAudioInput: selectedMicrophone != nil,
+            hasRecoveryAudioInput: recoveryMicrophone != nil,
             isBusy: isBusy
         )
     }
@@ -187,6 +199,13 @@ final class RecordingViewModel: ObservableObject {
         fileName = defaultRecordingBaseName(startedAt: date, timeZone: timeZone)
     }
 
+    func refreshDisplaysAfterSystemChange() {
+        refreshDisplays()
+        if !isRecording {
+            statusMessage = displays.isEmpty ? "No displays found" : "Ready to record"
+        }
+    }
+
     func refreshWindows() async {
         guard !isRefreshingWindows, !isRecording else { return }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
@@ -223,6 +242,8 @@ final class RecordingViewModel: ObservableObject {
 
         do {
             let outputDirectory = try prepareOutputDirectory(for: destination)
+            let recoveryDirectory = recoveryAudioDirectory()
+            try cleanupExpiredRecoveryAudio(in: recoveryDirectory)
             let outputs = recordingOutputURLs(
                 mode: mode,
                 directory: outputDirectory,
@@ -231,6 +252,31 @@ final class RecordingViewModel: ObservableObject {
             )
             var recorders: [any CaptureRecording] = []
             let startGate = mode == .both ? RecordingStartGate() : nil
+            var recoveryAudio: RecoveryAudioRecording?
+
+            if mode.capturesCamera || mode.capturesAudio {
+                guard let recoveryMicrophone else {
+                    throw RecordItError.message(
+                        "A separate MacBook Pro microphone is required for recovery audio. "
+                            + "Record It will not begin without an independent backup input."
+                    )
+                }
+                let recoveryURL = recoveryAudioURL(
+                    baseName: outputBaseName,
+                    directory: recoveryDirectory
+                )
+                recoveryAudio = RecoveryAudioRecording(
+                    device: recoveryMicrophone,
+                    outputURL: recoveryURL,
+                    onFailure: { [weak self] error in
+                        Task { @MainActor [weak self] in
+                            await self?.handleCaptureFailure(error, source: .recoveryAudio)
+                        }
+                    }
+                )
+                activeRecoveryAudio = recoveryAudio
+                try await recoveryAudio?.start()
+            }
 
             if mode.capturesScreen {
                 guard
@@ -311,7 +357,13 @@ final class RecordingViewModel: ObservableObject {
             }
 
             let session = RecordingSession(recorders: recorders, startGate: startGate)
-            try await session.start()
+            do {
+                try await session.start()
+            } catch {
+                try? await recoveryAudio?.stop()
+                activeRecoveryAudio = nil
+                throw error
+            }
             activeSession = session
             activeOutputURLs = Array(outputs.values)
             recordingStartedAt = startedAt
@@ -319,6 +371,10 @@ final class RecordingViewModel: ObservableObject {
             statusMessage = mode == .audio ? "Recording audio" : "Recording at 30 fps"
         } catch {
             activeSession = nil
+            if let activeRecoveryAudio {
+                try? await activeRecoveryAudio.stop()
+                self.activeRecoveryAudio = nil
+            }
             activeOutputURLs = []
             presentedError = error.localizedDescription
             statusMessage = "Ready to record"
@@ -333,6 +389,7 @@ final class RecordingViewModel: ObservableObject {
 
         do {
             try await activeSession.stop()
+            try await activeRecoveryAudio?.stop()
             let completedURLs = activeOutputURLs
             resetActiveRecording()
             resetFileName()
@@ -341,6 +398,7 @@ final class RecordingViewModel: ObservableObject {
                 NSWorkspace.shared.activateFileViewerSelecting(completedURLs)
             }
         } catch {
+            try? await activeRecoveryAudio?.stop()
             resetActiveRecording()
             resetFileName()
             statusMessage = "Recording stopped with an error"
@@ -352,7 +410,7 @@ final class RecordingViewModel: ObservableObject {
     private func refreshDisplays(preferredName: String? = nil) {
         let previousID = selectedDisplayID
         let previousName = preferredName ?? selectedDisplay?.name
-        displays = CaptureDeviceCatalog.displays()
+        displays = displayProvider()
         selectedDisplayID = displays.first(where: { $0.id == previousID })?.id
             ?? displays.first(where: { $0.name == previousName })?.id
             ?? preferredDisplay(in: displays)?.id
@@ -363,7 +421,8 @@ final class RecordingViewModel: ObservableObject {
         guard isRecording, !isBusy else { return }
         let message = criticalCaptureFailureMessage(
             source: source,
-            reason: error.localizedDescription
+            reason: error.localizedDescription,
+            recoveryAudioURL: activeRecoveryAudio?.outputURL
         )
         criticalFailureMessage = message
         statusMessage = "RECORDING FAILED. STOPPING NOW."
@@ -384,6 +443,7 @@ final class RecordingViewModel: ObservableObject {
 
     private func resetActiveRecording() {
         activeSession = nil
+        activeRecoveryAudio = nil
         activeOutputURLs = []
         recordingTelemetry = [:]
         recordingStartedAt = nil
@@ -391,7 +451,15 @@ final class RecordingViewModel: ObservableObject {
     }
 }
 
-func criticalCaptureFailureMessage(source: CaptureSource, reason: String) -> String {
-    "\(source.displayName.uppercased()) CAPTURE FAILED. RECORDING STOPPED. "
+func criticalCaptureFailureMessage(
+    source: CaptureSource,
+    reason: String,
+    recoveryAudioURL: URL? = nil
+) -> String {
+    var message = "\(source.displayName.uppercased()) CAPTURE FAILED. RECORDING STOPPED. "
         + "VIDEO AND AUDIO ARE NOT COMPLETE. Do not continue this take. \(reason)"
+    if let recoveryAudioURL {
+        message += " Recovery audio may be available at: \(recoveryAudioURL.path)"
+    }
+    return message
 }

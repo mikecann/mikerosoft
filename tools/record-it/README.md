@@ -98,8 +98,22 @@ green state confirms that media is reaching the output file.
 
 Camera and audio-only recordings also show a live waveform from the selected
 microphone. It updates ten times per second and keeps a short rolling history
-so speech and silence are visible without retaining extra audio outside the
-recording file.
+so speech and silence are visible.
+
+Every camera or audio-only take requires a second physical input. Record It
+uses the built-in MacBook Pro microphone and launches a separate helper process
+using `AVAudioEngine`, independent of the primary `AVCaptureSession`. The helper
+writes a lossless mono recovery track to:
+
+```text
+~/Library/Application Support/Record It/Recovery Audio/
+```
+
+Recovery tracks use the take name with `-backup-audio.caf`, are intentionally
+not opened in Finder after a normal take, and are retained for 14 days. Expired
+finalized recovery tracks are removed when a new recording begins. Record It
+refuses to start without a distinct built-in recovery microphone, and an
+unexpected helper exit is a critical whole-take failure.
 
 Screen recordings use variable-duration frames, so a static screen does not
 create a huge duplicate-frame backlog in the 4K hardware encoder. Record It
@@ -108,7 +122,11 @@ sustained encoder backpressure. The dashboard warns after three seconds without
 video activity or microphone signal. The entire take stops if required video or
 audio callbacks stall for ten seconds, an encoder rejects 60 consecutive
 samples, or the selected microphone delivers digital-zero audio below -120 dB
-for three seconds. Ordinary room silence never stops a recording.
+for three seconds. It also detects byte-identical PCM loops from 0.5 to 30
+seconds across arbitrary callback boundaries, confirms three seconds of exact
+repetition, and monitors AVFoundation interruptions, device disconnection,
+Core Audio device-alive state, and sample-rate changes. Ordinary room silence
+never stops a recording.
 Record It then activates itself, requests critical system attention, repeatedly
 sounds alarm tones, and displays an explicit incomplete-recording alert until
 the failure is acknowledged.

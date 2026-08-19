@@ -4,12 +4,14 @@ enum CaptureSource: Hashable, Sendable {
     case screen
     case camera
     case audio
+    case recoveryAudio
 
     var filenameSuffix: String {
         switch self {
         case .screen: "screen"
         case .camera: "camera"
         case .audio: "audio"
+        case .recoveryAudio: "backup-audio"
         }
     }
 
@@ -18,11 +20,16 @@ enum CaptureSource: Hashable, Sendable {
         case .screen: "Screen"
         case .camera: "Camera"
         case .audio: "Audio"
+        case .recoveryAudio: "Backup audio"
         }
     }
 
     var fileExtension: String {
-        self == .audio ? "m4a" : "mov"
+        switch self {
+        case .audio: "m4a"
+        case .recoveryAudio: "caf"
+        case .screen, .camera: "mov"
+        }
     }
 }
 

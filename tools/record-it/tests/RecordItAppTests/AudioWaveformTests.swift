@@ -50,4 +50,25 @@ final class AudioWaveformTests: XCTestCase {
 
         XCTAssertEqual(peakDecibels(in: buffer), -6.02, accuracy: 0.05)
     }
+
+    func testAudioFingerprintChangesWhenAnyPCMSampleChanges() throws {
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: true
+        ))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4))
+        buffer.frameLength = 4
+        let samples = try XCTUnwrap(
+            UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+                .first?.mData?.assumingMemoryBound(to: Int16.self)
+        )
+        for index in 0..<4 { samples[index] = Int16(index) }
+        let original = audioFingerprint(in: buffer)
+
+        samples[3] = 99
+
+        XCTAssertNotEqual(audioFingerprint(in: buffer), original)
+    }
 }

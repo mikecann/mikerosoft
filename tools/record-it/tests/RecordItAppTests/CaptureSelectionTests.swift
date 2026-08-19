@@ -13,13 +13,22 @@ final class CaptureSelectionTests: XCTestCase {
         XCTAssertEqual(configurationSteps, ["input", "format"])
     }
 
-    func testPreferredDisplayDefaultsToHG584T05() {
+    func testPreferredDisplayDefaultsToPA27JCVWhenAvailable() {
         let displays = [
             CaptureDisplay(id: 1, name: "LG Monitor", width: 5120, height: 2880),
-            CaptureDisplay(id: 2, name: "HG584T05", width: 2560, height: 1440)
+            CaptureDisplay(id: 2, name: "PA27JCV", width: 3200, height: 1800)
         ]
 
         XCTAssertEqual(preferredDisplay(in: displays)?.id, 2)
+    }
+
+    func testPreferredDisplayFallsBackToTheFirstConnectedDisplay() {
+        let displays = [
+            CaptureDisplay(id: 1, name: "LG Monitor", width: 5120, height: 2880),
+            CaptureDisplay(id: 2, name: "Studio Display", width: 5120, height: 2880)
+        ]
+
+        XCTAssertEqual(preferredDisplay(in: displays)?.id, 1)
     }
 
     func testWindowPickerSortsApplicationsThenWindowTitles() {

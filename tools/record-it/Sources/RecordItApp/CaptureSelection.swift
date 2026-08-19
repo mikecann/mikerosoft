@@ -97,7 +97,7 @@ func windowCapturePixelSize(
 
 func preferredDisplay(
     in displays: [CaptureDisplay],
-    preferredName: String = "HG584T05"
+    preferredName: String = "PA27JCV"
 ) -> CaptureDisplay? {
     displays.first {
         $0.name.compare(preferredName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame

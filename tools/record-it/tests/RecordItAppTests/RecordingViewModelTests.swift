@@ -15,6 +15,18 @@ final class RecordingViewModelTests: XCTestCase {
         )
     }
 
+    func testCriticalFailurePointsToTheTemporaryRecoveryTrack() {
+        let recoveryURL = URL(fileURLWithPath: "/recovery/take-backup-audio.caf")
+
+        XCTAssertTrue(
+            criticalCaptureFailureMessage(
+                source: .camera,
+                reason: "The primary microphone froze.",
+                recoveryAudioURL: recoveryURL
+            ).contains("Recovery audio may be available at: /recovery/take-backup-audio.caf")
+        )
+    }
+
     func testViewModelRestoresTheLastSelectedRecordingMode() {
         let suiteName = "record-it-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -34,6 +46,27 @@ final class RecordingViewModelTests: XCTestCase {
             defaultProjectsRoot(homeDirectory: homeDirectory),
             URL(fileURLWithPath: "/Users/m5-mike/dev/convex/convex-videos", isDirectory: true)
         )
+    }
+
+    func testDisplayConfigurationRefreshUpdatesResolutionAndKeepsTheSelectedDisplay() {
+        var connectedDisplays = [
+            CaptureDisplay(id: 1, name: "LG Monitor", width: 5120, height: 2880),
+            CaptureDisplay(id: 2, name: "PA27JCV", width: 3200, height: 1800)
+        ]
+        let model = RecordingViewModel(displayProvider: { connectedDisplays })
+
+        model.refreshDisplaysAfterSystemChange()
+        XCTAssertEqual(model.selectedDisplayID, 2)
+        XCTAssertEqual(model.selectedDisplay?.resolutionLabel, "3200 × 1800")
+
+        connectedDisplays = [
+            CaptureDisplay(id: 1, name: "LG Monitor", width: 5120, height: 2880),
+            CaptureDisplay(id: 2, name: "PA27JCV", width: 2560, height: 1440)
+        ]
+        model.refreshDisplaysAfterSystemChange()
+
+        XCTAssertEqual(model.selectedDisplayID, 2)
+        XCTAssertEqual(model.selectedDisplay?.resolutionLabel, "2560 × 1440")
     }
 
     func testRecordButtonIsDisabledWhileARecordingOperationIsBusy() {
@@ -92,6 +125,38 @@ final class RecordingViewModelTests: XCTestCase {
             hasWindow: false,
             hasCamera: false,
             hasAudioInput: false,
+            isBusy: false
+        ))
+    }
+
+    func testCameraModeCannotStartWithoutASeparateRecoveryMicrophone() {
+        XCTAssertFalse(recordingPrerequisitesAreAvailable(
+            mode: .camera,
+            screenCaptureTargetKind: .display,
+            hasDestination: true,
+            hasValidFileName: true,
+            hasVideoEncoder: true,
+            hasDisplay: false,
+            hasWindow: false,
+            hasCamera: true,
+            hasAudioInput: true,
+            hasRecoveryAudioInput: false,
+            isBusy: false
+        ))
+    }
+
+    func testCameraModeCannotStartWithoutPrimaryAudio() {
+        XCTAssertFalse(recordingPrerequisitesAreAvailable(
+            mode: .camera,
+            screenCaptureTargetKind: .display,
+            hasDestination: true,
+            hasValidFileName: true,
+            hasVideoEncoder: true,
+            hasDisplay: false,
+            hasWindow: false,
+            hasCamera: true,
+            hasAudioInput: false,
+            hasRecoveryAudioInput: true,
             isBusy: false
         ))
     }

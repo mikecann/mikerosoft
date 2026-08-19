@@ -7,9 +7,11 @@ BUILD_CONFIGURATION="${RECORD_IT_BUILD_CONFIGURATION:-release}"
 APP_NAME="Record It"
 APP_DIR="${RECORD_IT_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
 APP_BIN="$APP_DIR/Contents/MacOS/record-it-swift"
+RECOVERY_APP_BIN="$APP_DIR/Contents/Helpers/record-it-recovery-audio"
 ICON_SOURCE="$SCRIPT_DIR/icons/record-it.png"
 SIGNING_IDENTITY="${RECORD_IT_CODESIGN_IDENTITY:-}"
-SIGNING_REQUIREMENTS=()
+APP_SIGNING_REQUIREMENTS=()
+RECOVERY_SIGNING_REQUIREMENTS=()
 
 if ! command -v swift >/dev/null 2>&1; then
   echo "ERROR: swift is not on PATH. Install Xcode or Command Line Tools first."
@@ -20,18 +22,25 @@ echo "Building Record It ($BUILD_CONFIGURATION)..."
 swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION"
 BIN_DIR="$(swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION" --show-bin-path)"
 BINARY="$BIN_DIR/record-it-swift"
+RECOVERY_BINARY="$BIN_DIR/record-it-recovery-audio"
 
 if [[ ! -x "$BINARY" ]]; then
   echo "ERROR: built binary not found at $BINARY"
   exit 1
 fi
+if [[ ! -x "$RECOVERY_BINARY" ]]; then
+  echo "ERROR: recovery audio helper not found at $RECOVERY_BINARY"
+  exit 1
+fi
 
 echo "Staging $APP_DIR..."
 rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Helpers" "$APP_DIR/Contents/Resources"
 cp "$BINARY" "$APP_BIN"
+cp "$RECOVERY_BINARY" "$RECOVERY_APP_BIN"
 cp "$SCRIPT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 chmod +x "$APP_BIN"
+chmod +x "$RECOVERY_APP_BIN"
 
 if [[ -f "$ICON_SOURCE" ]]; then
   ICONSET="$(mktemp -d)/record-it.iconset"
@@ -62,10 +71,20 @@ if [[ "$SIGNING_IDENTITY" == "-" ]]; then
   # hash. That changes after every build and makes macOS TCC forget Screen
   # Recording, Camera, and Microphone permission. Keep a stable local
   # requirement when no Apple Development certificate is available.
-  SIGNING_REQUIREMENTS=(--requirements "=designated => identifier \"$BUNDLE_ID\"")
+  APP_SIGNING_REQUIREMENTS=(--requirements "=designated => identifier \"$BUNDLE_ID\"")
+  RECOVERY_ID="$BUNDLE_ID.recovery-audio"
+  RECOVERY_SIGNING_REQUIREMENTS=(
+    --identifier "$RECOVERY_ID"
+    --requirements "=designated => identifier \"$RECOVERY_ID\""
+  )
 fi
 
-codesign --force --deep --timestamp=none --sign "$SIGNING_IDENTITY" \
-  "${SIGNING_REQUIREMENTS[@]}" "$APP_DIR" >/dev/null
+# Nested code must be signed before the outer app so the app seal records the
+# helper's final signature. Applying the app's designated requirement through
+# --deep gives the helper an impossible identifier requirement.
+codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
+  "${RECOVERY_SIGNING_REQUIREMENTS[@]}" "$RECOVERY_APP_BIN" >/dev/null
+codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
+  "${APP_SIGNING_REQUIREMENTS[@]}" "$APP_DIR" >/dev/null
 
 echo "Built $APP_DIR"

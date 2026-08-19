@@ -1,5 +1,53 @@
 import Foundation
 
+private struct AudioFingerprintSample {
+    let time: TimeInterval
+    let fingerprint: UInt64
+}
+
+private struct RepeatedAudioDetector {
+    private static let minimumPeriod: TimeInterval = 0.5
+    private static let maximumPeriod: TimeInterval = 30
+    private static let requiredMatchDuration: TimeInterval = 3
+    private static let retainedDuration: TimeInterval = 34
+
+    private var samples: [AudioFingerprintSample] = []
+
+    mutating func append(time: TimeInterval, fingerprint: UInt64) -> TimeInterval? {
+        samples.append(AudioFingerprintSample(time: time, fingerprint: fingerprint))
+        let currentIndex = samples.count - 1
+
+        for previousIndex in stride(from: currentIndex - 1, through: 0, by: -1) {
+            let period = time - samples[previousIndex].time
+            if period < Self.minimumPeriod { continue }
+            if period > Self.maximumPeriod { break }
+            guard samples[previousIndex].fingerprint == fingerprint else { continue }
+
+            let indexPeriod = currentIndex - previousIndex
+            var matchedSamples = 1
+            while currentIndex - matchedSamples >= indexPeriod,
+                  samples[currentIndex - matchedSamples].fingerprint
+                    == samples[currentIndex - matchedSamples - indexPeriod].fingerprint {
+                matchedSamples += 1
+            }
+            let firstMatchingTime = samples[currentIndex - matchedSamples + 1].time
+            if time - firstMatchingTime >= Self.requiredMatchDuration {
+                trim(before: time - Self.retainedDuration)
+                return period
+            }
+        }
+
+        trim(before: time - Self.retainedDuration)
+        return nil
+    }
+
+    private mutating func trim(before cutoff: TimeInterval) {
+        if let firstRetained = samples.firstIndex(where: { $0.time >= cutoff }), firstRetained > 0 {
+            samples.removeFirst(firstRetained)
+        }
+    }
+}
+
 struct MediaCaptureHealthState {
     private static let stalledMediaTimeout: TimeInterval = 10
     private static let rejectedSampleLimit = 60
@@ -15,6 +63,8 @@ struct MediaCaptureHealthState {
     private(set) var consecutiveRejectedFrames = 0
     private(set) var consecutiveRejectedAudioSamples = 0
     private(set) var digitalSilenceStartedAt: TimeInterval?
+    private(set) var repeatedAudioPeriod: TimeInterval?
+    private var repeatedAudioDetector = RepeatedAudioDetector()
 
     init(
         startedAt: TimeInterval,
@@ -40,7 +90,8 @@ struct MediaCaptureHealthState {
     mutating func recordAudioCallback(
         at time: TimeInterval,
         accepted: Bool,
-        peakDecibels: Float
+        peakDecibels: Float,
+        fingerprint: UInt64? = nil
     ) {
         lastAudioCallbackAt = time
         consecutiveRejectedAudioSamples = accepted ? 0 : consecutiveRejectedAudioSamples + 1
@@ -51,6 +102,17 @@ struct MediaCaptureHealthState {
         } else {
             digitalSilenceStartedAt = nil
         }
+
+        if repeatedAudioPeriod == nil, let fingerprint {
+            repeatedAudioPeriod = repeatedAudioDetector.append(
+                time: time,
+                fingerprint: fingerprint
+            )
+        }
+    }
+
+    mutating func recordRepeatedAudio(period: TimeInterval) {
+        repeatedAudioPeriod = repeatedAudioPeriod ?? period
     }
 
     func problem(at time: TimeInterval) -> String? {
@@ -71,6 +133,12 @@ struct MediaCaptureHealthState {
            let digitalSilenceStartedAt,
            time - digitalSilenceStartedAt >= Self.digitalSilenceTimeout {
             return "The microphone delivered digital silence for 3 seconds. It may be muted or stalled."
+        }
+        if let repeatedAudioPeriod {
+            return String(
+                format: "The microphone is repeating an exact %.1f-second audio loop. Its input buffer is frozen.",
+                repeatedAudioPeriod
+            )
         }
         return nil
     }

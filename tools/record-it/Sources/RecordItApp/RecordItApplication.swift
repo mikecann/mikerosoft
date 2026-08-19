@@ -69,6 +69,13 @@ struct RecordItView: View {
         .task {
             await model.load()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: NSApplication.didChangeScreenParametersNotification
+            )
+        ) { _ in
+            model.refreshDisplaysAfterSystemChange()
+        }
         .alert(
             "Record It",
             isPresented: Binding(
@@ -358,7 +365,21 @@ struct RecordItView: View {
 
                 GridRow {
                     rowLabel("Camera audio", systemImage: "mic")
-                    microphonePicker(title: "Camera Audio", allowsNone: true)
+                    microphonePicker(title: "Camera Audio", allowsNone: false)
+                }
+            }
+
+            if model.mode.capturesCamera || model.mode.capturesAudio {
+                GridRow {
+                    rowLabel("Recovery audio", systemImage: "lifepreserver")
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(model.recoveryMicrophone?.name ?? "No separate recovery microphone")
+                        Text(model.recoveryMicrophone.map { _ in
+                            "Required lossless backup · separate helper process · kept for 14 days"
+                        } ?? "Recording is disabled until the MacBook Pro microphone is available")
+                            .font(.caption)
+                            .foregroundStyle(model.recoveryMicrophone == nil ? Color.red : Color.secondary)
+                    }
                 }
             }
 
@@ -655,6 +676,7 @@ struct RecordItView: View {
         case .screen: "display"
         case .camera: "video"
         case .audio: "waveform"
+        case .recoveryAudio: "lifepreserver"
         }
     }
 }

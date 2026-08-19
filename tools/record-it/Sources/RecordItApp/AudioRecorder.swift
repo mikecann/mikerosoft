@@ -18,6 +18,26 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     private var hasLoggedAudioFormat = false
     private var isStopping = false
     private var captureError: Error?
+    private lazy var sessionFailureMonitor = CaptureSessionFailureMonitor(
+        session: captureSession,
+        deviceIDs: [audioDevice.id],
+        onFailure: { [weak self] error in
+            self?.writerQueue.async { [weak self] in self?.reportFailure(error) }
+        }
+    )
+    private lazy var coreAudioHealthMonitor = CoreAudioInputHealthMonitor(
+        deviceUID: audioDevice.id,
+        deviceName: audioDevice.name,
+        onFailure: { [weak self] error in
+            self?.writerQueue.async { [weak self] in self?.reportFailure(error) }
+        }
+    )
+    private lazy var repeatedPCMMonitor = RepeatedPCMMonitor { [weak self] period in
+        self?.writerQueue.async { [weak self] in
+            guard let self, !isStopping else { return }
+            healthState?.recordRepeatedAudio(period: period)
+        }
+    }
 
     init(
         audioDevice: CaptureAudioDevice,
@@ -42,6 +62,8 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             sessionQueue.async { [self] in
                 do {
                     try configureSession()
+                    try coreAudioHealthMonitor.start()
+                    sessionFailureMonitor.start()
                     captureSession.startRunning()
                     startHealthMonitor()
                     RecordingDiagnostics.shared.log(
@@ -49,6 +71,8 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
                     )
                     continuation.resume()
                 } catch {
+                    sessionFailureMonitor.stop()
+                    coreAudioHealthMonitor.stop()
                     continuation.resume(throwing: error)
                 }
             }
@@ -61,6 +85,8 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             healthTimer?.cancel()
             healthTimer = nil
         }
+        sessionFailureMonitor.stop()
+        coreAudioHealthMonitor.stop()
         await withCheckedContinuation { continuation in
             sessionQueue.async { [self] in
                 if captureSession.isRunning {
@@ -104,11 +130,16 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
                     RecordingDiagnostics.shared.log(audioFormatDiagnosticSummary(buffer.format))
                 }
                 let accepted = try audioWriter?.appendAudio(buffer) ?? false
+                let peak = peakDecibels(in: buffer)
                 healthState?.recordAudioCallback(
                     at: now,
                     accepted: accepted,
-                    peakDecibels: peakDecibels(in: buffer)
+                    peakDecibels: peak,
+                    fingerprint: audioFingerprint(in: buffer)
                 )
+                if let chunk = pcmByteChunk(from: buffer) {
+                    repeatedPCMMonitor.append(chunk)
+                }
             }
         } catch {
             reportFailure(error)

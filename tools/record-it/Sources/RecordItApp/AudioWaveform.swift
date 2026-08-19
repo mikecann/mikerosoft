@@ -49,6 +49,23 @@ func peakDecibels(in buffer: AVAudioPCMBuffer) -> Float {
     return 20 * log10(min(1, peak))
 }
 
+func audioFingerprint(in buffer: AVAudioPCMBuffer) -> UInt64 {
+    // FNV-1a is intentionally simple and deterministic. We only compare
+    // fingerprints inside one recording to identify byte-for-byte replayed
+    // PCM buffers, not to provide cryptographic integrity.
+    var hash: UInt64 = 14_695_981_039_346_656_037
+    let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+    for audioBuffer in audioBuffers {
+        guard let data = audioBuffer.mData else { continue }
+        let bytes = data.assumingMemoryBound(to: UInt8.self)
+        for index in 0..<Int(audioBuffer.mDataByteSize) {
+            hash ^= UInt64(bytes[index])
+            hash &*= 1_099_511_628_211
+        }
+    }
+    return hash
+}
+
 struct AudioWaveformBuffer: Equatable, Sendable {
     let capacity: Int
     private(set) var levels: [Float] = []

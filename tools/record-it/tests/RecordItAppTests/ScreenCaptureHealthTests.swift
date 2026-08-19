@@ -118,4 +118,59 @@ final class ScreenCaptureHealthTests: XCTestCase {
         XCTAssertNil(health.problem(at: 119.9))
         XCTAssertNotNil(health.problem(at: 120.1))
     }
+
+    func testExactEightSecondAudioLoopIsAHardFailureAfterThreeRepeatedSeconds() {
+        var health = MediaCaptureHealthState(
+            startedAt: 100,
+            requiresVideo: false,
+            requiresAudio: true,
+            failsOnDigitalSilence: true
+        )
+
+        // Ten fingerprints per second for eight seconds of unique microphone audio.
+        for index in 0..<80 {
+            health.recordAudioCallback(
+                at: 100 + Double(index) / 10,
+                accepted: true,
+                peakDecibels: -12,
+                fingerprint: UInt64(index + 1)
+            )
+        }
+        XCTAssertNil(health.problem(at: 107.9))
+
+        // The capture device starts replaying that exact eight-second buffer.
+        for index in 0..<31 {
+            health.recordAudioCallback(
+                at: 108 + Double(index) / 10,
+                accepted: true,
+                peakDecibels: -12,
+                fingerprint: UInt64(index + 1)
+            )
+        }
+
+        XCTAssertEqual(
+            health.problem(at: 111),
+            "The microphone is repeating an exact 8.0-second audio loop. Its input buffer is frozen."
+        )
+    }
+
+    func testSimilarButNonIdenticalSpeechDoesNotTriggerLoopDetection() {
+        var health = MediaCaptureHealthState(
+            startedAt: 100,
+            requiresVideo: false,
+            requiresAudio: true,
+            failsOnDigitalSilence: true
+        )
+
+        for index in 0..<120 {
+            health.recordAudioCallback(
+                at: 100 + Double(index) / 10,
+                accepted: true,
+                peakDecibels: -12,
+                fingerprint: UInt64((index % 80) + 1 + (index >= 80 ? 1_000 : 0))
+            )
+        }
+
+        XCTAssertNil(health.problem(at: 111.9))
+    }
 }
