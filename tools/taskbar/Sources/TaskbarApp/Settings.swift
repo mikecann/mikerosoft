@@ -92,15 +92,22 @@ struct BatteryWidgetSettings: Codable, Equatable {
 struct ControlCenterLightsWidgetSettings: Codable, Equatable {
     var isEnabled: Bool
     var controlsTeleprompter: Bool
+    var controlsStudioDisplayScaling: Bool
 
-    init(isEnabled: Bool, controlsTeleprompter: Bool = false) {
+    init(
+        isEnabled: Bool,
+        controlsTeleprompter: Bool = false,
+        controlsStudioDisplayScaling: Bool = true
+    ) {
         self.isEnabled = isEnabled
         self.controlsTeleprompter = controlsTeleprompter
+        self.controlsStudioDisplayScaling = controlsStudioDisplayScaling
     }
 
     private enum CodingKeys: String, CodingKey {
         case isEnabled
         case controlsTeleprompter
+        case controlsStudioDisplayScaling
     }
 
     init(from decoder: Decoder) throws {
@@ -109,10 +116,20 @@ struct ControlCenterLightsWidgetSettings: Codable, Equatable {
         // Existing users already have this object persisted. Keep the new
         // DisplayLink control opt-in so an upgrade never disables a display.
         controlsTeleprompter = try container.decodeIfPresent(Bool.self, forKey: .controlsTeleprompter) ?? false
+        // This app is personal to Mike and PA27JCV is the studio reference
+        // display. Existing settings should pick up the requested behaviour.
+        controlsStudioDisplayScaling = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .controlsStudioDisplayScaling
+        ) ?? true
     }
 
     static var defaults: ControlCenterLightsWidgetSettings {
-        ControlCenterLightsWidgetSettings(isEnabled: true, controlsTeleprompter: false)
+        ControlCenterLightsWidgetSettings(
+            isEnabled: true,
+            controlsTeleprompter: false,
+            controlsStudioDisplayScaling: true
+        )
     }
 }
 

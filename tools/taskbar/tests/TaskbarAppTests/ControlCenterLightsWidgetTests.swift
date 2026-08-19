@@ -44,6 +44,7 @@ final class ControlCenterLightsWidgetTests: XCTestCase {
         XCTAssertEqual(installedTaskbarWidgetIDs(), [.stats, .battery, .controlCenterLights, .dateTime])
         XCTAssertTrue(TaskbarSettingValues.defaults.controlCenterLightsWidget.isEnabled)
         XCTAssertFalse(TaskbarSettingValues.defaults.controlCenterLightsWidget.controlsTeleprompter)
+        XCTAssertTrue(TaskbarSettingValues.defaults.controlCenterLightsWidget.controlsStudioDisplayScaling)
         XCTAssertEqual(activeTaskbarWidgets(for: .defaults).map(\.id), [.stats, .battery, .controlCenterLights, .dateTime])
     }
 
@@ -54,6 +55,28 @@ final class ControlCenterLightsWidgetTests: XCTestCase {
 
         XCTAssertTrue(decoded.isEnabled)
         XCTAssertFalse(decoded.controlsTeleprompter)
+        XCTAssertTrue(decoded.controlsStudioDisplayScaling)
+    }
+
+    func testStudioDisplayUsesLargerTextWhenLightsTurnOnAndDefaultWhenTheyTurnOff() {
+        XCTAssertEqual(
+            studioDisplayScaleTarget(isStudioEnabled: true),
+            StudioDisplayModeSize(width: 1600, height: 900, pixelWidth: 3200, pixelHeight: 1800)
+        )
+        XCTAssertEqual(
+            studioDisplayScaleTarget(isStudioEnabled: false),
+            StudioDisplayModeSize(width: 2560, height: 1440, pixelWidth: 5120, pixelHeight: 2880)
+        )
+    }
+
+    func testStudioDisplayModeSelectionRequiresTheExactHiDPIMode() {
+        let target = StudioDisplayModeSize(width: 1600, height: 900, pixelWidth: 3200, pixelHeight: 1800)
+        let modes = [
+            StudioDisplayModeSize(width: 1600, height: 900, pixelWidth: 1600, pixelHeight: 900),
+            StudioDisplayModeSize(width: 1600, height: 900, pixelWidth: 3200, pixelHeight: 1800)
+        ]
+
+        XCTAssertEqual(studioDisplayModeIndex(matching: target, in: modes), 1)
     }
 
     func testFindsTheSwitchBelongingToTheElgatoPrompterDisplay() {
@@ -142,13 +165,16 @@ final class ControlCenterLightsWidgetTests: XCTestCase {
         )
         let showItem = try XCTUnwrap(menu.items.first { $0.title == "Show Lights Button" })
         let prompterItem = try XCTUnwrap(menu.items.first { $0.title == "Include Elgato Prompter" })
+        let scalingItem = try XCTUnwrap(menu.items.first { $0.title == "Scale PA27JCV for Studio" })
 
         _ = controller.perform(try XCTUnwrap(showItem.action), with: showItem)
         _ = controller.perform(try XCTUnwrap(prompterItem.action), with: prompterItem)
+        _ = controller.perform(try XCTUnwrap(scalingItem.action), with: scalingItem)
 
         XCTAssertTrue(settings.preferences.general.controlCenterLightsWidget.isEnabled)
         XCTAssertFalse(settings.preferences.monitorOverrides["display:studio"]?.controlCenterLightsWidget?.isEnabled ?? true)
         XCTAssertTrue(settings.preferences.monitorOverrides["display:studio"]?.controlCenterLightsWidget?.controlsTeleprompter ?? false)
+        XCTAssertFalse(settings.preferences.monitorOverrides["display:studio"]?.controlCenterLightsWidget?.controlsStudioDisplayScaling ?? true)
     }
 }
 

@@ -224,6 +224,27 @@ final class SettingsWindowControllerTests: XCTestCase {
         XCTAssertTrue(settings.preferences.general.controlCenterLightsWidget.controlsTeleprompter)
     }
 
+    func testControlCenterLightsSettingsCanDisableStudioDisplayScaling() throws {
+        let settings = TaskbarSettings(store: RecordingSettingsStore())
+        let controller = SettingsWindowController(settings: settings, screens: [])
+        controller.selectWidget(.controlCenterLights)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let scaling = try XCTUnwrap(
+            button(actionNamed: "setGeneralControlCenterLightsDisplayScaling:", in: contentView)
+        )
+        XCTAssertEqual(scaling.title, "Scale PA27JCV for Studio")
+        XCTAssertEqual(scaling.state, .on)
+
+        scaling.state = .off
+        XCTAssertTrue(NSApplication.shared.sendAction(
+            try XCTUnwrap(scaling.action),
+            to: scaling.target,
+            from: scaling
+        ))
+
+        XCTAssertFalse(settings.preferences.general.controlCenterLightsWidget.controlsStudioDisplayScaling)
+    }
+
     func testGeneralWidgetSpacingControlUpdatesOnlyWidgetSpacing() throws {
         let settings = TaskbarSettings(store: RecordingSettingsStore())
         let controller = SettingsWindowController(settings: settings, screens: [])

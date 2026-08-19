@@ -721,7 +721,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
                 value: values.controlCenterLightsWidget,
                 enabled: true,
                 enabledAction: #selector(setGeneralControlCenterLightsEnabled(_:)),
-                teleprompterAction: #selector(setGeneralControlCenterLightsTeleprompter(_:))
+                teleprompterAction: #selector(setGeneralControlCenterLightsTeleprompter(_:)),
+                displayScalingAction: #selector(setGeneralControlCenterLightsDisplayScaling(_:))
             )
         ))
     }
@@ -920,7 +921,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         value: ControlCenterLightsWidgetSettings,
         enabled: Bool,
         enabledAction: Selector,
-        teleprompterAction: Selector
+        teleprompterAction: Selector,
+        displayScalingAction: Selector
     ) -> NSView {
         let controls = NSStackView()
         controls.orientation = .vertical
@@ -937,6 +939,12 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             state: value.controlsTeleprompter,
             enabled: enabled,
             action: teleprompterAction
+        ))
+        controls.addArrangedSubview(titledCheckbox(
+            "Scale PA27JCV for Studio",
+            state: value.controlsStudioDisplayScaling,
+            enabled: enabled,
+            action: displayScalingAction
         ))
         return controls
     }
@@ -1332,7 +1340,8 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
             value: value,
             enabled: isOverridden,
             enabledAction: #selector(setMonitorControlCenterLightsEnabled(_:)),
-            teleprompterAction: #selector(setMonitorControlCenterLightsTeleprompter(_:))
+            teleprompterAction: #selector(setMonitorControlCenterLightsTeleprompter(_:)),
+            displayScalingAction: #selector(setMonitorControlCenterLightsDisplayScaling(_:))
         ))
         return settingRow(
             icon: "lightbulb",
@@ -1802,6 +1811,10 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
         updateGeneral { $0.controlCenterLightsWidget.controlsTeleprompter = sender.state == .on }
     }
 
+    @objc private func setGeneralControlCenterLightsDisplayScaling(_ sender: NSButton) {
+        updateGeneral { $0.controlCenterLightsWidget.controlsStudioDisplayScaling = sender.state == .on }
+    }
+
     @objc private func setGeneralBackgroundOpacity(_ sender: NSSlider) {
         refreshSliderLabel(sender)
         updateGeneral { $0.backgroundOpacity = sender.doubleValue }
@@ -2053,6 +2066,10 @@ final class SettingsWindowController: NSWindowController, TaskbarSettingsWindow,
 
     @objc private func setMonitorControlCenterLightsTeleprompter(_ sender: NSButton) {
         updateMonitorControlCenterLightsWidget { $0.controlsTeleprompter = sender.state == .on }
+    }
+
+    @objc private func setMonitorControlCenterLightsDisplayScaling(_ sender: NSButton) {
+        updateMonitorControlCenterLightsWidget { $0.controlsStudioDisplayScaling = sender.state == .on }
     }
 
     @objc private func setMonitorStatsCPUDisplay(_ sender: NSPopUpButton) {

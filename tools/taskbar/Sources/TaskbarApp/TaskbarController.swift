@@ -590,12 +590,30 @@ final class TaskbarController: NSObject {
             let monitorID = monitorID ?? String(screenID)
             let controlsTeleprompter = settings.values(for: monitorID)
                 .controlCenterLightsWidget.controlsTeleprompter
+            let controlsStudioDisplayScaling = settings.values(for: monitorID)
+                .controlCenterLightsWidget.controlsStudioDisplayScaling
             ControlCenterLightsController.shared.toggleAll { target in
-                guard controlsTeleprompter, let target else { return }
-                DisplayLinkTeleprompterController.shared.setEnabled(target) { result in
-                    if case let .failure(error) = result {
-                        log("DisplayLink Elgato Prompter toggle failed: \(error.localizedDescription)")
+                guard let target else { return }
+                let updateDisplayScaling = {
+                    guard controlsStudioDisplayScaling else { return }
+                    StudioDisplayScalingController.shared.setStudioEnabled(target) { result in
+                        if case let .failure(error) = result {
+                            log("PA27JCV scaling toggle failed: \(error.localizedDescription)")
+                        }
                     }
+                }
+                if controlsTeleprompter {
+                    DisplayLinkTeleprompterController.shared.setEnabled(target) { result in
+                        if case let .failure(error) = result {
+                            log("DisplayLink Elgato Prompter toggle failed: \(error.localizedDescription)")
+                        }
+                        // A display mode change makes macOS rebuild menu-bar
+                        // state. Finish DisplayLink's AX interaction first so
+                        // PA27JCV scaling cannot invalidate its status item.
+                        updateDisplayScaling()
+                    }
+                } else {
+                    updateDisplayScaling()
                 }
             }
         case .battery, .dateTime:
@@ -893,6 +911,12 @@ final class TaskbarController: NSObject {
             action: #selector(toggleControlCenterLightsPrompterFromMenu),
             to: menu
         )
+        addWidgetToggle(
+            title: "Scale PA27JCV for Studio",
+            state: value.controlsStudioDisplayScaling,
+            action: #selector(toggleControlCenterLightsDisplayScalingFromMenu),
+            to: menu
+        )
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Lights Settings...", action: #selector(showWidgetSettingsFromMenu), keyEquivalent: ",")
         settingsItem.target = self
@@ -1063,6 +1087,10 @@ final class TaskbarController: NSObject {
 
     @objc private func toggleControlCenterLightsPrompterFromMenu() {
         updateControlCenterLightsWidgetFromMenu { $0.controlsTeleprompter.toggle() }
+    }
+
+    @objc private func toggleControlCenterLightsDisplayScalingFromMenu() {
+        updateControlCenterLightsWidgetFromMenu { $0.controlsStudioDisplayScaling.toggle() }
     }
 
     @objc private func toggleStatsCPUFromMenu() {
