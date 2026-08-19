@@ -80,6 +80,17 @@ struct RecordItView: View {
         } message: {
             Text(model.presentedError ?? "Unknown error")
         }
+        .alert(
+            "🚨 RECORDING FAILED 🚨",
+            isPresented: Binding(
+                get: { model.criticalFailureMessage != nil },
+                set: { if !$0 { model.dismissCriticalFailure() } }
+            )
+        ) {
+            Button("STOP ALARM") { model.dismissCriticalFailure() }
+        } message: {
+            Text(model.criticalFailureMessage ?? "The recording is incomplete. Do not continue this take.")
+        }
         .sheet(isPresented: $showingEncoderSettings) {
             EncoderSettingsView(model: model)
         }
@@ -163,8 +174,8 @@ struct RecordItView: View {
 
             Label(
                 model.mode == .audio
-                    ? "Record It will stop automatically if the selected input stops supplying audio."
-                    : "Record It will stop automatically if video callbacks cease or the encoder stops accepting frames.",
+                    ? "Required audio is monitored continuously. Missing, rejected, or silent input stops the take."
+                    : "Required video and audio are monitored continuously. Any failed stream stops the whole take.",
                 systemImage: "shield.checkered"
             )
             .font(.caption)
@@ -225,6 +236,20 @@ struct RecordItView: View {
                     }
                 }
             } else {
+                if telemetry.source == .camera {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack {
+                            Text("Microphone waveform")
+                            Spacer()
+                            Text("Required")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                        AudioWaveformView(levels: telemetry.audioWaveformLevels)
+                    }
+                }
+
                 Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
                     GridRow {
                         telemetryValue("Video timeline", formattedMediaDuration(telemetry.mediaDuration))

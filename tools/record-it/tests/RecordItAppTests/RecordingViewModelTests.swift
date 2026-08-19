@@ -4,6 +4,17 @@ import XCTest
 
 @MainActor
 final class RecordingViewModelTests: XCTestCase {
+    func testCriticalCaptureFailureMessageSaysTheRecordingIsNotUsable() {
+        XCTAssertEqual(
+            criticalCaptureFailureMessage(
+                source: .camera,
+                reason: "The microphone stayed silent for 10 seconds."
+            ),
+            "CAMERA CAPTURE FAILED. RECORDING STOPPED. VIDEO AND AUDIO ARE NOT COMPLETE. "
+                + "Do not continue this take. The microphone stayed silent for 10 seconds."
+        )
+    }
+
     func testViewModelRestoresTheLastSelectedRecordingMode() {
         let suiteName = "record-it-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

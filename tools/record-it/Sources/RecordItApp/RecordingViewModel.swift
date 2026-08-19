@@ -58,6 +58,7 @@ final class RecordingViewModel: ObservableObject {
     @Published private(set) var statusMessage = "Loading devices…"
     @Published private(set) var recordingTelemetry: [CaptureSource: RecordingTelemetry] = [:]
     @Published var presentedError: String?
+    @Published private(set) var criticalFailureMessage: String?
 
     let preferences: RecordingPreferences
 
@@ -360,8 +361,25 @@ final class RecordingViewModel: ObservableObject {
 
     private func handleCaptureFailure(_ error: Error, source: CaptureSource) async {
         guard isRecording, !isBusy else { return }
+        let message = criticalCaptureFailureMessage(
+            source: source,
+            reason: error.localizedDescription
+        )
+        criticalFailureMessage = message
+        statusMessage = "RECORDING FAILED. STOPPING NOW."
+        CriticalRecordingAlarm.shared.start()
         await stopRecording(revealInFinder: false)
-        presentedError = "\(source.displayName) capture failed and the recording was stopped immediately: \(error.localizedDescription)"
+        // stopRecording can surface a finalization error, but the capture
+        // failure is the primary warning and must remain impossible to miss.
+        presentedError = nil
+        criticalFailureMessage = message
+        statusMessage = "RECORDING FAILED. VIDEO AND AUDIO ARE NOT COMPLETE."
+    }
+
+    func dismissCriticalFailure() {
+        CriticalRecordingAlarm.shared.stop()
+        criticalFailureMessage = nil
+        statusMessage = "Ready to record"
     }
 
     private func resetActiveRecording() {
@@ -371,4 +389,9 @@ final class RecordingViewModel: ObservableObject {
         recordingStartedAt = nil
         isRecording = false
     }
+}
+
+func criticalCaptureFailureMessage(source: CaptureSource, reason: String) -> String {
+    "\(source.displayName.uppercased()) CAPTURE FAILED. RECORDING STOPPED. "
+        + "VIDEO AND AUDIO ARE NOT COMPLETE. Do not continue this take. \(reason)"
 }

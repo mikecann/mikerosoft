@@ -15,7 +15,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private var stream: SCStream?
     private var movieWriter: MovieWriter?
     private var streamError: Error?
-    private var healthState: ScreenCaptureHealthState?
+    private var healthState: MediaCaptureHealthState?
     private var healthTimer: DispatchSourceTimer?
     private var isStopping = false
     private var lastFrameStatus: SCFrameStatus?
@@ -171,7 +171,15 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             healthState?.recordVideoAppend(accepted: accepted || waitingForSharedStart)
             reportHealthProblemIfNeeded(at: now)
         case .audio:
-            movieWriter?.appendAudio(sampleBuffer)
+            let now = ProcessInfo.processInfo.systemUptime
+            let waitingForSharedStart = startGate != nil && startGate?.startTime == nil
+            let accepted = movieWriter?.appendAudio(sampleBuffer) ?? false
+            healthState?.recordAudioCallback(
+                at: now,
+                accepted: accepted || waitingForSharedStart,
+                peakDecibels: -160
+            )
+            reportHealthProblemIfNeeded(at: now)
         case .microphone:
             break
         @unknown default:
@@ -190,7 +198,10 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             guard let self else { return }
             guard !isStopping else { return }
             let now = ProcessInfo.processInfo.systemUptime
-            healthState = ScreenCaptureHealthState(startedAt: now)
+            healthState = MediaCaptureHealthState(
+                startedAt: now,
+                requiresAudio: audioSource.capturesSystemAudio
+            )
             lastHealthLogAt = now
             let timer = DispatchSource.makeTimerSource(queue: outputQueue)
             timer.schedule(deadline: .now() + 1, repeating: 1)

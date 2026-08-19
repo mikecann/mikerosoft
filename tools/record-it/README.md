@@ -96,16 +96,22 @@ writer, media timeline, current file size, output format, output file name, and
 pipeline health. This is writer telemetry, not just a recording timer, so a
 green state confirms that media is reaching the output file.
 
-Audio-only recordings also show a live waveform from the selected input. It
-updates ten times per second and keeps a short rolling history so speech and
-silence are visible without retaining extra audio outside the recording file.
+Camera and audio-only recordings also show a live waveform from the selected
+microphone. It updates ten times per second and keeps a short rolling history
+so speech and silence are visible without retaining extra audio outside the
+recording file.
 
 Screen recordings use variable-duration frames, so a static screen does not
 create a huge duplicate-frame backlog in the 4K hardware encoder. Record It
-also watches screen and camera callbacks plus sustained encoder backpressure.
-The dashboard warns after three seconds without video activity. If video stalls
-for ten seconds, or the encoder rejects 60 consecutive samples, the recording
-stops with a visible error instead of continuing silently with audio only.
+also watches screen and camera callbacks, every required audio stream, and
+sustained encoder backpressure. The dashboard warns after three seconds without
+video activity or microphone signal. The entire take stops if required video or
+audio callbacks stall for ten seconds, an encoder rejects 60 consecutive
+samples, or the selected microphone delivers digital-zero audio below -120 dB
+for three seconds. Ordinary room silence never stops a recording.
+Record It then activates itself, requests critical system attention, repeatedly
+sounds alarm tones, and displays an explicit incomplete-recording alert until
+the failure is acknowledged.
 
 Session starts, frame-status changes, 30-second health checks, failures, and
 stops are written to:

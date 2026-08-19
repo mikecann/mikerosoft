@@ -12,10 +12,9 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     private let writerQueue = DispatchQueue(label: "com.mikerosoft.record-it.audio-output")
     private var audioWriter: AudioWriter?
     private var healthTimer: DispatchSourceTimer?
-    private var startedAt: TimeInterval?
-    private var lastAudioActivityAt: TimeInterval?
+    private var healthState: MediaCaptureHealthState?
     private var lastWaveformSampleAt: TimeInterval?
-    private var waveform = AudioWaveformBuffer(capacity: 72)
+    private var waveform = AudioWaveformBuffer(capacity: 120)
     private var hasLoggedAudioFormat = false
     private var isStopping = false
     private var captureError: Error?
@@ -92,7 +91,6 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         from _: AVCaptureConnection
     ) {
         let now = ProcessInfo.processInfo.systemUptime
-        lastAudioActivityAt = now
         do {
             try withAudioPCMBuffer(from: sampleBuffer) { buffer in
                 if audioWriter == nil {
@@ -105,7 +103,12 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
                     hasLoggedAudioFormat = true
                     RecordingDiagnostics.shared.log(audioFormatDiagnosticSummary(buffer.format))
                 }
-                _ = try audioWriter?.appendAudio(buffer)
+                let accepted = try audioWriter?.appendAudio(buffer) ?? false
+                healthState?.recordAudioCallback(
+                    at: now,
+                    accepted: accepted,
+                    peakDecibels: peakDecibels(in: buffer)
+                )
             }
         } catch {
             reportFailure(error)
@@ -137,7 +140,13 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     private func startHealthMonitor() {
         writerQueue.async { [weak self] in
             guard let self, !isStopping else { return }
-            startedAt = ProcessInfo.processInfo.systemUptime
+            let startedAt = ProcessInfo.processInfo.systemUptime
+            healthState = MediaCaptureHealthState(
+                startedAt: startedAt,
+                requiresVideo: false,
+                requiresAudio: true,
+                failsOnDigitalSilence: true
+            )
             let timer = DispatchSource.makeTimerSource(queue: writerQueue)
             timer.schedule(
                 deadline: .now() + .milliseconds(100),
@@ -148,8 +157,8 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
                 guard let self else { return }
                 let now = ProcessInfo.processInfo.systemUptime
                 emitTelemetry(at: now)
-                if let startedAt, now - (lastAudioActivityAt ?? startedAt) >= 10 {
-                    reportFailure(RecordItError.message("No audio input was received for 10 seconds."))
+                if let problem = healthState?.problem(at: now) {
+                    reportFailure(RecordItError.message(problem))
                 }
             }
             healthTimer = timer
@@ -170,7 +179,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             audioSamplesWritten: progress.audioSamplesWritten,
             mediaDuration: progress.mediaDuration,
             fileSizeBytes: progress.fileSizeBytes,
-            lastVideoActivityAt: lastAudioActivityAt ?? startedAt,
+            lastVideoActivityAt: healthState?.lastAudioCallbackAt,
             consecutiveRejectedVideoSamples: 0,
             writerStatus: progress.writerStatus,
             now: time,

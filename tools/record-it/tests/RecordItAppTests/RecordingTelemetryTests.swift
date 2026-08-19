@@ -125,4 +125,50 @@ final class RecordingTelemetryTests: XCTestCase {
             "Input is silent. Check the selected microphone, mute, and gain"
         )
     }
+
+    func testCameraTelemetryWarnsWhenItsMicrophoneHasStayedSilent() {
+        let telemetry = RecordingTelemetry(
+            source: .camera,
+            outputURL: URL(fileURLWithPath: "/tmp/demo-camera.mov"),
+            width: 3840,
+            height: 2160,
+            codecName: "HEVC",
+            videoSamplesWritten: 300,
+            audioSamplesWritten: 500,
+            mediaDuration: 10,
+            fileSizeBytes: 8_000_000,
+            lastVideoActivityAt: 100,
+            consecutiveRejectedVideoSamples: 0,
+            writerStatus: .writing,
+            now: 100,
+            audioWaveformLevels: Array(repeating: 0.02, count: 30)
+        )
+
+        XCTAssertEqual(telemetry.health, .warning)
+        XCTAssertEqual(
+            telemetry.healthMessage,
+            "Microphone is quiet. Check mute and input level"
+        )
+    }
+
+    func testCameraCannotClaimHealthyBeforeWritingAudio() {
+        let telemetry = RecordingTelemetry(
+            source: .camera,
+            outputURL: URL(fileURLWithPath: "/tmp/demo-camera.mov"),
+            width: 3840,
+            height: 2160,
+            codecName: "HEVC",
+            videoSamplesWritten: 300,
+            audioSamplesWritten: 0,
+            mediaDuration: 2,
+            fileSizeBytes: 8_000_000,
+            lastVideoActivityAt: 100,
+            consecutiveRejectedVideoSamples: 0,
+            writerStatus: .writing,
+            now: 100
+        )
+
+        XCTAssertEqual(telemetry.health, .starting)
+        XCTAssertEqual(telemetry.healthMessage, "Waiting for the first microphone sample")
+    }
 }

@@ -16,8 +16,10 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let sessionQueue = DispatchQueue(label: "com.mikerosoft.record-it.camera-session")
     private let writerQueue = DispatchQueue(label: "com.mikerosoft.record-it.camera-output")
     private var movieWriter: MovieWriter?
-    private var healthState: ScreenCaptureHealthState?
+    private var healthState: MediaCaptureHealthState?
     private var healthTimer: DispatchSourceTimer?
+    private var lastWaveformSampleAt: TimeInterval?
+    private var waveform = AudioWaveformBuffer(capacity: 120)
     private var isStopping = false
     private var captureError: Error?
     private var configurationLockedDevice: AVCaptureDevice?
@@ -56,7 +58,8 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                     startHealthMonitor()
                     RecordingDiagnostics.shared.log(
                         "camera.start device=\(camera.name) output=\(camera.width)x\(camera.height) "
-                            + "audio=\(microphone != nil) encoder=\(encoderConfiguration.encoder.displayName)"
+                            + "microphone=\(microphone?.name ?? "none") "
+                            + "encoder=\(encoderConfiguration.encoder.displayName)"
                     )
                     let activeFormat = configurationLockedDevice?.activeFormat
                     if let activeFormat {
@@ -113,7 +116,27 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             healthState?.recordVideoAppend(accepted: accepted || waitingForSharedStart)
             reportHealthProblemIfNeeded(at: now)
         } else if output === audioOutput {
-            movieWriter?.appendAudio(sampleBuffer)
+            let now = ProcessInfo.processInfo.systemUptime
+            do {
+                try withAudioPCMBuffer(from: sampleBuffer) { [self] buffer in
+                    let peak = peakDecibels(in: buffer)
+                    let waitingForSharedStart = startGate != nil && startGate?.startTime == nil
+                    let accepted = movieWriter?.appendAudio(sampleBuffer) ?? false
+                    healthState?.recordAudioCallback(
+                        at: now,
+                        accepted: accepted || waitingForSharedStart,
+                        peakDecibels: peak
+                    )
+                    if lastWaveformSampleAt == nil || now - (lastWaveformSampleAt ?? 0) >= 0.1 {
+                        waveform.append(decibels: peak)
+                        lastWaveformSampleAt = now
+                    }
+                }
+            } catch {
+                reportFailure(error)
+                return
+            }
+            reportHealthProblemIfNeeded(at: now)
         }
     }
 
@@ -121,7 +144,11 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         writerQueue.async { [weak self] in
             guard let self, !isStopping else { return }
             let now = ProcessInfo.processInfo.systemUptime
-            healthState = ScreenCaptureHealthState(startedAt: now)
+            healthState = MediaCaptureHealthState(
+                startedAt: now,
+                requiresAudio: microphone != nil,
+                failsOnDigitalSilence: microphone != nil
+            )
             let timer = DispatchSource.makeTimerSource(queue: writerQueue)
             timer.schedule(deadline: .now() + 1, repeating: 1)
             timer.setEventHandler { [weak self] in
@@ -167,6 +194,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             consecutiveRejectedVideoSamples: healthState?.consecutiveRejectedFrames ?? 0,
             writerStatus: progress.writerStatus,
             now: time,
+            audioWaveformLevels: waveform.levels,
             failureMessage: failureMessage
         ))
     }

@@ -172,7 +172,8 @@ final class MovieWriter {
         return true
     }
 
-    func appendAudio(_ sampleBuffer: CMSampleBuffer) {
+    @discardableResult
+    func appendAudio(_ sampleBuffer: CMSampleBuffer) -> Bool {
         let sourceTimestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         guard
             CMSampleBufferDataIsReady(sampleBuffer),
@@ -181,12 +182,14 @@ final class MovieWriter {
             let audioInput,
             audioInput.isReadyForMoreMediaData,
             sourceTimestamp >= sessionStartTime
-        else { return }
+        else { return false }
 
         if audioInput.append(sampleBuffer) {
             latestAudioTimestamp = sourceTimestamp + CMSampleBufferGetDuration(sampleBuffer)
             audioSamplesWritten += 1
+            return true
         }
+        return false
     }
 
     func progress() -> WriterProgress {

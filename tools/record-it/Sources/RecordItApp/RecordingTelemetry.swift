@@ -109,6 +109,12 @@ struct RecordingTelemetry: Identifiable, Equatable, Sendable {
                 health = .healthy
                 healthMessage = "Audio and file output are active"
             }
+        } else if source == .camera, audioSamplesWritten == 0 {
+            health = .starting
+            healthMessage = "Waiting for the first microphone sample"
+        } else if source == .camera, hasSustainedAudioSilence(audioWaveformLevels) {
+            health = .warning
+            healthMessage = "Microphone is quiet. Check mute and input level"
         } else if consecutiveRejectedVideoSamples >= 60 {
             health = .failed
             healthMessage = "Video encoder is not accepting frames"
