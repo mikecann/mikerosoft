@@ -330,15 +330,16 @@ def get_foreground_monitor_work_area() -> tuple[int, int, int, int]:
 
 
 # ---------------------------------------------------------------------------
-# Text injection — pbcopy + Cmd+V via direct CGEventPost
+# Text injection via NSPasteboard + Cmd+V via direct CGEventPost
 #
 # pynput's Controller.type() internally calls TSM (Text Services Manager)
 # APIs that are main-thread-only.  paste_text() runs on a background thread,
 # which causes a SIGTRAP dispatch_assert_queue crash.
 #
-# Fix: copy text to clipboard with pbcopy, then simulate Cmd+V using
-# CGEventPost directly.  CGEventPost is explicitly thread-safe.
-# The clipboard is saved and restored around each injection.
+# Fix: copy text to NSPasteboard, then simulate Cmd+V using CGEventPost
+# directly. CGEventPost is explicitly thread-safe. Every pasteboard item and
+# type is saved and restored so images, files, rich text, and empty clipboards
+# survive injection as well as plain text.
 # ---------------------------------------------------------------------------
 
 # macOS virtual keycodes
@@ -357,41 +358,72 @@ def _post_events(vk_sequence: list[tuple[int, bool, int]]) -> None:
         Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
 
 
+def _snapshot_pasteboard(pasteboard) -> list[list[tuple[object, bytes]]]:
+    """Materialize every item and type before temporarily replacing it."""
+    snapshot: list[list[tuple[object, bytes]]] = []
+    for item in pasteboard.pasteboardItems() or []:
+        saved_types = []
+        for pasteboard_type in item.types() or []:
+            data = item.dataForType_(pasteboard_type)
+            if data is not None:
+                # Copy the bytes now. Pasteboard data providers can be lazy and
+                # their objects may no longer be valid after clearContents().
+                saved_types.append((pasteboard_type, bytes(data)))
+        snapshot.append(saved_types)
+    return snapshot
+
+
+def _restore_pasteboard(pasteboard, snapshot, item_class=None) -> None:
+    """Replace the pasteboard with a previously materialized snapshot."""
+    if item_class is None:
+        from AppKit import NSPasteboardItem
+        item_class = NSPasteboardItem
+
+    restored_items = []
+    for saved_types in snapshot:
+        item = item_class.alloc().init()
+        for pasteboard_type, data in saved_types:
+            item.setData_forType_(data, pasteboard_type)
+        restored_items.append(item)
+
+    pasteboard.clearContents()
+    if restored_items:
+        pasteboard.writeObjects_(restored_items)
+
+
 def inject_text(text: str, log: Callable[[str], None] | None = None) -> None:
-    import subprocess
     import time
+    from AppKit import NSPasteboard, NSPasteboardTypeString
 
     # Re-activate the app that had focus when recording started.
     # The overlay appearing may have moved focus away.
     restore_target_app_focus()
     time.sleep(0.15)  # wait for the app to actually come to front
 
-    # Save current clipboard so we can restore it after pasting
-    prev = subprocess.run(["pbpaste"], capture_output=True).stdout
+    pasteboard = NSPasteboard.generalPasteboard()
+    snapshot = _snapshot_pasteboard(pasteboard)
 
-    # Put the transcription in the clipboard
-    proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-    proc.communicate(text.encode("utf-8"))
-    time.sleep(0.05)  # give pbcopy time to commit
+    try:
+        pasteboard.clearContents()
+        if not pasteboard.setString_forType_(text, NSPasteboardTypeString):
+            raise RuntimeError("Could not put transcription on the pasteboard")
+        time.sleep(0.05)  # give the target app a stable pasteboard value
 
-    # Simulate Cmd+V: Command down → V down → V up → Command up
-    import Quartz
-    cmd_flag = Quartz.kCGEventFlagMaskCommand
-    _post_events([
-        (_VK_CMD, True,  cmd_flag),
-        (_VK_V,   True,  cmd_flag),
-        (_VK_V,   False, cmd_flag),
-        (_VK_CMD, False, 0),
-    ])
-    time.sleep(0.1)  # let paste complete before restoring clipboard
-
-    # Restore previous clipboard contents
-    if prev:
-        rp = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-        rp.communicate(prev)
+        # Simulate Cmd+V: Command down, V down, V up, Command up.
+        import Quartz
+        cmd_flag = Quartz.kCGEventFlagMaskCommand
+        _post_events([
+            (_VK_CMD, True,  cmd_flag),
+            (_VK_V,   True,  cmd_flag),
+            (_VK_V,   False, cmd_flag),
+            (_VK_CMD, False, 0),
+        ])
+        time.sleep(0.1)  # let paste complete before restoring the pasteboard
+    finally:
+        _restore_pasteboard(pasteboard, snapshot)
 
     if log:
-        log(f"pbcopy+Cmd+V: {len(text)} chars injected")
+        log(f"NSPasteboard+Cmd+V: {len(text)} chars injected")
 
 
 def inject_backspaces(count: int, log: Callable[[str], None] | None = None) -> None:

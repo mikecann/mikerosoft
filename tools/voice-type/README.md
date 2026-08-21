@@ -206,8 +206,9 @@ macOS does not currently use the Windows tray flow.
   boundary; if Whisper revised the boundary around a pause or stutter, Voice
   Type falls back to a full pass instead of risking missing or duplicated text.
 - **Text injection** — Windows injects text via `SendInput` with
-  `KEYEVENTF_UNICODE`. macOS re-activates the target app and pastes with a
-  clipboard-preserving `pbcopy` + `Cmd+V` flow.
+  `KEYEVENTF_UNICODE`. macOS re-activates the target app and pastes with an
+  `NSPasteboard` + `Cmd+V` flow that restores every clipboard item and type,
+  including screenshots, files, rich text, and an empty clipboard.
 - **Optional transcript cleanup** — for `final_only`, `hybrid`, and
   `precompute`, an optional local GGUF instruct model can lightly clean the
   final transcript before it is typed. Guardrails reject outputs that remove
