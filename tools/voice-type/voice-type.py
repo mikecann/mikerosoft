@@ -268,11 +268,12 @@ from runtime_policy import (
 )
 from audio_recovery import AudioBackendRecovery
 from microphone_readiness import (
+    DEFAULT_MICROPHONE_NAME,
+    input_device_options,
     microphone_candidate,
     probe_input_device,
     refresh_audio_devices,
-    resolve_current_default_input,
-    resolve_input_device,
+    resolve_recording_input,
 )
 from process_relaunch import restart_current_process, validate_relauncher_files
 from operation_watchdog import OperationWatchdog, finalization_timeout_seconds
@@ -412,7 +413,7 @@ def _load_settings():
         ),
     )
     _settings.setdefault("output_mode",  "final_only")
-    _settings.setdefault("microphone_name", "")
+    _settings.setdefault("microphone_name", DEFAULT_MICROPHONE_NAME)
     _settings.setdefault("formatter_enabled", False)
     _settings.setdefault("formatter_model", DEFAULT_FORMATTER_MODEL)
     _settings.setdefault("formatter_system_prompt", DEFAULT_FORMATTER_SYSTEM_PROMPT)
@@ -789,6 +790,19 @@ def _set_output_mode(name: str):
     _save_settings()
 
 
+def _set_microphone_name(name: str):
+    """Persist the input choice and use it for the next recording."""
+    microphone_name = name.strip()
+    if _settings.get("microphone_name", "") == microphone_name:
+        return
+    label = microphone_name or "System Default"
+    log(f"Input device switching to {label!r}...")
+    _settings["microphone_name"] = microphone_name
+    _save_settings()
+    if _runtime_recorder is not None:
+        _runtime_recorder.select_microphone(microphone_name)
+
+
 def _set_formatter_enabled(enabled: bool):
     enabled = bool(enabled)
     if bool(_settings.get("formatter_enabled", False)) == enabled:
@@ -1142,6 +1156,41 @@ class MacTrayIcon:
 
 
 def _build_control_state(tray) -> dict:
+    selected_microphone = str(_settings.get("microphone_name", "")).strip()
+    try:
+        if sys.platform == "darwin":
+            refresh_audio_devices(sd)
+        microphone_options, live_microphones = input_device_options(
+            sd,
+            selected_microphone,
+        )
+    except Exception as error:
+        log(f"Could not list input devices for settings: {error}")
+        microphone_options = [""]
+        live_microphones = set()
+        if selected_microphone:
+            microphone_options.append(selected_microphone)
+
+    selected_option = next(
+        (
+            option
+            for option in microphone_options
+            if option.casefold() == selected_microphone.casefold()
+        ),
+        selected_microphone,
+    )
+    microphone_labels = {"": "System Default"}
+    for option in microphone_options:
+        if not option:
+            continue
+        is_unavailable = (
+            option == selected_option
+            and option.casefold() not in live_microphones
+        )
+        microphone_labels[option] = (
+            f"{option} (unavailable)" if is_unavailable else option
+        )
+
     state = {
         "enabled": tray.enabled,
         "ui_state": getattr(tray, "_state", "idle"),
@@ -1152,6 +1201,7 @@ def _build_control_state(tray) -> dict:
         "final_model": _settings.get("final_model"),
         "stream_model": _settings.get("stream_model"),
         "output_mode": _settings.get("output_mode"),
+        "microphone_name": selected_option,
         "formatter_enabled": bool(_settings.get("formatter_enabled", False)),
         "formatter_model": _settings.get("formatter_model"),
         "startup_enabled": platform.startup_enabled(_VBS_PATH),
@@ -1164,9 +1214,11 @@ def _build_control_state(tray) -> dict:
         "final_model_options": FINAL_MODEL_OPTIONS,
         "stream_model_options": STREAM_MODEL_OPTIONS,
         "output_mode_options": OUTPUT_MODE_OPTIONS,
+        "microphone_options": microphone_options,
         "formatter_model_options": FORMATTER_MODEL_OPTIONS,
         "model_labels": MODEL_LABELS,
         "output_mode_labels": _OUTPUT_MODE_LABELS,
+        "microphone_labels": microphone_labels,
         "formatter_model_labels": {
             name: FORMATTER_MODEL_PRESETS[name].label
             for name in FORMATTER_MODEL_OPTIONS
@@ -1200,6 +1252,7 @@ def _apply_settings_changes(*, tray, updates: dict) -> None:
     _set_final_model(str(updates.get("final_model", _settings.get("final_model"))))
     _set_stream_model(str(updates.get("stream_model", _settings.get("stream_model"))))
     _set_output_mode(str(updates.get("output_mode", _settings.get("output_mode"))))
+    _set_microphone_name(str(updates.get("microphone_name", _settings.get("microphone_name", ""))))
     _set_formatter_enabled(bool(updates.get("formatter_enabled", _settings.get("formatter_enabled", False))))
     _set_formatter_model(str(updates.get("formatter_model", _settings.get("formatter_model"))))
 
@@ -1708,6 +1761,9 @@ class Overlay:
         final_v2l, final_l2v = _choice_maps(state["final_model_options"], state["model_labels"])
         stream_v2l, stream_l2v = _choice_maps(state["stream_model_options"], state["model_labels"])
         output_v2l, output_l2v = _choice_maps(state["output_mode_options"], state["output_mode_labels"])
+        microphone_v2l, microphone_l2v = _choice_maps(
+            state["microphone_options"], state["microphone_labels"]
+        )
         formatter_v2l, formatter_l2v = _choice_maps(
             state["formatter_model_options"], state["formatter_model_labels"]
         )
@@ -1715,7 +1771,7 @@ class Overlay:
         win = tk.Toplevel(self._root)
         self._settings_win = win
         win.title("Voice Type Settings")
-        win.geometry("560x420")
+        win.geometry("560x460")
         win.minsize(520, 380)
 
         body = ttk.Frame(win, padding=14)
@@ -1735,6 +1791,9 @@ class Overlay:
         final_var = tk.StringVar(value=final_v2l[state["final_model"]])
         stream_var = tk.StringVar(value=stream_v2l[state["stream_model"]])
         output_var = tk.StringVar(value=output_v2l[state["output_mode"]])
+        microphone_var = tk.StringVar(
+            value=microphone_v2l[state["microphone_name"]]
+        )
         formatter_var = tk.StringVar(value=formatter_v2l[state["formatter_model"]])
 
         row = 1
@@ -1779,6 +1838,19 @@ class Overlay:
         output_combo.grid(row=row, column=1, sticky="ew", pady=4)
         row += 1
 
+        ttk.Label(body, text="Input Device").grid(row=row, column=0, sticky="w", pady=4)
+        microphone_combo = ttk.Combobox(
+            body,
+            textvariable=microphone_var,
+            values=[
+                microphone_v2l[value]
+                for value in state["microphone_options"]
+            ],
+            state="readonly",
+        )
+        microphone_combo.grid(row=row, column=1, sticky="ew", pady=4)
+        row += 1
+
         ttk.Checkbutton(body, text="Formatter Enabled", variable=formatter_enabled_var).grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(10, 4)
         )
@@ -1817,6 +1889,7 @@ class Overlay:
                 "final_model": final_l2v[final_var.get()],
                 "stream_model": stream_l2v[stream_var.get()],
                 "output_mode": output_l2v[output_var.get()],
+                "microphone_name": microphone_l2v[microphone_var.get()],
                 "formatter_enabled": formatter_enabled_var.get(),
                 "formatter_model": formatter_l2v[formatter_var.get()],
             }
@@ -2109,17 +2182,13 @@ class Recorder:
             self._open_stream()
 
     def _open_stream(self):
-        if sys.platform == "darwin":
-            # PortAudio caches the macOS default device. Refresh between
-            # streams so USB changes follow the current system selection.
-            selected = resolve_current_default_input(
-                sd,
-                platform_name=sys.platform,
-            )
-            log(f"Mic (system default): {selected.name!r}")
-        else:
-            selected = resolve_input_device(sd, self._device_name)
-            log(f"Mic: {selected.name!r}")
+        selected = resolve_recording_input(
+            sd,
+            preferred_name=self._device_name,
+            platform_name=sys.platform,
+        )
+        source_label = "system default" if not self._device_name else "selected"
+        log(f"Mic ({source_label}): {selected.name!r}")
         # blocksize=256 → 16 ms per callback — low enough that the first
         # captured block is ≤16 ms after the key goes down.
         stream = sd.InputStream(
@@ -2715,9 +2784,7 @@ def run():
         )
 
         if _sys.platform == "darwin":
-            # macOS owns microphone selection. Always validate the current
-            # system default rather than pinning a device cached in settings.
-            microphone_name = ""
+            microphone_name = str(_settings.get("microphone_name", "")).strip()
             last_failure = None
             fallback_announced = False
             readiness_started = time.monotonic()
@@ -2753,7 +2820,9 @@ def run():
                         sleep=time.sleep,
                     )
                     if probe.ready:
-                        recorder.select_microphone(probe.device.name)
+                        recorder.select_microphone(
+                            probe.device.name if microphone_name else ""
+                        )
                         log(f"Microphone ready: {probe.device.name!r}.")
                         break
                     failure = f"{probe.device.name}: {probe.reason}"

@@ -286,7 +286,7 @@ Useful keys:
 | `final_model`        | `"small.en"` / `"large-v3-turbo"` | Final transcription model. On Apple Silicon, supported values can use MLX |
 | `stream_model`       | `"tiny.en"` / `"large-v3-turbo"` | Preview model. Accelerated systems default to turbo |
 | `output_mode`        | `"final_only"`   | Finalise strategy |
-| `microphone_name`    | `""`             | Optional exact input-device name on Windows. macOS always follows the current system default |
+| `microphone_name`    | `"Yeti Stereo Microphone"` | Input device selected in Settings. Choose System Default to follow the operating-system input |
 | `formatter_enabled`  | `false`          | Turn local transcript cleanup on/off |
 | `formatter_model`    | `"qwen2.5-0.5b"` | Local cleanup model preset |
 | `corrections`        | `{...}`          | Exact phrase replacements applied after transcription |

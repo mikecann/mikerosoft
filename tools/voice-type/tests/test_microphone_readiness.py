@@ -44,6 +44,12 @@ class MicrophoneReadinessTests(unittest.TestCase):
     def setUpClass(cls):
         cls.module = load_module()
 
+    def test_yeti_is_the_default_preferred_input(self):
+        self.assertEqual(
+            "Yeti Stereo Microphone",
+            self.module.DEFAULT_MICROPHONE_NAME,
+        )
+
     def test_resolves_configured_microphone_instead_of_system_default(self):
         sounddevice = mock.Mock()
         sounddevice.query_devices.return_value = [
@@ -70,6 +76,74 @@ class MicrophoneReadinessTests(unittest.TestCase):
             "Yeti Stereo Microphone",
         ):
             self.module.resolve_input_device(sounddevice, "Yeti Stereo Microphone")
+
+    def test_lists_input_devices_without_output_only_or_duplicate_entries(self):
+        sounddevice = mock.Mock()
+        sounddevice.query_devices.return_value = [
+            {"name": "MacBook Pro Microphone", "max_input_channels": 1},
+            {"name": "Studio Display Speakers", "max_input_channels": 0},
+            {"name": "Yeti Stereo Microphone", "max_input_channels": 2},
+            {"name": "yeti stereo microphone", "max_input_channels": 2},
+        ]
+
+        devices = self.module.list_input_devices(sounddevice)
+
+        self.assertEqual(
+            ["MacBook Pro Microphone", "Yeti Stereo Microphone"],
+            [device.name for device in devices],
+        )
+        self.assertEqual([0, 2], [device.index for device in devices])
+
+    def test_macos_recording_refreshes_devices_then_resolves_selected_input(self):
+        sounddevice = mock.Mock()
+        sounddevice.query_devices.return_value = [
+            {"name": "MacBook Pro Microphone", "max_input_channels": 1},
+            {"name": "Yeti Stereo Microphone", "max_input_channels": 2},
+        ]
+
+        selected = self.module.resolve_recording_input(
+            sounddevice,
+            preferred_name="Yeti Stereo Microphone",
+            platform_name="darwin",
+        )
+
+        sounddevice._terminate.assert_called_once_with()
+        sounddevice._initialize.assert_called_once_with()
+        self.assertEqual(1, selected.index)
+        self.assertEqual("Yeti Stereo Microphone", selected.name)
+
+    def test_input_options_keep_a_saved_device_that_is_currently_unavailable(self):
+        sounddevice = mock.Mock()
+        sounddevice.query_devices.return_value = [
+            {"name": "MacBook Pro Microphone", "max_input_channels": 1},
+        ]
+
+        options, available_names = self.module.input_device_options(
+            sounddevice,
+            selected_name="Yeti Stereo Microphone",
+        )
+
+        self.assertEqual(
+            ["", "MacBook Pro Microphone", "Yeti Stereo Microphone"],
+            options,
+        )
+        self.assertEqual({"macbook pro microphone"}, available_names)
+
+    def test_system_default_remains_an_explicit_recording_option(self):
+        sounddevice = mock.Mock()
+        sounddevice.query_devices.return_value = {
+            "name": "MacBook Pro Microphone",
+        }
+
+        selected = self.module.resolve_recording_input(
+            sounddevice,
+            preferred_name="",
+            platform_name="darwin",
+        )
+
+        sounddevice.query_devices.assert_called_once_with(None, "input")
+        self.assertIsNone(selected.index)
+        self.assertEqual("MacBook Pro Microphone", selected.name)
 
     def test_preferred_microphone_is_checked_during_resume_grace_period(self):
         self.assertEqual(
