@@ -77,6 +77,8 @@ class ControlServer:
         self._log = log
         self._client_timeout_seconds = client_timeout_seconds
         self._stop_event = threading.Event()
+        self._ready_event = threading.Event()
+        self._startup_error: OSError | None = None
         self._thread: threading.Thread | None = None
         self._server: socket.socket | None = None
 
@@ -84,8 +86,16 @@ class ControlServer:
         if self._thread is not None:
             return
         self._remove_stale_socket()
+        self._ready_event.clear()
+        self._startup_error = None
         self._thread = threading.Thread(target=self._serve, daemon=True, name="voice-type-control")
         self._thread.start()
+        if not self._ready_event.wait(timeout=1.0):
+            raise RuntimeError("Voice Type control server did not start within 1 second")
+        if self._startup_error is not None:
+            error = self._startup_error
+            self._thread = None
+            raise RuntimeError(f"Voice Type control server could not start: {error}")
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -106,9 +116,16 @@ class ControlServer:
 
     def _serve(self) -> None:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            try:
+                server.bind(self._socket_path)
+                server.listen()
+            except OSError as error:
+                self._startup_error = error
+                self._ready_event.set()
+                self._remove_stale_socket()
+                return
             self._server = server
-            server.bind(self._socket_path)
-            server.listen()
+            self._ready_event.set()
             while not self._stop_event.is_set():
                 try:
                     conn, _ = server.accept()

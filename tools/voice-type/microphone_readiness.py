@@ -8,6 +8,9 @@ from typing import Callable
 import numpy as np
 
 
+DEFAULT_MICROPHONE_NAME = "Yeti Stereo Microphone"
+
+
 class MicrophoneUnavailable(RuntimeError):
     pass
 
@@ -23,6 +26,39 @@ class MicrophoneProbeResult:
     ready: bool
     device: InputDevice
     reason: str = ""
+
+
+def list_input_devices(sounddevice) -> list[InputDevice]:
+    """Return selectable input devices with duplicate names removed."""
+    devices = []
+    seen_names = set()
+    for index, info in enumerate(sounddevice.query_devices()):
+        name = str(info.get("name", "")).strip()
+        normalized_name = name.casefold()
+        if (
+            not name
+            or int(info.get("max_input_channels", 0)) <= 0
+            or normalized_name in seen_names
+        ):
+            continue
+        devices.append(InputDevice(index=index, name=name))
+        seen_names.add(normalized_name)
+    return devices
+
+
+def input_device_options(
+    sounddevice,
+    selected_name: str | None,
+) -> tuple[list[str], set[str]]:
+    """Build settings choices, retaining an unplugged saved device."""
+    devices = list_input_devices(sounddevice)
+    options = [""]
+    options.extend(device.name for device in devices)
+    available_names = {device.name.casefold() for device in devices}
+    selected = (selected_name or "").strip()
+    if selected and selected.casefold() not in available_names:
+        options.append(selected)
+    return options, available_names
 
 
 def microphone_candidate(
@@ -117,8 +153,22 @@ def refresh_audio_devices(sounddevice) -> None:
     sounddevice._initialize()
 
 
-def resolve_current_default_input(sounddevice, *, platform_name: str) -> InputDevice:
-    """Resolve the current system default instead of PortAudio's stale cache."""
+def resolve_recording_input(
+    sounddevice,
+    *,
+    preferred_name: str | None,
+    platform_name: str,
+) -> InputDevice:
+    """Refresh macOS device state, then resolve the saved input choice."""
     if platform_name == "darwin":
         refresh_audio_devices(sounddevice)
-    return resolve_input_device(sounddevice, None)
+    return resolve_input_device(sounddevice, preferred_name)
+
+
+def resolve_current_default_input(sounddevice, *, platform_name: str) -> InputDevice:
+    """Resolve the current system default instead of PortAudio's stale cache."""
+    return resolve_recording_input(
+        sounddevice,
+        preferred_name=None,
+        platform_name=platform_name,
+    )

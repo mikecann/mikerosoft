@@ -77,11 +77,7 @@ class VoiceTypeControlTests(unittest.TestCase):
             )
             server.start()
             try:
-                deadline = time.time() + 1.0
-                while not pathlib.Path(socket_path).exists():
-                    if time.time() > deadline:
-                        self.fail("socket file was not created")
-                    time.sleep(0.01)
+                self.assertTrue(pathlib.Path(socket_path).exists())
 
                 response = self.module.send_request(
                     socket_path,
@@ -105,11 +101,6 @@ class VoiceTypeControlTests(unittest.TestCase):
             server.start()
             stalled = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
-                deadline = time.time() + 1.0
-                while not pathlib.Path(socket_path).exists():
-                    if time.time() > deadline:
-                        self.fail("socket file was not created")
-                    time.sleep(0.01)
                 stalled.connect(socket_path)
                 time.sleep(0.05)
 
