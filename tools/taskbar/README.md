@@ -12,13 +12,15 @@ maximising underneath the bar.
 
 - Shows one taskbar per monitor
 - Shows every window individually instead of grouping by app
+- Shows compact launchers for running apps without represented windows
+- Reacts to app and focused-window changes, with a one-second polling fallback
 - Minimises the active window when its item is clicked again, and restores it on the next click
 - Keeps the selected app highlighted with a sliding pill
 - Pins apps so they stay visible when closed
 - Gives open windows equal widths when crowded, keeping closed pinned launchers compact
 - Expands the selected window to read its label, shrinking the other buttons to fit
 - Ellipsises long labels
-- Mirrors app-wide Dock notification badges, including unread dots (requires Accessibility permission)
+- Mirrors app-wide Dock notification badges, including unread dots (requires Accessibility permission); checks every two seconds and refreshes immediately when results change
 - Fits complete stats values into compact modules without truncating percentages or transfer units
 - Supports Date & Time, Battery, Stats, and Control Center Lights taskbar widgets
 - Lets widgets own their menu, rendering, and settings surface

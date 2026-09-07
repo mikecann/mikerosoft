@@ -228,6 +228,9 @@ final class TaskbarController: NSObject {
     private let windowAvoider = WindowAvoider()
     private let performanceWatchdog = MainThreadWatchdog()
     private var panels: [UInt32: TaskbarPanel] = [:]
+    private lazy var focusMonitor = TaskbarFocusMonitor { [weak self] in
+        self?.scheduleRefreshSoon()
+    }
     private var timer: Timer?
     private var autoHideTimer: Timer?
     private var pendingRefreshWorkItem: DispatchWorkItem?
@@ -309,6 +312,8 @@ final class TaskbarController: NSObject {
     }
 
     private func finishStarting() {
+        focusMonitor.start()
+        TaskbarBadgeSampler.shared.onChange = { [weak self] in self?.scheduleRefreshSoon(after: 0) }
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -324,6 +329,10 @@ final class TaskbarController: NSObject {
     func prepareForTermination() {
         isWaitingForInitialWindowProviderWarmup = false
         pendingRefreshWorkItem?.cancel()
+        timer?.invalidate()
+        autoHideTimer?.invalidate()
+        focusMonitor.stop()
+        TaskbarBadgeSampler.shared.onChange = nil
         ControlCenterLightsController.shared.stop()
         stopObservingScreenChanges()
         settings.flushPendingPersistence()
@@ -341,6 +350,7 @@ final class TaskbarController: NSObject {
     }
 
     private func refreshNow() {
+        focusMonitor.updateFocusedApplication()
         processCommandFile()
 
         let screens = screenCollector()
@@ -409,6 +419,16 @@ final class TaskbarController: NSObject {
         }
 
         let badges = TaskbarBadgeSampler.shared.snapshot()
+        // Do not create a second launcher for an app whose window is shown on
+        // another monitor. Hidden/windowless apps still have an entry to reopen.
+        let representedPIDs = Set(visibleWindows(records, currentPID: currentProcessID, includeMinimized: true).map(\.pid))
+        let runningApps = NSWorkspace.shared.runningApplications.compactMap { app -> TaskbarRunningApp? in
+            guard app.activationPolicy == .regular, app.processIdentifier != currentProcessID,
+                  let url = app.bundleURL else { return nil }
+            return TaskbarRunningApp(name: app.localizedName ?? url.deletingPathExtension().lastPathComponent,
+                                     pid: app.processIdentifier, bundleID: app.bundleIdentifier ?? "", appPath: url.path)
+        }
+        let windowlessApps = taskbarWindowlessApps(runningApps, representedPIDs: representedPIDs)
         for screen in screens {
             let values = valuesByScreen[screen.id] ?? settings.values(for: screen.persistentID)
             let taskbarWindows = visibleWindows(
@@ -421,7 +441,8 @@ final class TaskbarController: NSObject {
                 windows: screenWindows,
                 frontmostPID: currentFrontmostPID,
                 frontmostWindowID: frontmostWindowResolution.effectiveWindowID,
-                pinnedApps: values.pinnedApps
+                pinnedApps: values.pinnedApps,
+                runningApps: windowlessApps
             )
             panels[screen.id]?.update(
                 screen: screen,

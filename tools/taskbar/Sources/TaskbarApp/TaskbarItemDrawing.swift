@@ -23,9 +23,8 @@ func taskbarItemLabel(_ item: TaskbarItem) -> String {
 }
 
 func taskbarItemShowsLabel(_ item: TaskbarItem) -> Bool {
-    // A closed pinned app is a launcher, not a window, so it should look like
-    // an app icon rather than consume the space of a labelled window tile.
-    !(item.isPinned && item.pid == nil)
+    // Apps without windows are compact launchers, whether running or pinned.
+    item.windowCount > 0 && !(item.isPinned && item.pid == nil)
 }
 
 func preferredTaskbarItemWidth(

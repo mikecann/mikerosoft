@@ -26,6 +26,7 @@ final class TaskbarBadgeSampler {
     private var cached: [String: String] = [:]
     private var lastRefresh = Date.distantPast
     private var refreshing = false
+    var onChange: (() -> Void)?
 
     init(
         collect: @escaping () -> [String: String] = collectDockBadges,
@@ -53,9 +54,13 @@ final class TaskbarBadgeSampler {
                 guard let self else { return }
                 let badges = self.collect()
                 self.lock.lock()
+                let changed = self.cached != badges
                 self.cached = badges
                 self.refreshing = false
                 self.lock.unlock()
+                if changed {
+                    DispatchQueue.main.async { [weak self] in self?.onChange?() }
+                }
             }
         }
         return result

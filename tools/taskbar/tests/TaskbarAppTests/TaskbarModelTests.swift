@@ -37,6 +37,14 @@ final class TaskbarModelTests: XCTestCase {
         )
     }
 
+    func testRunningAppWithAWindowDoesNotGetExtraLauncher() {
+        let app = TaskbarRunningApp(name: "Preview", pid: 42, bundleID: "com.apple.Preview", appPath: "/Applications/Preview.app")
+        let window = record(owner: app.name, title: "Photo", pid: app.pid, bundleID: app.bundleID, appPath: app.appPath)
+        let items = buildTaskbarItems(windows: [window], frontmostPID: nil, runningApps: [app])
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.windowCount, 1)
+    }
+
     func testVisibleWindowsRejectsDesktopPanelsAndTinyHelpers() {
         let records = [
             record(owner: "Safari", title: "Article", pid: 10, windowID: 1),

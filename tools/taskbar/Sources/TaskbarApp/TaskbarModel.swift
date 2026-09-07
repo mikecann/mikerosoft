@@ -69,6 +69,17 @@ struct WindowRecord: Equatable {
     }
 }
 
+struct TaskbarRunningApp {
+    let name: String
+    let pid: pid_t
+    let bundleID: String
+    let appPath: String
+}
+
+func taskbarWindowlessApps(_ apps: [TaskbarRunningApp], representedPIDs: Set<pid_t>) -> [TaskbarRunningApp] {
+    apps.filter { !representedPIDs.contains($0.pid) }
+}
+
 struct TaskbarItem: Equatable {
     let owner: String
     let pid: pid_t?
@@ -109,7 +120,7 @@ enum TaskbarItemClickAction: Equatable {
 }
 
 func taskbarItemClickAction(for item: TaskbarItem) -> TaskbarItemClickAction {
-    guard item.pid != nil else { return .launch }
+    guard item.pid != nil, item.windowCount > 0 else { return .launch }
     if item.isMinimized { return .restore }
     if item.isFrontmost { return .minimize }
     return .activate
@@ -460,13 +471,14 @@ func buildTaskbarItems(
     windows: [WindowRecord],
     frontmostPID: pid_t?,
     frontmostWindowID: Int? = nil,
-    pinnedApps: [PinnedApp] = []
+    pinnedApps: [PinnedApp] = [],
+    runningApps: [TaskbarRunningApp] = []
 ) -> [TaskbarItem] {
     let pinnedByIdentity = Dictionary(uniqueKeysWithValues: pinnedApps.enumerated().map { index, app in
         (app.identity, index)
     })
 
-    let runningItems = windows.map { window in
+    var runningItems = windows.map { window in
             let pinOrder = pinnedByIdentity[identity(bundleID: window.bundleID, appPath: window.appPath)]
             return TaskbarItem(
                 owner: window.owner,
@@ -484,6 +496,18 @@ func buildTaskbarItems(
                 pinOrder: pinOrder
             )
         }
+
+    let representedPIDs = Set(windows.map(\.pid))
+    for app in taskbarWindowlessApps(runningApps, representedPIDs: representedPIDs) {
+        let pinOrder = pinnedByIdentity[identity(bundleID: app.bundleID, appPath: app.appPath)]
+        runningItems.append(TaskbarItem(
+            owner: app.name, pid: app.pid, title: app.name, windowCount: 0,
+            windowIDs: [], windowBounds: nil, accessibilitySignature: "",
+            isFrontmost: app.pid == frontmostPID, isMinimized: false,
+            bundleID: app.bundleID, appPath: app.appPath,
+            isPinned: pinOrder != nil, pinOrder: pinOrder
+        ))
+    }
 
     return runningItems
         .includingClosedPinnedApps(

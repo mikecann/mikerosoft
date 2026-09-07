@@ -25,6 +25,38 @@ final class TaskbarBadgeTests: XCTestCase {
         XCTAssertEqual(applyingTaskbarBadges([:], to: badged), items)
     }
 
+    func testChangedSnapshotNotifiesOnMainQueueWithoutWaitingForNextPoll() {
+        var pending: [() -> Void] = []
+        var source = ["/Applications/Slack.app": "•"]
+        let sampler = TaskbarBadgeSampler(collect: { source }, schedule: { pending.append($0) })
+        var callbacks = 0
+        let changed = expectation(description: "Changed badge published")
+        sampler.onChange = {
+            XCTAssertTrue(Thread.isMainThread)
+            callbacks += 1
+            changed.fulfill()
+        }
+        let now = Date(timeIntervalSince1970: 100)
+        _ = sampler.snapshot(now: now)
+        pending.removeFirst()()
+        wait(for: [changed], timeout: 1)
+        XCTAssertEqual(callbacks, 1)
+
+        _ = sampler.snapshot(now: now.addingTimeInterval(3))
+        pending.removeFirst()()
+        let drained = expectation(description: "Main queue drained")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 1)
+        XCTAssertEqual(callbacks, 1)
+
+        source = [:]
+        let cleared = expectation(description: "Cleared badge published")
+        sampler.onChange = { cleared.fulfill() }
+        _ = sampler.snapshot(now: now.addingTimeInterval(6))
+        pending.removeFirst()()
+        wait(for: [cleared], timeout: 1)
+    }
+
     func testSamplerCachesWithoutBlockingAndClearsRemovedBadges() {
         var pending: [() -> Void] = []
         var source = ["/Applications/Slack.app": "•"]
