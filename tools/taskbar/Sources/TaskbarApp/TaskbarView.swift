@@ -293,6 +293,8 @@ final class TaskbarView: NSView {
             )
         }
 
+        drawTaskbarBadge(item.badgeLabel, in: iconRect)
+
         guard wantsLabel else { return }
         let label = taskbarItemLabel(item)
         let labelX = iconRect.maxX + TaskbarItemMetrics.iconTextGap

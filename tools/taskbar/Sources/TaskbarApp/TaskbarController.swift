@@ -408,6 +408,7 @@ final class TaskbarController: NSObject {
             closeStatsPopover()
         }
 
+        let badges = TaskbarBadgeSampler.shared.snapshot()
         for screen in screens {
             let values = valuesByScreen[screen.id] ?? settings.values(for: screen.persistentID)
             let taskbarWindows = visibleWindows(
@@ -424,7 +425,7 @@ final class TaskbarController: NSObject {
             )
             panels[screen.id]?.update(
                 screen: screen,
-                items: items,
+                items: applyingTaskbarBadges(badges, to: items),
                 values: values,
                 isObscuredByFullscreenWindow: fullscreenScreenIDs.contains(screen.id)
             )

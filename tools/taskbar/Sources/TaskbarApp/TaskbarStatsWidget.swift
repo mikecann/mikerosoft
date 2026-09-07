@@ -147,9 +147,8 @@ enum StatsWidgetMetrics {
     static let minimumGPUWidth: CGFloat = 42
     static let preferredGPUWidth: CGFloat = 48
     static let minimumMemoryWidth: CGFloat = 38
-    // A three-digit percentage ("100%") needs 36 points after the vertical
-    // label and gap; narrower content is truncated by AppKit to e.g. "4...".
-    // Keep the old compact minimum so crowded taskbars can still fit the widget.
+    // Compact modules retain the complete value at a smaller font size;
+    // preferred widths give the same text more breathing room.
     static let preferredMemoryWidth: CGFloat = 48
     static let minimumNetworkWidth: CGFloat = 64
     static let preferredNetworkWidth: CGFloat = 72
@@ -1256,7 +1255,8 @@ private func drawLabeledStatText(label: String, value: String, in rect: NSRect, 
     drawStatsText(
         value,
         in: NSRect(x: layout.content.minX, y: rect.midY - 7, width: layout.content.width, height: 14),
-        size: min(12, max(9, rect.height - 10)),
+        size: statsValueFont(for: value, width: layout.content.width,
+                             preferredSize: min(12, max(9, rect.height - 10))).pointSize,
         weight: .semibold,
         color: accent.blended(withFraction: 0.2, of: .white) ?? accent
     )
@@ -1307,7 +1307,12 @@ private func drawNetwork(snapshot: StatsSnapshot, in rect: NSRect) {
     drawVerticalStatsLabel("NET", in: sideLayout.label)
 
     let layout = statsNetworkLineRects(in: sideLayout.content)
-    let compactSize = min(10, max(8, rect.height / 2 - 2))
+    let preferredSize = min(10, max(8, rect.height / 2 - 2))
+    // Both directions use the same compact size, sized for the longer value.
+    let compactSize = min(
+        statsValueFont(for: "↑ \(upload)", width: layout.upload.width, preferredSize: preferredSize).pointSize,
+        statsValueFont(for: "↓ \(download)", width: layout.download.width, preferredSize: preferredSize).pointSize
+    )
 
     drawStatsText(
         "↑ \(upload)",
@@ -1495,6 +1500,20 @@ private func drawMiniGraph(
         NSBezierPath(roundedRect: barRect, xRadius: 1, yRadius: 1).fill()
         x += layout.barWidth + layout.gap
     }
+}
+
+func statsValueFont(for value: String, width: CGFloat, preferredSize: CGFloat) -> NSFont {
+    // Measure using the drawing font instead of estimating from character count.
+    // A small inset avoids fractional-pixel rounding triggering an ellipsis.
+    var size = preferredSize
+    while size > 1 {
+        let font = NSFont.systemFont(ofSize: size, weight: .semibold)
+        if (value as NSString).size(withAttributes: [.font: font]).width <= max(0, width - 1) {
+            return font
+        }
+        size -= 0.25
+    }
+    return NSFont.systemFont(ofSize: 1, weight: .semibold)
 }
 
 private func drawStatsText(_ value: String, in rect: NSRect, size: CGFloat, weight: NSFont.Weight, color: NSColor) {

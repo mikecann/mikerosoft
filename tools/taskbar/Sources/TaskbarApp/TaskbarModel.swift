@@ -83,6 +83,7 @@ struct TaskbarItem: Equatable {
     let appPath: String
     let isPinned: Bool
     let pinOrder: Int?
+    var badgeLabel: String? = nil
 
     var identity: String {
         identityForTaskbar(bundleID: bundleID, appPath: appPath)

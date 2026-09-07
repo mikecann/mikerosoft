@@ -18,6 +18,8 @@ maximising underneath the bar.
 - Gives open windows equal widths when crowded, keeping closed pinned launchers compact
 - Expands the selected window to read its label, shrinking the other buttons to fit
 - Ellipsises long labels
+- Mirrors app-wide Dock notification badges, including unread dots (requires Accessibility permission)
+- Fits complete stats values into compact modules without truncating percentages or transfer units
 - Supports Date & Time, Battery, Stats, and Control Center Lights taskbar widgets
 - Lets widgets own their menu, rendering, and settings surface
 - Auto-hides with configurable animation
