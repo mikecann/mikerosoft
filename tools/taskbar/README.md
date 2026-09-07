@@ -15,7 +15,8 @@ maximising underneath the bar.
 - Minimises the active window when its item is clicked again, and restores it on the next click
 - Keeps the selected app highlighted with a sliding pill
 - Pins apps so they stay visible when closed
-- Shrinks item widths when the bar is crowded so every item still fits
+- Gives open windows equal widths when crowded, keeping closed pinned launchers compact
+- Expands the selected window to read its label, shrinking the other buttons to fit
 - Ellipsises long labels
 - Supports Date & Time, Battery, Stats, and Control Center Lights taskbar widgets
 - Lets widgets own their menu, rendering, and settings surface

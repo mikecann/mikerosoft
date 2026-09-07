@@ -75,6 +75,85 @@ final class TaskbarLayoutTests: XCTestCase {
         )
     }
 
+    func testCrowdedWindowsHaveEqualWidthsDespiteDifferentTitleLengths() {
+        var settings = TaskbarSettingValues.defaults
+        settings.statsWidget.isEnabled = false
+        settings.batteryWidget.isEnabled = false
+        settings.dateTimeWidget.isEnabled = false
+        let items = (0..<4).map { layoutItem(index: $0, pid: 42) }
+        let layout = taskbarLayout(
+            bounds: NSRect(x: 0, y: 0, width: 400, height: 32),
+            items: items, settings: settings, tileHeight: 24,
+            preferredTileWidths: [96, 220, 137, 220]
+        )
+        for tile in layout.tiles {
+            XCTAssertEqual(tile.rect.width, layout.tiles[0].rect.width, accuracy: 0.001)
+            XCTAssertGreaterThan(tile.rect.width, 60)
+        }
+    }
+
+    func testSelectedWindowReservesLabelSpaceAndOtherWindowsShareTheRemainder() {
+        var settings = TaskbarSettingValues.defaults
+        settings.statsWidget.isEnabled = false
+        settings.batteryWidget.isEnabled = false
+        settings.dateTimeWidget.isEnabled = false
+        let items = (0..<4).map { layoutItem(index: $0, pid: 42, isFrontmost: $0 == 0) }
+        let layout = taskbarLayout(
+            bounds: NSRect(x: 0, y: 0, width: 500, height: 32),
+            items: items, settings: settings, tileHeight: 24,
+            preferredTileWidths: [220, 220, 137, 220]
+        )
+        XCTAssertEqual(layout.tiles[0].rect.width, 220, accuracy: 0.001)
+        for tile in layout.tiles.dropFirst() {
+            XCTAssertEqual(tile.rect.width, layout.tiles[1].rect.width, accuracy: 0.001)
+            XCTAssertLessThan(tile.rect.width, layout.tiles[0].rect.width)
+        }
+        XCTAssertLessThanOrEqual(layout.tiles.last!.rect.maxX, 500)
+    }
+
+    func testSelectedButtonFitsItsLabelUpToConfiguredMaximum() {
+        let item = layoutItem(index: 0, pid: 42, isFrontmost: true)
+        XCTAssertEqual(preferredTaskbarItemWidth(
+            for: item, textWidth: 40, iconSize: 24,
+            minimumWidth: 96, maximumWidth: 220
+        ), 82)
+        XCTAssertEqual(preferredTaskbarItemWidth(
+            for: item, textWidth: 600, iconSize: 24,
+            minimumWidth: 96, maximumWidth: 220
+        ), 220)
+    }
+
+    func testCrowdedLayoutKeepsClosedPinsCompactAsSelectionMoves() {
+        var settings = TaskbarSettingValues.defaults
+        settings.statsWidget.isEnabled = false
+        settings.batteryWidget.isEnabled = false
+        settings.dateTimeWidget.isEnabled = false
+        let pinWidth = TaskbarItemMetrics.iconOnlyWidth(iconSize: 20)
+        for selected in 1...3 {
+            let items = [layoutItem(index: 0, windowCount: 0, isPinned: true)]
+                + (1...3).map { layoutItem(index: $0, pid: 42, isFrontmost: $0 == selected) }
+            let layout = taskbarLayout(
+                bounds: NSRect(x: 0, y: 0, width: 500, height: 32),
+                items: items, settings: settings, tileHeight: 24,
+                preferredTileWidths: [pinWidth, 220, 220, 220]
+            )
+            XCTAssertEqual(layout.tiles[0].rect.width, pinWidth, accuracy: 0.001)
+            XCTAssertEqual(layout.tiles[selected].rect.width, 220, accuracy: 0.001)
+            let others = (1...3).filter { $0 != selected }.map { layout.tiles[$0].rect.width }
+            XCTAssertEqual(others[0], others[1], accuracy: 0.001)
+            XCTAssertGreaterThanOrEqual(others[0], pinWidth)
+            XCTAssertLessThanOrEqual(layout.tiles.last!.rect.maxX, 500)
+        }
+    }
+
+    func testSelectionCannotStarveOtherIconsOnExtremelyNarrowBar() {
+        let widths = fittedTaskbarItemWidths(
+            preferredWidths: [320, 220, 220], softMinimumWidth: 38,
+            availableWidth: 60, selectedIndex: 0
+        )
+        XCTAssertEqual(widths, [20, 20, 20])
+    }
+
     func testWidgetsNeverIntersectTilesAcrossLayoutMatrix() {
         var largestWidgets = TaskbarSettingValues.defaults
         largestWidgets.dateTimeWidget.dateDisplay = .always

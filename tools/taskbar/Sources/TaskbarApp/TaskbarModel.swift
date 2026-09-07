@@ -328,7 +328,7 @@ func taskbarItemWidth(textWidth: CGFloat, iconSize: CGFloat, minimumWidth: CGFlo
     return max(minimumWidth, min(maximumWidth, naturalWidth))
 }
 
-func fittedTaskbarItemWidths(preferredWidths: [CGFloat], softMinimumWidth: CGFloat, availableWidth: CGFloat) -> [CGFloat] {
+func fittedTaskbarItemWidths(preferredWidths: [CGFloat], softMinimumWidth: CGFloat, availableWidth: CGFloat, selectedIndex: Int? = nil) -> [CGFloat] {
     guard !preferredWidths.isEmpty else { return [] }
 
     let availableWidth = max(0, availableWidth)
@@ -345,6 +345,23 @@ func fittedTaskbarItemWidths(preferredWidths: [CGFloat], softMinimumWidth: CGFlo
     guard availableWidth > softMinimumTotalWidth else {
         let forcedWidth = availableWidth / CGFloat(preferredWidths.count)
         return Array(repeating: forcedWidth, count: preferredWidths.count)
+    }
+
+    if let selectedIndex, preferredWidths.indices.contains(selectedIndex) {
+        // Reserve the selected label first, but leave room for every other
+        // icon. Below the icon budget the equal-width fallback above wins.
+        let selectedWidth = min(
+            preferredWidths[selectedIndex],
+            availableWidth - softMinimumWidth * CGFloat(preferredWidths.count - 1)
+        )
+        let otherWidths = fittedTaskbarItemWidths(
+            preferredWidths: preferredWidths.enumerated().filter { $0.offset != selectedIndex }.map(\.element),
+            softMinimumWidth: softMinimumWidth,
+            availableWidth: availableWidth - selectedWidth
+        )
+        var result = otherWidths
+        result.insert(selectedWidth, at: selectedIndex)
+        return result
     }
 
     var fittedWidths = preferredWidths

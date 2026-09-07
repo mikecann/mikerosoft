@@ -39,10 +39,12 @@ func preferredTaskbarItemWidth(
         return TaskbarItemMetrics.iconOnlyWidth(iconSize: iconSize)
     }
 
+    // Reserve only the space the selected label needs. The layout protects
+    // this width under pressure without adding blank space to short titles.
     return taskbarItemWidth(
         textWidth: textWidth,
         iconSize: iconSize,
-        minimumWidth: minimumWidth,
+        minimumWidth: item.isFrontmost ? TaskbarItemMetrics.iconOnlyWidth(iconSize: iconSize) : minimumWidth,
         maximumWidth: maximumWidth
     )
 }

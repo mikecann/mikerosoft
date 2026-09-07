@@ -372,10 +372,23 @@ func taskbarLayout(
         let softMinimumWidth = TaskbarItemMetrics.iconOnlyWidth(
             iconSize: TaskbarItemMetrics.iconSize(for: tileHeight)
         )
+        var crowdedWidths = preferredTileWidths
+        if preferredTileWidths.reduce(0, +) > availableTileWidth {
+            // Short titles must not collapse to icons while longer titles
+            // retain labels. Open windows share one width under pressure;
+            // closed pinned launchers retain their compact width.
+            let windowWidth = items.indices
+                .filter { taskbarItemShowsLabel(items[$0]) && !items[$0].isFrontmost }
+                .map { preferredTileWidths[$0] }.max() ?? softMinimumWidth
+            for index in items.indices where taskbarItemShowsLabel(items[index]) && !items[index].isFrontmost {
+                crowdedWidths[index] = windowWidth
+            }
+        }
         let fittedWidths = fittedTaskbarItemWidths(
-            preferredWidths: preferredTileWidths,
+            preferredWidths: crowdedWidths,
             softMinimumWidth: softMinimumWidth,
-            availableWidth: availableTileWidth
+            availableWidth: availableTileWidth,
+            selectedIndex: items.firstIndex(where: { $0.isFrontmost })
         )
 
         for (item, tileWidth) in zip(items, fittedWidths) {
