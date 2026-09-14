@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { filterToolsByPlatforms, tools, type PlatformId, type Tool } from './tools.ts';
 
+test('describes X bookmark capture as an experimental macOS integration', () => {
+  const tool = tools.find(candidate => candidate.name === 'x-bookmarks');
+  assert.ok(tool);
+  assert.deepEqual(tool.platforms, ['macos']);
+  assert.match(tool.desc, /experimental/i);
+  assert.match(tool.icon, /x-bookmarks\/icons\/x-bookmarks.png$/);
+});
+
 const fixtures: Tool[] = [
   {
     name: 'windows-only',
