@@ -7,8 +7,13 @@ during unchanged polling**. Delivery is a separate, opt-in step.
 
 ## Current status
 
-Implemented and tested locally, **not live**. Paid API reads and experimental
-Codex delivery both default to disabled. No service has been installed.
+The X reader was verified against the live API on 15 September 2026: OAuth
+authorization succeeded, the first read recorded 18 existing bookmarks as the
+baseline, and a second poll successfully checked the latest bookmark without
+queuing duplicates. Credentials and state are stored privately outside the repo.
+Paid API reads and experimental Codex delivery default to disabled for new
+installations. This machine has paid reads enabled, but delivery remains disabled
+and no background service has been installed. **End-to-end delivery is blocked.**
 
 On 14 September 2026, the local Codex CLI was `0.154.0`. Its documented CLI help
 provides `codex app-server proxy`, which forwards JSONL to an **existing** local
@@ -41,8 +46,9 @@ No reusable X API credentials were found in the searched project `.env` key
 names under `~/dev`, X-related config filenames under `~/.config`, or the
 current environment. A subsequent read-only developer-console check on
 14 September found the existing `BruceMikesMini` and `Mikes Convex Portfolio`
-apps. Both showed OAuth 2.0 user authentication as not yet configured. Existing
-developer apps therefore exist, but bookmark authorization is still needed.
+apps. OAuth 2.0 was subsequently configured for `BruceMikesMini` as a Native
+App with read-only permissions and the loopback callback below. Its user
+authorization completed successfully on 15 September.
 
 ## Authentication and cost
 
