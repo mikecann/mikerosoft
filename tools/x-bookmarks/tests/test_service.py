@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from service import launchagent
+from service import launchagent, install_runtime
 
 
 class ServiceTests(unittest.TestCase):
@@ -19,6 +19,18 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(plist["StartInterval"], 60)
             self.assertNotIn("KeepAlive", plist)
             self.assertEqual(plist["StandardErrorPath"], str(root / "output.log"))
+
+    def test_runtime_survives_source_checkout_removal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            source = root / 'source'
+            source.mkdir()
+            for name in ('bookmarks.py', 'cli_delivery.py', 'oauth.py', 'service.py', 'x-bookmarks'):
+                (source / name).write_text('# runtime')
+            script = install_runtime(source, root / 'state')
+            (source / 'bookmarks.py').unlink()
+            self.assertEqual(script.read_text(), '# runtime')
+            self.assertTrue((script.parent / 'cli_delivery.py').exists())
 
 
 if __name__ == "__main__":

@@ -32,6 +32,15 @@ class CliTests(unittest.TestCase):
             self.assertEqual(api.return_value.get.call_count, 2)
             rpc.assert_not_called()
 
+    def test_cli_tick_with_no_new_bookmarks_never_starts_a_process(self):
+        private_json(self.root / "config.json", {"allow_paid_x_api": True,
+            "enable_experimental_codex_delivery": True, "delivery_backend": "cli"})
+        with patch("bookmarks.XApi") as api, patch("cli_delivery.subprocess.Popen") as proc:
+            api.return_value.get.side_effect = [{"data": {"id": "42"}}, {"meta": {"result_count": 0}}]
+            self.run_main("tick")
+            self.run_main("tick")
+            proc.assert_not_called()
+
     def test_429_backoff_is_persisted_and_no_codex_called(self):
         with patch("bookmarks.XApi") as api, patch("bookmarks.Rpc") as rpc:
             api.return_value.get.side_effect = ApiError(429, 1800)

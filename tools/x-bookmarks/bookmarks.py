@@ -393,7 +393,7 @@ def main():
                 if path.exists():
                     raise CaptureError("Configuration already exists; refusing to overwrite it")
                 private_json(path, {"allow_paid_x_api": False, "enable_experimental_codex_delivery": False,
-                                    "client_id": "", "token_file": str(store.root / "oauth.json"),
+                                    "delivery_backend": "cli", "client_id": "", "token_file": str(store.root / "oauth.json"),
                                     "interval_seconds": 300, "max_pages": 20, "delivery_limit": 5,
                                     "codex_binary": "codex", "codex_socket": None,
                                     "desktop_probe_thread_id": ""})
@@ -427,6 +427,17 @@ def main():
                         delay = max(config["interval_seconds"], min(3600, 60 * 2 ** failures), getattr(error, "delay", 0))
                         store.set("next_poll", time.time() + delay)
                         raise
+            if config.get("delivery_backend") == "cli" and args.command == "doctor":
+                result = subprocess.run([config.get("codex_binary", "codex"), "--version"], capture_output=True, text=True, timeout=10)
+                if result.returncode:
+                    raise CaptureError("Codex CLI version check failed")
+                print("Codex CLI available. Use a real delivery to verify authentication and Desktop visibility.")
+                return
+            if config.get("delivery_backend") == "cli" and args.command in ("tick", "deliver") and config.get("enable_experimental_codex_delivery") is True:
+                from cli_delivery import deliver_cli
+                deliver_cli(store, config, config["delivery_limit"])
+                print(json.dumps(store.counts()))
+                return
             if args.command == "doctor" or args.command in ("tick", "deliver") and config.get("enable_experimental_codex_delivery") is True:
                 if args.command != "doctor" and not any(store.counts().get(s) for s in ("pending", "created")):
                     return

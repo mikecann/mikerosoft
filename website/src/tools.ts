@@ -40,8 +40,9 @@ const base = 'https://cdn.jsdelivr.net/gh/mikecann/mikerosoft@main/tools';
 export const tools: Tool[] = [
   {
     name: 'x-bookmarks',
-    desc: 'Capture new X bookmarks with zero LLM polling and persistent deduplication; experimental Codex task delivery requires authentication and desktop connection setup',
+    desc: 'Turn new X bookmarks into saved Codex tasks automatically, with zero LLM polling and persistent deduplication',
     icon: `${base}/x-bookmarks/icons/x-bookmarks.png`,
+    header: `/x-bookmarks-header.png`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/x-bookmarks',
     platforms: ['macos'],

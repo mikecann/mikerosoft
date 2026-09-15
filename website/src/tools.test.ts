@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { filterToolsByPlatforms, tools, type PlatformId, type Tool } from './tools.ts';
 
-test('describes X bookmark capture as an experimental macOS integration', () => {
+test('describes X bookmark capture as an automatic macOS integration', () => {
   const tool = tools.find(candidate => candidate.name === 'x-bookmarks');
   assert.ok(tool);
   assert.deepEqual(tool.platforms, ['macos']);
-  assert.match(tool.desc, /experimental/i);
+  assert.match(tool.desc, /Codex/i);
+  assert.match(tool.header ?? "", /x-bookmarks-header.png$/);
   assert.match(tool.icon, /x-bookmarks\/icons\/x-bookmarks.png$/);
 });
 

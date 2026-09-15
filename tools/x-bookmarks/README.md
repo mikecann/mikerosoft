@@ -1,232 +1,117 @@
-# X bookmarks
+# X Bookmarks
 
-Capture newly observed X bookmarks and queue one Codex task per post, containing
-the author, text, and original link. Python's standard library and SQLite do the
-polling. There are **no LLM calls, tokens, Codex processes, or agent heartbeats
-during unchanged polling**. Delivery is a separate, opt-in step.
+![X Bookmarks](docs/header.png)
 
-## Current status
+Turn newly bookmarked X posts into saved Codex tasks. Python and SQLite check X
+without any LLM calls. Only a new bookmark starts one short `codex exec` turn,
+containing the author's name, post text, and original link. It asks Codex to reply
+“Saved for later” without researching or acting on the post.
 
-The X reader was verified against the live API on 15 September 2026: OAuth
-authorization succeeded, the first read recorded 18 existing bookmarks as the
-baseline, and a second poll successfully checked the latest bookmark without
-queuing duplicates. Credentials and state are stored privately outside the repo.
-Paid API reads and experimental Codex delivery default to disabled for new
-installations. This machine has paid reads enabled, but delivery remains disabled
-and no background service has been installed. **End-to-end delivery is blocked.**
+## How it works
 
-On 14 September 2026, the local Codex CLI was `0.154.0`. Its documented CLI help
-provides `codex app-server proxy`, which forwards JSONL to an **existing** local
-app-server control socket. A read-only connection attempt failed because
-`~/.codex/app-server-control/app-server-control.sock` does not exist on this
-machine. The Desktop app's separate private IPC socket is not that protocol.
-This implementation does not reverse-engineer private IPC, write Codex's
-database, or start another app-server beside Desktop.
+The first successful run records all existing bookmarks as a baseline, without
+creating tasks. Subsequent checks request the latest bookmark only. If its ID
+changed, the reader fetches ten posts at a time until it reaches a known item.
+IDs remain in SQLite permanently, including when a bookmark is removed from X.
 
-Further checks on 15 September found the bundled `codex-app-tools/server.mjs`
-MCP adapter. An external process could initialize this adapter, but its
-`tools/list` request was rejected by the running Desktop host. The app log
-recorded `dynamic_app_tools_peer_rejected reason=missing-code-signing-identity`.
-No task-creation request was sent. Do not bypass this trust check. The installed
-app's new-task deep-link handler prefills the composer; it does not submit a
-task. Neither route currently provides verified unattended task creation here.
-Standalone `codex exec` is also excluded because the earlier Index Sync watcher
-caused Desktop window flicker when running a separate Codex process.
+Delivery uses the installed Codex CLI and its normal saved-session format. There
+is no private Desktop socket, separate persistent app-server, database editing,
+UI scripting, or model-powered polling. A live CLI test on 15 September 2026
+created a task that Desktop could read and open; the user confirmed seeing it.
+Automatic sidebar refresh is controlled by Desktop.
 
-The adapter follows the installed CLI-generated schemas for `thread/start`,
-`thread/resume`, `thread/name/set`, and `turn/start`. OpenAI documents those in
-its [app-server reference](https://learn.chatgpt.com/docs/app-server), but labels
-the app-server integration experimental. The in-chat `create_thread` tool is
-not assumed to be externally callable. A working Desktop-compatible socket and
-a real bookmark delivery must still prove task creation, visible text in the
-sidebar task, and persistence across restart. A successful `doctor` only proves
-that a known Desktop task can be read through that server.
+The worker records creation intent before starting Codex, saves the task ID as
+soon as the CLI emits it, and marks delivery complete only after a successful
+turn and process exit. An interrupted or uncertain attempt is held for inspection
+instead of blindly creating a duplicate. This provides duplicate prevention,
+not a guarantee that a failed run will finish without manual reconciliation.
 
-No reusable X API credentials were found in the searched project `.env` key
-names under `~/dev`, X-related config filenames under `~/.config`, or the
-current environment. A subsequent read-only developer-console check on
-14 September found the existing `BruceMikesMini` and `Mikes Convex Portfolio`
-apps. OAuth 2.0 was subsequently configured for `BruceMikesMini` as a Native
-App with read-only permissions and the loopback callback below. Its user
-authorization completed successfully on 15 September.
+## Requirements and cost
 
-## Authentication and cost
-
-X requires an approved developer app and a **user** OAuth token with
-`bookmark.read`, `tweet.read`, and `users.read`.
-[X bookmark lookup quickstart](https://docs.x.com/x-api/posts/bookmarks/quickstart/bookmarks-lookup)
-
-The included PKCE login supports an X **Native App / public client**, requests
-those scopes plus `offline.access`, and refreshes expiring tokens automatically.
-It requests no posting, messaging, or bookmark-write permission. Confidential
-Web App or bot clients requiring a client secret are not supported by this
-helper. Browser cookies and app-only bearer tokens are not substitutes.
-[X OAuth reference](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code)
+macOS, Python 3.10+, a signed-in Codex CLI, and an X Native App with user OAuth
+scopes `bookmark.read`, `tweet.read`, `users.read`, and `offline.access`.
+No pip packages are required. Posting, messaging, and bookmark writes are not
+requested. Confidential OAuth clients requiring a client secret are unsupported.
 
 X API reads are paid separately from Codex. As checked on 14 September 2026,
-eligible owned bookmark reads cost **$0.001 per resource** when the authorized
-user owns the developer app. Standard post and user reads have different prices;
-author expansions and `/users/me` can add resources. X describes daily UTC
-deduplication as a soft guarantee. The latest-bookmark probe and account check
-can incur charges again each day, even when no new task is created. Catch-up
-reads add resources only when the latest ID changes. Confirm your app's
-eligibility, expansion billing, and spending limit in the developer console.
-This tool does not buy credits or enable auto-recharge.
-[X pricing](https://docs.x.com/x-api/getting-started/pricing)
+eligible owned bookmark reads cost $0.001 per resource; author expansions and
+account checks can add charges. Daily deduplication is a soft guarantee. This
+tool never purchases credits or enables auto-recharge. Check current
+[X pricing](https://docs.x.com/x-api/getting-started/pricing) for your app.
+
+Unchanged polling uses zero Codex tokens. Each newly captured bookmark consumes
+one Codex turn, including its input context. `--ignore-user-config` avoids loading
+custom MCP configuration; the CLI still supplies its normal instructions and
+applicable project guidance. The subprocess is read-only, and its prompt is a
+capture instruction, not a general-purpose tool authorization boundary.
 
 ## Setup
-
-Requires macOS and Python 3.10+. No pip packages are needed. Run from a permanent
-repo checkout before installing the service, since launchd retains absolute
-paths. Do not install it from a disposable worktree.
 
 ```sh
 python3 tools/x-bookmarks/bookmarks.py init
 ```
 
-This creates disabled configuration at
-`~/Library/Application Support/x-bookmarks/config.json`. Edit it locally. Keep
-credentials out of this repo and out of chat.
+Edit `~/Library/Application Support/x-bookmarks/config.json` locally:
 
-1. Set `client_id` from your X Native App. Register the exact callback URL
-   `http://127.0.0.1:8767/callback` in its OAuth settings.
-2. Run `python3 tools/x-bookmarks/bookmarks.py login` and authorize in the
-   browser. Login only obtains credentials, without fetching bookmarks or
-   enabling paid reads. Tokens are stored in `oauth.json` with mode `0600`.
-3. After reviewing and approving X usage costs, set `allow_paid_x_api` to `true`
-   and run `python3 tools/x-bookmarks/bookmarks.py poll` once. The entire first
-   successful paginated snapshot becomes the baseline and creates **no tasks**.
-
-Alternatively, import an existing public-client user token into the private
-`token_file`: JSON fields are `access_token`, `refresh_token`, `scope` (a
-space-separated string), and `expires_at` (Unix seconds). Set `client_id` for
-refresh. Preserve file mode `0600`. Never paste token values into command-line
-arguments. Account identity is checked using `/users/me` and pinned in state;
-switching accounts requires a different state directory and baseline.
-
-Only after a compatible existing Codex server is available:
-
-1. Set `codex_binary` to the absolute output of `command -v codex` and, if
-   needed, `codex_socket` to its supported control socket path. Set
-   `desktop_probe_thread_id` to a known local Desktop task ID.
-2. Run `python3 tools/x-bookmarks/bookmarks.py doctor`. It performs read-only
-   JSON-RPC initialization and task lookup, with no X calls or LLM requests.
-3. Set `enable_experimental_codex_delivery` to `true`. Bookmark one new post,
-   wait for the configured interval, run `poll`, then `deliver`. Check its task
-   in Desktop, including full text, author, link, and persistence. Repeat polling
-   to verify it stays one task before enabling the background timer.
-
-Task creation preserves the configured default model. Only a newly discovered
-post triggers `turn/start`, which can use Codex tokens. Its prompt asks for a
-minimal acknowledgment, explicitly excludes research and tool use, and labels
-the post as untrusted quoted data. The task uses a read-only sandbox and its own
-local directory containing `bookmark.json`. Prompt constraints are not a general
-tool-permission boundary; inspect the first real turn before enabling delivery.
-
-## Background service
-
-After successful baseline and delivery verification:
+1. Set `client_id` from the X Native App. Register callback
+   `http://127.0.0.1:8767/callback` in X's OAuth settings.
+2. Run `python3 tools/x-bookmarks/bookmarks.py login` and authorize the app.
+   Credentials are stored outside Git with file mode 0600.
+3. Set `allow_paid_x_api` to `true`, then run `poll` to record the baseline.
+4. Set `delivery_backend` to `cli`, `codex_binary` to the absolute executable
+   path from `command -v codex`, and `enable_experimental_codex_delivery` to `true`.
+   The latter is the original configuration flag retained for compatibility.
+   Optionally set `codex_model`; omission uses the CLI's default model.
+5. Bookmark a new post, run `tick` after the polling interval, then check `status`
+   and the saved task in Desktop.
+6. Install the background service:
 
 ```sh
 bash tools/x-bookmarks/install-launchagent.sh
-python3 tools/x-bookmarks/bookmarks.py status
-tail -n 20 ~/Library/Logs/x-bookmarks.log
 ```
 
-The installer refuses to start without API configuration and a baseline. If
-delivery is enabled, it also requires a successful Desktop history probe.
-It installs `com.mikerosoft.x-bookmarks` as a normal per-user LaunchAgent.
-launchd wakes once per minute; a persisted `next_poll` enforces the configured
-poll interval (default five minutes), including across restarts. Transient
-failures use exponential backoff, and HTTP 429 honors server retry hints.
-An exclusive process lock prevents overlapping CLI and scheduled runs.
+The installer copies a versioned runtime into the private application-support
+folder, installs `~/.local/bin/x-bookmarks`, and starts LaunchAgent
+`com.mikerosoft.x-bookmarks`. It does not depend on a temporary Git worktree.
+Run the installer again after updating the source. Old runtime snapshots and
+bookmark state are retained. The launch timer wakes every minute; the default
+persisted X polling interval is five minutes, with backoff for failures.
 
 ```sh
-# Stop the service, preserving tokens, captured posts, and deduplication history:
-bash tools/x-bookmarks/install-launchagent.sh --uninstall
-
-# Inspect generated configuration without starting anything:
-bash tools/x-bookmarks/install-launchagent.sh --output /tmp/x-bookmarks.plist
+x-bookmarks status
+x-bookmarks poll     # X only, respecting the stored interval
+x-bookmarks deliver  # deliver queued items, without reading X
+x-bookmarks tick     # poll, then deliver
+x-bookmarks doctor   # local CLI availability check, no LLM call
+python3 tools/x-bookmarks/service.py --uninstall
 ```
 
-`bash install_mac.sh` installs the `x-bookmarks` CLI symlink only. It never opts
-into API billing, starts polling, or installs the LaunchAgent. No Windows
-installer changes are needed for this macOS-only tool.
+Logs: `~/Library/Logs/x-bookmarks.log`. Private state, OAuth credentials, and task
+payloads: `~/Library/Application Support/x-bookmarks/`.
 
-## Delivery and recovery
+## Interrupted delivery
 
-The SQLite state records each post forever. Removing and re-bookmarking the same
-post will not create a second task. Back up the state directory; deleting it
-loses deduplication. An empty initial snapshot still establishes a baseline.
-After the full initial baseline (100 bookmarks per page), each poll requests
-only the latest bookmark with `max_results=1`, without author expansions. If its
-ID matches the saved latest ID, polling stops. The `/users/me` account check
-still runs each poll to reject a changed account.
-
-When the latest ID changes, catch-up starts from the newest 10 bookmarks and
-continues in pages of 10 until a page contains an already-known ID or X reports
-the end. The entire boundary page is processed before stopping. Permanent
-deduplication ensures only unseen posts become pending. The latest ID comes
-from the catch-up response, in case bookmarks changed after the initial probe.
-
-All required pages must succeed before the queue and latest ID are committed
-together. A page error, missing author, repeated cursor, or `max_pages` limit
-leaves the previous latest ID intact for retry. The default limit is 20 pages
-(up to 200 bookmarks per catch-up); do not raise it without reviewing cost.
-Existing databases without a saved latest ID perform one catch-up scan using
-their existing deduplication history, without resetting the baseline.
-
-Polling observes what X returns, not an atomic bookmark event stream. Posts
-added and removed between polls cannot be detected. An X-hidden bookmark that
-first becomes visible later is indistinguishable from a new bookmark; the
-baseline covers only the API-visible collection. This optimization assumes X
-returns the newest bookmarks first. Changes deeper in the collection, including
-previously hidden posts, are not detected while the latest ID stays unchanged.
-Changes during pagination or moving a known bookmark ahead of more than a page
-of new bookmarks can also cause misses. No filtering by
-tweet creation date is used, since an old tweet can be bookmarked today.
-
-States are `baseline`, `pending`, `creating`, `created`, `submitting`, and
-`delivered`. `delivered` means Codex acknowledged accepting the turn, not that
-the model completed successfully. Up to five pending posts are delivered per
-timer tick. Failures before the creation request leave a post pending. A known
-created task is reused. A lost creation/submission response leaves an uncertain
-state that is **never retried automatically**, including after a crash.
-
-`status` lists uncertain post IDs and any known task IDs, without their text.
-Inspect the Desktop task history, including archived tasks and the matching
-directory under `state-dir/tasks/POST_ID`, before manually resolving:
+`status` lists uncertain `creating` or `submitting` rows and their known task IDs.
+Inspect Desktop before resolving. Never mark an uncertain task as absent without
+checking, since it may have completed before the worker lost its connection.
 
 ```sh
-# Task exists and already contains the captured post:
-x-bookmarks resolve POST_ID --thread-id TASK_ID --confirmed-outcome captured
-
-# Task exists but no user message was submitted; reuse it on the next delivery:
-x-bookmarks resolve POST_ID --thread-id TASK_ID --confirmed-outcome created-without-message
-
-# Only after confirming the interrupted creation never made a task:
+x-bookmarks resolve POST_ID --confirmed-outcome captured --thread-id TASK_ID
 x-bookmarks resolve POST_ID --confirmed-outcome not-created
 ```
 
-These commands record the operator's confirmed outcome; they do not infer it or
-contact Codex. `not-created` is rejected if a task ID is already known. There is
-no automatic exactly-once guarantee from the destination API. Holding ambiguous
-deliveries trades automatic recovery for protection against duplicate tasks.
+The second command is allowed only when no task ID was recorded. A known but
+unfinished CLI task must be continued in Codex and then marked captured. The
+legacy app-server adapter remains available for existing configurations, but is
+not used by the CLI service.
 
-## Verification
+## Tests
 
 ```sh
 python3 -m unittest discover -s tools/x-bookmarks/tests -v
+cd website && npm test && npm run build
 ```
 
-Tests use fake X responses and a fake Codex subprocess, with no paid calls. They
-cover one-item probes, ten-item catch-up, atomic head advancement, pagination,
-baseline/restart behavior, old tweet IDs, account changes,
-partial responses, expired-token refresh, private file modes, duplicate guards,
-lost responses, manual recovery, PKCE state, launchd arguments, HTTP error
-redaction, rate-limit backoff, and unchanged polls that never open Codex.
-
-Live OAuth, X billing, task creation, sidebar visibility, and model completion
-remain unverified until the two external prerequisites above are resolved.
-
-Icon: reused famfamfam Silk `page_white_link.png`, Mark James, CC BY 2.5.
+Tests cover baseline and catch-up, account binding, malformed/partial responses,
+OAuth PKCE, throttling and backoff, process events, uncertain delivery, duplicate
+prevention, and an installation independent of the source checkout.

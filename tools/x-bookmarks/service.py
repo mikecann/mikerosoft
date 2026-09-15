@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Install an ordinary launchd timer. No Codex heartbeat or model polling."""
 import argparse
+import hashlib
+import shutil
 import os
 from pathlib import Path
 import plistlib
@@ -19,6 +21,17 @@ def launchagent(state, config, script, python, log):
             "StandardOutPath": str(log), "StandardErrorPath": str(log),
             "EnvironmentVariables": {"PATH": f"{Path(python).parent}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
                                      "PYTHONUNBUFFERED": "1"}}
+
+
+def install_runtime(source, root):
+    names = ('bookmarks.py', 'cli_delivery.py', 'oauth.py', 'service.py', 'x-bookmarks')
+    digest = hashlib.sha256(b''.join((source / name).read_bytes() for name in names)).hexdigest()[:16]
+    runtime = root / 'runtime' / digest
+    runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for name in names:
+        shutil.copy2(source / name, runtime / name)
+    (runtime / 'x-bookmarks').chmod(0o700)
+    return runtime / 'bookmarks.py'
 
 
 def main():
@@ -56,6 +69,15 @@ def main():
                 raise CaptureError("Set codex_binary to an absolute executable path for launchd")
             subprocess.run([sys.executable, str(script), "--state-dir", str(root),
                             "--config", str(config_path), "doctor"], check=True)
+    if not args.output:
+        # Keep launchd independent of a disposable development worktree.
+        script = install_runtime(script.parent, root)
+        launcher = Path.home() / '.local/bin/x-bookmarks'
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        if launcher.exists() and not launcher.is_symlink():
+            raise CaptureError('Refusing to replace an existing non-symlink x-bookmarks executable')
+        launcher.unlink(missing_ok=True)
+        launcher.symlink_to(script.with_name('x-bookmarks'))
     log = Path.home() / "Library/Logs/x-bookmarks.log"
     output = args.output or destination
     output.parent.mkdir(parents=True, exist_ok=True)
