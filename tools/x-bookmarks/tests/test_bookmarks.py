@@ -34,10 +34,10 @@ class Tests(unittest.TestCase):
     def test_baseline_all_pages_then_only_new_even_old_tweet_id(self):
         poll(self.store, self.source(page(99, next_token="next"), page(98)))
         self.assertEqual(self.store.counts(), {"baseline": 2})
-        poll(self.store, self.source(page(1, 99, 98)))
+        poll(self.store, self.source(page(1), page(1, 99, 98)))
         self.assertEqual(self.store.counts(), {"baseline": 2, "pending": 1})
         poll(self.store, self.source(page(1)))
-        poll(self.store, self.source(page(99, 1)))
+        poll(self.store, self.source(page(99), page(99, 1)))
         self.assertEqual(self.store.counts(), {"baseline": 2, "pending": 1})
 
     def test_empty_baseline_is_durable(self):
@@ -45,7 +45,7 @@ class Tests(unittest.TestCase):
         self.store.close()
         self.store = Store(pathlib.Path(self.tmp.name))
         self.addCleanup(self.store.close)
-        poll(self.store, self.source(page(1)))
+        poll(self.store, self.source(page(1), page(1)))
         self.assertEqual(self.store.counts(), {"pending": 1})
 
     def test_failed_or_partial_snapshot_never_advances_baseline(self):
@@ -77,7 +77,79 @@ class Tests(unittest.TestCase):
 
     def seed(self):
         poll(self.store, self.source(page()))
-        poll(self.store, self.source(page(1)))
+        poll(self.store, self.source(page(1), page(1)))
+
+    def test_unchanged_head_only_fetches_one_bookmark_without_authors(self):
+        poll(self.store, self.source(page(99, 98)))
+        self.store.close()
+        self.store = Store(pathlib.Path(self.tmp.name))
+        self.addCleanup(self.store.close)
+        api = self.source({"data": [{"id": "99"}], "meta": {"result_count": 1}})
+        poll(self.store, api)
+        self.assertEqual(api.get.call_count, 2)  # Account check plus one bookmark.
+        self.assertEqual(api.get.call_args.args[1], {"max_results": 1})
+        self.assertEqual(self.store.get("latest_bookmark"), "99")
+
+    def test_changed_head_uses_ten_and_pages_until_known(self):
+        poll(self.store, self.source(page(99)))
+        api = self.source(page(1), page(*range(1, 11), next_token="older"), page(11, 99, next_token="unused"))
+        poll(self.store, api)
+        self.assertEqual([call.args[1]["max_results"] for call in api.get.call_args_list[1:]], [1, 10, 10])
+        self.assertEqual(api.get.call_args.args[1]["pagination_token"], "older")
+        self.assertEqual(self.store.counts(), {"baseline": 1, "pending": 11})
+        self.assertEqual(self.store.get("latest_bookmark"), "1")
+
+    def test_processes_whole_boundary_page_when_known_item_moved_to_top(self):
+        poll(self.store, self.source(page(99, 98)))
+        poll(self.store, self.source(page(98), page(98, 1, 99, next_token="unused")))
+        self.assertEqual(self.store.counts(), {"baseline": 2, "pending": 1})
+        self.assertEqual(self.store.get("latest_bookmark"), "98")
+
+    def test_failed_catchup_keeps_head_and_queue_for_retry(self):
+        poll(self.store, self.source(page(99)))
+        for last in [OSError("offline"), {"errors": [{"detail": "partial"}]}]:
+            api = self.source(page(1), page(1, next_token="older"), last)
+            with self.assertRaises((OSError, CaptureError)):
+                poll(self.store, api)
+            self.assertEqual(self.store.get("latest_bookmark"), "99")
+            self.assertEqual(self.store.counts(), {"baseline": 1})
+        poll(self.store, self.source(page(1), page(1, 99)))
+        self.assertEqual(self.store.counts(), {"baseline": 1, "pending": 1})
+
+    def test_catchup_limit_does_not_advance_head(self):
+        poll(self.store, self.source(page(99)))
+        with self.assertRaises(CaptureError):
+            poll(self.store, self.source(page(1), page(1, next_token="older")), max_pages=1)
+        self.assertEqual(self.store.get("latest_bookmark"), "99")
+
+    def test_empty_head_and_legacy_state_do_not_rebaseline(self):
+        poll(self.store, self.source(page(99)))
+        poll(self.store, self.source(page()))
+        self.assertEqual(self.store.get("latest_bookmark"), "")
+        poll(self.store, self.source(page(99), page(99)))
+        with self.store.db:
+            self.store.db.execute("DELETE FROM metadata WHERE key='latest_bookmark'")
+        poll(self.store, self.source(page(1), page(1, 99)))
+        self.assertEqual(self.store.counts(), {"baseline": 1, "pending": 1})
+
+    def test_invalid_probe_does_not_clear_head(self):
+        poll(self.store, self.source(page(99)))
+        for bad in [{}, {"meta": {"result_count": 0}, "errors": [{}]}, page(1, 2)]:
+            with self.assertRaises(CaptureError):
+                poll(self.store, self.source(bad))
+            self.assertEqual(self.store.get("latest_bookmark"), "99")
+
+    def test_head_is_taken_from_catchup_if_bookmarks_change_between_requests(self):
+        poll(self.store, self.source(page(99)))
+        poll(self.store, self.source(page(1), page(2, 1, 99)))
+        self.assertEqual(self.store.get("latest_bookmark"), "2")
+        self.assertEqual(self.store.counts(), {"baseline": 1, "pending": 2})
+
+    def test_removed_boundary_scans_to_end_without_recreating_known_tasks(self):
+        self.seed()
+        poll(self.store, self.source(page(2), page(2, 3, next_token="older"), page(4)))
+        self.assertEqual(self.store.counts(), {"pending": 4})
+        self.assertEqual(self.store.get("latest_bookmark"), "2")
 
     def test_poll_never_opens_codex_and_delivery_is_once(self):
         self.seed()

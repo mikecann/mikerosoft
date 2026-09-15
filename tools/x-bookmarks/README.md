@@ -29,9 +29,10 @@ that a known Desktop task can be read through that server.
 
 No reusable X API credentials were found in the searched project `.env` key
 names under `~/dev`, X-related config filenames under `~/.config`, or the
-current environment. Earlier `x-engagement` work used signed-in Chrome. That is
-not an OAuth token with bookmark access. This search does not prove that no
-credentials exist in a password manager or elsewhere.
+current environment. A subsequent read-only developer-console check on
+14 September found the existing `BruceMikesMini` and `Mikes Convex Portfolio`
+apps. Both showed OAuth 2.0 user authentication as not yet configured. Existing
+developer apps therefore exist, but bookmark authorization is still needed.
 
 ## Authentication and cost
 
@@ -50,8 +51,9 @@ X API reads are paid separately from Codex. As checked on 14 September 2026,
 eligible owned bookmark reads cost **$0.001 per resource** when the authorized
 user owns the developer app. Standard post and user reads have different prices;
 author expansions and `/users/me` can add resources. X describes daily UTC
-deduplication as a soft guarantee. Repeated full scans can therefore incur
-charges again each day, even when no new task is created. Confirm your app's
+deduplication as a soft guarantee. The latest-bookmark probe and account check
+can incur charges again each day, even when no new task is created. Catch-up
+reads add resources only when the latest ID changes. Confirm your app's
 eligibility, expansion billing, and spending limit in the developer console.
 This tool does not buy credits or enable auto-recharge.
 [X pricing](https://docs.x.com/x-api/getting-started/pricing)
@@ -140,15 +142,32 @@ installer changes are needed for this macOS-only tool.
 The SQLite state records each post forever. Removing and re-bookmarking the same
 post will not create a second task. Back up the state directory; deleting it
 loses deduplication. An empty initial snapshot still establishes a baseline.
-All pages must succeed before any snapshot is committed. A page error, missing
-author, repeated cursor, or `max_pages` limit leaves the prior snapshot intact.
-Do not raise the default 20-page limit without reviewing the associated cost.
+After the full initial baseline (100 bookmarks per page), each poll requests
+only the latest bookmark with `max_results=1`, without author expansions. If its
+ID matches the saved latest ID, polling stops. The `/users/me` account check
+still runs each poll to reject a changed account.
+
+When the latest ID changes, catch-up starts from the newest 10 bookmarks and
+continues in pages of 10 until a page contains an already-known ID or X reports
+the end. The entire boundary page is processed before stopping. Permanent
+deduplication ensures only unseen posts become pending. The latest ID comes
+from the catch-up response, in case bookmarks changed after the initial probe.
+
+All required pages must succeed before the queue and latest ID are committed
+together. A page error, missing author, repeated cursor, or `max_pages` limit
+leaves the previous latest ID intact for retry. The default limit is 20 pages
+(up to 200 bookmarks per catch-up); do not raise it without reviewing cost.
+Existing databases without a saved latest ID perform one catch-up scan using
+their existing deduplication history, without resetting the baseline.
 
 Polling observes what X returns, not an atomic bookmark event stream. Posts
 added and removed between polls cannot be detected. An X-hidden bookmark that
 first becomes visible later is indistinguishable from a new bookmark; the
-baseline covers only the API-visible collection. Changes during pagination can
-also move a post between pages; a later scan can recover it. No filtering by
+baseline covers only the API-visible collection. This optimization assumes X
+returns the newest bookmarks first. Changes deeper in the collection, including
+previously hidden posts, are not detected while the latest ID stays unchanged.
+Changes during pagination or moving a known bookmark ahead of more than a page
+of new bookmarks can also cause misses. No filtering by
 tweet creation date is used, since an old tweet can be bookmarked today.
 
 States are `baseline`, `pending`, `creating`, `created`, `submitting`, and
@@ -185,7 +204,8 @@ python3 -m unittest discover -s tools/x-bookmarks/tests -v
 ```
 
 Tests use fake X responses and a fake Codex subprocess, with no paid calls. They
-cover pagination, baseline/restart behavior, old tweet IDs, account changes,
+cover one-item probes, ten-item catch-up, atomic head advancement, pagination,
+baseline/restart behavior, old tweet IDs, account changes,
 partial responses, expired-token refresh, private file modes, duplicate guards,
 lost responses, manual recovery, PKCE state, launchd arguments, HTTP error
 redaction, rate-limit backoff, and unchanged polls that never open Codex.

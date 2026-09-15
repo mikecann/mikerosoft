@@ -158,20 +158,28 @@ class XApi:
         return request_json(url, {"Authorization": "Bearer " + self.token["access_token"]})
 
 
-def fetch_snapshot(api, user_id, max_pages=20):
+def bookmark_data(page):
+    if not isinstance(page, dict) or page.get("errors") or not isinstance(page.get("meta"), dict):
+        raise CaptureError("Incomplete bookmark response; no snapshot committed")
+    data = page.get("data", [])
+    if not isinstance(data, list) or page["meta"].get("result_count") != len(data):
+        raise CaptureError("Invalid bookmark count; no snapshot committed")
+    if any(not isinstance(item, dict) or not isinstance(item.get("id"), str)
+           or not re.fullmatch(r"[0-9]+", item["id"]) for item in data):
+        raise CaptureError("Invalid bookmark ID; no snapshot committed")
+    return data
+
+
+def fetch_snapshot(api, user_id, max_pages=20, *, page_size=100, known_ids=None):
     result, cursors = {}, set()
     cursor = None
     for _ in range(max_pages):
-        params = {"max_results": 100, "tweet.fields": "author_id,note_tweet",
+        params = {"max_results": page_size, "tweet.fields": "author_id,note_tweet",
                   "expansions": "author_id", "user.fields": "name,username"}
         if cursor:
             params["pagination_token"] = cursor
         page = api.get(f"/users/{user_id}/bookmarks", params)
-        if page.get("errors") or not isinstance(page.get("meta"), dict):
-            raise CaptureError("Incomplete bookmark response; no snapshot committed")
-        data = page.get("data", [])
-        if not isinstance(data, list) or page["meta"].get("result_count") != len(data):
-            raise CaptureError("Invalid bookmark count; no snapshot committed")
+        data = bookmark_data(page)
         users = {u["id"]: u for u in page.get("includes", {}).get("users", [])}
         for tweet in data:
             author = users.get(tweet.get("author_id"), {})
@@ -183,6 +191,10 @@ def fetch_snapshot(api, user_id, max_pages=20):
             result[tweet["id"]] = {"id": tweet["id"], "text": tweet.get("note_tweet", {}).get("text", tweet["text"]),
                                    "author": author["name"], "username": author["username"],
                                    "url": f'https://x.com/{author["username"]}/status/{tweet["id"]}'}
+        # Read the entire boundary page: a re-bookmarked known item may be ahead
+        # of new items. Only IDs saved before this scan count as a stopping point.
+        if known_ids is not None and any(item["id"] in known_ids for item in data):
+            return list(result.values())
         cursor = page["meta"].get("next_token")
         if not cursor:
             return list(result.values())
@@ -200,15 +212,30 @@ def poll(store, api, max_pages=20):
         raise CaptureError("Cannot identify the authenticated X account")
     if store.get("account") not in (None, user_id):
         raise CaptureError("X account changed. Use a separate state directory and establish its baseline")
-    snapshot = fetch_snapshot(api, user_id, max_pages)
-    status = "pending" if store.get("baseline") else "baseline"
-    # All pages must succeed before anything becomes eligible for delivery.
+    established = bool(store.get("baseline"))
+    if established:
+        head = bookmark_data(api.get(f"/users/{user_id}/bookmarks", {"max_results": 1}))
+        if len(head) > 1:
+            raise CaptureError("Latest bookmark response contained more than one item")
+        latest = head[0]["id"] if head else ""
+        if latest == store.get("latest_bookmark"):
+            store.set("last_success", time.time())
+            return store.counts()
+        known_ids = {row[0] for row in store.db.execute("SELECT id FROM bookmarks")}
+        snapshot = fetch_snapshot(api, user_id, max_pages, page_size=10, known_ids=known_ids) if head else []
+    else:
+        # First run still reads every available page so old bookmarks stay baseline.
+        snapshot = fetch_snapshot(api, user_id, max_pages)
+    latest = snapshot[0]["id"] if snapshot else ""
+    status = "pending" if established else "baseline"
+    # Advance the head with the queue transaction, never before catch-up succeeds.
     with store.db:
         for item in snapshot:
             store.db.execute("INSERT OR IGNORE INTO bookmarks VALUES (?, ?, ?, NULL, ?)",
                              (item["id"], json.dumps(item, ensure_ascii=False), status, time.time()))
         store.db.execute("INSERT OR REPLACE INTO metadata VALUES ('account', ?)", (user_id,))
         store.db.execute("INSERT OR REPLACE INTO metadata VALUES ('baseline', 'complete')")
+        store.db.execute("INSERT OR REPLACE INTO metadata VALUES ('latest_bookmark', ?)", (latest,))
         store.db.execute("INSERT OR REPLACE INTO metadata VALUES ('last_success', ?)", (str(time.time()),))
     return store.counts()
 
