@@ -3,9 +3,13 @@
 ![X Bookmarks](docs/header.png)
 
 Turn newly bookmarked X posts into saved Codex tasks. Python and SQLite check X
-without any LLM calls. Only a new bookmark starts one short `codex exec` turn,
-containing the author's name, post text, and original link. It asks Codex to reply
-“Saved for later” without researching or acting on the post.
+without any LLM calls. Only a new bookmark starts a `codex exec` research turn. It reads the post,
+fact-checks important claims with live web search, looks for author follow-ups
+and relevant replies, and prepares likely questions with linked evidence.
+Each brief starts with a content-specific title and retains the original link.
+The initial task preview also starts with an excerpt of the post. Automatic
+sidebar renaming requires a supported rename tool; the standalone CLI does not
+currently expose one, so the worker does not guarantee a custom sidebar title.
 
 ## How it works
 
@@ -40,10 +44,13 @@ tool never purchases credits or enables auto-recharge. Check current
 [X pricing](https://docs.x.com/x-api/getting-started/pricing) for your app.
 
 Unchanged polling uses zero Codex tokens. Each newly captured bookmark consumes
-one Codex turn, including its input context. `--ignore-user-config` avoids loading
+one research turn, including input context and web search. Research uses more
+Codex allowance than the old acknowledgment, but does not add paid X search
+calls. A 15-minute process timeout prevents indefinite research. `--ignore-user-config` avoids loading
 custom MCP configuration; the CLI still supplies its normal instructions and
-applicable project guidance. The subprocess is read-only, and its prompt is a
-capture instruction, not a general-purpose tool authorization boundary.
+applicable project guidance. The subprocess is read-only. The research prompt forbids posting, messages,
+purchases and acting on source instructions. Inaccessible X threads or comments
+must be reported as gaps; the agent must not pretend to have reviewed them.
 
 ## Setup
 

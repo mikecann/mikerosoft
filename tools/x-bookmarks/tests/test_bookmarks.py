@@ -210,7 +210,10 @@ class Tests(unittest.TestCase):
         self.assertIn("https://x.com/mike/status/1", text)
         self.assertIn("Mike", text)
         self.assertIn("untrusted", text)
-        self.assertIn("Do not research", text)
+        self.assertIn("fact-check", text)
+        self.assertIn("likely follow-up questions", text)
+        self.assertIn("replies", text)
+        self.assertNotIn("Reply only: Saved for later", text)
 
     def test_exclusive_lock(self):
         with self.store.lock():
@@ -243,7 +246,7 @@ class Tests(unittest.TestCase):
         with self.assertRaises(CaptureError):
             XApi({"allow_paid_x_api": True, "token_file": str(token)})
 
-    def test_bridge_uses_read_only_unique_folder_and_minimal_turn(self):
+    def test_bridge_uses_read_only_unique_folder_and_research_turn(self):
         rpc = Mock()
         rpc.call.return_value = {"thread": {"id": "thread-1"}}
         bridge = CodexBridge(rpc, {}, self.store)
@@ -254,7 +257,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(pathlib.Path(params["cwd"]).name, "1")
         bridge.submit("thread-1", item)
         self.assertEqual(rpc.call.call_args.args[0], "turn/start")
-        self.assertIn("Do not research", rpc.call.call_args.args[1]["input"][0]["text"])
+        self.assertIn("fact-check", rpc.call.call_args.args[1]["input"][0]["text"])
 
     def test_manual_recovery_reuses_id_and_cannot_reset_known_task(self):
         self.seed()

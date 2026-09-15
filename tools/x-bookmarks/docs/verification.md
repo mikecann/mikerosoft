@@ -33,3 +33,17 @@ reconciled and the actual LaunchAgent was retriggered. It created and completed
 one task, `01a0a3e8-142a-71d0-abce-09272821fe85`. Desktop read back the exact
 bookmark payload and acknowledgment. Repeating delivery created no duplicate.
 The background process exited with code 0. All 41 Python tests pass.
+
+## Research briefs
+
+New tasks now request live-source fact-checking, author continuations, substantive
+replies, related posts, and likely follow-up questions with evidence and access
+gaps. Web search is explicitly set to live. The process deadline is 15 minutes.
+The unchanged-poll path still starts no Codex process. All 41 Python tests and
+six website tests pass; the website builds successfully.
+
+The live CLI research test resumed the separate codebase-explorer test task and
+issued real web searches. The original crater task was renamed through the
+Desktop tool and given the research instructions in place. The CLI itself has
+no supported sidebar rename operation, so future briefs have a subject-based
+initial preview and descriptive response heading, not a guaranteed sidebar title.

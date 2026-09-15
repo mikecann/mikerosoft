@@ -40,7 +40,7 @@ const base = 'https://cdn.jsdelivr.net/gh/mikecann/mikerosoft@main/tools';
 export const tools: Tool[] = [
   {
     name: 'x-bookmarks',
-    desc: 'Turn new X bookmarks into saved Codex tasks automatically, with zero LLM polling and persistent deduplication',
+    desc: 'Turn new X bookmarks into researched Codex briefs with fact-checks, useful follow-ups and source links; unchanged polling uses zero LLM tokens',
     icon: `${base}/x-bookmarks/icons/x-bookmarks.png`,
     header: `/x-bookmarks-header.png`,
     screenshots: [],

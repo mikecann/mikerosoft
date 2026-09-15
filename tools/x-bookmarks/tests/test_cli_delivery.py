@@ -57,6 +57,7 @@ class DeliveryTests(unittest.TestCase):
 import json,sys
 assert 'app-server' not in sys.argv
 assert '--json' in sys.argv and '--sandbox' in sys.argv
+assert 'web_search="live"' in sys.argv
 prompt = sys.stdin.read()
 print(json.dumps({'type':'thread.started','thread_id':'01a0a392-9ba6-7de0-9910-e8acbca11275'}), flush=True)
 if prompt == 'fail': sys.exit(1)

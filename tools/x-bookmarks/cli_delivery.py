@@ -21,10 +21,14 @@ def cli_environment(config):
     return env
 
 
-def run_cli(config, folder, prompt, on_thread):
+def run_cli(config, folder, prompt, on_thread, *, resume_thread_id=None):
     env = cli_environment(config)
     args = [config.get('codex_binary', 'codex'), 'exec', '--ignore-user-config',
-            '--sandbox', 'read-only', '--skip-git-repo-check', '-C', str(folder), '--json', '-']
+            '-c', 'web_search="live"', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', str(folder), '--json']
+    if resume_thread_id:
+        uuid.UUID(resume_thread_id)
+        args += ['resume', resume_thread_id]
+    args += ['-']
     # Preserve an explicitly configured model, otherwise use the CLI default.
     if config.get('codex_model'):
         args[2:2] = ['--model', config['codex_model']]
@@ -36,7 +40,7 @@ def run_cli(config, folder, prompt, on_thread):
         try:
             proc.stdin.write(prompt.encode())
             proc.stdin.close()
-            deadline = time.monotonic() + 180
+            deadline = time.monotonic() + 900
             while time.monotonic() < deadline:
                 if not selector.select(timeout=1):
                     if proc.poll() is not None: break
