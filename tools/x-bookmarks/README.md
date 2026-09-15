@@ -18,6 +18,16 @@ machine. The Desktop app's separate private IPC socket is not that protocol.
 This implementation does not reverse-engineer private IPC, write Codex's
 database, or start another app-server beside Desktop.
 
+Further checks on 15 September found the bundled `codex-app-tools/server.mjs`
+MCP adapter. An external process could initialize this adapter, but its
+`tools/list` request was rejected by the running Desktop host. The app log
+recorded `dynamic_app_tools_peer_rejected reason=missing-code-signing-identity`.
+No task-creation request was sent. Do not bypass this trust check. The installed
+app's new-task deep-link handler prefills the composer; it does not submit a
+task. Neither route currently provides verified unattended task creation here.
+Standalone `codex exec` is also excluded because the earlier Index Sync watcher
+caused Desktop window flicker when running a separate Codex process.
+
 The adapter follows the installed CLI-generated schemas for `thread/start`,
 `thread/resume`, `thread/name/set`, and `turn/start`. OpenAI documents those in
 its [app-server reference](https://learn.chatgpt.com/docs/app-server), but labels
