@@ -68,3 +68,11 @@ print(json.dumps({'type':'turn.completed'}), flush=True)
         self.assertEqual(len(seen), 1)
         with self.assertRaises(CaptureError):
             run_cli({'codex_binary':str(executable)}, self.tmp.name, 'fail', seen.append)
+
+    def test_background_environment_includes_codex_node_directory(self):
+        from cli_delivery import cli_environment
+        with patch.dict('os.environ', {'PATH':'/usr/bin:/bin', 'CODEX_THREAD_ID':'parent', 'CODEX_HOME':'/private/codex'}, clear=True):
+            env = cli_environment({'codex_binary':'/custom/node/bin/codex'})
+        self.assertEqual(env['PATH'].split(':')[0], '/custom/node/bin')
+        self.assertNotIn('CODEX_THREAD_ID', env)
+        self.assertEqual(env['CODEX_HOME'], '/private/codex')

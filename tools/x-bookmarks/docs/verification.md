@@ -20,3 +20,16 @@ The controlled test used an existing bookmark as unseen local input. A fresh
 user bookmark arriving through the installed timer has not yet been observed.
 Desktop restart persistence and long-duration absence of flicker were not tested.
 The website was verified locally, not on the public production deployment.
+
+## Fresh bookmark and background delivery follow-up
+
+The next real bookmark was detected by the installed timer, but its first CLI
+attempt failed before task creation because launchd's PATH omitted the npm
+installation's Node directory. The CLI environment now explicitly includes the
+configured Codex executable's parent directory. A regression test covers this.
+
+After verifying that no task existed for that bookmark, its uncertain state was
+reconciled and the actual LaunchAgent was retriggered. It created and completed
+one task, `01a0a3e8-142a-71d0-abce-09272821fe85`. Desktop read back the exact
+bookmark payload and acknowledgment. Repeating delivery created no duplicate.
+The background process exited with code 0. All 41 Python tests pass.

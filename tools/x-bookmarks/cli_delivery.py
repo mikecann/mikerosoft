@@ -10,9 +10,19 @@ import uuid
 from bookmarks import CaptureError, private_json, prompt_for
 
 
-def run_cli(config, folder, prompt, on_thread):
+def cli_environment(config):
     # A launchd worker must not inherit a parent Codex task's session/tool pipe.
     env = {k: v for k, v in os.environ.items() if not k.startswith('CODEX_') or k == 'CODEX_HOME'}
+    # npm installs Codex beside Node, but launchd omits that directory. Keep
+    # the configured shim path rather than resolving it into node_modules.
+    binary = Path(config.get('codex_binary', 'codex')).expanduser()
+    if binary.is_absolute():
+        env['PATH'] = str(binary.parent) + os.pathsep + env.get('PATH', '/usr/bin:/bin')
+    return env
+
+
+def run_cli(config, folder, prompt, on_thread):
+    env = cli_environment(config)
     args = [config.get('codex_binary', 'codex'), 'exec', '--ignore-user-config',
             '--sandbox', 'read-only', '--skip-git-repo-check', '-C', str(folder), '--json', '-']
     # Preserve an explicitly configured model, otherwise use the CLI default.

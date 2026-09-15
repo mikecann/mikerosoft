@@ -428,7 +428,8 @@ def main():
                         store.set("next_poll", time.time() + delay)
                         raise
             if config.get("delivery_backend") == "cli" and args.command == "doctor":
-                result = subprocess.run([config.get("codex_binary", "codex"), "--version"], capture_output=True, text=True, timeout=10)
+                from cli_delivery import cli_environment
+                result = subprocess.run([config.get("codex_binary", "codex"), "--version"], capture_output=True, text=True, timeout=10, env=cli_environment(config))
                 if result.returncode:
                     raise CaptureError("Codex CLI version check failed")
                 print("Codex CLI available. Use a real delivery to verify authentication and Desktop visibility.")

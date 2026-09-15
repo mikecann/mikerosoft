@@ -73,6 +73,8 @@ bash tools/x-bookmarks/install-launchagent.sh
 The installer copies a versioned runtime into the private application-support
 folder, installs `~/.local/bin/x-bookmarks`, and starts LaunchAgent
 `com.mikerosoft.x-bookmarks`. It does not depend on a temporary Git worktree.
+The worker includes the configured Codex executable directory in PATH so npm-installed
+Codex can find its sibling Node executable under launchd.
 Run the installer again after updating the source. Old runtime snapshots and
 bookmark state are retained. The launch timer wakes every minute; the default
 persisted X polling interval is five minutes, with backoff for failures.
