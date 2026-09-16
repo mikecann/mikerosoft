@@ -52,6 +52,15 @@ class CliTests(unittest.TestCase):
         self.addCleanup(store.close)
         self.assertEqual(store.get("failures"), "1")
 
+    def test_app_server_tick_with_no_new_bookmarks_never_starts_codex(self):
+        private_json(self.root / "config.json", {"allow_paid_x_api": True,
+            "enable_experimental_codex_delivery": True, "delivery_backend": "app-server"})
+        with patch("bookmarks.XApi") as api, patch("app_server_delivery.AppServer") as server:
+            api.return_value.get.side_effect = [{"data": {"id": "42"}}, {"meta": {"result_count": 0}}]
+            self.assertIsNone(self.run_main("tick"))
+            self.assertIsNone(self.run_main("tick"))
+            server.assert_not_called()
+
     def test_http_error_never_exposes_token_or_body(self):
         error = HTTPError("https://api.x.com/private?secret=secret-value", 401, "private body", {}, None)
         with patch("bookmarks.urllib.request.build_opener") as opener:

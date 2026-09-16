@@ -24,7 +24,7 @@ def launchagent(state, config, script, python, log):
 
 
 def install_runtime(source, root):
-    names = ('bookmarks.py', 'cli_delivery.py', 'oauth.py', 'service.py', 'x-bookmarks')
+    names = ('bookmarks.py', 'cli_delivery.py', 'app_server_delivery.py', 'oauth.py', 'service.py', 'x-bookmarks')
     digest = hashlib.sha256(b''.join((source / name).read_bytes() for name in names)).hexdigest()[:16]
     runtime = root / 'runtime' / digest
     runtime.mkdir(parents=True, exist_ok=True, mode=0o700)

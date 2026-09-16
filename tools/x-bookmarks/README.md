@@ -3,13 +3,12 @@
 ![X Bookmarks](docs/header.png)
 
 Turn newly bookmarked X posts into saved Codex tasks. Python and SQLite check X
-without any LLM calls. Only a new bookmark starts a `codex exec` research turn. It reads the post,
+without any LLM calls. Only a new bookmark starts a short-lived `codex app-server --stdio` research turn. It reads the post,
 fact-checks important claims with live web search, looks for author follow-ups
 and relevant replies, and prepares likely questions with linked evidence.
 Each brief starts with a content-specific title and retains the original link.
-The initial task preview also starts with an excerpt of the post. Automatic
-sidebar renaming requires a supported rename tool; the standalone CLI does not
-currently expose one, so the worker does not guarantee a custom sidebar title.
+The worker sets a subject-based task name before research, then replaces it with
+the brief's heading using `thread/name/set`.
 
 ## How it works
 
@@ -18,17 +17,25 @@ creating tasks. Subsequent checks request the latest bookmark only. If its ID
 changed, the reader fetches ten posts at a time until it reaches a known item.
 IDs remain in SQLite permanently, including when a bookmark is removed from X.
 
-Delivery uses the installed Codex CLI and its normal saved-session format. There
-is no private Desktop socket, separate persistent app-server, database editing,
-UI scripting, or model-powered polling. A live CLI test on 15 September 2026
-created a task that Desktop could read and open; the user confirmed seeing it.
-Automatic sidebar refresh is controlled by Desktop.
+Delivery uses the installed Codex binary's documented app-server JSON-RPC
+interface over stdin/stdout. Each new bookmark starts a short-lived worker;
+unchanged checks do not start Codex. There are no Desktop private sockets,
+Codex database edits, UI scripting, or persistent additional app-server.
 
-The worker records creation intent before starting Codex, saves the task ID as
-soon as the CLI emits it, and marks delivery complete only after a successful
-turn and process exit. An interrupted or uncertain attempt is held for inspection
-instead of blindly creating a duplicate. This provides duplicate prevention,
-not a guarantee that a failed run will finish without manual reconciliation.
+**Why not `codex exec`?** Desktop's current sidebar catalogue explicitly excludes
+`exec` sessions. The September 15 test only proved that such a task could be
+read and manually opened. It did not prove automatic sidebar discovery.
+App-server-created sessions are eligible for Desktop's catalogue. Desktop
+controls refresh timing, so a completed worker is not itself proof of visibility.
+When validating an installation, confirm a fresh task appears in Desktop's task
+list without navigating to it or manually opening it first.
+
+The worker records creation intent before sending `thread/start`, saves the task
+ID before starting a turn, and marks delivery complete only after a completed
+research turn and successful title update. It rejects a hidden `exec` source.
+An interrupted or uncertain attempt is held for inspection instead of blindly
+creating a duplicate. `delivered` means persisted research and naming succeeded;
+it is not an acknowledgement from Desktop's separate sidebar catalogue.
 
 ## Requirements and cost
 
@@ -46,9 +53,11 @@ tool never purchases credits or enables auto-recharge. Check current
 Unchanged polling uses zero Codex tokens. Each newly captured bookmark consumes
 one research turn, including input context and web search. Research uses more
 Codex allowance than the old acknowledgment, but does not add paid X search
-calls. A 15-minute process timeout prevents indefinite research. `--ignore-user-config` avoids loading
-custom MCP configuration; the CLI still supplies its normal instructions and
-applicable project guidance. The subprocess is read-only. The research prompt forbids posting, messages,
+calls. A 15-minute turn timeout prevents indefinite research. The app-server
+uses the user's existing Codex login and model settings, with read-only sandboxing
+and approval policy `never`. The research thread disables configured MCP servers,
+plugins, apps, hooks, shell tools, and memory features, retaining live web search.
+The research prompt forbids posting, messages,
 purchases and acting on source instructions. Inaccessible X threads or comments
 must be reported as gaps; the agent must not pretend to have reviewed them.
 
@@ -65,7 +74,7 @@ Edit `~/Library/Application Support/x-bookmarks/config.json` locally:
 2. Run `python3 tools/x-bookmarks/bookmarks.py login` and authorize the app.
    Credentials are stored outside Git with file mode 0600.
 3. Set `allow_paid_x_api` to `true`, then run `poll` to record the baseline.
-4. Set `delivery_backend` to `cli`, `codex_binary` to the absolute executable
+4. Set `delivery_backend` to `app-server`, `codex_binary` to the absolute executable
    path from `command -v codex`, and `enable_experimental_codex_delivery` to `true`.
    The latter is the original configuration flag retained for compatibility.
    Optionally set `codex_model`; omission uses the CLI's default model.
@@ -91,7 +100,7 @@ x-bookmarks status
 x-bookmarks poll     # X only, respecting the stored interval
 x-bookmarks deliver  # deliver queued items, without reading X
 x-bookmarks tick     # poll, then deliver
-x-bookmarks doctor   # local CLI availability check, no LLM call
+x-bookmarks doctor   # app-server protocol check, no LLM call
 python3 tools/x-bookmarks/service.py --uninstall
 ```
 
@@ -100,7 +109,7 @@ payloads: `~/Library/Application Support/x-bookmarks/`.
 
 ## Interrupted delivery
 
-`status` lists uncertain `creating` or `submitting` rows and their known task IDs.
+`status` lists uncertain `creating`, `created`, or `submitting` rows and their known task IDs.
 Inspect Desktop before resolving. Never mark an uncertain task as absent without
 checking, since it may have completed before the worker lost its connection.
 
@@ -110,9 +119,9 @@ x-bookmarks resolve POST_ID --confirmed-outcome not-created
 ```
 
 The second command is allowed only when no task ID was recorded. A known but
-unfinished CLI task must be continued in Codex and then marked captured. The
+unfinished task must be continued in Codex and then marked captured. The
 legacy app-server adapter remains available for existing configurations, but is
-not used by the CLI service.
+not used by the stdio app-server service.
 
 ## Tests
 

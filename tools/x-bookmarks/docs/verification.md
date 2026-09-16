@@ -47,3 +47,44 @@ issued real web searches. The original crater task was renamed through the
 Desktop tool and given the research instructions in place. The CLI itself has
 no supported sidebar rename operation, so future briefs have a subject-based
 initial preview and descriptive response heading, not a guaranteed sidebar title.
+
+## 16 September: automatic sidebar delivery correction
+
+The September 15 test conflated a saved task being readable/openable with it
+appearing automatically. The installed Desktop catalogue rejects `exec` sources.
+Today’s Jev bookmark was captured and researched successfully but omitted from
+that catalogue. This was a delivery integration bug, not an X polling failure.
+
+Delivery now uses the documented `codex app-server --stdio` protocol in a
+short-lived subprocess. Thread creation uses read-only sandboxing and no
+interactive approvals; private MCP servers, plugins, apps, hooks, shell tools,
+and memory features are disabled for the research thread. Normal user login and
+model settings are retained. The worker calls `thread/name/set` for the initial
+subject and final research heading. No Desktop database or session file is edited.
+
+Live verification:
+
+- A fresh short app-server turn appeared in Desktop's `list_threads` result
+  before any Desktop read, open, rename, pin, or navigation action on it.
+- The real installed LaunchAgent then delivered the already-captured Jev
+  bookmark as a deliberate replacement for its known hidden task. The original
+  mapping was retained in watcher metadata, and original research was archived
+  only after replacement completion. The original 18-bookmark baseline remained.
+- Replacement `01a0a82f-4106-79c3-8b50-4d5957f669c0` appeared in Desktop's task list
+  automatically, first under its subject and then as
+  `Jev: fast AI decisions, with unproven frontier claims`.
+- The completed research was read back after task-list visibility was established.
+- Repeating delivery retained exactly two delivered bookmark rows and the same
+  task ID, with no uncertain rows. No new Codex process is started on empty queues.
+- Final runtime installed outside the worktree: `f70eec524e141070`. The actual
+  LaunchAgent's first unchanged run exited 0.
+- 49 Python tests pass, including notification-before-response handling, failed
+  turns, source rejection, title failures, manual reconciliation, no-process
+  unchanged checks, and installation of the new module.
+- Temporary visibility-test tasks were archived.
+
+Desktop controls catalogue refresh timing. This validates automatic discovery in
+this installation, not instantaneous cross-process notifications or an actual
+reboot. `delivered` remains the worker's completed-research state, not a Desktop
+sidebar acknowledgement. UI screenshots could not be taken because computer-use
+access to Codex is blocked; verification used Desktop's own task-list API.

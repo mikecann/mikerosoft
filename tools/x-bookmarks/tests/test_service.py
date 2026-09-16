@@ -25,12 +25,13 @@ class ServiceTests(unittest.TestCase):
             root = pathlib.Path(tmp)
             source = root / 'source'
             source.mkdir()
-            for name in ('bookmarks.py', 'cli_delivery.py', 'oauth.py', 'service.py', 'x-bookmarks'):
+            for name in ('bookmarks.py', 'cli_delivery.py', 'app_server_delivery.py', 'oauth.py', 'service.py', 'x-bookmarks'):
                 (source / name).write_text('# runtime')
             script = install_runtime(source, root / 'state')
             (source / 'bookmarks.py').unlink()
             self.assertEqual(script.read_text(), '# runtime')
             self.assertTrue((script.parent / 'cli_delivery.py').exists())
+            self.assertTrue((script.parent / 'app_server_delivery.py').exists())
 
 
 if __name__ == "__main__":

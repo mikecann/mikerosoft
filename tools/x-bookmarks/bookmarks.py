@@ -419,7 +419,7 @@ def main():
                 if path.exists():
                     raise CaptureError("Configuration already exists; refusing to overwrite it")
                 private_json(path, {"allow_paid_x_api": False, "enable_experimental_codex_delivery": False,
-                                    "delivery_backend": "cli", "client_id": "", "token_file": str(store.root / "oauth.json"),
+                                    "delivery_backend": "app-server", "client_id": "", "token_file": str(store.root / "oauth.json"),
                                     "interval_seconds": 300, "max_pages": 20, "delivery_limit": 5,
                                     "codex_binary": "codex", "codex_socket": None,
                                     "desktop_probe_thread_id": ""})
@@ -429,7 +429,7 @@ def main():
                 print(json.dumps({"baseline": store.get("baseline"), "counts": store.counts(),
                                   "last_success": store.get("last_success"), "next_poll": store.get("next_poll"),
                                   "attention": [dict(r) for r in store.db.execute(
-                                      "SELECT id,status,thread_id FROM bookmarks WHERE status IN ('creating','submitting')")]}))
+                                      "SELECT id,status,thread_id FROM bookmarks WHERE status IN ('creating','created','submitting')")]}))
                 return
             config = config_read(path)
             if args.command == "login":
@@ -453,6 +453,20 @@ def main():
                         delay = max(config["interval_seconds"], min(3600, 60 * 2 ** failures), getattr(error, "delay", 0))
                         store.set("next_poll", time.time() + delay)
                         raise
+            if config.get("delivery_backend") == "app-server" and args.command == "doctor":
+                from app_server_delivery import AppServer
+                rpc = AppServer(config)
+                try:
+                    rpc.call("config/read", {"includeLayers": False})
+                    print("Codex app-server protocol available. Verify a fresh completed task in Desktop's list before claiming sidebar delivery.")
+                finally:
+                    rpc.close()
+                return
+            if config.get("delivery_backend") == "app-server" and args.command in ("tick", "deliver") and config.get("enable_experimental_codex_delivery") is True:
+                from app_server_delivery import deliver_app_server
+                deliver_app_server(store, config, config["delivery_limit"])
+                print(json.dumps(store.counts()))
+                return
             if config.get("delivery_backend") == "cli" and args.command == "doctor":
                 from cli_delivery import cli_environment
                 result = subprocess.run([config.get("codex_binary", "codex"), "--version"], capture_output=True, text=True, timeout=10, env=cli_environment(config))
@@ -492,8 +506,8 @@ def main():
 
 def resolve_delivery(store, tweet_id, outcome, thread_id):
     row = store.row(tweet_id)
-    if not row or row["status"] not in ("creating", "submitting"):
-        raise CaptureError("Only uncertain creating/submitting rows can be reconciled")
+    if not row or row["status"] not in ("creating", "created", "submitting"):
+        raise CaptureError("Only uncertain creating/created/submitting rows can be reconciled")
     if outcome == "not-created":
         if row["status"] != "creating" or row["thread_id"] or thread_id:
             raise CaptureError("A known task must be reused; cannot reset it to pending")
