@@ -149,6 +149,44 @@ struct SpeakerPlaybackRange: Equatable, Sendable {
     }
 }
 
+@MainActor
+enum SpeakerPlayerSurface {
+    static func make(player: AVPlayer) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .inline
+        view.showsFullScreenToggleButton = false
+        view.showsSharingServiceButton = false
+        return view
+    }
+
+    static func update(_ view: AVPlayerView, player: AVPlayer) {
+        if view.player !== player { view.player = player }
+    }
+
+    static func dismantle(_ view: AVPlayerView) {
+        view.player?.pause()
+        view.player = nil
+    }
+}
+
+@MainActor
+struct SpeakerPlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        SpeakerPlayerSurface.make(player: player)
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        SpeakerPlayerSurface.update(view, player: player)
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        SpeakerPlayerSurface.dismantle(view)
+    }
+}
+
 struct SpeakerReviewDraft: Equatable, Sendable {
     var name: String
     var isPredicted: Bool
@@ -421,6 +459,9 @@ final class SpeakerReviewModel: ObservableObject {
     private let onReviewChanged: () -> Void
     private var playbackURL: URL?
     private var playbackTask: Task<Void, Never>?
+    private var playbackFetchTask: Task<URL, Error>?
+    private var playbackGeneration = 0
+    @Published private(set) var isFetchingPlayback = false
 
     var remainingUnconfirmedCount: Int {
         guard let response else { return 0 }
@@ -522,38 +563,64 @@ final class SpeakerReviewModel: ObservableObject {
             playbackStatus = "This excerpt has text but no generated playback file."
             return
         }
+        playbackGeneration &+= 1
+        let generation = playbackGeneration
+        playbackTask?.cancel()
+        playbackTask = nil
         do {
             let url = try await localPlaybackURL()
+            guard generation == playbackGeneration else { return }
             let player = player ?? AVPlayer(url: url)
             self.player = player
-            playbackTask?.cancel()
             player.pause()
             await player.seek(to: CMTime(seconds: range.start, preferredTimescale: 600))
+            guard generation == playbackGeneration else { return }
             player.play()
             playbackStatus = "Playing \(speakerID) from \(formatTime(range.start)) to \(formatTime(range.end))"
             playbackTask = Task { [weak self, weak player] in
                 try? await Task.sleep(for: .seconds(range.end - range.start))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, self?.playbackGeneration == generation else { return }
                 player?.pause()
                 self?.playbackStatus = nil
             }
         } catch {
+            guard generation == playbackGeneration else { return }
             failure = error.localizedDescription
         }
     }
 
+    func stopPlayback() {
+        playbackGeneration &+= 1
+        playbackTask?.cancel()
+        playbackTask = nil
+        playbackFetchTask?.cancel()
+        player?.pause()
+        player = nil
+        playbackStatus = nil
+    }
+
     private func localPlaybackURL() async throws -> URL {
         if let playbackURL { return playbackURL }
+        if let playbackFetchTask { return try await playbackFetchTask.value }
         playbackStatus = "Fetching the archived playback…"
+        isFetchingPlayback = true
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-archive-speaker-review", isDirectory: true)
             .appendingPathComponent(meetingID.uuidString.lowercased(), isDirectory: true)
         let destination = directory.appendingPathComponent("meeting.mp4")
-        let result = try await client.fetchPlayback(
-            meetingID: meetingID,
-            destination: destination,
-            configuration: configuration
-        )
+        let task = Task { [client, configuration, meetingID] in
+            try await client.fetchPlayback(
+                meetingID: meetingID,
+                destination: destination,
+                configuration: configuration
+            )
+        }
+        playbackFetchTask = task
+        defer {
+            playbackFetchTask = nil
+            isFetchingPlayback = false
+        }
+        let result = try await task.value
         playbackURL = result
         return result
     }
@@ -610,6 +677,7 @@ struct SpeakerReviewView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Later") {
+                        model.stopPlayback()
                         onLater()
                         dismiss()
                     }
@@ -619,6 +687,7 @@ struct SpeakerReviewView: View {
                         Button("Try again") { Task { await model.load() } }
                     }
                     Button("Complete") {
+                        model.stopPlayback()
                         onComplete()
                         dismiss()
                     }
@@ -628,6 +697,7 @@ struct SpeakerReviewView: View {
         }
         .frame(minWidth: 620, minHeight: 560)
         .task { if model.response == nil { await model.load() } }
+        .onDisappear { model.stopPlayback() }
     }
 
     private func reviewList(_ response: SpeakerReviewResponse) -> some View {
@@ -645,7 +715,7 @@ struct SpeakerReviewView: View {
                 }
 
                 if let player = model.player {
-                    VideoPlayer(player: player)
+                    SpeakerPlayerView(player: player)
                         .frame(height: 180)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
@@ -701,7 +771,7 @@ struct SpeakerReviewView: View {
                             Image(systemName: "play.circle.fill").font(.title2)
                         }
                         .buttonStyle(.plain)
-                        .disabled(excerpt.playbackPath == nil)
+                        .disabled(excerpt.playbackPath == nil || model.isFetchingPlayback)
                         .help(excerpt.playbackPath == nil ? "Playback has not been generated" : "Play this excerpt")
 
                         VStack(alignment: .leading, spacing: 3) {

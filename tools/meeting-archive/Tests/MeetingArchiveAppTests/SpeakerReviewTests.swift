@@ -1,3 +1,5 @@
+import AVFoundation
+import AVKit
 import Foundation
 import XCTest
 @testable import MeetingArchiveApp
@@ -160,6 +162,44 @@ final class SpeakerReviewTests: XCTestCase {
         XCTAssertEqual(SpeakerPlaybackRange(start: -2, end: 4)?.end, 4)
         XCTAssertNil(SpeakerPlaybackRange(start: 4, end: 4))
         XCTAssertNil(SpeakerPlaybackRange(start: .nan, end: 5))
+    }
+
+    @MainActor
+    func testNativePlayerSurfaceAttachesAndDetachesPlayer() {
+        let player = AVPlayer()
+        let view = SpeakerPlayerSurface.make(player: player)
+
+        XCTAssertTrue(view.player === player)
+        XCTAssertEqual(view.controlsStyle, .inline)
+
+        SpeakerPlayerSurface.dismantle(view)
+
+        XCTAssertNil(view.player)
+        XCTAssertEqual(player.rate, 0)
+    }
+
+    @MainActor
+    func testLatePlaybackFetchCannotStartAfterReviewStops() async {
+        let meetingID = UUID()
+        let client = ControlledPlaybackReviewClient(meetingID: meetingID)
+        let model = makeModel(meetingID: meetingID, client: client)
+        let excerpt = SpeakerReviewExcerpt(
+            start: 0,
+            end: 1,
+            text: "fixture",
+            channelOrigin: "system",
+            playbackPath: "playback/meeting.mp4"
+        )
+
+        let play = Task { await model.play(excerpt, speakerID: "pending") }
+        await client.waitUntilFetchStarted()
+        model.stopPlayback()
+        await client.finishFetch()
+        await play.value
+
+        XCTAssertNil(model.player)
+        XCTAssertNil(model.playbackStatus)
+        XCTAssertFalse(model.isFetchingPlayback)
     }
 
     @MainActor
@@ -423,5 +463,60 @@ private actor ControlledSpeakerReviewClient: SpeakerReviewServing {
         configuration: ArchiveTransferConfiguration
     ) async throws -> URL {
         destination
+    }
+}
+
+private actor ControlledPlaybackReviewClient: SpeakerReviewServing {
+    let meetingID: UUID
+    private var fetchStarted = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var fetchContinuation: CheckedContinuation<URL, Error>?
+
+    init(meetingID: UUID) { self.meetingID = meetingID }
+
+    func load(
+        meetingID: UUID,
+        revision: Int,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> SpeakerReviewResponse {
+        SpeakerReviewResponse(
+            schemaVersion: 1,
+            meetingID: meetingID,
+            manifestRevision: revision,
+            speakers: [],
+            calendarCandidates: []
+        )
+    }
+
+    func identify(
+        meetingID: UUID,
+        revision: Int,
+        speakerID: String,
+        name: String,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> SpeakerIdentificationResponse {
+        throw SpeakerReviewError.invalidResponse("identify is not part of this fixture")
+    }
+
+    func fetchPlayback(
+        meetingID: UUID,
+        destination: URL,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> URL {
+        fetchStarted = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        return try await withCheckedThrowingContinuation { fetchContinuation = $0 }
+    }
+
+    func waitUntilFetchStarted() async {
+        if fetchStarted { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func finishFetch() {
+        fetchContinuation?.resume(returning: URL(fileURLWithPath: "/private/tmp/late-playback-fixture.mp4"))
+        fetchContinuation = nil
     }
 }

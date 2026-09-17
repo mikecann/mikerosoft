@@ -1,3 +1,6 @@
+import AppKit
+import AVFoundation
+import AVKit
 import Foundation
 
 private struct ScenarioFailure: Error, CustomStringConvertible {
@@ -96,6 +99,49 @@ private actor ControlledScenarioReviewService: SpeakerReviewServing {
     ) async throws -> URL { destination }
 }
 
+private actor ControlledScenarioPlaybackService: SpeakerReviewServing {
+    let meetingID: UUID
+    private var fetchStarted = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var fetchContinuation: CheckedContinuation<URL, Error>?
+
+    init(meetingID: UUID) { self.meetingID = meetingID }
+
+    func load(meetingID: UUID, revision: Int, configuration: ArchiveTransferConfiguration) async throws -> SpeakerReviewResponse {
+        SpeakerReviewResponse(
+            schemaVersion: 1, meetingID: meetingID, manifestRevision: revision,
+            speakers: [], calendarCandidates: []
+        )
+    }
+
+    func identify(
+        meetingID: UUID, revision: Int, speakerID: String, name: String,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> SpeakerIdentificationResponse {
+        throw SpeakerReviewError.invalidResponse("identify is not part of this fixture")
+    }
+
+    func fetchPlayback(
+        meetingID: UUID, destination: URL, configuration: ArchiveTransferConfiguration
+    ) async throws -> URL {
+        fetchStarted = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        return try await withCheckedThrowingContinuation { fetchContinuation = $0 }
+    }
+
+    func waitUntilFetchStarted() async {
+        if fetchStarted { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func finishFetch() {
+        fetchContinuation?.resume(returning: URL(fileURLWithPath: "/private/tmp/late-playback-fixture.mp4"))
+        fetchContinuation = nil
+    }
+}
+
 @main
 private enum SpeakerReviewScenarios {
     @MainActor
@@ -179,7 +225,76 @@ private enum SpeakerReviewScenarios {
             onReviewChanged: {},
             onLater: {}
         )
-        print("Speaker review reopen, edit, failure, callback, and zero-speaker scenarios passed")
+        let playbackClient = ControlledScenarioPlaybackService(meetingID: meetingID)
+        let stopped = SpeakerReviewModel(
+            meetingID: meetingID,
+            revision: 3,
+            configuration: .bruce,
+            client: playbackClient
+        )
+        let excerpt = SpeakerReviewExcerpt(
+            start: 0, end: 1, text: "fixture", channelOrigin: "system",
+            playbackPath: "playback/meeting.mp4"
+        )
+        let latePlayback = Task { await stopped.play(excerpt, speakerID: "pending") }
+        await playbackClient.waitUntilFetchStarted()
+        stopped.stopPlayback()
+        await playbackClient.finishFetch()
+        await latePlayback.value
+        try require(stopped.player == nil && stopped.playbackStatus == nil, "late fetch restarted stopped playback")
+        try require(!stopped.isFetchingPlayback, "late fetch left playback loading")
+
+        try await verifyNativePlaybackSurface()
+        print("Speaker review state, in-flight edit, and native playback surface scenarios passed")
+    }
+
+    @MainActor
+    private static func verifyNativePlaybackSurface() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-speaker-playback-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mediaURL = directory.appendingPathComponent("valid.wav")
+        try writeValidAudio(to: mediaURL)
+
+        let player = AVPlayer(url: mediaURL)
+        let view = SpeakerPlayerSurface.make(player: player)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 180),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = view
+        try require(view.player === player, "native player view did not retain the player")
+        player.play()
+        try await Task.sleep(for: .milliseconds(350))
+        try require(player.currentTime().seconds > 0, "valid local media did not begin playback")
+
+        SpeakerPlayerSurface.dismantle(view)
+        window.contentView = nil
+        try require(view.player == nil && player.rate == 0, "native player teardown did not stop playback")
+    }
+
+    private static func writeValidAudio(to url: URL) throws {
+        let sampleRate: UInt32 = 8_000
+        let seconds: UInt32 = 2
+        let dataSize = sampleRate * seconds * 2
+        var data = Data()
+        data.append(contentsOf: "RIFF".utf8)
+        data.appendLittleEndian(UInt32(36) + dataSize)
+        data.append(contentsOf: "WAVEfmt ".utf8)
+        data.appendLittleEndian(UInt32(16))
+        data.appendLittleEndian(UInt16(1))
+        data.appendLittleEndian(UInt16(1))
+        data.appendLittleEndian(sampleRate)
+        data.appendLittleEndian(sampleRate * 2)
+        data.appendLittleEndian(UInt16(2))
+        data.appendLittleEndian(UInt16(16))
+        data.append(contentsOf: "data".utf8)
+        data.appendLittleEndian(dataSize)
+        data.append(Data(repeating: 0, count: Int(dataSize)))
+        try data.write(to: url)
     }
 
     private static func response(
@@ -209,5 +324,12 @@ private enum SpeakerReviewScenarios {
             embeddingAvailable: false,
             excerpts: []
         )
+    }
+}
+
+private extension Data {
+    mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+        var value = value.littleEndian
+        Swift.withUnsafeBytes(of: &value) { append(contentsOf: $0) }
     }
 }

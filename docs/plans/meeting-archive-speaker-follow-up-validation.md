@@ -54,3 +54,25 @@ Build with `bash tools/meeting-archive/verification/run-follow-up-ui-harness.sh
 isolated data path is embedded and signed before launch. Choose Continue in
 background, then Finish simulated processing. Do not submit a speaker identity
 while using real archive metadata unless the user has provided that identity.
+
+## Playback crash correction
+
+The user's first excerpt Play click exposed a path the initial UI check did
+not exercise. The 15:13 crash report and an isolated reproduction show a Swift
+runtime abort in `_AVKit_SwiftUI`: `VideoPlayerView` could not resolve its
+`AVPlayerView` superclass. The downloaded H.264/AAC recording matched Bruce's
+SHA-256 exactly and passed media probing.
+
+Speaker review now embeds native `AVPlayerView` through `NSViewRepresentable`.
+Closing review pauses and detaches playback, and a generation check prevents a
+late download or seek from starting audio after dismissal. Concurrent excerpt
+requests share the download.
+
+Validation covered the old build crashing on the actual Play click, then the
+fixed build playing the real recording and replaying the excerpt. The native
+player displayed the video, its timeline advanced from three seconds, and it
+paused at the end of the excerpt. Later closed an active replay safely. The
+same Play action was also checked in the installed signed app. Standalone
+production-code regressions exercised valid local PCM playback, native view
+teardown, and a delayed fetch completing after dismissal. The signed app was
+restored to one running managed background process after installation.
