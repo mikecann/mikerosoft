@@ -208,6 +208,14 @@ class PublicationQueue:
 
 
 def run_once(database: Path, processor=process, publisher=publish, lease_seconds: float = 900) -> dict:
+    # Speaker confirmations use a durable outbox. Reconcile it before claiming
+    # heavy work, but never let one derived-artifact failure block other jobs.
+    try:
+        from .speaker_refresh import reconcile_pending_speakers
+
+        reconcile_pending_speakers(database)
+    except Exception:
+        pass
     queue = JobQueue(database)
     job = queue.claim_ready(f"{socket.gethostname()}:{uuid.uuid4()}", lease_seconds)
     processed = False

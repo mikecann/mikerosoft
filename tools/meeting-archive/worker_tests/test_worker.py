@@ -929,9 +929,9 @@ class CliTests(unittest.TestCase):
                 "meeting_id": meeting_id,
                 "manifest_revision": 1,
                 "turns": [
-                    {"speaker": "microphone:SPEAKER_00"},
+                    {"speaker": "microphone:SPEAKER_00", "name": "Michael", "name_source": "confirmed"},
                     {"speaker": "incoming:SPEAKER_00"},
-                    {"speaker": "microphone:SPEAKER_00"},
+                    {"speaker": "microphone:SPEAKER_00", "name": "Michael", "name_source": "confirmed"},
                     {"text": "turn without a diarized speaker"},
                 ],
                 "processing": {"manifest_sha256": digest},

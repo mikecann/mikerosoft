@@ -19,6 +19,7 @@ from .manifest import verify_incoming
 from .processing import TranscriptProcessor, timeline_offset
 from .queue import Job
 from .speakers import SpeakerRegistry
+from .speaker_evidence import refresh_speaker_matches, video_label_evidence
 
 
 PLAYBACK_PATH = "playback/meeting.mp4"
@@ -185,6 +186,8 @@ def process(archive_directory: Path, job: Job) -> None:
         _refresh_confirmed_names(existing, os.environ.get("MEETING_ARCHIVE_WORKER_DB"))
         _write_transcript_artifacts(output, existing)
         create_playback(archive_directory, manifest)
+        if os.environ.get("MEETING_ARCHIVE_WORKER_DB"):
+            video_label_evidence(archive_directory, existing, SpeakerRegistry(os.environ["MEETING_ARCHIVE_WORKER_DB"]))
         return
     transcriber = WhisperPyannoteTranscriber()
     offsets = {}
@@ -222,33 +225,26 @@ def process(archive_directory: Path, job: Job) -> None:
                 embedding,
                 embedding_model_id,
             )
-        confirmed = registry.assignments(manifest.meeting_id, manifest.revision)
-        for turn in result["turns"]:
-            speaker_id = turn.get("speaker")
-            embedding = transcriber.embeddings.get(speaker_id) if speaker_id else None
-            name = confirmed.get(speaker_id) if speaker_id else None
-            if name is None and embedding is not None:
-                name = registry.suggest(embedding, model_id=embedding_model_id)
-            if name:
-                turn["name"] = name
+        refresh_speaker_matches(result, registry)
         # SQLite commits each observation before transcript.json becomes the
         # durable processing receipt used to skip expensive model work.
         result["processing"]["speaker_observations_committed"] = True
     else:
         result["processing"]["speaker_observations_committed"] = False
+    # OCR needs no speech model. Release those before optional frame analysis
+    # so Bruce does not keep both workloads resident on its 8 GB machine.
+    del transcriber
     _write_transcript_artifacts(output, result)
     create_playback(archive_directory, manifest)
+    if worker_db:
+        video_label_evidence(archive_directory, result, registry)
 
 
 def _refresh_confirmed_names(result: dict[str, Any], worker_db: str | None) -> None:
     if not worker_db:
         return
     registry = SpeakerRegistry(worker_db)
-    assignments = registry.assignments(result["meeting_id"], result["manifest_revision"])
-    for turn in result.get("turns", []):
-        speaker_id = turn.get("speaker")
-        if speaker_id in assignments:
-            turn["name"] = assignments[speaker_id]
+    refresh_speaker_matches(result, registry)
 
 
 def render_markdown(result: dict[str, Any]) -> str:

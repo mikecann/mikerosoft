@@ -87,11 +87,33 @@ Confirming a speaker name rewrites
 the JSON and Markdown views with fsync plus atomic replacement, then requests a
 fresh idempotent Notion publication without retranscribing media.
 
-`review-speakers` returns nullable confirmed and suggested names, confidence
-and separation values, whether an embedding exists, three timestamped excerpts
+`review-speakers` returns nullable confirmed, automatic, and tentative names,
+cosine similarity and separation values, whether an embedding exists, three timestamped excerpts
 per diarized speaker, an optional absolute playback path, and normalized
 calendar candidate objects. `identify` uses the saved observation automatically
 and enrolls it only after that explicit confirmation.
+
+Strong matches retain the 0.82 cosine / 0.08 runner-up margin gate and require
+an explicitly confirmed source meeting. Review-only tentative suggestions use
+0.65 / 0.08 and at least two distinct confirmed source meetings. These are
+engineering defaults, not calibrated probabilities or a completed human
+recognition accuracy benchmark. Matching excludes the current meeting across
+all revisions. Profile provenance is migrated from unambiguous existing
+assignments and observations; repeated confirmations update one source profile.
+
+Only strong matches are written as transcript names, with `name_source` set to
+`voice_match`. Explicit corrections use `confirmed`. Tentative matches stay in
+the review evidence. The service retries durable speaker refresh requests so
+interrupted transcript or Notion updates recover without retranscribing or
+enrolling predictions. Per-meeting locks serialize review/confirmation writes.
+
+`vision/build.sh` builds the local Apple Vision OCR helper during Bruce setup.
+Video analysis samples at most 12 frames, three per speaker, within a shared
+20-second budget. It compares text only against previously confirmed full names
+and calendar attendee names. `video_label` and `active_speaker_label` evidence
+is cached separately with video/turn/candidate provenance, never used to lower
+voice thresholds or automatically name a speaker. Missing OCR tools and failed
+frame reads do not block transcription or archiving. See [vision/README.md](vision/README.md).
 
 ## Bruce background service
 

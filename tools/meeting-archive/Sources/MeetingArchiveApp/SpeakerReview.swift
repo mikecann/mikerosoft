@@ -36,6 +36,20 @@ struct SpeakerReviewResponse: Codable, Equatable, Sendable {
                     throw SpeakerReviewError.invalidResponse("review-speakers returned an invalid excerpt range")
                 }
             }
+            let evidenceLabels = speaker.evidenceLabels ?? []
+            guard evidenceLabels.count <= 100 else {
+                throw SpeakerReviewError.invalidResponse("review-speakers returned too many visible name labels")
+            }
+            for evidence in evidenceLabels {
+                let name = evidence.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty,
+                      name.count <= 200,
+                      (1 ... 100).contains(evidence.timestamps.count),
+                      evidence.timestamps.allSatisfy({ $0.isFinite && $0 >= 0 })
+                else {
+                    throw SpeakerReviewError.invalidResponse("review-speakers returned invalid visible name evidence")
+                }
+            }
         }
     }
 }
@@ -48,6 +62,10 @@ struct SpeakerReviewSpeaker: Codable, Equatable, Identifiable, Sendable {
     var suggestionMargin: Double?
     var embeddingAvailable: Bool
     var excerpts: [SpeakerReviewExcerpt]
+    var automaticName: String? = nil
+    var suggestionKind: String? = nil
+    var confirmationCount: Int? = nil
+    var evidenceLabels: [SpeakerEvidenceLabel]? = nil
 
     var id: String { speakerID }
 
@@ -59,6 +77,21 @@ struct SpeakerReviewSpeaker: Codable, Equatable, Identifiable, Sendable {
         case suggestionMargin = "suggestion_margin"
         case embeddingAvailable = "embedding_available"
         case excerpts
+        case automaticName = "automatic_name"
+        case suggestionKind = "suggestion_kind"
+        case confirmationCount = "confirmation_count"
+        case evidenceLabels = "evidence_labels"
+    }
+}
+
+struct SpeakerEvidenceLabel: Codable, Equatable, Identifiable, Sendable {
+    var name: String
+    var timestamps: [Double]
+    var source: String
+
+    var id: String {
+        let timestampBits = timestamps.map { String($0.bitPattern) }.joined(separator: ",")
+        return "\(source)\u{0}\(name)\u{0}\(timestampBits)"
     }
 }
 
@@ -195,6 +228,11 @@ struct SpeakerReviewDraft: Equatable, Sendable {
         Dictionary(uniqueKeysWithValues: speakers.map { speaker in
             if let name = speaker.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
                 return (speaker.speakerID, SpeakerReviewDraft(name: name, isPredicted: false))
+            }
+            if let automaticName = speaker.automaticName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !automaticName.isEmpty
+            {
+                return (speaker.speakerID, SpeakerReviewDraft(name: automaticName, isPredicted: false))
             }
             if let suggestion = speaker.suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines), !suggestion.isEmpty {
                 return (speaker.speakerID, SpeakerReviewDraft(name: suggestion, isPredicted: true))
@@ -502,10 +540,11 @@ final class SpeakerReviewModel: ObservableObject {
             self.response = response
             drafts = SpeakerReviewDraft.make(speakers: response.speakers)
             confirmedSpeakerIDs = Set(response.speakers.compactMap { speaker in
-                guard let name = speaker.name?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      !name.isEmpty
-                else { return nil }
-                return speaker.speakerID
+                let explicitName = speaker.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let automaticName = speaker.automaticName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return explicitName?.isEmpty == false || automaticName?.isEmpty == false
+                    ? speaker.speakerID
+                    : nil
             })
         } catch {
             failure = error.localizedDescription
@@ -518,9 +557,14 @@ final class SpeakerReviewModel: ObservableObject {
         confirmedSpeakerIDs.remove(speakerID)
     }
 
+    func selectEvidence(_ evidence: SpeakerEvidenceLabel, for speakerID: String) {
+        setName(evidence.name, for: speakerID)
+    }
+
     @discardableResult
     func confirm(_ speakerID: String) async -> Bool {
         guard response?.speakers.contains(where: { $0.speakerID == speakerID }) == true,
+              !confirmedSpeakerIDs.contains(speakerID),
               let draft = drafts[speakerID],
               confirmingSpeakerIDs.insert(speakerID).inserted
         else { return false }
@@ -546,6 +590,14 @@ final class SpeakerReviewModel: ObservableObject {
                 // The remote confirmation succeeded, but the user typed a
                 // newer draft while it was in flight. Keep that draft pending.
                 return false
+            }
+            if var updatedResponse = response,
+               let index = updatedResponse.speakers.firstIndex(where: { $0.speakerID == speakerID })
+            {
+                // Record that this session made an explicit confirmation so
+                // an edited automatic match is no longer presented as merely recognized.
+                updatedResponse.speakers[index].name = name
+                response = updatedResponse
             }
             drafts[speakerID] = SpeakerReviewDraft(name: name, isPredicted: false)
             confirmedSpeakerIDs.insert(speakerID)
@@ -642,6 +694,7 @@ struct SpeakerReviewView: View {
         meetingID: UUID,
         revision: Int,
         configuration: ArchiveTransferConfiguration,
+        client: any SpeakerReviewServing = SpeakerReviewClient(),
         onComplete: @escaping () -> Void = {},
         onReviewChanged: @escaping () -> Void = {},
         onLater: @escaping () -> Void = {}
@@ -653,6 +706,7 @@ struct SpeakerReviewView: View {
                 meetingID: meetingID,
                 revision: revision,
                 configuration: configuration,
+                client: client,
                 onReviewChanged: onReviewChanged
             )
         )
@@ -703,7 +757,7 @@ struct SpeakerReviewView: View {
     private func reviewList(_ response: SpeakerReviewResponse) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                Text("Listen to a sample, type the person’s name, then confirm it. Predicted names are suggestions until you confirm them.")
+                Text("Strong voice matches are filled in automatically; suggestions and names visible in the video still need your confirmation.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
@@ -748,7 +802,10 @@ struct SpeakerReviewView: View {
             HStack {
                 Text(speaker.speakerID).font(.headline)
                 if model.confirmedSpeakerIDs.contains(speaker.speakerID) {
-                    Label("Confirmed", systemImage: "checkmark.circle.fill")
+                    Label(
+                        automaticNameIsCurrentAndConfirmed(speaker, draft: draft) ? "Recognized" : "Confirmed",
+                        systemImage: "checkmark.circle.fill"
+                    )
                         .font(.caption)
                         .foregroundStyle(.green)
                 }
@@ -795,6 +852,34 @@ struct SpeakerReviewView: View {
                 Text(predictionLabel(speaker))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if automaticNameIsCurrentAndConfirmed(speaker, draft: draft) {
+                Text(automaticNameLabel(speaker))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let evidenceLabels = speaker.evidenceLabels, !evidenceLabels.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Name visible in the meeting video")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(evidenceLabels) { evidence in
+                        HStack(spacing: 8) {
+                            Button(evidence.name) {
+                                model.selectEvidence(evidence, for: speaker.speakerID)
+                            }
+                            .buttonStyle(.link)
+                            if evidence.source == "active_speaker_label" {
+                                Text("Shown as speaking").font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let times = evidenceTimes(evidence), !times.isEmpty {
+                                Text(times)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             }
 
             if !candidates.isEmpty {
@@ -822,10 +907,38 @@ struct SpeakerReviewView: View {
     }
 
     private func predictionLabel(_ speaker: SpeakerReviewSpeaker) -> String {
-        if let score = speaker.suggestionScore, score.isFinite {
-            return "Predicted name, \(score.formatted(.percent.precision(.fractionLength(0)))) confidence. Confirm or replace it."
+        if let name = speaker.suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return "Possibly \(name). Confirm or replace it."
         }
-        return "Predicted name. Confirm or replace it."
+        return "Possible name. Confirm or replace it."
+    }
+
+    private func automaticNameIsCurrentAndConfirmed(
+        _ speaker: SpeakerReviewSpeaker,
+        draft: SpeakerReviewDraft
+    ) -> Bool {
+        let explicitName = speaker.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard explicitName.isEmpty,
+              let automaticName = speaker.automaticName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !automaticName.isEmpty
+        else { return false }
+        return model.confirmedSpeakerIDs.contains(speaker.speakerID)
+            && draft.name.trimmingCharacters(in: .whitespacesAndNewlines) == automaticName
+    }
+
+    private func automaticNameLabel(_ speaker: SpeakerReviewSpeaker) -> String {
+        if let count = speaker.confirmationCount, count > 0 {
+            let noun = count == 1 ? "confirmation" : "confirmations"
+            return "Recognized from \(count) prior voice \(noun)."
+        }
+        return "Recognized from a previously confirmed voice."
+    }
+
+    private func evidenceTimes(_ evidence: SpeakerEvidenceLabel) -> String? {
+        let times = evidence.timestamps
+            .filter { $0.isFinite && $0 >= 0 }
+            .map(formatTime)
+        return times.isEmpty ? nil : times.joined(separator: ", ")
     }
 
     private func candidateLabel(_ candidate: SpeakerCalendarCandidate) -> String {

@@ -14,6 +14,7 @@ private func require(_ condition: @autoclosure () -> Bool, _ message: String) th
 private actor ScenarioReviewService: SpeakerReviewServing {
     let response: SpeakerReviewResponse
     let identifyFails: Bool
+    private var identifyCalls = 0
 
     init(response: SpeakerReviewResponse, identifyFails: Bool = false) {
         self.response = response
@@ -35,6 +36,7 @@ private actor ScenarioReviewService: SpeakerReviewServing {
         name: String,
         configuration: ArchiveTransferConfiguration
     ) async throws -> SpeakerIdentificationResponse {
+        identifyCalls += 1
         if identifyFails { throw SpeakerReviewError.invalidResponse("fixture confirmation failed") }
         return SpeakerIdentificationResponse(
             schemaVersion: 1,
@@ -54,6 +56,8 @@ private actor ScenarioReviewService: SpeakerReviewServing {
     ) async throws -> URL {
         destination
     }
+
+    func identifyCallCount() -> Int { identifyCalls }
 }
 
 private actor ControlledScenarioReviewService: SpeakerReviewServing {
@@ -163,6 +167,107 @@ private enum SpeakerReviewScenarios {
         await model.load()
         try require(model.confirmedSpeakerIDs == ["saved"], "saved name was not restored as confirmed")
         try require(model.remainingUnconfirmedCount == 1, "reopened pending count was wrong")
+
+        let evidence = SpeakerEvidenceLabel(
+            name: "Michael Cann",
+            timestamps: [12.5, 42],
+            source: "video_text"
+        )
+        let automaticResponse = response(
+            meetingID: meetingID,
+            speakers: [
+                speaker(
+                    "automatic",
+                    suggestion: "Tentative fallback",
+                    automaticName: "Mike Cann",
+                    suggestionKind: "strong",
+                    confirmationCount: 3
+                ),
+                speaker(
+                    "tentative",
+                    suggestion: "Alex Chen",
+                    suggestionKind: "tentative",
+                    evidenceLabels: [evidence]
+                ),
+            ]
+        )
+        let automaticService = ScenarioReviewService(response: automaticResponse)
+        let automatic = SpeakerReviewModel(
+            meetingID: meetingID,
+            revision: 3,
+            configuration: .bruce,
+            client: automaticService
+        )
+        await automatic.load()
+        try require(
+            automatic.drafts["automatic"] == SpeakerReviewDraft(name: "Mike Cann", isPredicted: false),
+            "strong automatic voice did not take priority over a tentative suggestion"
+        )
+        try require(automatic.confirmedSpeakerIDs.contains("automatic"), "strong automatic voice was not complete-capable")
+        try require(
+            automatic.drafts["tentative"] == SpeakerReviewDraft(name: "Alex Chen", isPredicted: true),
+            "tentative suggestion was not presented as pending"
+        )
+        let unchangedAutomaticSave = await automatic.confirm("automatic")
+        let callsAfterUnchangedAutomatic = await automaticService.identifyCallCount()
+        try require(!unchangedAutomaticSave, "unchanged automatic voice tried to enroll again")
+        try require(callsAfterUnchangedAutomatic == 0, "unchanged automatic voice called identify")
+
+        automatic.setName("Michael Cann", for: "automatic")
+        try require(!automatic.canComplete, "editing an automatic voice left review complete")
+        let editedAutomaticSave = await automatic.confirm("automatic")
+        let callsAfterEditedAutomatic = await automaticService.identifyCallCount()
+        try require(editedAutomaticSave, "edited automatic voice could not be confirmed")
+        try require(callsAfterEditedAutomatic == 1, "edited automatic voice did not call identify exactly once")
+        try require(
+            automatic.response?.speakers.first(where: { $0.speakerID == "automatic" })?.name == "Michael Cann",
+            "explicit edit remained classified as an automatic match"
+        )
+
+        automatic.selectEvidence(evidence, for: "tentative")
+        try require(automatic.drafts["tentative"]?.name == "Michael Cann", "visible label did not fill the draft")
+        try require(
+            !automatic.confirmedSpeakerIDs.contains("tentative") && !automatic.canComplete,
+            "visible label evidence confirmed a speaker without user confirmation"
+        )
+
+        let oldResponse = try JSONDecoder().decode(
+            SpeakerReviewResponse.self,
+            from: Data("""
+            {
+              "schema_version": 1,
+              "meeting_id": "\(meetingID.uuidString.lowercased())",
+              "manifest_revision": 3,
+              "speakers": [{
+                "speaker_id": "old",
+                "name": null,
+                "suggested_name": null,
+                "suggestion_score": null,
+                "suggestion_margin": null,
+                "embedding_available": false,
+                "excerpts": []
+              }],
+              "calendar_candidates": []
+            }
+            """.utf8)
+        )
+        try require(oldResponse.speakers.first?.automaticName == nil, "old response did not decode without automatic fields")
+
+        let invalidEvidenceResponse = response(
+            meetingID: meetingID,
+            speakers: [
+                speaker(
+                    "invalid-evidence",
+                    evidenceLabels: [SpeakerEvidenceLabel(name: "", timestamps: [-1], source: "video_text")]
+                ),
+            ]
+        )
+        do {
+            try invalidEvidenceResponse.validate(meetingID: meetingID, revision: 3)
+            throw ScenarioFailure(description: "malformed visible label evidence passed validation")
+        } catch is SpeakerReviewError {
+            // Expected: visible labels must have a bounded name and valid time.
+        }
 
         model.setName("Mike", for: "saved")
         try require(model.remainingUnconfirmedCount == 2, "edit did not invalidate saved confirmation")
@@ -313,7 +418,11 @@ private enum SpeakerReviewScenarios {
     private static func speaker(
         _ id: String,
         name: String? = nil,
-        suggestion: String? = nil
+        suggestion: String? = nil,
+        automaticName: String? = nil,
+        suggestionKind: String? = nil,
+        confirmationCount: Int? = nil,
+        evidenceLabels: [SpeakerEvidenceLabel]? = nil
     ) -> SpeakerReviewSpeaker {
         SpeakerReviewSpeaker(
             speakerID: id,
@@ -322,7 +431,11 @@ private enum SpeakerReviewScenarios {
             suggestionScore: nil,
             suggestionMargin: nil,
             embeddingAvailable: false,
-            excerpts: []
+            excerpts: [],
+            automaticName: automaticName,
+            suggestionKind: suggestionKind,
+            confirmationCount: confirmationCount,
+            evidenceLabels: evidenceLabels
         )
     }
 }

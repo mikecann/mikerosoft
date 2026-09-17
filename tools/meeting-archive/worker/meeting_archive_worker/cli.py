@@ -20,10 +20,10 @@ from .archive import ArchiveConflict, ArchiveStore
 from .db import closing_connection
 from .manifest import ManifestError, verify_incoming
 from .media_validation import MediaValidationError
-from .durable_files import atomic_write_bytes, atomic_write_text
-from .model_processor import render_markdown
+from .model_processor import _write_transcript_artifacts
 from .queue import Job, JobQueue, QueueConflict
 from .speakers import SpeakerRegistry
+from .speaker_evidence import automatic_names, refresh_speaker_matches, video_label_evidence
 
 
 class PermanentProcessingError(RuntimeError):
@@ -129,15 +129,33 @@ def _speaker_counts_for_status(
         with closing_connection(
             lambda: sqlite3.connect(database_uri, uri=True),
         ) as connection:
-            confirmed_ids = {
-                str(row[0])
-                for row in connection.execute(
-                    "SELECT speaker_id FROM speaker_assignments "
+            assignments = dict(connection.execute(
+                    "SELECT speaker_id, display_name FROM speaker_assignments "
                     "WHERE meeting_id=? AND manifest_revision=?",
                     (job["meeting_id"], job["manifest_revision"]),
-                )
+                ))
+            confirmed_ids = {
+                speaker for speaker, name in assignments.items()
+                if all(turn.get("name") == name and turn.get("name_source") == "confirmed"
+                       for turn in transcript["turns"] if turn.get("speaker") == speaker)
             }
-    except (OSError, sqlite3.Error):
+            # A name appearing in text alone is not evidence of a completed
+            # review. Require a persisted strong match and recheck its explicit
+            # source profiles without enrolling or migrating anything here.
+            for speaker, name in automatic_names(transcript).items():
+                observation = connection.execute(
+                    "SELECT embedding_json, model_id FROM observed_voices "
+                    "WHERE meeting_id=? AND manifest_revision=? AND speaker_id=?",
+                    (job["meeting_id"], job["manifest_revision"], speaker),
+                ).fetchone()
+                if observation:
+                    match = SpeakerRegistry.review_match_from_connection(
+                        connection, json.loads(observation[0]), model_id=observation[1],
+                        exclude_meeting_id=job["meeting_id"],
+                    )
+                    if match["automatic_name"] == name:
+                        confirmed_ids.add(speaker)
+    except (OSError, sqlite3.Error, ValueError, TypeError):
         return None
     return len(speaker_ids), len(speaker_ids - confirmed_ids)
 
@@ -350,17 +368,29 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "process-ready":
             return _process_ready(args)
         if args.command == "review-speakers":
-            transcript = json.loads((args.archive_dir / "transcripts" / f"v{args.revision}" / "transcript.json").read_text(encoding="utf-8"))
-            assignments = SpeakerRegistry(args.db).assignments(transcript["meeting_id"], args.revision)
+            from .speaker_refresh import speaker_archive_lock, reconcile_speaker_refresh
+
+            registry = SpeakerRegistry(args.db)
+            with speaker_archive_lock(args.archive_dir, args.revision):
+                transcript = json.loads((args.archive_dir / "transcripts" / f"v{args.revision}" / "transcript.json").read_text(encoding="utf-8"))
+                if transcript.get("manifest_revision") != args.revision:
+                    raise ValueError("Transcript revision does not match the review request.")
+                assignments = registry.assignments(transcript["meeting_id"], args.revision)
+                before = json.dumps(transcript, sort_keys=True)
+                refresh_speaker_matches(transcript, registry)
+                if json.dumps(transcript, sort_keys=True) != before:
+                    # Record the retry first, so a crash during derived writes
+                    # or publication scheduling cannot lose this correction.
+                    registry.request_refresh(transcript["meeting_id"], args.revision)
+                    _write_transcript_artifacts(args.archive_dir / "transcripts" / f"v{args.revision}", transcript)
+            reconcile_speaker_refresh(args.db, transcript["meeting_id"], args.revision)
             speaker_ids = sorted({turn["speaker"] for turn in transcript["turns"] if "speaker" in turn})
             metadata = json.loads((args.archive_dir / "metadata.json").read_text(encoding="utf-8"))
-            registry = SpeakerRegistry(args.db)
+            visual_evidence = video_label_evidence(args.archive_dir, transcript, registry)
             speakers = []
             for value in speaker_ids:
                 observation = registry.observation_record(transcript["meeting_id"], args.revision, value)
-                embedding, model_id = observation if observation else (None, None)
-                scores = registry.ranked_suggestions(embedding, model_id) if embedding else []
-                suggested = registry.suggest(embedding, model_id=model_id) if embedding else None
+                match = transcript["speaker_matches"].get(value, {})
                 excerpts = [
                     {
                         **{key: turn[key] for key in ("start", "end", "text", "channel_origin")},
@@ -370,39 +400,28 @@ def main(argv: list[str] | None = None) -> int:
                     }
                     for turn in transcript["turns"] if turn.get("speaker") == value
                 ][:3]
-                speakers.append({"speaker_id": value, "name": assignments.get(value), "suggested_name": suggested, "suggestion_score": scores[0][0] if scores else None, "suggestion_margin": (scores[0][0] - scores[1][0]) if len(scores) > 1 else None, "embedding_available": embedding is not None, "excerpts": excerpts})
+                speakers.append({
+                    "speaker_id": value, "name": assignments.get(value),
+                    "suggested_name": match.get("suggested_name"),
+                    "automatic_name": match.get("automatic_name"),
+                    "suggestion_kind": match.get("suggestion_kind"),
+                    "suggestion_score": match.get("suggestion_score"),
+                    "suggestion_margin": match.get("suggestion_margin"),
+                    "confirmation_count": match.get("confirmation_count", 0),
+                    "embedding_available": observation is not None, "excerpts": excerpts,
+                    "evidence_labels": visual_evidence.get(value, []),
+                })
             _print_json({"schema_version": 1, "meeting_id": transcript["meeting_id"], "manifest_revision": args.revision, "speakers": speakers, "calendar_candidates": _calendar_candidates(metadata)})
             return 0
         if args.command == "identify":
+            from .speaker_refresh import reconcile_speaker_refresh
+
             registry = SpeakerRegistry(args.db)
             enrolled = registry.confirm_observation(args.meeting_id, args.revision, args.speaker_id, args.name)
             acknowledgement = JobQueue(args.db).acceptance(args.meeting_id)
-            if acknowledgement:
-                meeting_directory = Path(acknowledgement["archive_path"])
-                transcript_path = meeting_directory / "transcripts" / f"v{args.revision}" / "transcript.json"
-                if transcript_path.is_file():
-                    transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
-                    if (
-                        transcript.get("meeting_id") != args.meeting_id
-                        or transcript.get("manifest_revision") != args.revision
-                    ):
-                        raise ValueError("Transcript identity does not match the identify request.")
-                    for turn in transcript.get("turns", []):
-                        if turn.get("speaker") == args.speaker_id:
-                            turn["name"] = args.name
-                    # Markdown is a derived view. Commit it before JSON, which
-                    # is the receipt read by review and publication clients.
-                    atomic_write_text(transcript_path.with_name("transcript.md"), render_markdown(transcript))
-                    atomic_write_bytes(
-                        transcript_path,
-                        (json.dumps(transcript, sort_keys=True, ensure_ascii=False, indent=2) + "\n").encode(),
-                    )
-                    from .service import PublicationQueue
-
-                    PublicationQueue(args.db).refresh(
-                        int(acknowledgement["queue_job_id"]),
-                        str(meeting_directory),
-                    )
+            refreshed = reconcile_speaker_refresh(args.db, args.meeting_id, args.revision)
+            if acknowledgement and not refreshed:
+                raise ValueError("The name is saved. Updating the transcript is queued for retry on Bruce.")
             _print_json({"schema_version": 1, "confirmed": True, "meeting_id": args.meeting_id, "manifest_revision": args.revision, "speaker_id": args.speaker_id, "name": args.name, "voice_profile_enrolled": enrolled})
             return 0
         if args.command == "locate":

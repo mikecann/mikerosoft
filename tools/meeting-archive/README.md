@@ -84,7 +84,20 @@ menu bar retains a count and direct review actions for speakers needing names,
 including after a review is dismissed or the app restarts. Notifications do
 not need to be enabled for this window and menu-bar flow.
 
-Confirm each speaker's name, then choose **Complete**. **Later** closes review
+Strong voice matches are filled in automatically and marked **Recognized**.
+Weaker matches can show **Possibly Mike Cann** after at least two different
+meetings were explicitly confirmed. These still require **Confirm**. Editing
+an automatic name also requires confirmation. Repeatedly confirming the same
+recording does not add extra evidence, and predictions never train themselves.
+Similarity scores are not confidence percentages.
+
+Bruce also reads known participant names from a few video frames using local
+Apple Vision OCR. Visible names and explicit “Talking:” / “Speaking:” labels
+appear separately with timestamps. Selecting one only fills the draft; it
+does not confirm the speaker. Gallery names do not prove who was speaking.
+This analysis makes no external model requests and does not recognise faces.
+
+Confirm any remaining names, then choose **Complete**. **Later** closes review
 without marking unresolved speakers complete. Confirmed names remain saved
 when reopening review. Archiving and subsequent recordings do not wait for
 speaker review.

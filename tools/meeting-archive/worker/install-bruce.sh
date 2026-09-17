@@ -14,6 +14,7 @@ mkdir -p "$ROOT/meetings" "$ROOT/incoming" "$ROOT/runtime/worker" "$ROOT/runtime
 if [[ "$SOURCE" != "$ROOT/runtime/worker" ]]; then
   /usr/bin/rsync -a --exclude='__pycache__' --exclude='.venv' "$SOURCE/" "$ROOT/runtime/worker/"
 fi
+bash "$ROOT/runtime/worker/vision/build.sh"
 if [[ ! -x "$ROOT/runtime/venv/bin/python3" ]]; then "$PYTHON" -m venv "$ROOT/runtime/venv"; fi
 export PIP_CACHE_DIR="$ROOT/runtime/cache/pip"
 export TMPDIR="$ROOT/runtime/tmp"

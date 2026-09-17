@@ -53,6 +53,76 @@ final class SpeakerReviewTests: XCTestCase {
         XCTAssertEqual(response.speakers[0].excerpts[0].start, 12.5)
         XCTAssertEqual(response.speakers[1].name, "Michael")
         XCTAssertEqual(response.calendarCandidates.first?.email, "alex@example.com")
+        XCTAssertNil(response.speakers[0].automaticName)
+        XCTAssertNil(response.speakers[0].suggestionKind)
+        XCTAssertNil(response.speakers[0].confirmationCount)
+        XCTAssertNil(response.speakers[0].evidenceLabels)
+    }
+
+    func testReviewResponseDecodesAutomaticNameAndVisibleLabelEvidence() throws {
+        let meetingID = UUID()
+        let data = Data("""
+        {
+          "schema_version": 1,
+          "meeting_id": "\(meetingID.uuidString.lowercased())",
+          "manifest_revision": 3,
+          "speakers": [{
+            "speaker_id": "SPEAKER_00",
+            "name": null,
+            "suggested_name": "Michael",
+            "suggestion_score": null,
+            "suggestion_margin": null,
+            "embedding_available": true,
+            "excerpts": [],
+            "automatic_name": "Mike Cann",
+            "suggestion_kind": "strong",
+            "confirmation_count": 4,
+            "evidence_labels": [{
+              "name": "Michael Cann",
+              "timestamps": [12.5, 42.0],
+              "source": "video_text"
+            }]
+          }],
+          "calendar_candidates": []
+        }
+        """.utf8)
+
+        let response = try JSONDecoder().decode(SpeakerReviewResponse.self, from: data)
+        let speaker = try XCTUnwrap(response.speakers.first)
+
+        XCTAssertEqual(speaker.automaticName, "Mike Cann")
+        XCTAssertEqual(speaker.suggestionKind, "strong")
+        XCTAssertEqual(speaker.confirmationCount, 4)
+        XCTAssertEqual(
+            speaker.evidenceLabels,
+            [SpeakerEvidenceLabel(name: "Michael Cann", timestamps: [12.5, 42], source: "video_text")]
+        )
+    }
+
+    func testReviewResponseRejectsMalformedOrExcessiveVisibleLabelEvidence() {
+        let meetingID = UUID()
+        let invalidEvidence = [
+            SpeakerEvidenceLabel(name: "", timestamps: [12], source: "video_text"),
+            SpeakerEvidenceLabel(name: "Michael", timestamps: [.nan], source: "video_text"),
+            SpeakerEvidenceLabel(name: "Michael", timestamps: [-1], source: "video_text"),
+        ]
+
+        for evidence in invalidEvidence {
+            let response = makeResponse(
+                meetingID: meetingID,
+                speakers: [makeSpeaker(id: "speaker", evidenceLabels: [evidence])]
+            )
+            XCTAssertThrowsError(try response.validate(meetingID: meetingID, revision: 3))
+        }
+
+        let excessive = (0 ... 100).map {
+            SpeakerEvidenceLabel(name: "Name \($0)", timestamps: [Double($0)], source: "video_text")
+        }
+        let response = makeResponse(
+            meetingID: meetingID,
+            speakers: [makeSpeaker(id: "speaker", evidenceLabels: excessive)]
+        )
+        XCTAssertThrowsError(try response.validate(meetingID: meetingID, revision: 3))
     }
 
     func testDraftsAutofillExistingNameThenPredictionAndMarkOnlyPrediction() {
@@ -64,7 +134,8 @@ final class SpeakerReviewTests: XCTestCase {
                 suggestionScore: 0.9,
                 suggestionMargin: 0.2,
                 embeddingAvailable: true,
-                excerpts: []
+                excerpts: [],
+                automaticName: "Wrong automatic fallback"
             ),
             SpeakerReviewSpeaker(
                 speakerID: "predicted",
@@ -84,6 +155,19 @@ final class SpeakerReviewTests: XCTestCase {
                 embeddingAvailable: false,
                 excerpts: []
             ),
+            SpeakerReviewSpeaker(
+                speakerID: "automatic",
+                name: nil,
+                suggestedName: "Tentative fallback",
+                suggestionScore: nil,
+                suggestionMargin: nil,
+                embeddingAvailable: true,
+                excerpts: [],
+                automaticName: "Known voice",
+                suggestionKind: "strong",
+                confirmationCount: 3,
+                evidenceLabels: nil
+            ),
         ]
 
         let drafts = SpeakerReviewDraft.make(speakers: speakers)
@@ -94,6 +178,8 @@ final class SpeakerReviewTests: XCTestCase {
         XCTAssertEqual(drafts["predicted"]?.isPredicted, true)
         XCTAssertEqual(drafts["unknown"]?.name, "")
         XCTAssertEqual(drafts["unknown"]?.isPredicted, false)
+        XCTAssertEqual(drafts["automatic"]?.name, "Known voice")
+        XCTAssertEqual(drafts["automatic"]?.isPredicted, false)
     }
 
     func testRemoteShellQuotesArbitraryNamesAsOneLiteralArgument() {
@@ -214,6 +300,84 @@ final class SpeakerReviewTests: XCTestCase {
         await model.load()
 
         XCTAssertEqual(model.confirmedSpeakerIDs, Set(["saved"]))
+        XCTAssertEqual(model.remainingUnconfirmedCount, 1)
+        XCTAssertFalse(model.canComplete)
+    }
+
+    @MainActor
+    func testStrongAutomaticNameLoadsConfirmedWithoutIdentifyCall() async {
+        let meetingID = UUID()
+        let response = makeResponse(
+            meetingID: meetingID,
+            speakers: [makeSpeaker(id: "automatic", automaticName: "Mike Cann", suggestionKind: "strong")]
+        )
+        let client = StubSpeakerReviewClient(response: response)
+        let model = makeModel(meetingID: meetingID, client: client)
+
+        await model.load()
+
+        XCTAssertEqual(model.drafts["automatic"]?.name, "Mike Cann")
+        XCTAssertTrue(model.confirmedSpeakerIDs.contains("automatic"))
+        XCTAssertEqual(model.remainingUnconfirmedCount, 0)
+        XCTAssertTrue(model.canComplete)
+        let saved = await model.confirm("automatic")
+        let identifyCalls = await client.identifyCallCount()
+        XCTAssertFalse(saved)
+        XCTAssertEqual(identifyCalls, 0)
+    }
+
+    @MainActor
+    func testTentativeSuggestionPrefillsButRemainsUnconfirmed() async {
+        let meetingID = UUID()
+        let response = makeResponse(
+            meetingID: meetingID,
+            speakers: [makeSpeaker(id: "tentative", suggestion: "Mike Cann", suggestionKind: "tentative")]
+        )
+        let model = makeModel(meetingID: meetingID, client: StubSpeakerReviewClient(response: response))
+
+        await model.load()
+
+        XCTAssertEqual(model.drafts["tentative"], SpeakerReviewDraft(name: "Mike Cann", isPredicted: true))
+        XCTAssertFalse(model.confirmedSpeakerIDs.contains("tentative"))
+        XCTAssertEqual(model.remainingUnconfirmedCount, 1)
+        XCTAssertFalse(model.canComplete)
+    }
+
+    @MainActor
+    func testEditingAutomaticNameInvalidatesCompletionUntilConfirmed() async {
+        let meetingID = UUID()
+        let response = makeResponse(
+            meetingID: meetingID,
+            speakers: [makeSpeaker(id: "automatic", automaticName: "Mike Cann", suggestionKind: "strong")]
+        )
+        let model = makeModel(meetingID: meetingID, client: StubSpeakerReviewClient(response: response))
+        await model.load()
+
+        model.setName("Michael Cann", for: "automatic")
+
+        XCTAssertFalse(model.confirmedSpeakerIDs.contains("automatic"))
+        XCTAssertFalse(model.canComplete)
+        let saved = await model.confirm("automatic")
+        XCTAssertTrue(saved)
+        XCTAssertTrue(model.canComplete)
+        XCTAssertEqual(model.response?.speakers.first?.name, "Michael Cann")
+    }
+
+    @MainActor
+    func testSelectingVisibleLabelEvidenceLeavesSpeakerUnconfirmed() async {
+        let meetingID = UUID()
+        let evidence = SpeakerEvidenceLabel(name: "Mike Cann", timestamps: [12.5, 42], source: "video_text")
+        let response = makeResponse(
+            meetingID: meetingID,
+            speakers: [makeSpeaker(id: "pending", evidenceLabels: [evidence])]
+        )
+        let model = makeModel(meetingID: meetingID, client: StubSpeakerReviewClient(response: response))
+        await model.load()
+
+        model.selectEvidence(evidence, for: "pending")
+
+        XCTAssertEqual(model.drafts["pending"]?.name, "Mike Cann")
+        XCTAssertFalse(model.confirmedSpeakerIDs.contains("pending"))
         XCTAssertEqual(model.remainingUnconfirmedCount, 1)
         XCTAssertFalse(model.canComplete)
     }
@@ -345,7 +509,11 @@ final class SpeakerReviewTests: XCTestCase {
     private func makeSpeaker(
         id: String,
         name: String? = nil,
-        suggestion: String? = nil
+        suggestion: String? = nil,
+        automaticName: String? = nil,
+        suggestionKind: String? = nil,
+        confirmationCount: Int? = nil,
+        evidenceLabels: [SpeakerEvidenceLabel]? = nil
     ) -> SpeakerReviewSpeaker {
         SpeakerReviewSpeaker(
             speakerID: id,
@@ -354,7 +522,11 @@ final class SpeakerReviewTests: XCTestCase {
             suggestionScore: nil,
             suggestionMargin: nil,
             embeddingAvailable: false,
-            excerpts: []
+            excerpts: [],
+            automaticName: automaticName,
+            suggestionKind: suggestionKind,
+            confirmationCount: confirmationCount,
+            evidenceLabels: evidenceLabels
         )
     }
 }
@@ -362,6 +534,7 @@ final class SpeakerReviewTests: XCTestCase {
 private actor StubSpeakerReviewClient: SpeakerReviewServing {
     let response: SpeakerReviewResponse
     let identifyFails: Bool
+    private var identifyCalls = 0
 
     init(response: SpeakerReviewResponse, identifyFails: Bool = false) {
         self.response = response
@@ -383,6 +556,7 @@ private actor StubSpeakerReviewClient: SpeakerReviewServing {
         name: String,
         configuration: ArchiveTransferConfiguration
     ) async throws -> SpeakerIdentificationResponse {
+        identifyCalls += 1
         if identifyFails {
             throw SpeakerReviewError.invalidResponse("confirmation failed")
         }
@@ -396,6 +570,8 @@ private actor StubSpeakerReviewClient: SpeakerReviewServing {
             voiceProfileEnrolled: false
         )
     }
+
+    func identifyCallCount() -> Int { identifyCalls }
 
     func fetchPlayback(
         meetingID: UUID,
