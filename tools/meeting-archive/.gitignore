@@ -1,0 +1,7 @@
+.build/
+.build-xcode/
+.venv/
+__pycache__/
+*.pyc
+*.sqlite*
+test-output/

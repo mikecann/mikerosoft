@@ -44,6 +44,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/record-it/docs/header.webp" width="220"><br>[record-it](tools/record-it/README.md) | Mac - GUI | Native SwiftUI screen and camera recorder with 4K/30 capture, project-aware output folders, and separate full-resolution files |
 | <img src="tools/token-stats/docs/header.png" width="220"><br>[token-stats](tools/token-stats/README.md) | Mac - GUI | Native SwiftUI dashboard for Codex, Claude, and OpenRouter token usage with API-equivalent costs and shareable graph exports |
 | <img src="tools/record-meeting/docs/header.webp" width="220"><br>[record-meeting](tools/record-meeting/README.md) | Mac - GUI | Always-on-top meeting recorder with system audio + microphone capture, live waveform, synchronized transcript review, MP3 export, speaker-labelled transcription, and Notion publishing |
+| [meeting-archive](tools/meeting-archive/README.md) | Mac - GUI (preview) | Camera-triggered meeting archive with a validated Zoom capture-to-Notion path; wider app coverage remains in validation |
 | <img src="tools/video-hq/docs/header.jpg" width="220"><br>[video-hq](tools/video-hq/README.md) | Mac - GUI | Native video-production command center with project and render discovery, Notion script import, transcription, and YouTube descriptions |
 | <img src="tools/voice-type/docs/header.webp" width="220"><br>[voice-type](tools/voice-type/README.md) | Taskbar + macOS daemon | Push-to-talk local voice transcription on Windows and macOS. On Apple Silicon it uses MLX for faster final transcription |
 | <img src="tools/video-titles/docs/header.webp" width="220"><br>[video-titles](tools/video-titles/README.md) | Context menu | Chat with an AI agent to ideate YouTube titles using the Compelling Title Matrix; right-click any video in Explorer (requires `OPENROUTER_API_KEY` in `.env`) |
@@ -100,6 +101,8 @@ For macOS, set tools up individually where mac support exists:
   `bash tools/token-stats/setup_mac.sh`
 - `record-meeting`:
   `bash tools/record-meeting/setup_mac.sh`
+- `meeting-archive` (preview):
+  `bash tools/meeting-archive/setup_mac.sh`
 - `video-hq`:
   `bash tools/video-hq/setup_mac.sh`
 
@@ -120,6 +123,7 @@ while still not covering the Windows-only integrations.
 | `record-it` | Supported | `bash tools/record-it/setup_mac.sh` | `record-it` | SwiftUI + ScreenCaptureKit + AVFoundation recorder. Saves into the selected project's `source` folder |
 | `token-stats` | Supported | `bash tools/token-stats/setup_mac.sh` | `token-stats` | SwiftUI dashboard that reads local Codex and Claude histories, pulls exact OpenRouter Activity API usage, and can import older CSV history |
 | `record-meeting` | Supported | `bash tools/record-meeting/setup_mac.sh` | `record-meeting` | SwiftUI meeting audio recorder with diarized transcripts and optional Notion publishing |
+| `meeting-archive` | Preview | `bash tools/meeting-archive/setup_mac.sh` | `meeting-archive` | Zoom capture, Bruce processing, and Notion publication validated. Chrome automatic capture is blocked pending the capture-mode decision; Teams and Slack remain live-unverified |
 | `video-hq` | Supported | `bash tools/video-hq/setup_mac.sh` | Launch `Video HQ` from Spotlight or run `video-hq` | Project-first command center with Notion script import, rendered-video preview, transcription, and OpenRouter-powered descriptions |
 | Everything else | Windows-only for now | Use `install.ps1` on Windows | Varies by tool | Most other tools still depend on Windows-specific shell integration, taskbar shortcuts, or Explorer context menus |
 

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleDisplayName</key><string>Meeting Archive</string>
+<key>CFBundleExecutable</key><string>meeting-archive-app</string>
+<key>CFBundleIdentifier</key><string>com.mikerosoft.meeting-archive</string>
+<key>CFBundleName</key><string>Meeting Archive</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>15.0</string>
+<key>LSUIElement</key><true/>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSMicrophoneUsageDescription</key><string>Meeting Archive includes your microphone in meeting recordings, even while you are muted in the call.</string>
+<key>NSScreenCaptureUsageDescription</key><string>Meeting Archive records your meeting window and incoming audio for your private archive.</string>
+<key>NSCalendarsFullAccessUsageDescription</key><string>Meeting Archive suggests meeting titles and possible speakers from your selected personal and work calendars.</string>
+<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>Meeting Archive</string><key>CFBundleURLSchemes</key><array><string>meetingarchive</string></array></dict></array>
+</dict></plist>

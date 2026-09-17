@@ -216,6 +216,14 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
+    name: 'meeting-archive',
+    desc: 'Preview: camera-triggered Zoom recording with microphone and meeting audio, Bruce archival and transcription, speaker review, and Notion indexing. Wider app support is still in validation.',
+    icon: `${base}/meeting-archive/icons/meeting-archive.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/meeting-archive',
+    platforms: ['macos'],
+  },
+  {
     name: 'video-hq',
     desc: 'Native macOS video-production hub: browse project folders, import scripts from Notion, preview rendered MP4s, transcribe, and generate YouTube descriptions',
     icon: `${base}/video-hq/icons/video-hq.png`,
