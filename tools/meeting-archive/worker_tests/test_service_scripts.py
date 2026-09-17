@@ -23,6 +23,25 @@ class ServiceScriptContractTests(unittest.TestCase):
                 self.assertIn('Meeting Archive Worker.app/Contents/MacOS/meeting-archive-worker', installer)
                 self.assertIn('[[ -x "${LAUNCHER}" && ! -L "${LAUNCHER}" ]]', installer)
 
+    def test_worker_avoids_background_disk_throttling_but_keeps_cpu_bounds(self) -> None:
+        installer = (WORKER_ROOT / "install-service-bruce.sh").read_text(
+            encoding="utf-8"
+        )
+        template = re.search(r"(<\?xml.*?</plist>)", installer, re.S).group(1)
+        nodes = list(ET.fromstring(template).find("dict"))
+        properties = {nodes[i].text: nodes[i + 1] for i in range(0, len(nodes), 2)}
+        wrapper = (WORKER_ROOT / "run-service-bruce.sh").read_text(encoding="utf-8")
+
+        self.assertEqual(properties["ProcessType"].text, "Standard")
+        self.assertNotIn("LowPriorityIO", properties)
+        self.assertEqual(properties["ThrottleInterval"].text, "30")
+        self.assertEqual(properties["KeepAlive"].tag, "true")
+        self.assertIn('exec /usr/bin/nice -n 10 "${PYTHON}"', wrapper)
+        self.assertIn("export OMP_NUM_THREADS=2", wrapper)
+        self.assertIn("export MKL_NUM_THREADS=2", wrapper)
+        self.assertIn("export MEETING_ARCHIVE_TORCH_THREADS=2", wrapper)
+        self.assertIn("export MEETING_ARCHIVE_WHISPER_CPU_THREADS=2", wrapper)
+
     def test_worker_installer_stages_private_bounded_stderr_diagnostics(self) -> None:
         installer = (WORKER_ROOT / "install-service-bruce.sh").read_text(
             encoding="utf-8"

@@ -81,6 +81,9 @@ fi
 /bin/mkdir -p "${AGENT_DIRECTORY}"
 temporary="$(/usr/bin/mktemp "${AGENT_DIRECTORY}/.${LABEL}.XXXXXX")"
 trap '/bin/rm -f "${temporary}"' EXIT
+# Background/LowPriorityIO can stall model-library reads from CannMedia for
+# minutes. Use normal disk scheduling; the wrapper still limits CPU threads
+# and runs at nice 10, while the service lock allows only one heavy job.
 /bin/cat >"${temporary}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -100,9 +103,7 @@ trap '/bin/rm -f "${temporary}"' EXIT
     <key>ThrottleInterval</key>
     <integer>30</integer>
     <key>ProcessType</key>
-    <string>Background</string>
-    <key>LowPriorityIO</key>
-    <true/>
+    <string>Standard</string>
     <key>StandardOutPath</key>
     <string>/dev/null</string>
     <key>StandardErrorPath</key>

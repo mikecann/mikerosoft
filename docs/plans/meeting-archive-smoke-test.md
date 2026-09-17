@@ -25,6 +25,13 @@ remains untested.
 
 ## First call, about three minutes
 
+A solo meeting is enough to test camera-triggered capture, microphone recording,
+save, transfer, transcription, and publication. A second device or participant
+is needed to validate incoming speech and multiple speakers. Michael's first
+29.694-second solo recording saved, reached the managed worker, and was
+transcribed and published after a worker disk-priority correction. The
+validation report distinguishes that recovered run from a clean first attempt.
+
 1. Open a new private Zoom meeting with a second device or willing participant.
    Camera preview alone should not start a recording. Join and turn the camera
    on; the menu-bar indicator and Library should show recording.
