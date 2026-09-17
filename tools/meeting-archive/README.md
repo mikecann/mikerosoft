@@ -29,6 +29,13 @@ setup script is intentionally separate from the Windows-only `install.ps1`.
 Quit Meeting Archive from its menu before updating or rebuilding it, so an
 active recording can finish cleanly. The setup script does not launch the app.
 
+For an existing login item, disable startup before replacing the bundle. Open
+the updated app normally, then use its Settings to disable and re-enable the
+login item. During the September 17 update, command-line registration reported
+success but macOS rejected the background launch; re-registering from the
+running app restored it. Verify the managed process actually starts after the
+foreground app quits. The Settings label alone is not a startup health check.
+
 ## First launch and privacy
 
 Open the staged app yourself, then use Settings to request the permissions it

@@ -53,7 +53,7 @@ struct NamingView: View {
                     if let pending = controller.pending { controller.resolve(pending.id, resolution: .discard) }
                 }
                 Spacer()
-                Button("Keep recording") {
+                Button("Save recording") {
                     if let pending = controller.pending { controller.resolve(pending.id, resolution: .accept(trigger: .keepButton)) }
                 }.keyboardShortcut(.defaultAction)
             }
