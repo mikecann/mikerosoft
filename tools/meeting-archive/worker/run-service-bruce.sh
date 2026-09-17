@@ -21,6 +21,7 @@ log_error() {
 }
 
 fail() {
+    printf 'Meeting Archive worker: %s\n' "$1" >&2
     log_error "$1"
     exit 1
 }

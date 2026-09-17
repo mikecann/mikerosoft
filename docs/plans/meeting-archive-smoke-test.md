@@ -7,17 +7,11 @@ capture choice; Teams and Slack are not yet validated live.
 
 ## Before the call
 
-On Bruce, first complete the
-[worker app’s one-time drive permission](../../tools/meeting-archive/worker/launcher/README.md).
-The background processor is currently disabled after macOS denied the shell
-entry point access to CannMedia. The successful SSH run does not establish
-unattended readiness. Verify the worker is running before this full smoke test.
-
-The signed setup app is installed on Bruce at
-`/Users/bruce/Applications/Meeting Archive Worker.app`. Open it on Bruce, choose
-exactly `/Volumes/CannMedia/MeetingArchive`, approve drive access if prompted,
-and close its window when it says “Access is ready”. Then have the managed
-worker enabled and its startup checked.
+Bruce's [worker app drive permission](../../tools/meeting-archive/worker/launcher/README.md)
+is complete. The background processor is enabled and passed managed startup,
+clean shutdown, and automatic restart with one worker holding the service lock.
+This call will test new media through that managed service. An actual reboot
+remains untested.
 
 1. Open `~/Applications/Meeting Archive.app` and Settings. Meeting detection,
    Screen and meeting audio, and Microphone should say Granted.

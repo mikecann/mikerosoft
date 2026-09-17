@@ -52,6 +52,13 @@ class ServiceScriptContractTests(unittest.TestCase):
         self.assertNotIn("echo \"${MEETING_ARCHIVE_NOTION_TOKEN}", wrapper)
         self.assertNotIn("set -x", wrapper)
 
+    def test_worker_wrapper_failures_reach_stderr_and_unified_logging(self) -> None:
+        wrapper = (WORKER_ROOT / "run-service-bruce.sh").read_text(encoding="utf-8")
+        fail_body = re.search(r"fail\(\) \{(.*?)\n\}", wrapper, re.S).group(1)
+
+        self.assertIn("printf 'Meeting Archive worker: %s\\n' \"$1\" >&2", fail_body)
+        self.assertIn('log_error "$1"', fail_body)
+
 
 if __name__ == "__main__":
     unittest.main()

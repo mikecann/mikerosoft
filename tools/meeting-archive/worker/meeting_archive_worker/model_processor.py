@@ -154,6 +154,15 @@ def diarize_waveform(pipeline, waveform, sample_rate: int):
 def process(archive_directory: Path, job: Job) -> None:
     """CLI processor callable. Outputs are versioned and source files stay untouched."""
     manifest = verify_incoming(archive_directory)
+    if (
+        job.meeting_id != manifest.meeting_id
+        or job.manifest_revision != manifest.revision
+        or job.manifest_sha256 != manifest.manifest_sha256
+    ):
+        # The queue claim is the authority for which immutable archive revision
+        # this worker may process. Refuse a changed or misrouted directory before
+        # creating generated paths or loading either model.
+        raise RuntimeError("Claimed job does not match the verified archive manifest.")
     _assert_generated_namespaces_unowned(manifest)
     output = _ensure_real_generated_directory(
         archive_directory,

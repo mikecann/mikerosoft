@@ -90,17 +90,27 @@ class PlaybackMediaTests(unittest.TestCase):
                 source.parent.mkdir(parents=True, exist_ok=True)
                 original = b"accepted source must survive"
                 source.write_bytes(original)
-                manifest = SimpleNamespace(files=(
-                    VerifiedFile(relative_path, len(original), "a" * 64, "metadata"),
-                ))
+                manifest = SimpleNamespace(
+                    meeting_id="11111111-1111-4111-8111-111111111111",
+                    revision=1,
+                    manifest_sha256="b" * 64,
+                    files=(
+                        VerifiedFile(relative_path, len(original), "a" * 64, "metadata"),
+                    ),
+                )
+                job = SimpleNamespace(
+                    meeting_id=manifest.meeting_id,
+                    manifest_revision=manifest.revision,
+                    manifest_sha256=manifest.manifest_sha256,
+                )
                 with patch("meeting_archive_worker.model_processor.find_executable") as find:
                     with self.assertRaisesRegex(RuntimeError, "reserved generated namespace"):
                         create_playback(root, manifest)
                 find.assert_not_called()
                 with patch("meeting_archive_worker.model_processor.verify_incoming", return_value=manifest), \
-                     patch("meeting_archive_worker.model_processor.WhisperPyannoteTranscriber") as transcriber:
+                    patch("meeting_archive_worker.model_processor.WhisperPyannoteTranscriber") as transcriber:
                     with self.assertRaisesRegex(RuntimeError, "reserved generated namespace"):
-                        process_archive(root, SimpleNamespace(manifest_revision=1))
+                        process_archive(root, job)
 
                 self.assertEqual(source.read_bytes(), original)
                 transcriber.assert_not_called()
@@ -235,14 +245,24 @@ class PlaybackMediaTests(unittest.TestCase):
                 link = root.joinpath(*symlink_component.split("/"))
                 link.parent.mkdir(parents=True, exist_ok=True)
                 link.symlink_to(external, target_is_directory=True)
-                manifest = SimpleNamespace(files=(
-                    VerifiedFile("meeting-view.mov", 10, "a" * 64, "video"),
-                    VerifiedFile("microphone.m4a", 10, "b" * 64, "microphone_audio"),
-                ))
+                manifest = SimpleNamespace(
+                    meeting_id="22222222-2222-4222-8222-222222222222",
+                    revision=1,
+                    manifest_sha256="c" * 64,
+                    files=(
+                        VerifiedFile("meeting-view.mov", 10, "a" * 64, "video"),
+                        VerifiedFile("microphone.m4a", 10, "b" * 64, "microphone_audio"),
+                    ),
+                )
+                job = SimpleNamespace(
+                    meeting_id=manifest.meeting_id,
+                    manifest_revision=manifest.revision,
+                    manifest_sha256=manifest.manifest_sha256,
+                )
                 with patch("meeting_archive_worker.model_processor.verify_incoming", return_value=manifest), \
                      patch("meeting_archive_worker.model_processor.WhisperPyannoteTranscriber") as transcriber:
                     with self.assertRaisesRegex(RuntimeError, "transcripts.*real directory"):
-                        process_archive(root, SimpleNamespace(manifest_revision=1))
+                        process_archive(root, job)
 
                 self.assertEqual(marker.read_bytes(), b"outside transcript output")
                 self.assertEqual(list(external.iterdir()), [marker])

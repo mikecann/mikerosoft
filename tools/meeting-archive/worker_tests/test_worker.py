@@ -635,6 +635,40 @@ class QueueTests(unittest.TestCase):
 
 
 class ProcessingTests(unittest.TestCase):
+    def test_claimed_job_must_match_verified_manifest_before_output_or_models(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            incoming, _ = write_bundle(root)
+            verified = verify_incoming(incoming)
+            matching_job = {
+                "meeting_id": verified.meeting_id,
+                "manifest_revision": verified.revision,
+                "manifest_sha256": verified.manifest_sha256,
+            }
+            mismatches = {
+                "meeting_id": str(uuid.uuid4()),
+                "manifest_revision": verified.revision + 1,
+                "manifest_sha256": "0" * 64,
+            }
+
+            for field, mismatched_value in mismatches.items():
+                with self.subTest(field=field):
+                    job_values = matching_job | {field: mismatched_value}
+                    with patch(
+                        "meeting_archive_worker.model_processor._ensure_real_generated_directory",
+                    ) as ensure_output, patch(
+                        "meeting_archive_worker.model_processor.WhisperPyannoteTranscriber",
+                    ) as transcriber:
+                        with self.assertRaisesRegex(
+                            RuntimeError,
+                            "Claimed job does not match the verified archive manifest",
+                        ):
+                            model_process(incoming, SimpleNamespace(**job_values))
+
+                    ensure_output.assert_not_called()
+                    transcriber.assert_not_called()
+                    self.assertFalse((incoming / "transcripts").exists())
+
     def test_valid_json_checkpoint_rebuilds_missing_markdown_without_models(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -661,7 +695,14 @@ class ProcessingTests(unittest.TestCase):
                 "meeting_archive_worker.model_processor.WhisperPyannoteTranscriber",
                 side_effect=AssertionError("checkpoint recovery must not load models"),
             ):
-                model_process(incoming, SimpleNamespace(manifest_revision=1))
+                model_process(
+                    incoming,
+                    SimpleNamespace(
+                        meeting_id=verified.meeting_id,
+                        manifest_revision=verified.revision,
+                        manifest_sha256=verified.manifest_sha256,
+                    ),
+                )
 
             self.assertIn("Recovered view", (output / "transcript.md").read_text(encoding="utf-8"))
             self.assertEqual(list(output.glob("*.part")), [])
