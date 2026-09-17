@@ -161,4 +161,267 @@ final class SpeakerReviewTests: XCTestCase {
         XCTAssertNil(SpeakerPlaybackRange(start: 4, end: 4))
         XCTAssertNil(SpeakerPlaybackRange(start: .nan, end: 5))
     }
+
+    @MainActor
+    func testLoadedSavedNamesRemainConfirmedOnReopen() async {
+        let meetingID = UUID()
+        let response = makeResponse(
+            meetingID: meetingID,
+            speakers: [makeSpeaker(id: "saved", name: "Michael"), makeSpeaker(id: "pending")]
+        )
+        let model = makeModel(meetingID: meetingID, client: StubSpeakerReviewClient(response: response))
+
+        await model.load()
+
+        XCTAssertEqual(model.confirmedSpeakerIDs, Set(["saved"]))
+        XCTAssertEqual(model.remainingUnconfirmedCount, 1)
+        XCTAssertFalse(model.canComplete)
+    }
+
+    @MainActor
+    func testEditingSavedNameInvalidatesConfirmationUntilSuccessfulSave() async {
+        let meetingID = UUID()
+        let response = makeResponse(meetingID: meetingID, speakers: [makeSpeaker(id: "saved", name: "Michael")])
+        var changedCount = 0
+        let model = makeModel(
+            meetingID: meetingID,
+            client: StubSpeakerReviewClient(response: response),
+            onReviewChanged: { changedCount += 1 }
+        )
+        await model.load()
+        XCTAssertTrue(model.canComplete)
+
+        model.setName("Mike", for: "saved")
+
+        XCTAssertFalse(model.confirmedSpeakerIDs.contains("saved"))
+        XCTAssertEqual(model.remainingUnconfirmedCount, 1)
+        XCTAssertFalse(model.canComplete)
+        let saved = await model.confirm("saved")
+        XCTAssertTrue(saved)
+        XCTAssertEqual(model.remainingUnconfirmedCount, 0)
+        XCTAssertTrue(model.canComplete)
+        XCTAssertEqual(changedCount, 1)
+    }
+
+    @MainActor
+    func testFailedConfirmationNeverClearsPendingReviewOrCallsChangeCallback() async {
+        let meetingID = UUID()
+        let response = makeResponse(meetingID: meetingID, speakers: [makeSpeaker(id: "pending", suggestion: "Alex")])
+        var changedCount = 0
+        let client = StubSpeakerReviewClient(response: response, identifyFails: true)
+        let model = makeModel(meetingID: meetingID, client: client, onReviewChanged: { changedCount += 1 })
+        await model.load()
+
+        let saved = await model.confirm("pending")
+        XCTAssertFalse(saved)
+
+        XCTAssertEqual(model.remainingUnconfirmedCount, 1)
+        XCTAssertFalse(model.confirmedSpeakerIDs.contains("pending"))
+        XCTAssertFalse(model.canComplete)
+        XCTAssertNotNil(model.failure)
+        XCTAssertEqual(changedCount, 0)
+    }
+
+    @MainActor
+    func testZeroSpeakerResponseCanCompleteOnlyAfterItLoads() async {
+        let meetingID = UUID()
+        let response = makeResponse(meetingID: meetingID, speakers: [])
+        let model = makeModel(meetingID: meetingID, client: StubSpeakerReviewClient(response: response))
+
+        XCTAssertEqual(model.remainingUnconfirmedCount, 0)
+        XCTAssertFalse(model.canComplete)
+
+        await model.load()
+
+        XCTAssertEqual(model.remainingUnconfirmedCount, 0)
+        XCTAssertTrue(model.canComplete)
+    }
+
+    @MainActor
+    func testPendingSpeakerBlocksCompletionUntilSuccessfulConfirmation() async {
+        let meetingID = UUID()
+        let response = makeResponse(meetingID: meetingID, speakers: [makeSpeaker(id: "pending", suggestion: "Alex")])
+        let model = makeModel(meetingID: meetingID, client: StubSpeakerReviewClient(response: response))
+        await model.load()
+
+        XCTAssertFalse(model.canComplete)
+        let saved = await model.confirm("pending")
+        XCTAssertTrue(saved)
+        XCTAssertTrue(model.canComplete)
+    }
+
+    @MainActor
+    func testEditDuringConfirmationPreservesNewDraftAndKeepsCompletionPending() async {
+        let meetingID = UUID()
+        let response = makeResponse(meetingID: meetingID, speakers: [makeSpeaker(id: "pending", suggestion: "Alex")])
+        let client = ControlledSpeakerReviewClient(response: response)
+        var changedCount = 0
+        let model = makeModel(meetingID: meetingID, client: client, onReviewChanged: { changedCount += 1 })
+        await model.load()
+
+        let confirmation = Task { await model.confirm("pending") }
+        await client.waitUntilIdentifyStarted()
+        XCTAssertFalse(model.canComplete)
+        model.setName("Alicia", for: "pending")
+        await client.finishIdentify()
+        let savedCurrentDraft = await confirmation.value
+
+        XCTAssertFalse(savedCurrentDraft)
+        XCTAssertEqual(model.drafts["pending"]?.name, "Alicia")
+        XCTAssertFalse(model.confirmedSpeakerIDs.contains("pending"))
+        XCTAssertEqual(model.remainingUnconfirmedCount, 1)
+        XCTAssertFalse(model.canComplete)
+        XCTAssertEqual(changedCount, 1)
+    }
+
+    @MainActor
+    private func makeModel(
+        meetingID: UUID,
+        client: any SpeakerReviewServing,
+        onReviewChanged: @escaping () -> Void = {}
+    ) -> SpeakerReviewModel {
+        SpeakerReviewModel(
+            meetingID: meetingID,
+            revision: 3,
+            configuration: .bruce,
+            client: client,
+            onReviewChanged: onReviewChanged
+        )
+    }
+
+    private func makeResponse(
+        meetingID: UUID,
+        speakers: [SpeakerReviewSpeaker]
+    ) -> SpeakerReviewResponse {
+        SpeakerReviewResponse(
+            schemaVersion: 1,
+            meetingID: meetingID,
+            manifestRevision: 3,
+            speakers: speakers,
+            calendarCandidates: []
+        )
+    }
+
+    private func makeSpeaker(
+        id: String,
+        name: String? = nil,
+        suggestion: String? = nil
+    ) -> SpeakerReviewSpeaker {
+        SpeakerReviewSpeaker(
+            speakerID: id,
+            name: name,
+            suggestedName: suggestion,
+            suggestionScore: nil,
+            suggestionMargin: nil,
+            embeddingAvailable: false,
+            excerpts: []
+        )
+    }
+}
+
+private actor StubSpeakerReviewClient: SpeakerReviewServing {
+    let response: SpeakerReviewResponse
+    let identifyFails: Bool
+
+    init(response: SpeakerReviewResponse, identifyFails: Bool = false) {
+        self.response = response
+        self.identifyFails = identifyFails
+    }
+
+    func load(
+        meetingID: UUID,
+        revision: Int,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> SpeakerReviewResponse {
+        response
+    }
+
+    func identify(
+        meetingID: UUID,
+        revision: Int,
+        speakerID: String,
+        name: String,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> SpeakerIdentificationResponse {
+        if identifyFails {
+            throw SpeakerReviewError.invalidResponse("confirmation failed")
+        }
+        return SpeakerIdentificationResponse(
+            schemaVersion: 1,
+            confirmed: true,
+            meetingID: meetingID,
+            manifestRevision: revision,
+            speakerID: speakerID,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            voiceProfileEnrolled: false
+        )
+    }
+
+    func fetchPlayback(
+        meetingID: UUID,
+        destination: URL,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> URL {
+        destination
+    }
+}
+
+private actor ControlledSpeakerReviewClient: SpeakerReviewServing {
+    let response: SpeakerReviewResponse
+    private var identifyStarted = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var finishContinuation: CheckedContinuation<Void, Never>?
+
+    init(response: SpeakerReviewResponse) {
+        self.response = response
+    }
+
+    func load(
+        meetingID: UUID,
+        revision: Int,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> SpeakerReviewResponse {
+        response
+    }
+
+    func identify(
+        meetingID: UUID,
+        revision: Int,
+        speakerID: String,
+        name: String,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> SpeakerIdentificationResponse {
+        identifyStarted = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { finishContinuation = $0 }
+        return SpeakerIdentificationResponse(
+            schemaVersion: 1,
+            confirmed: true,
+            meetingID: meetingID,
+            manifestRevision: revision,
+            speakerID: speakerID,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            voiceProfileEnrolled: false
+        )
+    }
+
+    func waitUntilIdentifyStarted() async {
+        if identifyStarted { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func finishIdentify() {
+        finishContinuation?.resume()
+        finishContinuation = nil
+    }
+
+    func fetchPlayback(
+        meetingID: UUID,
+        destination: URL,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> URL {
+        destination
+    }
 }

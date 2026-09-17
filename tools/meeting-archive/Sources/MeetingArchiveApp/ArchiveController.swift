@@ -25,6 +25,7 @@ final class ArchiveController: ObservableObject {
     @Published var pending: MeetingRecord?
     @Published var titleDraft = ""
     @Published var calendarChoices: [CalendarSuggestion] = []
+    @Published private(set) var followUpMeetingID: UUID?
     let settings = AppSettings()
     let calendar = CalendarService()
     private var store: SQLiteMeetingStore?
@@ -42,10 +43,16 @@ final class ArchiveController: ObservableObject {
     private var cleanedMeetingIDs = Set<UUID>()
     private var lockFD: Int32 = -1
     private var pendingWindow: NSWindow?
+    private var followUpWindow: NamingWindow?
+    private var attentionTracker = SpeakerAttentionTracker()
+    private var refreshingWorkerStatuses = false
+    private var workerRefreshRequested = false
+    private var hasPolledMeetingState = false
+    private var meetingInteractionBlocksAttention = true
     private let transfer = ArchiveTransfer()
-    private let workerStatusClient = WorkerStatusClient()
+    private let workerStatusClient = WorkerStatusClient(cacheDuration: 10)
 
-    init() {
+    init(startServices: Bool = true) {
         do {
             for directory in [AppPaths.root, AppPaths.spool, AppPaths.index] {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -66,7 +73,18 @@ final class ArchiveController: ObservableObject {
             failure = error.localizedDescription
         }
         isPaused = machine.state.isPaused
+        if let data = try? Data(contentsOf: AppPaths.root.appendingPathComponent("speaker-attention.json")),
+           let saved = try? JSONDecoder().decode(SpeakerAttentionTracker.self, from: data) {
+            attentionTracker = saved
+        }
         refresh()
+        // The isolated UI verification harness uses the real controller and
+        // views without polling devices, recording, uploading, or recovering.
+        guard startServices else {
+            hasPolledMeetingState = true
+            meetingInteractionBlocksAttention = false
+            return
+        }
         timer = Task { [weak self] in
             await self?.recoverInterruptedCaptures()
             await self?.refreshWorkerStatuses()
@@ -92,8 +110,20 @@ final class ArchiveController: ObservableObject {
     }
 
     func refreshWorkerStatuses(force: Bool = false) async {
+        guard !refreshingWorkerStatuses else {
+            workerRefreshRequested = workerRefreshRequested || force
+            return
+        }
+        refreshingWorkerStatuses = true
+        defer {
+            refreshingWorkerStatuses = false
+            if workerRefreshRequested {
+                workerRefreshRequested = false
+                Task { await refreshWorkerStatuses(force: true) }
+            }
+        }
         lastWorkerStatusPoll = Date()
-        let archivedIDs = meetings.lazy
+        var archivedIDs = meetings
             .filter { meeting in
                 self.jobs.contains { job in
                     job.meetingID == meeting.id
@@ -101,20 +131,27 @@ final class ArchiveController: ObservableObject {
                         && job.acknowledgement != nil
                 }
             }
-            .prefix(100)
             .map(\.id)
+        // Opening an older recording must still fetch its review, even when
+        // the routine recent-history batch is full.
+        if let focused = followUpMeetingID, archivedIDs.contains(focused) {
+            archivedIDs.removeAll { $0 == focused }
+            archivedIDs.insert(focused, at: 0)
+        }
         guard !archivedIDs.isEmpty else {
             workerStatuses = [:]
             workerStatusFailure = nil
             return
         }
         do {
-            workerStatuses = try await workerStatusClient.fetch(
-                meetingIDs: Array(archivedIDs),
+            let fetched = try await workerStatusClient.fetch(
+                meetingIDs: Array(archivedIDs.prefix(100)),
                 configuration: transferConfiguration,
                 force: force
             )
+            workerStatuses.merge(fetched) { _, fresh in fresh }
             workerStatusFailure = nil
+            presentReadySpeakerReview()
         } catch {
             workerStatusFailure = error.localizedDescription
         }
@@ -137,6 +174,12 @@ final class ArchiveController: ObservableObject {
     private func tick() {
         guard store != nil else { return }
         let snapshot = detector.poll()
+        hasPolledMeetingState = true
+        // Unknown camera controls or missing Accessibility are not proof that
+        // it is safe to raise a window over the user's current meeting.
+        meetingInteractionBlocksAttention = !SpeakerAttentionTracker.interactionIsSafe(
+            noSupportedMeeting: snapshot.status == .noSupportedMeeting, cameraActive: snapshot.cameraActive
+        )
         recorder?.checkHealth()
         recorder?.setVideoAllowed(snapshot.videoSafe)
         if let session = snapshot.session {
@@ -165,10 +208,11 @@ final class ArchiveController: ObservableObject {
             lastQueuePoll = Date()
             Task { await uploadNext() }
         }
-        if Date().timeIntervalSince(lastWorkerStatusPoll) >= 60 {
+        if Date().timeIntervalSince(lastWorkerStatusPoll) >= (processingMeetings.isEmpty ? 60 : 15) {
             lastWorkerStatusPoll = Date()
             Task { await refreshWorkerStatuses() }
         }
+        presentReadySpeakerReview()
     }
 
     private func dispatch(_ event: CaptureEvent, windowID: CGWindowID? = nil) {
@@ -421,6 +465,10 @@ final class ArchiveController: ObservableObject {
     func resolve(_ id: UUID, resolution: AcceptanceResolution) {
         do {
             guard var record = try store?.fetchMeeting(id: id), record.acceptance.isPending else { return }
+            let showProgress: Bool
+            if pending?.id == id, case .accept(let trigger) = resolution {
+                showProgress = trigger == .keepButton || trigger == .deadline
+            } else { showProgress = false }
             if pending?.id == id, !titleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, titleDraft != record.title {
                 record = record.updatingTitle(titleDraft.trimmingCharacters(in: .whitespacesAndNewlines), at: Date())
                 try store?.updateMeeting(record)
@@ -430,7 +478,97 @@ final class ArchiveController: ObservableObject {
             if case .discard = resolution { try FileManager.default.removeItem(at: AppPaths.meeting(id)) }
             if pending?.id == id { pending = nil; pendingWindow?.close(); pendingWindow = nil }
             refresh()
+            if showProgress { showFollowUp(id) }
+            if case .accept = resolution { Task { await uploadNext() } }
         } catch { fail(error.localizedDescription) }
+    }
+
+    func followUpPhase(for record: MeetingRecord) -> MeetingFollowUpPhase {
+        guard let job = jobs.first(where: { $0.meetingID == record.id && $0.manifestRevision == record.metadataRevision }) else {
+            return .checking
+        }
+        if let error = job.lastError, job.status != .succeeded { return .waiting("Transfer waiting to retry: \(error)") }
+        guard job.status == .succeeded else { return .transferring }
+        let remote = workerStatuses[record.id]
+        return .afterArchive(
+            expectedRevision: record.metadataRevision, workerRevision: remote?.manifestRevision,
+            processingSucceeded: remote?.processingState == .succeeded,
+            remainingNames: remote?.unconfirmedSpeakerCount,
+            processingError: remote?.retryStage == .processing ? remote?.detail : nil,
+            connectionError: workerStatusFailure
+        )
+    }
+
+    var processingMeetings: [MeetingRecord] {
+        meetings.filter { record in
+            guard case .accepted = record.acceptance else { return false }
+            return followUpPhase(for: record).isBusy
+        }
+    }
+
+    var speakerAttentionCandidates: [SpeakerAttentionCandidate] {
+        meetings.compactMap { record in
+            guard case .accepted = record.acceptance,
+                  let remote = workerStatuses[record.id],
+                  remote.manifestRevision == record.metadataRevision,
+                  remote.processingState == .succeeded,
+                  let count = remote.unconfirmedSpeakerCount, count > 0 else { return nil }
+            return SpeakerAttentionCandidate(meetingID: record.id, revision: record.metadataRevision, remainingCount: count)
+        }
+    }
+
+    var meetingsNeedingSpeakerNames: [MeetingRecord] {
+        let ids = Set(speakerAttentionCandidates.map(\.meetingID))
+        return meetings.filter { ids.contains($0.id) }
+    }
+
+    var speakersNeedingNames: Int { speakerAttentionCandidates.reduce(0) { $0 + $1.remainingCount } }
+
+    func showFollowUp(_ id: UUID, refreshStatus: Bool = true) {
+        guard let record = meetings.first(where: { $0.id == id }) else { return }
+        if followUpMeetingID != id {
+            closeFollowUp()
+            followUpMeetingID = id
+            let panel = NamingWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 650), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            panel.title = record.title
+            panel.isReleasedWhenClosed = false
+            panel.contentView = NSHostingView(rootView: MeetingFollowUpView(controller: self, meetingID: id))
+            panel.onClose = { [weak self] in
+                self?.followUpMeetingID = nil
+                self?.followUpWindow = nil
+            }
+            panel.center()
+            followUpWindow = panel
+        }
+        if let candidate = speakerAttentionCandidates.first(where: { $0.meetingID == id }) {
+            markSpeakerAttentionPresented(candidate)
+        }
+        followUpWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        if refreshStatus, jobs.contains(where: { $0.meetingID == id && $0.status == .succeeded && $0.acknowledgement != nil }) {
+            Task { await refreshWorkerStatuses(force: true) }
+        }
+    }
+
+    func closeFollowUp() { followUpWindow?.close() }
+
+    func speakerReviewChanged() { Task { await refreshWorkerStatuses(force: true) } }
+
+    private func presentReadySpeakerReview() {
+        // Finish the current call and its title prompt before bringing another
+        // meeting's review forward. The menu indicator remains available.
+        let blocked = !hasPolledMeetingState || meetingInteractionBlocksAttention || isRecording || recorder != nil || pending != nil
+        let candidates = speakerAttentionCandidates.filter { followUpMeetingID == nil || $0.meetingID == followUpMeetingID }
+        guard let candidate = attentionTracker.nextPresentation(from: candidates, interactionBlocked: blocked) else { return }
+        showFollowUp(candidate.meetingID)
+        NSApp.requestUserAttention(.informationalRequest)
+    }
+
+    private func markSpeakerAttentionPresented(_ candidate: SpeakerAttentionCandidate) {
+        attentionTracker.markPresented(candidate)
+        do {
+            try JSONEncoder().encode(attentionTracker).write(to: AppPaths.root.appendingPathComponent("speaker-attention.json"), options: .atomic)
+        } catch { fail("Could not save speaker prompt state: \(error.localizedDescription)") }
     }
 
     private func showPrompt(_ record: MeetingRecord) {
@@ -516,6 +654,7 @@ final class ArchiveController: ObservableObject {
             }
         }
         refresh()
+        if claimed != nil { await refreshWorkerStatuses(force: true) }
     }
 
     private func cleanupVerifiedMedia() async {

@@ -11,13 +11,31 @@ struct MeetingArchiveApplication: App {
             if controller.isRecording { Button("Skip this meeting") { controller.skip() } }
             Button(controller.isPaused ? "Resume automatic recording" : "Pause automatic recording") { controller.togglePause() }
             Divider()
+            if !controller.meetingsNeedingSpeakerNames.isEmpty {
+                Text("\(controller.speakersNeedingNames) speaker\(controller.speakersNeedingNames == 1 ? " needs a name" : "s need names")")
+                ForEach(controller.meetingsNeedingSpeakerNames, id: \.id) { meeting in
+                    Button("Review speakers: \(meeting.title)") { controller.showFollowUp(meeting.id) }
+                }
+                Divider()
+            }
+            if !controller.processingMeetings.isEmpty {
+                ForEach(controller.processingMeetings, id: \.id) { meeting in
+                    Button("Processing: \(meeting.title)") { controller.showFollowUp(meeting.id) }
+                }
+                Divider()
+            }
             WindowButton()
             SettingsLink { Text("Settings…") }
             Divider()
             Button("Quit Meeting Archive") { Task { await controller.quit() } }.keyboardShortcut("q")
         } label: {
-            Image(systemName: controller.isRecording ? "record.circle.fill" : controller.failure != nil ? "exclamationmark.circle" : controller.isPaused ? "pause.circle" : "video.badge.waveform")
-                .foregroundStyle(controller.isRecording ? .red : .primary)
+            HStack(spacing: 3) {
+                Image(systemName: controller.isRecording ? "record.circle.fill" : controller.speakersNeedingNames > 0 ? "person.crop.circle.badge.exclamationmark" : controller.failure != nil ? "exclamationmark.circle" : controller.isPaused ? "pause.circle" : "video.badge.waveform")
+                if controller.speakersNeedingNames > 0 { Text("\(controller.speakersNeedingNames)") }
+                else if !controller.processingMeetings.isEmpty { Image(systemName: "hourglass") }
+            }
+            .foregroundStyle(controller.isRecording ? .red : .primary)
+            .accessibilityLabel(controller.speakersNeedingNames > 0 ? "Meeting Archive: \(controller.speakersNeedingNames) speakers need names" : "Meeting Archive")
         }
         Window("Meeting Archive", id: "library") {
             LibraryView(controller: controller)
@@ -64,7 +82,6 @@ struct NamingView: View {
 struct LibraryView: View {
     @ObservedObject var controller: ArchiveController
     @State private var search = ""
-    @State private var reviewing: MeetingRecord?
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -103,12 +120,15 @@ struct LibraryView: View {
                             Text("\(record.startedAt.formatted()) · \(Int(record.endedAt.timeIntervalSince(record.startedAt))) seconds · \(record.sourceApplication.displayName)")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text(jobLabel(record)).font(.caption).foregroundStyle(.secondary)
+                            if controller.followUpPhase(for: record).isBusy {
+                                ProgressView().controlSize(.small)
+                            }
                         }
                         Spacer()
                         Button("Play") { controller.openPlayback(record.id) }
                         Button("Transcript") { controller.openTranscript(record.id) }
-                        Button("Speakers") { reviewing = record }
-                        if controller.workerStatuses[record.id]?.retryStage != nil {
+                        Button(currentWorkerStatus(record)?.unconfirmedSpeakerCount ?? 0 > 0 ? "Name speakers…" : "Speakers…") { controller.showFollowUp(record.id) }
+                        if currentWorkerStatus(record)?.retryStage != nil {
                             Button("Retry") { controller.retryWorker(record.id) }
                         }
                     }.padding(.vertical, 6)
@@ -116,11 +136,7 @@ struct LibraryView: View {
             }.overlay {
                 if controller.meetings.isEmpty { ContentUnavailableView("No meetings yet", systemImage: "video", description: Text("Grant the permissions in Settings. Eligible calls will appear here after recording.")) }
             }
-        }.padding(20).sheet(isPresented: Binding(get: { reviewing != nil }, set: { if !$0 { reviewing = nil } })) {
-            if let meeting = reviewing {
-                SpeakerReviewView(meetingID: meeting.id, revision: meeting.metadataRevision, configuration: controller.transferConfiguration)
-            }
-        }
+        }.padding(20)
     }
 
     private func jobLabel(_ record: MeetingRecord) -> String {
@@ -128,12 +144,61 @@ struct LibraryView: View {
         guard let job = controller.jobs.first(where: { $0.meetingID == record.id }) else { return "Saved locally" }
         if let error = job.lastError { return "Waiting to retry: \(error)" }
         if job.status == .succeeded {
-            return controller.workerStatuses[record.id]?.detail
+            return currentWorkerStatus(record)?.detail
                 ?? (controller.workerStatusFailure == nil
                     ? "Archived • checking processing status"
                     : "Archived • remote status unavailable")
         }
         return "Archive: \(job.status.rawValue)"
+    }
+
+    private func currentWorkerStatus(_ record: MeetingRecord) -> WorkerMeetingStatus? {
+        guard let status = controller.workerStatuses[record.id], status.manifestRevision == record.metadataRevision else { return nil }
+        return status
+    }
+}
+
+struct MeetingFollowUpView: View {
+    @ObservedObject var controller: ArchiveController
+    let meetingID: UUID
+
+    var body: some View {
+        if let record = controller.meetings.first(where: { $0.id == meetingID }) {
+            let phase = controller.followUpPhase(for: record)
+            VStack(alignment: .leading, spacing: 16) {
+                Text(record.title).font(.title2).lineLimit(2)
+                if controller.workerStatuses[meetingID]?.speakerReview == .available,
+                   controller.workerStatuses[meetingID]?.manifestRevision == record.metadataRevision {
+                    SpeakerReviewView(
+                        meetingID: meetingID,
+                        revision: record.metadataRevision,
+                        configuration: controller.transferConfiguration,
+                        onComplete: { controller.closeFollowUp(); controller.speakerReviewChanged() },
+                        onReviewChanged: { controller.speakerReviewChanged() },
+                        onLater: { controller.closeFollowUp() }
+                    )
+                } else {
+                    Spacer()
+                    HStack(spacing: 12) {
+                        if phase.isBusy { ProgressView().controlSize(.large) }
+                        else { Image(systemName: "clock.badge.exclamationmark").font(.largeTitle) }
+                        Text(phase.detail).font(.headline)
+                    }
+                    Text("Your recording is saved. You can close this window. It will open again when speaker names are ready to review, and the menu bar will show anything that still needs your attention.")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    HStack {
+                        if controller.workerStatuses[meetingID]?.manifestRevision == record.metadataRevision,
+                           controller.workerStatuses[meetingID]?.retryStage != nil {
+                            Button("Retry") { controller.retryWorker(meetingID) }
+                        }
+                        Button("Refresh") { controller.speakerReviewChanged() }
+                        Spacer()
+                        Button("Continue in background") { controller.closeFollowUp() }
+                    }
+                }
+            }.padding(20)
+        }
     }
 }
 

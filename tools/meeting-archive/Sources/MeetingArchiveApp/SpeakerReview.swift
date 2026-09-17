@@ -276,7 +276,29 @@ enum SpeakerReviewCommandBuilder {
     }
 }
 
-actor SpeakerReviewClient {
+protocol SpeakerReviewServing: Sendable {
+    func load(
+        meetingID: UUID,
+        revision: Int,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> SpeakerReviewResponse
+
+    func identify(
+        meetingID: UUID,
+        revision: Int,
+        speakerID: String,
+        name: String,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> SpeakerIdentificationResponse
+
+    func fetchPlayback(
+        meetingID: UUID,
+        destination: URL,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> URL
+}
+
+actor SpeakerReviewClient: SpeakerReviewServing {
     private let processRunner: any ArchiveProcessRunning
     private let transfer: ArchiveTransfer
 
@@ -395,20 +417,32 @@ final class SpeakerReviewModel: ObservableObject {
     let meetingID: UUID
     let revision: Int
     private let configuration: ArchiveTransferConfiguration
-    private let client: SpeakerReviewClient
+    private let client: any SpeakerReviewServing
+    private let onReviewChanged: () -> Void
     private var playbackURL: URL?
     private var playbackTask: Task<Void, Never>?
+
+    var remainingUnconfirmedCount: Int {
+        guard let response else { return 0 }
+        return response.speakers.lazy.filter { !self.confirmedSpeakerIDs.contains($0.speakerID) }.count
+    }
+
+    var canComplete: Bool {
+        response != nil && !isLoading && confirmingSpeakerIDs.isEmpty && remainingUnconfirmedCount == 0
+    }
 
     init(
         meetingID: UUID,
         revision: Int,
         configuration: ArchiveTransferConfiguration,
-        client: SpeakerReviewClient = SpeakerReviewClient()
+        client: any SpeakerReviewServing = SpeakerReviewClient(),
+        onReviewChanged: @escaping () -> Void = {}
     ) {
         self.meetingID = meetingID
         self.revision = revision
         self.configuration = configuration
         self.client = client
+        self.onReviewChanged = onReviewChanged
     }
 
     deinit { playbackTask?.cancel() }
@@ -426,25 +460,35 @@ final class SpeakerReviewModel: ObservableObject {
             )
             self.response = response
             drafts = SpeakerReviewDraft.make(speakers: response.speakers)
-            confirmedSpeakerIDs.removeAll()
+            confirmedSpeakerIDs = Set(response.speakers.compactMap { speaker in
+                guard let name = speaker.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !name.isEmpty
+                else { return nil }
+                return speaker.speakerID
+            })
         } catch {
             failure = error.localizedDescription
         }
     }
 
     func setName(_ name: String, for speakerID: String) {
+        guard response?.speakers.contains(where: { $0.speakerID == speakerID }) == true else { return }
         drafts[speakerID] = SpeakerReviewDraft(name: name, isPredicted: false)
         confirmedSpeakerIDs.remove(speakerID)
     }
 
-    func confirm(_ speakerID: String) async {
-        guard let draft = drafts[speakerID] else { return }
+    @discardableResult
+    func confirm(_ speakerID: String) async -> Bool {
+        guard response?.speakers.contains(where: { $0.speakerID == speakerID }) == true,
+              let draft = drafts[speakerID],
+              confirmingSpeakerIDs.insert(speakerID).inserted
+        else { return false }
         let name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             failure = SpeakerReviewError.emptyName.description
-            return
+            confirmingSpeakerIDs.remove(speakerID)
+            return false
         }
-        confirmingSpeakerIDs.insert(speakerID)
         failure = nil
         defer { confirmingSpeakerIDs.remove(speakerID) }
         do {
@@ -455,10 +499,19 @@ final class SpeakerReviewModel: ObservableObject {
                 name: name,
                 configuration: configuration
             )
+            onReviewChanged()
+            let currentName = drafts[speakerID]?.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard currentName == name else {
+                // The remote confirmation succeeded, but the user typed a
+                // newer draft while it was in flight. Keep that draft pending.
+                return false
+            }
             drafts[speakerID] = SpeakerReviewDraft(name: name, isPredicted: false)
             confirmedSpeakerIDs.insert(speakerID)
+            return true
         } catch {
             failure = error.localizedDescription
+            return false
         }
     }
 
@@ -515,13 +568,25 @@ final class SpeakerReviewModel: ObservableObject {
 struct SpeakerReviewView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model: SpeakerReviewModel
+    private let onComplete: () -> Void
+    private let onLater: () -> Void
 
-    init(meetingID: UUID, revision: Int, configuration: ArchiveTransferConfiguration) {
+    init(
+        meetingID: UUID,
+        revision: Int,
+        configuration: ArchiveTransferConfiguration,
+        onComplete: @escaping () -> Void = {},
+        onReviewChanged: @escaping () -> Void = {},
+        onLater: @escaping () -> Void = {}
+    ) {
+        self.onComplete = onComplete
+        self.onLater = onLater
         _model = StateObject(
             wrappedValue: SpeakerReviewModel(
                 meetingID: meetingID,
                 revision: revision,
-                configuration: configuration
+                configuration: configuration,
+                onReviewChanged: onReviewChanged
             )
         )
     }
@@ -543,9 +608,21 @@ struct SpeakerReviewView: View {
             }
             .navigationTitle("Review speakers")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                if model.response == nil && !model.isLoading {
-                    ToolbarItem(placement: .primaryAction) { Button("Try again") { Task { await model.load() } } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Later") {
+                        onLater()
+                        dismiss()
+                    }
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if model.response == nil && !model.isLoading {
+                        Button("Try again") { Task { await model.load() } }
+                    }
+                    Button("Complete") {
+                        onComplete()
+                        dismiss()
+                    }
+                    .disabled(!model.canComplete)
                 }
             }
         }
@@ -666,6 +743,7 @@ struct SpeakerReviewView: View {
                     .disabled(
                         draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || model.confirmingSpeakerIDs.contains(speaker.speakerID)
+                            || model.confirmedSpeakerIDs.contains(speaker.speakerID)
                     )
             }
         }

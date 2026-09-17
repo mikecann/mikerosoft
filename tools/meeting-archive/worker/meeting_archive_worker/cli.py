@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import sqlite3
 import socket
+import stat
 import sys
 import threading
 import uuid
@@ -15,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .archive import ArchiveConflict, ArchiveStore
+from .db import closing_connection
 from .manifest import ManifestError, verify_incoming
 from .media_validation import MediaValidationError
 from .durable_files import atomic_write_bytes, atomic_write_text
@@ -76,6 +79,74 @@ def _calendar_candidates(metadata: dict[str, Any]) -> list[dict[str, str | None]
                 "source": raw.get("source") if isinstance(raw.get("source"), str) else None,
             })
     return result
+
+
+def _speaker_counts_for_status(
+    job: dict[str, Any],
+    database: Path,
+) -> tuple[int, int] | None:
+    """Read canonical speaker-review state without creating files or DB rows."""
+    if job.get("state") != "succeeded":
+        return None
+    transcript_path = (
+        Path(job["archive_path"])
+        / "transcripts"
+        / f"v{job['manifest_revision']}"
+        / "transcript.json"
+    )
+    try:
+        transcript_stat = transcript_path.lstat()
+        if (
+            not stat.S_ISREG(transcript_stat.st_mode)
+            or transcript_stat.st_size > 16 * 1024 * 1024
+        ):
+            return None
+        transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(transcript, dict)
+        or transcript.get("schema_version") != 1
+        or transcript.get("meeting_id") != job["meeting_id"]
+        or transcript.get("manifest_revision") != job["manifest_revision"]
+        or not isinstance(transcript.get("processing"), dict)
+        or transcript["processing"].get("manifest_sha256") != job["manifest_sha256"]
+        or not isinstance(transcript.get("turns"), list)
+    ):
+        return None
+    speaker_ids: set[str] = set()
+    for turn in transcript["turns"]:
+        if not isinstance(turn, dict):
+            return None
+        speaker_id = turn.get("speaker")
+        if speaker_id is None:
+            continue
+        if not isinstance(speaker_id, str) or not speaker_id.strip():
+            return None
+        speaker_ids.add(speaker_id)
+    try:
+        database_uri = database.resolve().as_uri() + "?mode=ro"
+        with closing_connection(
+            lambda: sqlite3.connect(database_uri, uri=True),
+        ) as connection:
+            confirmed_ids = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT speaker_id FROM speaker_assignments "
+                    "WHERE meeting_id=? AND manifest_revision=?",
+                    (job["meeting_id"], job["manifest_revision"]),
+                )
+            }
+    except (OSError, sqlite3.Error):
+        return None
+    return len(speaker_ids), len(speaker_ids - confirmed_ids)
+
+
+def _add_speaker_counts_to_status(status: dict[str, Any], database: Path) -> None:
+    for job in status["jobs"]:
+        counts = _speaker_counts_for_status(job, database)
+        if counts is not None:
+            job["total_speaker_count"], job["unconfirmed_speaker_count"] = counts
 
 
 class _Heartbeat:
@@ -249,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
                 for value in args.meeting_id
             } if args.meeting_id else None
             status = JobQueue(args.db).status(meeting_ids)
+            _add_speaker_counts_to_status(status, Path(args.db))
             from .service import PublicationQueue
 
             processing_job_ids = {int(job["id"]) for job in status["jobs"]}

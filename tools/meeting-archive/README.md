@@ -76,6 +76,19 @@ and an actual reboot remain untested.
 
 ## Review and current limits
 
+After naming a meeting, a progress window shows transfer and processing on
+Bruce. It can be closed while that work continues. When speaker analysis is
+ready, the app brings up speaker review once per meeting revision, deferring
+the popup while another call is recording or its title prompt is open. The
+menu bar retains a count and direct review actions for speakers needing names,
+including after a review is dismissed or the app restarts. Notifications do
+not need to be enabled for this window and menu-bar flow.
+
+Confirm each speaker's name, then choose **Complete**. **Later** closes review
+without marking unresolved speakers complete. Confirmed names remain saved
+when reopening review. Archiving and subsequent recordings do not wait for
+speaker review.
+
 The library supports playback, transcript access, and speaker review after a
 processed archive is available. Calendar candidates are suggestions and need
 manual confirmation. Keep the app’s minimal settings explicit: selected

@@ -915,6 +915,97 @@ class ProcessingTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_status_cli_counts_canonical_unconfirmed_speakers_without_enrolling(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "worker.sqlite3"
+            meeting_id = str(uuid.uuid4())
+            archive = root / "archive"
+            transcript_directory = archive / "transcripts" / "v1"
+            transcript_directory.mkdir(parents=True)
+            digest = "a" * 64
+            transcript = {
+                "schema_version": 1,
+                "meeting_id": meeting_id,
+                "manifest_revision": 1,
+                "turns": [
+                    {"speaker": "microphone:SPEAKER_00"},
+                    {"speaker": "incoming:SPEAKER_00"},
+                    {"speaker": "microphone:SPEAKER_00"},
+                    {"text": "turn without a diarized speaker"},
+                ],
+                "processing": {"manifest_sha256": digest},
+            }
+            (transcript_directory / "transcript.json").write_text(
+                json.dumps(transcript), encoding="utf-8"
+            )
+            queue = JobQueue(database)
+            queue.enqueue(meeting_id, 1, digest, str(archive))
+            claimed = queue.claim_ready("worker", 60)
+            queue.complete(claimed)  # type: ignore[arg-type]
+            registry = SpeakerRegistry(database)
+            registry.identify(meeting_id, 1, "microphone:SPEAKER_00", "Michael")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["status", "--db", str(database), "--meeting-id", meeting_id])
+            response = json.loads(output.getvalue())
+
+            self.assertEqual(code, 0)
+            self.assertEqual(response["jobs"][0]["total_speaker_count"], 2)
+            self.assertEqual(response["jobs"][0]["unconfirmed_speaker_count"], 1)
+            self.assertEqual(
+                registry.assignments(meeting_id, 1),
+                {"microphone:SPEAKER_00": "Michael"},
+            )
+            with closing_connection(lambda: sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM voice_profiles").fetchone()[0], 0)
+
+    def test_status_cli_leaves_speaker_counts_unknown_when_data_is_not_canonical(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "worker.sqlite3"
+            queue = JobQueue(database)
+            SpeakerRegistry(database)
+            meeting_ids = {
+                "missing": str(uuid.uuid4()),
+                "corrupt": str(uuid.uuid4()),
+                "wrong_revision": str(uuid.uuid4()),
+                "not_ready": str(uuid.uuid4()),
+            }
+            digest = "b" * 64
+            for kind, meeting_id in meeting_ids.items():
+                archive = root / kind
+                transcript_directory = archive / "transcripts" / "v1"
+                transcript_directory.mkdir(parents=True)
+                if kind == "corrupt":
+                    (transcript_directory / "transcript.json").write_text("not json", encoding="utf-8")
+                elif kind in ("wrong_revision", "not_ready"):
+                    (transcript_directory / "transcript.json").write_text(
+                        json.dumps({
+                            "schema_version": 1,
+                            "meeting_id": meeting_id,
+                            "manifest_revision": 2 if kind == "wrong_revision" else 1,
+                            "turns": [{"speaker": "incoming:SPEAKER_00"}],
+                            "processing": {"manifest_sha256": digest},
+                        }),
+                        encoding="utf-8",
+                    )
+                queue.enqueue(meeting_id, 1, digest, str(archive))
+                if kind != "not_ready":
+                    claimed = queue.claim_ready(f"worker-{kind}", 60)
+                    queue.complete(claimed)  # type: ignore[arg-type]
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = cli_main(["status", "--db", str(database)])
+            response = json.loads(output.getvalue())
+
+            self.assertEqual(code, 0)
+            for job in response["jobs"]:
+                self.assertNotIn("total_speaker_count", job)
+                self.assertNotIn("unconfirmed_speaker_count", job)
+
     def test_status_cli_filters_a_bounded_meeting_set_and_joins_publication(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             database = Path(temporary) / "worker.sqlite3"

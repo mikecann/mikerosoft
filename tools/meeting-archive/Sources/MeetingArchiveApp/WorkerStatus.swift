@@ -40,6 +40,22 @@ struct WorkerMeetingStatus: Equatable, Sendable {
     var speakerReview: WorkerSpeakerReviewState
     var retryStage: WorkerRetryStage?
     var lastError: String?
+    var manifestRevision: Int? = nil
+    var totalSpeakerCount: Int? = nil
+    var unconfirmedSpeakerCount: Int? = nil
+
+    private var speakerReviewDetail: String {
+        guard totalSpeakerCount != nil, let unconfirmedSpeakerCount else {
+            return "Speaker review available"
+        }
+        if unconfirmedSpeakerCount == 0 {
+            return "Speaker review complete"
+        }
+        if unconfirmedSpeakerCount == 1 {
+            return "1 speaker needs a name"
+        }
+        return "\(unconfirmedSpeakerCount) speakers need names"
+    }
 
     var detail: String {
         switch phase {
@@ -50,22 +66,22 @@ struct WorkerMeetingStatus: Equatable, Sendable {
             return lastError.map { "\(stage) needs attention: \($0)" }
                 ?? "\(stage) needs attention"
         case .published:
-            return "Published to Notion • speaker review available"
+            return "Published to Notion • \(speakerReviewDetail.lowercased())"
         case .processing:
             if processingState != .succeeded {
                 return processingState == .leased
-                    ? "Diarization in progress"
-                    : "Archived • processing queued"
+                    ? "Transcribing and separating speakers"
+                    : "Archived • transcription and speaker separation queued"
             }
             switch publicationState {
             case .publishing:
-                return "Speaker review available • publishing to Notion"
+                return "\(speakerReviewDetail) • publishing to Notion"
             case .ready, nil:
-                return "Speaker review available • Notion queued"
+                return "\(speakerReviewDetail) • Notion queued"
             case .retryWait:
-                return "Speaker review available • Notion waiting to retry"
+                return "\(speakerReviewDetail) • Notion waiting to retry"
             case .succeeded:
-                return "Published to Notion • speaker review available"
+                return "Published to Notion • \(speakerReviewDetail.lowercased())"
             }
         }
     }
@@ -99,6 +115,21 @@ struct WorkerStatusResponse: Codable, Equatable, Sendable {
         }
         guard jobs.allSatisfy({ $0.manifestRevision >= 1 }) else {
             throw WorkerStatusError.invalidResponse("Worker status returned an invalid manifest revision")
+        }
+        guard jobs.allSatisfy({ job in
+            switch (job.totalSpeakerCount, job.unconfirmedSpeakerCount) {
+            case (nil, nil):
+                return true
+            case let (total?, unconfirmed?):
+                return job.state == .succeeded
+                    && total >= 0
+                    && unconfirmed >= 0
+                    && unconfirmed <= total
+            default:
+                return false
+            }
+        }) else {
+            throw WorkerStatusError.invalidResponse("Worker status returned invalid speaker counts")
         }
 
         let jobsByMeeting = Dictionary(grouping: jobs, by: \.meetingID).mapValues { candidates in
@@ -141,7 +172,8 @@ struct WorkerStatusResponse: Codable, Equatable, Sendable {
                 publicationState: publication?.state,
                 speakerReview: .waitingForProcessing,
                 retryStage: .processing,
-                lastError: job.lastError
+                lastError: job.lastError,
+                manifestRevision: job.manifestRevision
             )
         }
         guard job.state == .succeeded else {
@@ -152,7 +184,8 @@ struct WorkerStatusResponse: Codable, Equatable, Sendable {
                 publicationState: publication?.state,
                 speakerReview: .waitingForProcessing,
                 retryStage: nil,
-                lastError: nil
+                lastError: nil,
+                manifestRevision: job.manifestRevision
             )
         }
         if publication?.state == .retryWait {
@@ -163,7 +196,10 @@ struct WorkerStatusResponse: Codable, Equatable, Sendable {
                 publicationState: .retryWait,
                 speakerReview: .available,
                 retryStage: .publication,
-                lastError: publication?.lastError
+                lastError: publication?.lastError,
+                manifestRevision: job.manifestRevision,
+                totalSpeakerCount: job.totalSpeakerCount,
+                unconfirmedSpeakerCount: job.unconfirmedSpeakerCount
             )
         }
         return WorkerMeetingStatus(
@@ -173,7 +209,10 @@ struct WorkerStatusResponse: Codable, Equatable, Sendable {
             publicationState: publication?.state,
             speakerReview: .available,
             retryStage: nil,
-            lastError: nil
+            lastError: nil,
+            manifestRevision: job.manifestRevision,
+            totalSpeakerCount: job.totalSpeakerCount,
+            unconfirmedSpeakerCount: job.unconfirmedSpeakerCount
         )
     }
 }
@@ -190,6 +229,8 @@ struct WorkerProcessingJob: Codable, Equatable, Sendable {
     var leaseOwner: String?
     var leaseExpiresAt: Double?
     var lastError: String?
+    var totalSpeakerCount: Int?
+    var unconfirmedSpeakerCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -202,6 +243,8 @@ struct WorkerProcessingJob: Codable, Equatable, Sendable {
         case leaseOwner = "lease_owner"
         case leaseExpiresAt = "lease_expires_at"
         case lastError = "last_error"
+        case totalSpeakerCount = "total_speaker_count"
+        case unconfirmedSpeakerCount = "unconfirmed_speaker_count"
     }
 }
 

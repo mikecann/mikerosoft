@@ -28,6 +28,78 @@ final class WorkerStatusTests: XCTestCase {
         XCTAssertEqual(statuses[failedID]?.phase, .needsAttention)
         XCTAssertEqual(statuses[failedID]?.retryStage, .processing)
         XCTAssertEqual(statuses[failedID]?.lastError, "audio is corrupt")
+        XCTAssertEqual(statuses[publishedID]?.manifestRevision, 1)
+        XCTAssertNil(statuses[publishedID]?.totalSpeakerCount)
+        XCTAssertNil(statuses[publishedID]?.unconfirmedSpeakerCount)
+    }
+
+    func testSpeakerCountsAndCurrentRevisionReachStatusDetails() throws {
+        let queuedID = UUID()
+        let activeID = UUID()
+        let publishedID = UUID()
+        let completeID = UUID()
+        let response = try JSONDecoder().decode(
+            WorkerStatusResponse.self,
+            from: statusFixture(
+                jobs: [
+                    job(id: 20, meetingID: queuedID, state: "ready"),
+                    job(id: 21, meetingID: activeID, state: "leased"),
+                    job(
+                        id: 22,
+                        meetingID: publishedID,
+                        state: "succeeded",
+                        totalSpeakerCount: 3,
+                        unconfirmedSpeakerCount: 2
+                    ),
+                    job(
+                        id: 23,
+                        meetingID: completeID,
+                        state: "succeeded",
+                        totalSpeakerCount: 2,
+                        unconfirmedSpeakerCount: 0
+                    ),
+                ],
+                publications: [
+                    publication(processingJobID: 22, state: "succeeded"),
+                    publication(processingJobID: 23, state: "publishing"),
+                ]
+            )
+        )
+
+        let statuses = try response.statuses(
+            for: [queuedID, activeID, publishedID, completeID]
+        )
+
+        XCTAssertEqual(statuses[queuedID]?.detail, "Archived • transcription and speaker separation queued")
+        XCTAssertEqual(statuses[activeID]?.detail, "Transcribing and separating speakers")
+        XCTAssertEqual(statuses[publishedID]?.manifestRevision, 1)
+        XCTAssertEqual(statuses[publishedID]?.totalSpeakerCount, 3)
+        XCTAssertEqual(statuses[publishedID]?.unconfirmedSpeakerCount, 2)
+        XCTAssertEqual(statuses[publishedID]?.detail, "Published to Notion • 2 speakers need names")
+        XCTAssertEqual(statuses[completeID]?.detail, "Speaker review complete • publishing to Notion")
+    }
+
+    func testRejectsPartialOrImpossibleSpeakerCounts() throws {
+        let meetingID = UUID()
+        for counts in [(2, nil), (nil, 1), (1, 2), (-1, 0)] as [(Int?, Int?)] {
+            let response = try JSONDecoder().decode(
+                WorkerStatusResponse.self,
+                from: statusFixture(
+                    jobs: [
+                        job(
+                            id: 30,
+                            meetingID: meetingID,
+                            state: "succeeded",
+                            totalSpeakerCount: counts.0,
+                            unconfirmedSpeakerCount: counts.1
+                        ),
+                    ],
+                    publications: []
+                )
+            )
+
+            XCTAssertThrowsError(try response.statuses(for: [meetingID]))
+        }
     }
 
     func testPublicationIsJoinedToItsProcessingJobRatherThanGlobalPhase() throws {
@@ -257,9 +329,11 @@ final class WorkerStatusTests: XCTestCase {
         id: Int,
         meetingID: UUID,
         state: String,
-        error: String? = nil
+        error: String? = nil,
+        totalSpeakerCount: Int? = nil,
+        unconfirmedSpeakerCount: Int? = nil
     ) -> [String: Any] {
-        [
+        var value: [String: Any] = [
             "id": id,
             "meeting_id": meetingID.uuidString.lowercased(),
             "manifest_revision": 1,
@@ -272,6 +346,13 @@ final class WorkerStatusTests: XCTestCase {
             "lease_expires_at": NSNull(),
             "last_error": error ?? NSNull(),
         ]
+        if let totalSpeakerCount {
+            value["total_speaker_count"] = totalSpeakerCount
+        }
+        if let unconfirmedSpeakerCount {
+            value["unconfirmed_speaker_count"] = unconfirmedSpeakerCount
+        }
+        return value
     }
 
     private func publication(
