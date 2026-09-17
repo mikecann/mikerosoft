@@ -79,6 +79,16 @@ final class ControlCenterLightsWidgetTests: XCTestCase {
         XCTAssertEqual(studioDisplayModeIndex(matching: target, in: modes), 1)
     }
 
+    func testRecordItLaunchURLIsOnlyProvidedWhenTheStudioTurnsOn() {
+        let homeDirectory = URL(fileURLWithPath: "/Users/mike", isDirectory: true)
+
+        XCTAssertEqual(
+            recordItLaunchURL(isStudioEnabled: true, homeDirectory: homeDirectory)?.path,
+            "/Users/mike/Applications/Record It.app"
+        )
+        XCTAssertNil(recordItLaunchURL(isStudioEnabled: false, homeDirectory: homeDirectory))
+    }
+
     func testFindsTheSwitchBelongingToTheElgatoPrompterDisplay() {
         let tree = DisplayLinkAccessibilityNode(
             role: "AXApplication",

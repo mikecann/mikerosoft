@@ -109,7 +109,10 @@ time when macOS reports one.
 Control Center Lights discovers Elgato lights through Bonjour and shows one
 power button. A click reads every reachable light first. If they are all on it
 turns them all off; otherwise it turns them all on. The request changes only
-power, preserving each light's brightness and colour temperature.
+power, preserving each light's brightness and colour temperature. When the
+button turns the studio on, it also opens `~/Applications/Record It.app`.
+Turning the studio off leaves Record It alone so an active recording is never
+quit unexpectedly.
 
 The widget can optionally include the Elgato Prompter in the same action. Turn
 on **Include Elgato Prompter** in the widget settings or its right-click menu.

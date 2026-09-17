@@ -1,6 +1,32 @@
 import AppKit
 import QuartzCore
 
+func recordItLaunchURL(
+    isStudioEnabled: Bool,
+    homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+) -> URL? {
+    guard isStudioEnabled else { return nil }
+    return homeDirectory
+        .appendingPathComponent("Applications", isDirectory: true)
+        .appendingPathComponent("Record It.app", isDirectory: true)
+}
+
+private func launchRecordItWhenStudioTurnsOn(_ isStudioEnabled: Bool) {
+    guard let appURL = recordItLaunchURL(isStudioEnabled: isStudioEnabled) else { return }
+    guard FileManager.default.fileExists(atPath: appURL.path) else {
+        log("Record It launch skipped: app not found at \(appURL.path)")
+        return
+    }
+
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
+        if let error {
+            log("Record It launch failed: \(error.localizedDescription)")
+        }
+    }
+}
+
 final class TaskbarPanel {
     let screenID: UInt32
     let monitorID: String
@@ -616,6 +642,7 @@ final class TaskbarController: NSObject {
                 .controlCenterLightsWidget.controlsStudioDisplayScaling
             ControlCenterLightsController.shared.toggleAll { target in
                 guard let target else { return }
+                launchRecordItWhenStudioTurnsOn(target)
                 let updateDisplayScaling = {
                     guard controlsStudioDisplayScaling else { return }
                     StudioDisplayScalingController.shared.setStudioEnabled(target) { result in
