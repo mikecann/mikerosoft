@@ -63,8 +63,9 @@ are not imported automatically yet.
 Bruce uses a separate one-time drive permission for the
 [worker launcher](worker/launcher/README.md). On this installation, that consent
 is complete and the managed worker passed startup, clean shutdown, and automatic
-restart. The next smoke test still needs to prove a new recording is processed
-by that service, and an actual reboot remains untested.
+restart. A solo recording completed processing and publication after a disk
+priority correction and retry. A fresh call without corrective intervention
+and an actual reboot remain untested.
 
 ## Review and current limits
 
