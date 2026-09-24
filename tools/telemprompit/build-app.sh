@@ -55,9 +55,9 @@ if [[ -z "$SIGNING_IDENTITY" ]]; then
       | head -n 1
   } || true)"
 fi
+SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
 SIGNING_REQUIREMENTS=()
-if [[ -z "$SIGNING_IDENTITY" ]]; then
-  SIGNING_IDENTITY="-"
+if [[ "$SIGNING_IDENTITY" == "-" ]]; then
   # An ad-hoc signature's default requirement is the binary hash, which
   # changes every build and makes macOS forget the Accessibility grant used
   # by "Turn On Elgato Prompter". Pin it to the bundle identifier instead.

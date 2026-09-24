@@ -457,11 +457,12 @@ bash tools/telemprompit/restart.sh
   tests instead of synthesising clicks.
 - Global hotkeys use Carbon `RegisterEventHotKey`. Synthetic `CGEvent`s do
   not trigger them, so verify them with a real key press or clicker.
-- `tools/lib/PrompterKit` is shared with Taskbar and Video HQ. After changing
-  it, run all three test suites:
+- `tools/lib/PrompterKit` is shared with Taskbar, Video HQ and Telemprompit.
+  After changing it, run every consumer's tests:
   `swift test --package-path tools/lib/PrompterKit`,
   `swift test --package-path tools/taskbar`,
-  `swift test --package-path tools/video-hq`.
+  `swift test --package-path tools/video-hq`,
+  `swift test --package-path tools/telemprompit`.
 
 ---
 

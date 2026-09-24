@@ -9,13 +9,17 @@ final class PrompterModel: ObservableObject {
     @Published var scriptText = "" {
         didSet {
             guard scriptText != oldValue else { return }
+            let previousItems = items
             items = ScriptParser.parse(scriptText)
-            if let current, current < items.count, items[current].kind == .line {
-                return
-            }
-            current = PromptNavigator.stop(atOffset: offset, tops: tops, in: items)
+            current = PromptNavigator.keepPlace(of: current, from: previousItems, in: items)
         }
     }
+
+    /// Which settings tab is showing. Lives here so reopening the settings
+    /// window can switch tabs without rebuilding its views.
+    @Published var settingsTab = SettingsTab.script
+    /// The display the prompter window is on, for the settings window.
+    @Published var displayStatus = ""
 
     @Published private(set) var items: [PromptItem] = []
     @Published private(set) var current: Int?

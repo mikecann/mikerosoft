@@ -356,9 +356,7 @@ final class TeleprompterWindowController: NSObject, NSWindowDelegate {
         window.title = "Teleprompter - \(projectName)"
         window.contentView = NSHostingView(rootView: TeleprompterScriptView(script: script))
 
-        let screen = NSScreen.screens.first {
-            TeleprompterWindowPlacement.isPrompterDisplay(named: $0.localizedName)
-        } ?? NSScreen.main ?? NSScreen.screens[0]
+        let screen = PrompterDisplay.prompterScreen() ?? NSScreen.main ?? NSScreen.screens[0]
         window.setFrame(
             TeleprompterWindowPlacement.windowFrame(in: screen.visibleFrame),
             display: true

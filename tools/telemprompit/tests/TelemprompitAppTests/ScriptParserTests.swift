@@ -109,4 +109,26 @@ final class ScriptParserTests: XCTestCase {
     func testDecodesCommonHTMLEntitiesFromNotionExports() {
         XCTAssertEqual(ScriptParser.parse("Tom &amp; Jerry&nbsp;&lt;3"), [.line("Tom & Jerry <3")])
     }
+
+    func testCodeSpansKeepTagShapedText() {
+        XCTAssertEqual(
+            ScriptParser.parse("- Use `<div>` here, **with `x` bold**"),
+            [.line("Use <div> here, with x bold")]
+        )
+    }
+
+    func testAFourBacktickFenceIsNotClosedByAnInnerTripleFence() {
+        let notes = """
+        ````md
+        ```ts
+        x
+        ```
+        ````
+        - After
+        """
+        XCTAssertEqual(ScriptParser.parse(notes), [
+            PromptItem(kind: .code, text: "```ts\nx\n```"),
+            .line("After"),
+        ])
+    }
 }

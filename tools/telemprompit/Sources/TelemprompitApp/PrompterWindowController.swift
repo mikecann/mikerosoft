@@ -71,8 +71,9 @@ final class PrompterWindowController: NSObject, NSWindowDelegate {
         )
     }
 
-    var screenDescription: String {
-        window.screen?.localizedName ?? "no screen"
+    private func publishDisplayStatus() {
+        let name = window.screen?.localizedName ?? "no screen"
+        model.displayStatus = isOnPrompter ? name : "\(name) (Elgato Prompter not found)"
     }
 
     var isOnPrompter: Bool {
@@ -91,6 +92,7 @@ final class PrompterWindowController: NSObject, NSWindowDelegate {
         window.setFrame(WindowPlacement.frame(on: target, saved: WindowPlacement.savedFrames()), display: true)
         isPlacing = false
         frameBeforeFill = nil
+        publishDisplayStatus()
     }
 
     /// Toggles between filling the current display and the previous frame.
@@ -107,6 +109,7 @@ final class PrompterWindowController: NSObject, NSWindowDelegate {
     }
 
     @objc private func screensChanged() {
+        publishDisplayStatus()
         guard model.settings.followPrompter, !isOnPrompter,
               PrompterDisplay.prompterScreen() != nil
         else { return }
@@ -116,6 +119,7 @@ final class PrompterWindowController: NSObject, NSWindowDelegate {
     // MARK: - Remember where the window was put on each display
 
     func windowDidMove(_ notification: Notification) { rememberFrame() }
+    func windowDidChangeScreen(_ notification: Notification) { publishDisplayStatus() }
     func windowDidEndLiveResize(_ notification: Notification) { rememberFrame() }
     func windowDidResize(_ notification: Notification) {
         if !window.inLiveResize { rememberFrame() }

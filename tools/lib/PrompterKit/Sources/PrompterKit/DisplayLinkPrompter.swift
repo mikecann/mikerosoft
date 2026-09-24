@@ -116,7 +116,8 @@ public final class DisplayLinkTeleprompterController {
     /// Where diagnostics go. Each app points this at its own log.
     public var log: (String) -> Void = { NSLog("%@", $0) }
 
-    public init() {}
+    // One controller per process, so switch presses stay serialized on its queue.
+    private init() {}
 
     private let bundleID = "com.displaylink.DisplayLinkUserAgent"
     private let appURL = URL(fileURLWithPath: "/Applications/DisplayLink Manager.app")

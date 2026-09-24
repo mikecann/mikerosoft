@@ -27,6 +27,19 @@ enum PromptNavigator {
         return stops.last { $0 < current } ?? stops.first
     }
 
+    /// After an edit, finds the line the reader was on in the new items:
+    /// the same text nearest its old position, otherwise the nearest line
+    /// at or before its old position (the line that took its place).
+    static func keepPlace(of current: Int?, from oldItems: [PromptItem], in newItems: [PromptItem]) -> Int? {
+        let stops = stops(in: newItems)
+        guard let current, oldItems.indices.contains(current) else { return stops.first }
+        let matches = stops.filter { newItems[$0] == oldItems[current] }
+        if let nearest = matches.min(by: { abs($0 - current) < abs($1 - current) }) {
+            return nearest
+        }
+        return stops.last { $0 <= current } ?? stops.first
+    }
+
     /// The line the reader is on while scrolling: the last stop whose top
     /// has reached the reading line.
     static func stop(atOffset offset: CGFloat, tops: [Int: CGFloat], in items: [PromptItem]) -> Int? {

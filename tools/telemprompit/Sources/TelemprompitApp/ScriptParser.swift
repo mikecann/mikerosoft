@@ -54,9 +54,11 @@ enum ScriptParser {
             }
 
             if trimmed.hasPrefix("```") {
+                // A fence closes only with at least as many backticks as it opened with.
+                let fence = String(trimmed.prefix { $0 == "`" })
                 var code: [String] = []
                 while index < lines.count,
-                      !lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                      !lines[index].trimmingCharacters(in: .whitespaces).hasPrefix(fence) {
                     code.append(lines[index])
                     index += 1
                 }
@@ -128,6 +130,22 @@ enum ScriptParser {
     }
 
     private static func cleanInline(_ line: String) -> String {
+        // Swap code spans for placeholders so `<div>` in backticks survives
+        // the tag and markup cleanup, then put their contents back.
+        var spans: [String] = []
+        var text = line
+        while let match = text.range(of: #"`[^`]+`"#, options: .regularExpression) {
+            spans.append(String(text[match].dropFirst().dropLast()))
+            text.replaceSubrange(match, with: "\u{E000}\(spans.count - 1)\u{E001}")
+        }
+        text = cleanMarkup(text)
+        for (index, span) in spans.enumerated() {
+            text = text.replacingOccurrences(of: "\u{E000}\(index)\u{E001}", with: span)
+        }
+        return text
+    }
+
+    private static func cleanMarkup(_ line: String) -> String {
         var text = line
         // Notion annotates blocks with trailing attributes such as
         // {toggle="true"} or {color="gray"}.
@@ -140,7 +158,6 @@ enum ScriptParser {
         text = replacing(#"~~(.+?)~~"#, in: text, with: "$1")
         text = replacing(#"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])"#, in: text, with: "$1")
         text = replacing(#"(?<![\w_])_(?!\s)(.+?)(?<!\s)_(?![\w_])"#, in: text, with: "$1")
-        text = replacing(#"`([^`]+)`"#, in: text, with: "$1")
         for (entity, value) in [
             ("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"),
             ("&quot;", "\""), ("&#39;", "'"), ("&amp;", "&"),

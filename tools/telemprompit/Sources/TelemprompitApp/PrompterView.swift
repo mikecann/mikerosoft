@@ -24,6 +24,8 @@ struct PrompterView: View {
     var body: some View {
         GeometryReader { geometry in
             let readingY = geometry.size.height * settings.readingLine
+            // Never let the margins squeeze the column below a third of the width.
+            let margin = min(settings.sideMargin, geometry.size.width / 3)
             ZStack(alignment: .topLeading) {
                 Color(hex: settings.backgroundColor, fallback: .black)
 
@@ -32,10 +34,10 @@ struct PrompterView: View {
                 } else {
                     ScriptColumn(items: model.items, current: model.current, settings: settings)
                         .frame(
-                            width: max(1, geometry.size.width - settings.sideMargin * 2),
+                            width: max(1, geometry.size.width - margin * 2),
                             alignment: .topLeading
                         )
-                        .offset(x: settings.sideMargin, y: readingY - model.offset)
+                        .offset(x: margin, y: readingY - model.offset)
                         .onPreferenceChange(ItemTopsKey.self) { tops in
                             model.updateLayout(tops: tops, contentHeight: model.contentHeight)
                         }
@@ -54,7 +56,7 @@ struct PrompterView: View {
 
                     if settings.showReadingMarker {
                         ReadingMarker(color: Color(hex: settings.highlightColor, fallback: .yellow))
-                            .offset(x: max(4, settings.sideMargin * 0.5 - 10), y: readingY - 12)
+                            .offset(x: max(4, margin * 0.5 - 10), y: readingY - 12)
                     }
                 }
             }
@@ -172,7 +174,6 @@ private struct ItemView: View, Equatable {
         case .code:
             Text(item.text)
                 .font(.system(size: fontSize, design: .monospaced))
-                .lineLimit(6)
                 .foregroundStyle(textColor.opacity(0.55))
                 .padding(fontSize * 0.5)
                 .background(textColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))

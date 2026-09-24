@@ -15,10 +15,10 @@ case "${1:-start}" in
       # arguments only reach a fresh process, so stop a running one first.
       SCRIPT_PATH="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
       bash "$SCRIPT_DIR/kill.sh" >/dev/null || true
-      for _ in 1 2 3 4 5 6 7 8 9 10; do
-        pgrep -f "$APP_DIR/Contents/MacOS/telemprompit" >/dev/null || break
-        sleep 0.1
-      done
+      if pgrep -f "$APP_DIR/Contents/MacOS/telemprompit" >/dev/null; then
+        echo "Telemprompit is still shutting down; try again in a moment." >&2
+        exit 1
+      fi
       open "$APP_DIR" --args --script "$SCRIPT_PATH"
     else
       open "$APP_DIR"

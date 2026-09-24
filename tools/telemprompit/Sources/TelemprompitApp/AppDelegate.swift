@@ -6,12 +6,11 @@ import PrompterKit
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let model = PrompterModel()
     private lazy var prompter = PrompterWindowController(model: model)
     private let hotkeys = GlobalHotkeys()
     private var settingsWindow: NSWindow?
-    private var settingsTab = SettingsView.Tab.script
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -74,10 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func editScript(_ sender: Any?) { showSettings(tab: .script) }
 
     func showSettings(tab: SettingsView.Tab) {
-        settingsTab = tab
+        model.settingsTab = tab
         let window = settingsWindow ?? makeSettingsWindow()
         settingsWindow = window
-        window.contentView = NSHostingView(rootView: settingsView())
         if !window.isVisible {
             // Open on the main screen, not the prompter, which may be mirrored.
             let screen = NSScreen.screens.first { !PrompterDisplay.isPrompterDisplay(named: $0.localizedName) }
@@ -96,12 +94,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func settingsView() -> some View {
         SettingsView(
             model: model,
-            tab: Binding(get: { [weak self] in self?.settingsTab ?? .script }, set: { [weak self] in self?.settingsTab = $0 }),
-            prompterStatus: { [weak self] in
-                guard let self else { return "" }
-                let name = self.prompter.screenDescription
-                return self.prompter.isOnPrompter ? name : "\(name) (Elgato Prompter not found)"
-            },
             movePrompter: { [weak self] in self?.prompter.placeOnPreferredScreen() },
             turnOnPrompter: { [weak self] in self?.turnOnPrompter(nil) }
         )
@@ -116,6 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "Telemprompit Settings"
         window.isReleasedWhenClosed = false
+        // Built once so the script editor keeps its undo stack and caret.
+        window.contentView = NSHostingView(rootView: settingsView())
         return window
     }
 

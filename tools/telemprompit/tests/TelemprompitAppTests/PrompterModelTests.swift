@@ -96,6 +96,20 @@ final class PrompterModelTests: XCTestCase {
         XCTAssertEqual(model.current, 0)
     }
 
+    func testInsertingALineAboveKeepsTheSameLineCurrent() {
+        let model = makeModel()
+        model.next() // "Two"
+        model.scriptText = "# Intro\n- Zero\n- One\n- Two\n    - Two point one\n- Three"
+        XCTAssertEqual(model.items[model.current!].text, "Two")
+    }
+
+    func testDeletingTheCurrentLineMovesToTheLineNowInItsPlace() {
+        let model = makeModel()
+        model.next() // "Two" at index 2
+        model.scriptText = "# Intro\n- One\n    - Two point one\n- Three"
+        XCTAssertEqual(model.items[model.current!].text, "Two point one")
+    }
+
     func testClearingTheScriptLeavesNoCurrentLine() {
         let model = makeModel()
         model.load("")

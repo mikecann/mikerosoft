@@ -1,16 +1,16 @@
 import SwiftUI
 
+enum SettingsTab: Hashable { case script, appearance, controls }
+
 struct SettingsView: View {
-    enum Tab: Hashable { case script, appearance, controls }
+    typealias Tab = SettingsTab
 
     @ObservedObject var model: PrompterModel
-    @Binding var tab: Tab
-    let prompterStatus: () -> String
     let movePrompter: () -> Void
     let turnOnPrompter: () -> Void
 
     var body: some View {
-        TabView(selection: $tab) {
+        TabView(selection: $model.settingsTab) {
             ScriptTab(model: model)
                 .tabItem { Label("Script", systemImage: "text.alignleft") }
                 .tag(Tab.script)
@@ -19,7 +19,7 @@ struct SettingsView: View {
                 .tag(Tab.appearance)
             ControlsTab(
                 settings: $model.settings,
-                prompterStatus: prompterStatus,
+                displayStatus: model.displayStatus,
                 movePrompter: movePrompter,
                 turnOnPrompter: turnOnPrompter
             )
@@ -97,7 +97,7 @@ private struct AppearanceTab: View {
 
 private struct ControlsTab: View {
     @Binding var settings: PrompterSettings
-    let prompterStatus: () -> String
+    let displayStatus: String
     let movePrompter: () -> Void
     let turnOnPrompter: () -> Void
 
@@ -119,7 +119,7 @@ private struct ControlsTab: View {
             Section("Window") {
                 Toggle("Keep on top of other windows", isOn: $settings.keepOnTop)
                 Toggle("Move to the Elgato Prompter when it is switched on", isOn: $settings.followPrompter)
-                LabeledContent("Showing on", value: prompterStatus())
+                LabeledContent("Showing on", value: displayStatus)
                 HStack {
                     Button("Move to Prompter Display", action: movePrompter)
                     Button("Turn On Elgato Prompter", action: turnOnPrompter)

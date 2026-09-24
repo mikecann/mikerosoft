@@ -128,7 +128,7 @@ while still not covering the Windows-only integrations.
 | `record-meeting` | Supported | `bash tools/record-meeting/setup_mac.sh` | `record-meeting` | SwiftUI meeting audio recorder with diarized transcripts and optional Notion publishing |
 | `meeting-archive` | Preview | `bash tools/meeting-archive/setup_mac.sh` | `meeting-archive` | Zoom capture, Bruce processing, and Notion publication validated. Chrome automatic capture is blocked pending the capture-mode decision; Teams and Slack remain live-unverified |
 | `video-hq` | Supported | `bash tools/video-hq/setup_mac.sh` | Launch `Video HQ` from Spotlight or run `video-hq` | Project-first command center with Notion script import, rendered-video preview, transcription, and OpenRouter-powered descriptions |
-| `telemprompit` | Supported | `bash tools/telemprompit/setup_mac.sh` | Launch `Telemprompit` from Spotlight or run `telemprompit` | Opens on the Elgato Prompter when it is connected, otherwise the main screen. Page Up/Down work from any app for clickers |
+| `telemprompit` | Supported | `bash tools/telemprompit/setup_mac.sh` | Launch `Telemprompit` from Spotlight, or `telemprompit` after `bash install_mac.sh` | Opens on the Elgato Prompter when it is connected, otherwise the main screen. Page Up/Down work from any app for clickers |
 | Everything else | Windows-only for now | Use `install.ps1` on Windows | Varies by tool | Most other tools still depend on Windows-specific shell integration, taskbar shortcuts, or Explorer context menus |
 
 ### Codex worktrees
