@@ -26,6 +26,7 @@ If you want to use any of this, the recommended approach is:
 
 | Name | Type | Description |
 |---|---|---|
+| 🔖 [x-bookmarks](tools/x-bookmarks/README.md) | Mac - background service | Automatically research new X bookmarks in Codex, with fact-checks, follow-up questions, source links, and zero LLM polling |
 | <img src="tools/transcribe/docs/header.webp" width="220"><br>[transcribe](tools/transcribe/README.md) | CLI + context menu | Extract audio from a video and transcribe it via faster-whisper (CUDA with CPU fallback); right-click any video file in Explorer |
 | <img src="tools/video-to-markdown/docs/header.webp" width="220"><br>[video-to-markdown](tools/video-to-markdown/README.md) | CLI + context menu | Convert a YouTube URL to a markdown image-link and copy it to clipboard; right-click any `.url` Internet Shortcut in Explorer |
 | <img src="tools/removebg/docs/header.webp" width="220"><br>[removebg](tools/removebg/README.md) | CLI + context menu | Remove the background from an image using rembg / birefnet-portrait; right-click any image file in Explorer |
