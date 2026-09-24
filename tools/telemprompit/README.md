@@ -1,4 +1,6 @@
-![Telemprompit](docs/ss1.png)
+![Telemprompit](docs/header.png)
+
+![Telemprompit stepping through notes](docs/ss1.png)
 
 # telemprompit
 

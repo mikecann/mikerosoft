@@ -240,7 +240,7 @@ export const tools: Tool[] = [
     name: 'telemprompit',
     desc: 'Teleprompter for the Elgato Prompter: paste notes or Notion bullets, step through them line by line or auto-scroll, mirror for beam-splitter glass, and drive it with a clicker from any app',
     icon: `${base}/telemprompit/icons/telemprompit.png`,
-    header: `${base}/telemprompit/docs/ss1.png`,
+    header: `${base}/telemprompit/docs/header.png`,
     screenshots: [
       `${base}/telemprompit/docs/ss1.png`,
       `${base}/telemprompit/docs/ss2.png`,
