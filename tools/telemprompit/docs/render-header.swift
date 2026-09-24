@@ -1,3 +1,4 @@
+// Renders docs/header.png. Run from tools/telemprompit: swift docs/render-header.swift docs/header.png
 import AppKit
 let W: CGFloat = 1200, H: CGFloat = 500
 let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(W), pixelsHigh: Int(H), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
