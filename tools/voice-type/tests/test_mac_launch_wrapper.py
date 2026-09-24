@@ -110,6 +110,34 @@ class MacLaunchWrapperTests(unittest.TestCase):
                 launch_file.read_text(encoding="utf-8").strip(),
             )
 
+    def test_ignores_an_old_py2app_applet_saved_as_the_approved_launcher(self):
+        # Older installs ran from a py2app "Voice Type.app". It cannot host the
+        # current runtime, so the wrapper must fall back to the native launcher.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            install_dir, log_dir = self._runtime(tmpdir)
+            launch_file = pathlib.Path(tmpdir) / "launch.txt"
+            bundle = pathlib.Path(tmpdir) / "Voice Type.app" / "Contents"
+            (bundle / "MacOS").mkdir(parents=True)
+            (bundle / "Resources").mkdir()
+            (bundle / "Resources" / "__boot__.py").write_text("# py2app\n", encoding="utf-8")
+            applet = bundle / "MacOS" / "Voice Type"
+            applet.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf 'applet:%s\\n' \"$*\" > \"$VOICE_TYPE_TEST_LAUNCH_FILE\"\n",
+                encoding="utf-8",
+            )
+            applet.chmod(0o755)
+            (install_dir / "trusted-launcher-path").write_text(f"{applet}\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["VOICE_TYPE_INSTALL_DIR"] = str(install_dir)
+            env["VOICE_TYPE_LOG_DIR"] = str(log_dir)
+            env["VOICE_TYPE_TEST_LAUNCH_FILE"] = str(launch_file)
+
+            result = subprocess.run(["bash", str(WRAPPER)], env=env, capture_output=True, text=True, check=False)
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(str(install_dir / "voice-type.py"), launch_file.read_text(encoding="utf-8").strip())
+
 
 if __name__ == "__main__":
     unittest.main()

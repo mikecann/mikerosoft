@@ -14,7 +14,9 @@ TRUSTED_LAUNCHER_PATH_FILE="$INSTALL_DIR/trusted-launcher-path"
 LAUNCHER="$RUNTIME_LAUNCHER"
 if [[ -f "$TRUSTED_LAUNCHER_PATH_FILE" ]]; then
   trusted_launcher="$(head -n 1 "$TRUSTED_LAUNCHER_PATH_FILE")"
-  if [[ -x "$trusted_launcher" ]]; then
+  # A py2app applet from an older install (it has Resources/__boot__.py)
+  # cannot host the current runtime, so only honour native launchers.
+  if [[ -x "$trusted_launcher" && ! -f "$(dirname "$trusted_launcher")/../Resources/__boot__.py" ]]; then
     LAUNCHER="$trusted_launcher"
   fi
 fi

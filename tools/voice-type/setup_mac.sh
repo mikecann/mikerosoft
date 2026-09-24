@@ -18,7 +18,9 @@ if [[ -z "$TRUSTED_LAUNCHER" && -f "$HOME/Library/LaunchAgents/com.mikerosoft.vo
   existing_program="$(/usr/libexec/PlistBuddy \
     -c "Print :ProgramArguments:0" \
     "$HOME/Library/LaunchAgents/com.mikerosoft.voice-type.plist" 2>/dev/null || true)"
-  if [[ "$(basename "$existing_program")" == "Voice Type" && -x "$existing_program" ]]; then
+  # Skip py2app applets from older installs; they cannot host this runtime.
+  if [[ "$(basename "$existing_program")" == "Voice Type" && -x "$existing_program" \
+        && ! -f "$(dirname "$existing_program")/../Resources/__boot__.py" ]]; then
     TRUSTED_LAUNCHER="$existing_program"
   fi
 fi
