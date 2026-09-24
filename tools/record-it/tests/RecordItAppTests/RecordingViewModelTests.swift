@@ -4,27 +4,19 @@ import XCTest
 
 @MainActor
 final class RecordingViewModelTests: XCTestCase {
-    func testCriticalCaptureFailureMessageSaysTheRecordingIsNotUsable() {
-        XCTAssertEqual(
-            criticalCaptureFailureMessage(
-                source: .camera,
-                reason: "The microphone stayed silent for 10 seconds."
-            ),
-            "CAMERA CAPTURE FAILED. RECORDING STOPPED. VIDEO AND AUDIO ARE NOT COMPLETE. "
-                + "Do not continue this take. The microphone stayed silent for 10 seconds."
-        )
+    func testReusedTakeNamesGetASuffixInsteadOfOverwriting() {
+        let taken: Set<String> = ["intro", "intro-2"]
+
+        XCTAssertEqual(availableRecordingBaseName("intro") { taken.contains($0) }, "intro-3")
+        XCTAssertEqual(availableRecordingBaseName("outro") { taken.contains($0) }, "outro")
     }
 
-    func testCriticalFailurePointsToTheTemporaryRecoveryTrack() {
-        let recoveryURL = URL(fileURLWithPath: "/recovery/take-backup-audio.caf")
+    func testProblemReportListsTimecodesFromTheStartOfTheTake() {
+        let report = captureProblemReport(takeName: "take", problems: [
+            CaptureProblem(sourceName: "Camera", message: "Mic muted", takeTime: 754.6, soundsAlarm: true)
+        ])
 
-        XCTAssertTrue(
-            criticalCaptureFailureMessage(
-                source: .camera,
-                reason: "The primary microphone froze.",
-                recoveryAudioURL: recoveryURL
-            ).contains("Recovery audio may be available at: /recovery/take-backup-audio.caf")
-        )
+        XCTAssertTrue(report.contains("00:12:34  Camera: Mic muted"))
     }
 
     func testViewModelRestoresTheLastSelectedRecordingMode() {

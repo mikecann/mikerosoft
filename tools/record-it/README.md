@@ -112,24 +112,42 @@ writes a lossless mono recovery track to:
 Recovery tracks use the take name with `-backup-audio.caf`, are intentionally
 not opened in Finder after a normal take, and are retained for 14 days. Expired
 finalized recovery tracks are removed when a new recording begins. Record It
-refuses to start without a distinct built-in recovery microphone, and an
-unexpected helper exit is a critical whole-take failure.
+refuses to start without a distinct built-in recovery microphone. The helper
+records through problems and reports them as quiet warnings, since a backup
+glitch never damages the main files. If Record It crashes, the helper notices
+and closes the backup file cleanly.
 
 Screen recordings use variable-duration frames, so a static screen does not
 create a huge duplicate-frame backlog in the 4K hardware encoder. Record It
 also watches screen and camera callbacks, every required audio stream, and
 sustained encoder backpressure. The dashboard warns after three seconds without
-video activity or microphone signal. The entire take stops if required video or
+video activity or microphone signal. A problem is raised if required video or
 audio callbacks stall for ten seconds, an encoder rejects 60 consecutive
 samples, or the selected microphone delivers digital-zero audio below -120 dB
-for three seconds. It also detects byte-identical PCM loops from 0.5 to 30
+for three seconds. A static screen is not a stall: ScreenCaptureKit stops
+sending frames while nothing changes, so silence after an idle frame is ignored. It also detects byte-identical PCM loops from 0.5 to 30
 seconds across arbitrary callback boundaries, confirms three seconds of exact
 repetition, and monitors AVFoundation interruptions, device disconnection,
 Core Audio device-alive state, and sample-rate changes. Ordinary room silence
-never stops a recording.
-Record It then activates itself, requests critical system attention, repeatedly
-sounds alarm tones, and displays an explicit incomplete-recording alert until
-the failure is acknowledged.
+never raises a problem.
+
+Problems never stop the take. Every source keeps writing, Record It comes to
+the front, sounds an alarm, and asks whether to **Keep Recording** or **Stop
+Recording**. The dashboard lists each problem with its time into the take, and
+a `<take>-problems.txt` file listing the same timecodes is saved next to the
+recording so the bad section is easy to find in the edit.
+
+Other protections against losing a take:
+
+- Screen and camera movies are written in five-second fragments. A crash,
+  force quit, or power loss leaves a file that plays up to the last fragment.
+  A normally stopped file has the standard movie layout.
+- Every recorder is finalized independently, so one failing source can't
+  abandon another source's file halfway through finalizing.
+- A take name that already exists gets a `-2`, `-3` suffix. Existing files are
+  never overwritten.
+- Recording won't start with less than 10 GB free, and an alarm sounds if free
+  space drops below 5 GB mid-take.
 
 Session starts, frame-status changes, 30-second health checks, failures, and
 stops are written to:

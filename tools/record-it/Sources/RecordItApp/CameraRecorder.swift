@@ -8,7 +8,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let outputURL: URL
     private let encoderConfiguration: EncoderConfiguration
     private let startGate: RecordingStartGate?
-    private let onFailure: (@Sendable (Error) -> Void)?
+    private let onProblem: (@Sendable (Error) -> Void)?
     private let onTelemetry: (@Sendable (RecordingTelemetry) -> Void)?
     private let captureSession = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -21,13 +21,13 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var lastWaveformSampleAt: TimeInterval?
     private var waveform = AudioWaveformBuffer(capacity: 120)
     private var isStopping = false
-    private var captureError: Error?
+    private var problemTracker = CaptureProblemTracker()
     private var configurationLockedDevice: AVCaptureDevice?
     private lazy var sessionFailureMonitor = CaptureSessionFailureMonitor(
         session: captureSession,
         deviceIDs: Set([camera.id, microphone?.id].compactMap { $0 }),
         onFailure: { [weak self] error in
-            self?.writerQueue.async { [weak self] in self?.reportFailure(error) }
+            self?.writerQueue.async { [weak self] in self?.reportProblem(error.localizedDescription) }
         }
     )
     private lazy var coreAudioHealthMonitor = microphone.map { microphone in
@@ -35,7 +35,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             deviceUID: microphone.id,
             deviceName: microphone.name,
             onFailure: { [weak self] error in
-                self?.writerQueue.async { [weak self] in self?.reportFailure(error) }
+                self?.writerQueue.async { [weak self] in self?.reportProblem(error.localizedDescription) }
             }
         )
     }
@@ -53,7 +53,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         outputURL: URL,
         encoderConfiguration: EncoderConfiguration,
         startGate: RecordingStartGate? = nil,
-        onFailure: (@Sendable (Error) -> Void)? = nil,
+        onProblem: (@Sendable (Error) -> Void)? = nil,
         onTelemetry: (@Sendable (RecordingTelemetry) -> Void)? = nil
     ) {
         self.camera = camera
@@ -61,7 +61,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         self.outputURL = outputURL
         self.encoderConfiguration = encoderConfiguration
         self.startGate = startGate
-        self.onFailure = onFailure
+        self.onProblem = onProblem
         self.onTelemetry = onTelemetry
     }
 
@@ -127,9 +127,13 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         writerQueue.sync {}
         guard let movieWriter else { return }
         self.movieWriter = nil
-        try await movieWriter.finish()
-        RecordingDiagnostics.shared.log("camera.stop error=\(captureError?.localizedDescription ?? "none")")
-        if let captureError { throw captureError }
+        do {
+            try await movieWriter.finish()
+        } catch {
+            RecordingDiagnostics.shared.log("camera.stop error=\(error.localizedDescription)")
+            throw error
+        }
+        RecordingDiagnostics.shared.log("camera.stop error=none")
     }
 
     func captureOutput(
@@ -167,7 +171,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                     }
                 }
             } catch {
-                reportFailure(error)
+                reportProblem(error.localizedDescription)
                 return
             }
             reportHealthProblemIfNeeded(at: now)
@@ -197,18 +201,27 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
 
     private func reportHealthProblemIfNeeded(at time: TimeInterval) {
-        guard let problem = healthState?.problem(at: time) else { return }
-        reportFailure(RecordItError.message(problem))
+        guard !isStopping else { return }
+        let transition = problemTracker.updateHealth(healthState?.problem(at: time))
+        if let recovered = transition.recovered {
+            RecordingDiagnostics.shared.log("camera.recovered problem=\(recovered)")
+        }
+        if let problem = transition.newProblem {
+            announce(problem)
+        }
     }
 
-    private func reportFailure(_ error: Error) {
-        guard !isStopping, captureError == nil else { return }
-        captureError = error
-        healthTimer?.cancel()
-        healthTimer = nil
-        RecordingDiagnostics.shared.log("camera.failure error=\(error.localizedDescription)")
-        emitTelemetry(at: ProcessInfo.processInfo.systemUptime, failureMessage: error.localizedDescription)
-        onFailure?(error)
+    private func reportProblem(_ message: String) {
+        guard !isStopping, problemTracker.recordEvent(message) else { return }
+        announce(message)
+    }
+
+    // Problems never stop the take. Whatever is still arriving keeps being
+    // written, and the user decides whether the take is worth continuing.
+    private func announce(_ message: String) {
+        RecordingDiagnostics.shared.log("camera.problem error=\(message)")
+        emitTelemetry(at: ProcessInfo.processInfo.systemUptime, failureMessage: message)
+        onProblem?(RecordItError.message(message))
     }
 
     private func emitTelemetry(at time: TimeInterval, failureMessage: String? = nil) {
@@ -229,7 +242,7 @@ final class CameraRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             writerStatus: progress.writerStatus,
             now: time,
             audioWaveformLevels: waveform.levels,
-            failureMessage: failureMessage
+            failureMessage: failureMessage ?? problemTracker.currentProblem
         ))
     }
 

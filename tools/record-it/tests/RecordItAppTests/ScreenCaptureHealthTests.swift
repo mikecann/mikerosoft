@@ -21,6 +21,43 @@ final class ScreenCaptureHealthTests: XCTestCase {
         XCTAssertNotNil(health.problem(at: 119.1))
     }
 
+    func testAnIdleScreenIsNotAStallNoMatterHowLongItStaysStill() {
+        var health = MediaCaptureHealthState(startedAt: 100)
+
+        health.recordScreenCallback(at: 101, isIdle: true)
+
+        XCTAssertNil(health.problem(at: 400))
+    }
+
+    func testChangedScreenContentReenablesTheStallCheck() {
+        var health = MediaCaptureHealthState(startedAt: 100)
+
+        health.recordScreenCallback(at: 101, isIdle: true)
+        health.recordScreenCallback(at: 102, isIdle: false)
+
+        XCTAssertNil(health.problem(at: 111.9))
+        XCTAssertNotNil(health.problem(at: 112.1))
+    }
+
+    func testProblemTrackerAnnouncesHealthProblemsAgainAfterTheyClear() {
+        var tracker = CaptureProblemTracker()
+
+        XCTAssertEqual(tracker.updateHealth("silent").newProblem, "silent")
+        XCTAssertNil(tracker.updateHealth("silent").newProblem)
+        let cleared = tracker.updateHealth(nil)
+        XCTAssertNil(cleared.newProblem)
+        XCTAssertEqual(cleared.recovered, "silent")
+        XCTAssertEqual(tracker.updateHealth("silent").newProblem, "silent")
+    }
+
+    func testProblemTrackerAnnouncesEachEventOnce() {
+        var tracker = CaptureProblemTracker()
+
+        XCTAssertTrue(tracker.recordEvent("disconnected"))
+        XCTAssertFalse(tracker.recordEvent("disconnected"))
+        XCTAssertEqual(tracker.currentProblem, "disconnected")
+    }
+
     func testHealthDetectsSustainedVideoEncoderBackpressure() {
         var health = MediaCaptureHealthState(startedAt: 100)
 

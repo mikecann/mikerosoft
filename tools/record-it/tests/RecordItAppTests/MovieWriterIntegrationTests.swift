@@ -147,6 +147,43 @@ final class MovieWriterIntegrationTests: XCTestCase {
             }
         }
     }
+
+    func testAnUnfinishedMovieIsStillPlayableUpToTheLastFragment() async throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("record-it-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+        let encoder = try XCTUnwrap(preferredHardwareVideoEncoder(
+            in: HardwareVideoEncoderCatalog.availableEncoders(),
+            savedID: ""
+        ))
+        var writer: MovieWriter? = try MovieWriter(
+            outputURL: outputURL,
+            width: 128,
+            height: 128,
+            includesAudio: false,
+            encoderConfiguration: EncoderConfiguration(
+                encoder: encoder,
+                rateControl: .cbr,
+                bitRateMbps: 5,
+                maximumBitRateMbps: 5,
+                qualityParameter: 20
+            )
+        )
+
+        // Fifteen seconds of timeline, then the app "crashes" without finishing.
+        for frame in stride(from: 0, through: 450, by: 15) {
+            writer?.appendVideo(try videoSampleBuffer(frame: frame, width: 128, height: 128))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        writer = nil
+
+        let asset = AVURLAsset(url: outputURL)
+        let duration = try await asset.load(.duration)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        XCTAssertFalse(tracks.isEmpty)
+        XCTAssertGreaterThanOrEqual(duration.seconds, 5)
+    }
 }
 
 private func videoSampleBuffer(frame: Int, width: Int, height: Int) throws -> CMSampleBuffer {

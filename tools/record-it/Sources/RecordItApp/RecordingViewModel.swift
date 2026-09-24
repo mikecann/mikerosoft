@@ -60,7 +60,8 @@ final class RecordingViewModel: ObservableObject {
     @Published private(set) var statusMessage = "Loading devices…"
     @Published private(set) var recordingTelemetry: [CaptureSource: RecordingTelemetry] = [:]
     @Published var presentedError: String?
-    @Published private(set) var criticalFailureMessage: String?
+    @Published private(set) var captureProblems: [CaptureProblem] = []
+    @Published private(set) var pendingProblemAlert: CaptureProblem?
 
     let preferences: RecordingPreferences
 
@@ -69,6 +70,9 @@ final class RecordingViewModel: ObservableObject {
     private var activeSession: RecordingSession?
     private var activeRecoveryAudio: RecoveryAudioRecording?
     private var activeOutputURLs: [URL] = []
+    private var activeTakeName: String?
+    private var activeOutputDirectory: URL?
+    private var diskSpaceMonitor: Task<Void, Never>?
 
     init(
         preferences: RecordingPreferences = RecordingPreferences(),
@@ -232,18 +236,40 @@ final class RecordingViewModel: ObservableObject {
         guard
             canRecord,
             let destination = selectedDestination,
-            let outputBaseName = resolvedFileName
+            let requestedBaseName = resolvedFileName
         else { return }
         isBusy = true
         statusMessage = "Starting…"
         recordingTelemetry = [:]
+        captureProblems = []
+        pendingProblemAlert = nil
         let startedAt = Date()
-        fileName = outputBaseName
 
         do {
             let outputDirectory = try prepareOutputDirectory(for: destination)
+            if let freeBytes = availableRecordingBytes(at: outputDirectory),
+               freeBytes < minimumFreeRecordingBytes {
+                throw RecordItError.message(
+                    "Only \(formattedFreeSpace(freeBytes)) is free on the recording disk. "
+                        + "Free at least \(formattedFreeSpace(minimumFreeRecordingBytes)) before recording."
+                )
+            }
             let recoveryDirectory = recoveryAudioDirectory()
             try cleanupExpiredRecoveryAudio(in: recoveryDirectory)
+            let recordingMode = mode
+            let outputBaseName = availableRecordingBaseName(requestedBaseName) { candidate in
+                let urls = Array(recordingOutputURLs(
+                    mode: recordingMode,
+                    directory: outputDirectory,
+                    startedAt: startedAt,
+                    baseName: candidate
+                ).values) + [
+                    recoveryAudioURL(baseName: candidate, directory: recoveryDirectory),
+                    outputDirectory.appendingPathComponent(captureProblemReportName(candidate))
+                ]
+                return urls.contains { FileManager.default.fileExists(atPath: $0.path) }
+            }
+            fileName = outputBaseName
             let outputs = recordingOutputURLs(
                 mode: mode,
                 directory: outputDirectory,
@@ -268,9 +294,9 @@ final class RecordingViewModel: ObservableObject {
                 recoveryAudio = RecoveryAudioRecording(
                     device: recoveryMicrophone,
                     outputURL: recoveryURL,
-                    onFailure: { [weak self] error in
+                    onProblem: { [weak self] error in
                         Task { @MainActor [weak self] in
-                            await self?.handleCaptureFailure(error, source: .recoveryAudio)
+                            self?.handleCaptureProblem(error, source: .recoveryAudio)
                         }
                     }
                 )
@@ -293,9 +319,9 @@ final class RecordingViewModel: ObservableObject {
                         outputURL: outputURL,
                         encoderConfiguration: encoderConfiguration,
                         startGate: startGate,
-                        onFailure: { [weak self] error in
+                        onProblem: { [weak self] error in
                             Task { @MainActor [weak self] in
-                                await self?.handleCaptureFailure(error, source: .screen)
+                                self?.handleCaptureProblem(error, source: .screen)
                             }
                         },
                         onTelemetry: { [weak self] telemetry in
@@ -321,9 +347,9 @@ final class RecordingViewModel: ObservableObject {
                         outputURL: outputURL,
                         encoderConfiguration: encoderConfiguration,
                         startGate: startGate,
-                        onFailure: { [weak self] error in
+                        onProblem: { [weak self] error in
                             Task { @MainActor [weak self] in
-                                await self?.handleCaptureFailure(error, source: .camera)
+                                self?.handleCaptureProblem(error, source: .camera)
                             }
                         },
                         onTelemetry: { [weak self] telemetry in
@@ -342,9 +368,9 @@ final class RecordingViewModel: ObservableObject {
                     AudioRecorder(
                         audioDevice: audioDevice,
                         outputURL: outputURL,
-                        onFailure: { [weak self] error in
+                        onProblem: { [weak self] error in
                             Task { @MainActor [weak self] in
-                                await self?.handleCaptureFailure(error, source: .audio)
+                                self?.handleCaptureProblem(error, source: .audio)
                             }
                         },
                         onTelemetry: { [weak self] telemetry in
@@ -366,8 +392,11 @@ final class RecordingViewModel: ObservableObject {
             }
             activeSession = session
             activeOutputURLs = Array(outputs.values)
+            activeTakeName = outputBaseName
+            activeOutputDirectory = outputDirectory
             recordingStartedAt = startedAt
             isRecording = true
+            startDiskSpaceMonitor(for: outputDirectory)
             statusMessage = mode == .audio ? "Recording audio" : "Recording at 30 fps"
         } catch {
             activeSession = nil
@@ -386,25 +415,117 @@ final class RecordingViewModel: ObservableObject {
         guard let activeSession else { return }
         isBusy = true
         statusMessage = "Finishing files…"
+        diskSpaceMonitor?.cancel()
+        diskSpaceMonitor = nil
+        acknowledgeProblem()
 
+        var stopError: Error?
         do {
             try await activeSession.stop()
-            try await activeRecoveryAudio?.stop()
-            let completedURLs = activeOutputURLs
-            resetActiveRecording()
-            resetFileName()
-            statusMessage = "Saved \(completedURLs.count == 1 ? "recording" : "recordings")"
-            if revealInFinder && preferences.openFinderAfterRecording {
-                NSWorkspace.shared.activateFileViewerSelecting(completedURLs)
-            }
         } catch {
-            try? await activeRecoveryAudio?.stop()
-            resetActiveRecording()
-            resetFileName()
+            stopError = error
+        }
+        do {
+            try await activeRecoveryAudio?.stop()
+        } catch {
+            // The backup track failing to close never invalidates the main files.
+            RecordingDiagnostics.shared.log("recovery-audio.stop error=\(error.localizedDescription)")
+        }
+
+        let completedURLs = activeOutputURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
+        let reportURL = writeProblemReport()
+        let problemCount = captureProblems.count
+        resetActiveRecording()
+        resetFileName()
+
+        if let stopError {
             statusMessage = "Recording stopped with an error"
-            presentedError = error.localizedDescription
+            presentedError = stopErrorMessage(stopError, savedFiles: completedURLs)
+        } else if problemCount > 0 {
+            statusMessage = "Saved with \(problemCount) problem\(problemCount == 1 ? "" : "s") noted"
+        } else {
+            statusMessage = "Saved \(completedURLs.count == 1 ? "recording" : "recordings")"
+        }
+        if revealInFinder && preferences.openFinderAfterRecording && !completedURLs.isEmpty {
+            NSWorkspace.shared.activateFileViewerSelecting(completedURLs + [reportURL].compactMap { $0 })
         }
         isBusy = false
+    }
+
+    /// Keeps the take running and makes the problem impossible to miss. The
+    /// user decides whether to carry on, because stopping on their behalf has
+    /// thrown away good takes over false alarms.
+    private func handleCaptureProblem(_ error: Error, source: CaptureSource) {
+        raiseProblem(
+            sourceName: source.displayName,
+            message: error.localizedDescription,
+            soundsAlarm: source != .recoveryAudio
+        )
+    }
+
+    private func raiseProblem(sourceName: String, message: String, soundsAlarm: Bool) {
+        guard isRecording, !isBusy, let recordingStartedAt else { return }
+        let problem = CaptureProblem(
+            sourceName: sourceName,
+            message: message,
+            takeTime: Date().timeIntervalSince(recordingStartedAt),
+            soundsAlarm: soundsAlarm
+        )
+        captureProblems.append(problem)
+        RecordingDiagnostics.shared.log(
+            "take.problem at=\(problem.timecode) source=\(sourceName) alarm=\(soundsAlarm) error=\(message)"
+        )
+        guard soundsAlarm else { return }
+        pendingProblemAlert = problem
+        CriticalRecordingAlarm.shared.start()
+    }
+
+    func acknowledgeProblem() {
+        CriticalRecordingAlarm.shared.stop()
+        pendingProblemAlert = nil
+    }
+
+    private func startDiskSpaceMonitor(for directory: URL) {
+        diskSpaceMonitor = Task { [weak self] in
+            var warned = false
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled, let self else { return }
+                guard let freeBytes = availableRecordingBytes(at: directory) else { continue }
+                if freeBytes < minimumFreeRecordingBytes / 2, !warned {
+                    warned = true
+                    raiseProblem(
+                        sourceName: "Disk",
+                        message: "Only \(formattedFreeSpace(freeBytes)) left on the recording disk. "
+                            + "Stop soon or the files will stop growing.",
+                        soundsAlarm: true
+                    )
+                }
+            }
+        }
+    }
+
+    private func writeProblemReport() -> URL? {
+        guard
+            !captureProblems.isEmpty,
+            let activeTakeName,
+            let activeOutputDirectory
+        else { return nil }
+        let url = activeOutputDirectory.appendingPathComponent(captureProblemReportName(activeTakeName))
+        do {
+            try captureProblemReport(takeName: activeTakeName, problems: captureProblems)
+                .write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            RecordingDiagnostics.shared.log("take.problem-report error=\(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func stopErrorMessage(_ error: Error, savedFiles: [URL]) -> String {
+        guard !savedFiles.isEmpty else { return error.localizedDescription }
+        let names = savedFiles.map(\.lastPathComponent).joined(separator: ", ")
+        return "\(error.localizedDescription)\n\nThese files were still saved: \(names)"
     }
 
     private func refreshDisplays(preferredName: String? = nil) {
@@ -417,49 +538,22 @@ final class RecordingViewModel: ObservableObject {
             ?? 0
     }
 
-    private func handleCaptureFailure(_ error: Error, source: CaptureSource) async {
-        guard isRecording, !isBusy else { return }
-        let message = criticalCaptureFailureMessage(
-            source: source,
-            reason: error.localizedDescription,
-            recoveryAudioURL: activeRecoveryAudio?.outputURL
-        )
-        criticalFailureMessage = message
-        statusMessage = "RECORDING FAILED. STOPPING NOW."
-        CriticalRecordingAlarm.shared.start()
-        await stopRecording(revealInFinder: false)
-        // stopRecording can surface a finalization error, but the capture
-        // failure is the primary warning and must remain impossible to miss.
-        presentedError = nil
-        criticalFailureMessage = message
-        statusMessage = "RECORDING FAILED. VIDEO AND AUDIO ARE NOT COMPLETE."
-    }
-
-    func dismissCriticalFailure() {
-        CriticalRecordingAlarm.shared.stop()
-        criticalFailureMessage = nil
-        statusMessage = "Ready to record"
-    }
-
     private func resetActiveRecording() {
         activeSession = nil
         activeRecoveryAudio = nil
         activeOutputURLs = []
+        activeTakeName = nil
+        activeOutputDirectory = nil
         recordingTelemetry = [:]
         recordingStartedAt = nil
         isRecording = false
     }
 }
 
-func criticalCaptureFailureMessage(
-    source: CaptureSource,
-    reason: String,
-    recoveryAudioURL: URL? = nil
-) -> String {
-    var message = "\(source.displayName.uppercased()) CAPTURE FAILED. RECORDING STOPPED. "
-        + "VIDEO AND AUDIO ARE NOT COMPLETE. Do not continue this take. \(reason)"
-    if let recoveryAudioURL {
-        message += " Recovery audio may be available at: \(recoveryAudioURL.path)"
-    }
-    return message
+func captureProblemReportName(_ takeName: String) -> String {
+    "\(takeName)-problems.txt"
+}
+
+func formattedFreeSpace(_ bytes: Int64) -> String {
+    ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
 }

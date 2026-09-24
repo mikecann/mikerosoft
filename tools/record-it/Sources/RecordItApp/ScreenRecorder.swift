@@ -9,12 +9,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private let outputURL: URL
     private let encoderConfiguration: EncoderConfiguration
     private let startGate: RecordingStartGate?
-    private let onFailure: (@Sendable (Error) -> Void)?
+    private let onProblem: (@Sendable (Error) -> Void)?
     private let onTelemetry: (@Sendable (RecordingTelemetry) -> Void)?
     private let outputQueue = DispatchQueue(label: "com.mikerosoft.record-it.screen-output")
     private var stream: SCStream?
     private var movieWriter: MovieWriter?
-    private var streamError: Error?
+    private var problemTracker = CaptureProblemTracker()
     private var healthState: MediaCaptureHealthState?
     private var healthTimer: DispatchSourceTimer?
     private var isStopping = false
@@ -30,7 +30,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         outputURL: URL,
         encoderConfiguration: EncoderConfiguration,
         startGate: RecordingStartGate? = nil,
-        onFailure: (@Sendable (Error) -> Void)? = nil,
+        onProblem: (@Sendable (Error) -> Void)? = nil,
         onTelemetry: (@Sendable (RecordingTelemetry) -> Void)? = nil
     ) {
         self.target = target
@@ -38,7 +38,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         self.outputURL = outputURL
         self.encoderConfiguration = encoderConfiguration
         self.startGate = startGate
-        self.onFailure = onFailure
+        self.onProblem = onProblem
         self.onTelemetry = onTelemetry
     }
 
@@ -142,9 +142,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         }
 
         RecordingDiagnostics.shared.log(
-            "screen.stop error=\((streamError ?? stopError)?.localizedDescription ?? "none")"
+            "screen.stop error=\(stopError?.localizedDescription ?? "none")"
         )
-        if let streamError { throw streamError }
         if let stopError { throw stopError }
     }
 
@@ -156,11 +155,15 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         switch outputType {
         case .screen:
             let now = ProcessInfo.processInfo.systemUptime
-            healthState?.recordScreenCallback(at: now)
+            let frameStatus = screenFrameStatus(sampleBuffer)
+            healthState?.recordScreenCallback(
+                at: now,
+                isIdle: frameStatus == .idle || frameStatus == .blank
+            )
             let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             if timestamp.isValid { latestScreenTimestamp = timestamp }
 
-            guard let status = screenFrameStatus(sampleBuffer) else { return }
+            guard let status = frameStatus else { return }
             if status != lastFrameStatus {
                 lastFrameStatus = status
                 RecordingDiagnostics.shared.log("screen.frame-status value=\(status.rawValue)")
@@ -189,7 +192,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         outputQueue.async { [weak self] in
-            self?.reportFailure(error)
+            self?.reportProblem(
+                "Screen capture stopped: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -226,18 +231,27 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
                     + "frameStatus=\(lastFrameStatus?.rawValue.description ?? "none")"
             )
         }
-        guard let problem = healthState?.problem(at: time) else { return }
-        reportFailure(RecordItError.message(problem))
+        guard !isStopping else { return }
+        let transition = problemTracker.updateHealth(healthState?.problem(at: time))
+        if let recovered = transition.recovered {
+            RecordingDiagnostics.shared.log("screen.recovered problem=\(recovered)")
+        }
+        if let problem = transition.newProblem {
+            announce(problem)
+        }
     }
 
-    private func reportFailure(_ error: Error) {
-        guard !isStopping, streamError == nil else { return }
-        streamError = error
-        healthTimer?.cancel()
-        healthTimer = nil
-        RecordingDiagnostics.shared.log("screen.failure error=\(error.localizedDescription)")
-        emitTelemetry(at: ProcessInfo.processInfo.systemUptime, failureMessage: error.localizedDescription)
-        onFailure?(error)
+    private func reportProblem(_ message: String) {
+        guard !isStopping, problemTracker.recordEvent(message) else { return }
+        announce(message)
+    }
+
+    // Problems never stop the take. Whatever is still arriving keeps being
+    // written, and the user decides whether the take is worth continuing.
+    private func announce(_ message: String) {
+        RecordingDiagnostics.shared.log("screen.problem error=\(message)")
+        emitTelemetry(at: ProcessInfo.processInfo.systemUptime, failureMessage: message)
+        onProblem?(RecordItError.message(message))
     }
 
     private func emitTelemetry(at time: TimeInterval, failureMessage: String? = nil) {
@@ -253,11 +267,11 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             audioSamplesWritten: progress.audioSamplesWritten,
             mediaDuration: progress.mediaDuration,
             fileSizeBytes: progress.fileSizeBytes,
-            lastVideoActivityAt: healthState?.lastScreenCallbackAt,
+            lastVideoActivityAt: healthState.map { $0.screenIsIdle ? time : $0.lastScreenCallbackAt },
             consecutiveRejectedVideoSamples: healthState?.consecutiveRejectedFrames ?? 0,
             writerStatus: progress.writerStatus,
             now: time,
-            failureMessage: failureMessage
+            failureMessage: failureMessage ?? problemTracker.currentProblem
         ))
     }
 }

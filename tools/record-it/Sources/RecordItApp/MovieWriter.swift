@@ -47,6 +47,8 @@ func videoOutputSettings(
     ]
 }
 
+let movieFragmentInterval = CMTime(seconds: 5, preferredTimescale: 600)
+
 enum RecordItError: LocalizedError {
     case message(String)
 
@@ -83,9 +85,13 @@ final class MovieWriter {
     ) throws {
         self.outputURL = outputURL
         self.startGate = startGate
-        try? FileManager.default.removeItem(at: outputURL)
-
+        // Never delete an existing file here. AVAssetWriter refuses to overwrite,
+        // which is the right outcome if a take name somehow collides.
         writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        // Write self-contained movie fragments so a crash, force quit, or power
+        // loss leaves a playable file up to the last fragment instead of an
+        // unreadable one with no movie header.
+        writer.movieFragmentInterval = movieFragmentInterval
         videoInput = AVAssetWriterInput(
             mediaType: .video,
             outputSettings: videoOutputSettings(
@@ -253,7 +259,9 @@ final class MovieWriter {
             guard writer.status == .writing else {
                 throw writer.error ?? RecordItError.message("The video encoder stopped accepting frames.")
             }
-            try await Task.sleep(nanoseconds: 10_000_000)
+            // Finalizing must not be abandoned because the calling task was
+            // cancelled, so the sleep ignores cancellation.
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
         throw RecordItError.message("The video encoder remained stalled for more than five seconds.")
     }

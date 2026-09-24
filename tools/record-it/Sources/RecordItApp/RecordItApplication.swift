@@ -88,15 +88,23 @@ struct RecordItView: View {
             Text(model.presentedError ?? "Unknown error")
         }
         .alert(
-            "🚨 RECORDING FAILED 🚨",
+            "Recording problem. Still recording.",
             isPresented: Binding(
-                get: { model.criticalFailureMessage != nil },
-                set: { if !$0 { model.dismissCriticalFailure() } }
+                get: { model.pendingProblemAlert != nil },
+                set: { if !$0 { model.acknowledgeProblem() } }
+            ),
+            presenting: model.pendingProblemAlert
+        ) { _ in
+            Button("Keep Recording") { model.acknowledgeProblem() }
+            Button("Stop Recording", role: .destructive) {
+                Task { await model.stopRecording() }
+            }
+        } message: { problem in
+            Text(
+                "\(problem.sourceName) at \(problem.timecode) into the take: \(problem.message)\n\n"
+                    + "Every source is still being written. Stop if this take is ruined, "
+                    + "or keep going and fix it in the edit. The time is saved next to the files."
             )
-        ) {
-            Button("STOP ALARM") { model.dismissCriticalFailure() }
-        } message: {
-            Text(model.criticalFailureMessage ?? "The recording is incomplete. Do not continue this take.")
         }
         .sheet(isPresented: $showingEncoderSettings) {
             EncoderSettingsView(model: model)
@@ -163,6 +171,10 @@ struct RecordItView: View {
 
             recordingHealthBanner
 
+            if !model.captureProblems.isEmpty {
+                problemList
+            }
+
             if model.activeTelemetry.isEmpty {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -181,14 +193,30 @@ struct RecordItView: View {
 
             Label(
                 model.mode == .audio
-                    ? "Required audio is monitored continuously. Missing, rejected, or silent input stops the take."
-                    : "Required video and audio are monitored continuously. Any failed stream stops the whole take.",
+                    ? "Audio is monitored continuously. Problems sound an alarm but never stop the take."
+                    : "Video and audio are monitored continuously. Problems sound an alarm but never stop the take.",
                 systemImage: "shield.checkered"
             )
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var problemList: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("Problems this take", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.red)
+            ForEach(model.captureProblems) { problem in
+                Text(problem.summary)
+                    .font(.caption.monospacedDigit())
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(11)
+        .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var recordingHealthBanner: some View {
@@ -905,7 +933,7 @@ private func overallHealthTitle(_ health: RecordingHealth) -> String {
     case .starting: "Starting capture pipelines"
     case .healthy: "Recording is healthy"
     case .warning: "Recording needs attention"
-    case .failed: "Recording has failed"
+    case .failed: "A source has a problem"
     }
 }
 
@@ -914,6 +942,6 @@ private func overallHealthDetail(_ health: RecordingHealth) -> String {
     case .starting: "Waiting for confirmed media writes"
     case .healthy: "Media samples are reaching the output file"
     case .warning: "Capture activity has slowed; the watchdog is still monitoring it"
-    case .failed: "The recording will stop so you do not continue with a broken file"
+    case .failed: "Still recording. Check the source below before you carry on"
     }
 }

@@ -4,7 +4,7 @@ import CoreMedia
 final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let audioDevice: CaptureAudioDevice
     private let outputURL: URL
-    private let onFailure: (@Sendable (Error) -> Void)?
+    private let onProblem: (@Sendable (Error) -> Void)?
     private let onTelemetry: (@Sendable (RecordingTelemetry) -> Void)?
     private let captureSession = AVCaptureSession()
     private let audioOutput = AVCaptureAudioDataOutput()
@@ -17,19 +17,19 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     private var waveform = AudioWaveformBuffer(capacity: 120)
     private var hasLoggedAudioFormat = false
     private var isStopping = false
-    private var captureError: Error?
+    private var problemTracker = CaptureProblemTracker()
     private lazy var sessionFailureMonitor = CaptureSessionFailureMonitor(
         session: captureSession,
         deviceIDs: [audioDevice.id],
         onFailure: { [weak self] error in
-            self?.writerQueue.async { [weak self] in self?.reportFailure(error) }
+            self?.writerQueue.async { [weak self] in self?.reportProblem(error.localizedDescription) }
         }
     )
     private lazy var coreAudioHealthMonitor = CoreAudioInputHealthMonitor(
         deviceUID: audioDevice.id,
         deviceName: audioDevice.name,
         onFailure: { [weak self] error in
-            self?.writerQueue.async { [weak self] in self?.reportFailure(error) }
+            self?.writerQueue.async { [weak self] in self?.reportProblem(error.localizedDescription) }
         }
     )
     private lazy var repeatedPCMMonitor = RepeatedPCMMonitor { [weak self] period in
@@ -42,12 +42,12 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
     init(
         audioDevice: CaptureAudioDevice,
         outputURL: URL,
-        onFailure: (@Sendable (Error) -> Void)? = nil,
+        onProblem: (@Sendable (Error) -> Void)? = nil,
         onTelemetry: (@Sendable (RecordingTelemetry) -> Void)? = nil
     ) {
         self.audioDevice = audioDevice
         self.outputURL = outputURL
-        self.onFailure = onFailure
+        self.onProblem = onProblem
         self.onTelemetry = onTelemetry
     }
 
@@ -97,7 +97,6 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
         }
         writerQueue.sync {}
         guard let audioWriter else {
-            if let captureError { throw captureError }
             throw RecordItError.message("No audio samples were received.")
         }
         self.audioWriter = nil
@@ -107,8 +106,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             RecordingDiagnostics.shared.log("audio.stop error=\(detailedErrorDescription(error))")
             throw error
         }
-        RecordingDiagnostics.shared.log("audio.stop error=\(captureError?.localizedDescription ?? "none")")
-        if let captureError { throw captureError }
+        RecordingDiagnostics.shared.log("audio.stop error=none")
     }
 
     func captureOutput(
@@ -142,7 +140,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
                 }
             }
         } catch {
-            reportFailure(error)
+            reportProblem(error.localizedDescription)
             return
         }
         if lastWaveformSampleAt == nil || now - (lastWaveformSampleAt ?? 0) >= 0.1 {
@@ -188,9 +186,7 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
                 guard let self else { return }
                 let now = ProcessInfo.processInfo.systemUptime
                 emitTelemetry(at: now)
-                if let problem = healthState?.problem(at: now) {
-                    reportFailure(RecordItError.message(problem))
-                }
+                checkHealth(at: now)
             }
             healthTimer = timer
             timer.resume()
@@ -215,18 +211,32 @@ final class AudioRecorder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegat
             writerStatus: progress.writerStatus,
             now: time,
             audioWaveformLevels: waveform.levels,
-            failureMessage: failureMessage
+            failureMessage: failureMessage ?? problemTracker.currentProblem
         ))
     }
 
-    private func reportFailure(_ error: Error) {
-        guard !isStopping, captureError == nil else { return }
-        captureError = error
-        healthTimer?.cancel()
-        healthTimer = nil
-        RecordingDiagnostics.shared.log("audio.failure error=\(error.localizedDescription)")
-        emitTelemetry(at: ProcessInfo.processInfo.systemUptime, failureMessage: error.localizedDescription)
-        onFailure?(error)
+    private func checkHealth(at time: TimeInterval) {
+        guard !isStopping else { return }
+        let transition = problemTracker.updateHealth(healthState?.problem(at: time))
+        if let recovered = transition.recovered {
+            RecordingDiagnostics.shared.log("audio.recovered problem=\(recovered)")
+        }
+        if let problem = transition.newProblem {
+            announce(problem)
+        }
+    }
+
+    private func reportProblem(_ message: String) {
+        guard !isStopping, problemTracker.recordEvent(message) else { return }
+        announce(message)
+    }
+
+    // Problems never stop the take. Whatever is still arriving keeps being
+    // written, and the user decides whether the take is worth continuing.
+    private func announce(_ message: String) {
+        RecordingDiagnostics.shared.log("audio.problem error=\(message)")
+        emitTelemetry(at: ProcessInfo.processInfo.systemUptime, failureMessage: message)
+        onProblem?(RecordItError.message(message))
     }
 }
 

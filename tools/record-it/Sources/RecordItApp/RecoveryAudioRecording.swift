@@ -1,5 +1,9 @@
 import Foundation
 
+/// The recovery helper prefixes stderr lines with this when the backup
+/// microphone has a problem it is recording through.
+let recoveryAudioProblemPrefix = "problem:"
+
 let recoveryAudioRetention: TimeInterval = 14 * 24 * 60 * 60
 
 func recoveryAudioDirectory(
@@ -60,21 +64,23 @@ final class RecoveryAudioRecording: @unchecked Sendable {
     private let device: CaptureAudioDevice
     private let helperURL: URL
     private let readyURL: URL
-    private let onFailure: @Sendable (Error) -> Void
+    private let onProblem: @Sendable (Error) -> Void
     private let process = Process()
     private let stateLock = NSLock()
     private var isStopping = false
+    private var pendingDiagnostics = ""
+    private var lastDiagnosticLine: String?
 
     init(
         device: CaptureAudioDevice,
         outputURL: URL,
         helperURL: URL = recoveryAudioHelperURL(),
-        onFailure: @escaping @Sendable (Error) -> Void
+        onProblem: @escaping @Sendable (Error) -> Void
     ) {
         self.device = device
         self.outputURL = outputURL
         self.helperURL = helperURL
-        self.onFailure = onFailure
+        self.onProblem = onProblem
         readyURL = outputURL.appendingPathExtension("ready")
     }
 
@@ -100,17 +106,32 @@ final class RecoveryAudioRecording: @unchecked Sendable {
         ]
         let diagnostics = Pipe()
         process.standardError = diagnostics
+        // The helper keeps recording through problems and reports each one as
+        // a line on stderr, so read lines as they arrive rather than at exit.
+        diagnostics.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard let self, !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            self.receiveDiagnostics(String(decoding: data, as: UTF8.self))
+        }
         process.terminationHandler = { [weak self] process in
             guard let self else { return }
-            let expected = self.stateLock.withLock { self.isStopping }
+            // Drain whatever the helper wrote just before exiting so the
+            // reported reason includes its last message.
+            let reader = diagnostics.fileHandleForReading
+            reader.readabilityHandler = nil
+            let remaining = reader.readDataToEndOfFile()
+            if !remaining.isEmpty {
+                self.receiveDiagnostics(String(decoding: remaining, as: UTF8.self) + "\n")
+            }
+            let (expected, lastLine) = self.stateLock.withLock { (self.isStopping, self.lastDiagnosticLine) }
             guard !expected else { return }
-            let data = diagnostics.fileHandleForReading.readDataToEndOfFile()
-            let detail = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let reason = detail.flatMap { $0.isEmpty ? nil : $0 }
-                ?? "The recovery-audio helper exited unexpectedly "
-                    + "with status \(process.terminationStatus)."
-            onFailure(RecordItError.message(reason))
+            let reason = "The backup audio helper exited with status \(process.terminationStatus)"
+                + (lastLine.map { ": \($0)" } ?? ".")
+                + " The main recording is unaffected."
+            onProblem(RecordItError.message(reason))
         }
 
         try process.run()
@@ -149,12 +170,38 @@ final class RecoveryAudioRecording: @unchecked Sendable {
         )
     }
 
+    private func receiveDiagnostics(_ text: String) {
+        let lines = stateLock.withLock { () -> [String] in
+            pendingDiagnostics += text
+            var parts = pendingDiagnostics.components(separatedBy: "\n")
+            pendingDiagnostics = parts.removeLast()
+            let lines = parts
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            if let last = lines.last { lastDiagnosticLine = last }
+            return lines
+        }
+        let isStopping = stateLock.withLock { self.isStopping }
+        for line in lines {
+            RecordingDiagnostics.shared.log("recovery-audio.helper \(line)")
+            if !isStopping, line.hasPrefix(recoveryAudioProblemPrefix) {
+                let message = line.dropFirst(recoveryAudioProblemPrefix.count)
+                    .trimmingCharacters(in: .whitespaces)
+                onProblem(RecordItError.message(message))
+            }
+        }
+    }
+
     private func waitUntilReady() async throws {
         let deadline = ProcessInfo.processInfo.systemUptime + 8
         while ProcessInfo.processInfo.systemUptime < deadline {
             if FileManager.default.fileExists(atPath: readyURL.path) { return }
             if !process.isRunning {
-                throw RecordItError.message("The independent recovery-audio helper failed to start.")
+                let detail = stateLock.withLock { lastDiagnosticLine }
+                throw RecordItError.message(
+                    "The independent recovery-audio helper failed to start."
+                        + (detail.map { " \($0)" } ?? "")
+                )
             }
             try await Task.sleep(for: .milliseconds(25))
         }

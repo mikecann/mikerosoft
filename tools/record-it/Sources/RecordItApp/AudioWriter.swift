@@ -17,7 +17,9 @@ final class AudioWriter {
         processingFormat: AVAudioFormat
     ) throws {
         self.outputURL = outputURL
-        try? FileManager.default.removeItem(at: outputURL)
+        guard !FileManager.default.fileExists(atPath: outputURL.path) else {
+            throw RecordItError.message("\(outputURL.lastPathComponent) already exists.")
+        }
 
         guard processingFormat.sampleRate > 0, processingFormat.channelCount > 0 else {
             throw RecordItError.message("The selected input did not provide a usable audio format.")

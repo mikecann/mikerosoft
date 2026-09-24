@@ -60,6 +60,9 @@ struct MediaCaptureHealthState {
     private let startedAt: TimeInterval
     private(set) var lastScreenCallbackAt: TimeInterval
     private(set) var lastAudioCallbackAt: TimeInterval?
+    /// ScreenCaptureKit stops delivering callbacks while the captured content is
+    /// unchanged, so silence after an idle frame means a static screen, not a stall.
+    private(set) var screenIsIdle = false
     private(set) var consecutiveRejectedFrames = 0
     private(set) var consecutiveRejectedAudioSamples = 0
     private(set) var digitalSilenceStartedAt: TimeInterval?
@@ -79,8 +82,9 @@ struct MediaCaptureHealthState {
         lastScreenCallbackAt = startedAt
     }
 
-    mutating func recordScreenCallback(at time: TimeInterval) {
+    mutating func recordScreenCallback(at time: TimeInterval, isIdle: Bool = false) {
         lastScreenCallbackAt = time
+        screenIsIdle = isIdle
     }
 
     mutating func recordVideoAppend(accepted: Bool) {
@@ -116,7 +120,7 @@ struct MediaCaptureHealthState {
     }
 
     func problem(at time: TimeInterval) -> String? {
-        if requiresVideo, time - lastScreenCallbackAt >= Self.stalledMediaTimeout {
+        if requiresVideo, !screenIsIdle, time - lastScreenCallbackAt >= Self.stalledMediaTimeout {
             return "No screen frames were delivered for 10 seconds."
         }
         if consecutiveRejectedFrames >= Self.rejectedSampleLimit {
@@ -178,5 +182,28 @@ final class RecordingDiagnostics: @unchecked Sendable {
                 // Diagnostics must never be allowed to interrupt a recording.
             }
         }
+    }
+}
+
+/// Decides which capture problems are new enough to announce. A health problem
+/// clears when its condition ends and is announced again if it comes back.
+/// One-off events, such as a disconnected device, are announced once per take.
+struct CaptureProblemTracker {
+    private(set) var activeHealthProblem: String?
+    private(set) var latestEvent: String?
+    private var announcedEvents = Set<String>()
+
+    var currentProblem: String? { activeHealthProblem ?? latestEvent }
+
+    mutating func updateHealth(_ problem: String?) -> (newProblem: String?, recovered: String?) {
+        guard problem != activeHealthProblem else { return (nil, nil) }
+        let previous = activeHealthProblem
+        activeHealthProblem = problem
+        return (problem, previous)
+    }
+
+    mutating func recordEvent(_ message: String) -> Bool {
+        latestEvent = message
+        return announcedEvents.insert(message).inserted
     }
 }

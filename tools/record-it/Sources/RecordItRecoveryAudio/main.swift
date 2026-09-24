@@ -144,6 +144,7 @@ private final class RecoveryCapture {
             do {
                 try self?.file?.write(from: buffer)
                 self?.health.record(buffer)
+                self?.health.clearFailure()
             } catch {
                 self?.health.fail("Recovery audio write failed: \(error.localizedDescription)")
             }
@@ -185,7 +186,11 @@ private final class RecoveryCaptureHealth: @unchecked Sendable {
     }
 
     func fail(_ message: String) {
-        lock.withLock { failureMessage = failureMessage ?? message }
+        lock.withLock { failureMessage = message }
+    }
+
+    func clearFailure() {
+        lock.withLock { failureMessage = nil }
     }
 
     func problem(at now: TimeInterval) -> String? {
@@ -222,15 +227,32 @@ do {
     termination.resume()
     interruption.resume()
 
+    // If Record It crashes, close the backup file cleanly instead of recording
+    // forever as an orphan.
+    let parent = DispatchSource.makeProcessSource(
+        identifier: getppid(),
+        eventMask: .exit,
+        queue: .main
+    )
+    parent.setEventHandler { shouldStop = true }
+    parent.resume()
+
     try capture.start(deviceID: deviceID, outputURL: outputURL)
     guard FileManager.default.createFile(atPath: readyURL.path, contents: Data()) else {
         throw RecoveryHelperError.message("Could not create the recovery-audio readiness marker.")
     }
 
+    // Problems are reported, never fatal. A backup that keeps recording through
+    // a glitch is still more useful than one that gave up.
+    var reportedProblem: String?
     while !shouldStop {
         RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.1))
-        if let problem = health.problem(at: ProcessInfo.processInfo.systemUptime) {
-            throw RecoveryHelperError.message(problem)
+        let problem = health.problem(at: ProcessInfo.processInfo.systemUptime)
+        if problem != reportedProblem {
+            reportedProblem = problem
+            if let problem {
+                fputs("problem: \(problem)\n", stderr)
+            }
         }
     }
     capture.stop()

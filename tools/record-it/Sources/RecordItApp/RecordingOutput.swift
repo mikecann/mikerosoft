@@ -84,3 +84,50 @@ func recordingOutputURLs(
     }
     return outputs
 }
+
+/// Returns a take name whose files don't exist yet, adding "-2", "-3" and so
+/// on when needed, so a reused name can never overwrite an earlier take.
+func availableRecordingBaseName(_ baseName: String, isTaken: (String) -> Bool) -> String {
+    guard isTaken(baseName) else { return baseName }
+    var suffix = 2
+    while isTaken("\(baseName)-\(suffix)") {
+        suffix += 1
+    }
+    return "\(baseName)-\(suffix)"
+}
+
+struct CaptureProblem: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let sourceName: String
+    let message: String
+    let takeTime: TimeInterval
+    /// Problems that damage the primary media sound the alarm. Backup-only
+    /// problems are shown quietly so the alarm doesn't end up in a good take.
+    let soundsAlarm: Bool
+
+    var timecode: String {
+        let seconds = max(0, Int(takeTime.rounded(.down)))
+        return String(format: "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
+    }
+
+    var summary: String {
+        "\(timecode)  \(sourceName): \(message)"
+    }
+}
+
+func captureProblemReport(takeName: String, problems: [CaptureProblem]) -> String {
+    var lines = [
+        "Record It problems for \(takeName)",
+        "Times are from the start of the take. Everything else kept recording.",
+        ""
+    ]
+    lines += problems.map(\.summary)
+    return lines.joined(separator: "\n") + "\n"
+}
+
+let minimumFreeRecordingBytes: Int64 = 10 * 1_000_000_000
+
+func availableRecordingBytes(at directory: URL) -> Int64? {
+    let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+    return values?.volumeAvailableCapacityForImportantUsage
+}

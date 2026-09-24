@@ -44,10 +44,28 @@ struct RecordingSession: Sendable {
         }
     }
 
+    /// Finalizes every recorder even when another one fails. A throwing task
+    /// group would cancel the remaining finalizations and could lose files that
+    /// were recorded perfectly.
     func stop() async throws {
-        try await runConcurrently { recorder in
-            try await recorder.stop()
+        let errors = await withTaskGroup(of: Error?.self) { group in
+            for recorder in recorders {
+                group.addTask {
+                    do {
+                        try await recorder.stop()
+                        return nil
+                    } catch {
+                        return error
+                    }
+                }
+            }
+            var errors: [Error] = []
+            for await error in group {
+                if let error { errors.append(error) }
+            }
+            return errors
         }
+        if let error = errors.first { throw error }
     }
 
     private func runConcurrently(

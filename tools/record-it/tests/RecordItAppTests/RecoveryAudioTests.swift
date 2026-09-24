@@ -110,11 +110,48 @@ final class RecoveryAudioTests: XCTestCase {
             helperURL: helper
         ) { error in
             XCTAssertTrue(error.localizedDescription.contains("simulated recovery helper crash"))
+            XCTAssertTrue(error.localizedDescription.contains("The main recording is unaffected."))
             failure.fulfill()
         }
 
         try await recording.start()
         await fulfillment(of: [failure], timeout: 3)
+        try await recording.stop()
+    }
+
+    func testRecoveryHelperProblemsAreReportedWhileItKeepsRecording() async throws {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory
+            .appendingPathComponent("record-it-recovery-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+        let helper = directory.appendingPathComponent("helper.sh")
+        let script = """
+        #!/bin/sh
+        touch "$2"
+        touch "$4"
+        echo "problem: The independent recovery microphone delivered digital silence for 3 seconds." >&2
+        trap 'exit 0' TERM
+        while true; do sleep 0.1; done
+        """
+        try Data(script.utf8).write(to: helper)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+
+        let problem = expectation(description: "backup problem reported")
+        let recording = RecoveryAudioRecording(
+            device: CaptureAudioDevice(id: "backup", name: "Backup Mic"),
+            outputURL: directory.appendingPathComponent("take-backup-audio.caf"),
+            helperURL: helper
+        ) { error in
+            XCTAssertEqual(
+                error.localizedDescription,
+                "The independent recovery microphone delivered digital silence for 3 seconds."
+            )
+            problem.fulfill()
+        }
+
+        try await recording.start()
+        await fulfillment(of: [problem], timeout: 3)
         try await recording.stop()
     }
 }
