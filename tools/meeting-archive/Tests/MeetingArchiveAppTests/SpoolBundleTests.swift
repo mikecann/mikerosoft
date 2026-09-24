@@ -14,7 +14,7 @@ final class SpoolBundleTests: XCTestCase {
         let manifest = try SpoolBundle.prepare(record: record, directory: directory)
         try manifest.validate()
         XCTAssertEqual(Set(manifest.files.map(\.path)), ["metadata.json", "meeting-view.mov", "microphone.m4a"])
-        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("manifest.json")), manifest.canonicalData())
+        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("manifest.json")), try manifest.canonicalData())
         let metadata = try JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("metadata.json"))) as! [String: Any]
         XCTAssertEqual(metadata["title"] as? String, "Planning")
         XCTAssertEqual(metadata["duration_seconds"] as? Double, 60)

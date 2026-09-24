@@ -207,7 +207,47 @@ class PublicationQueue:
         return cursor.rowcount == 1
 
 
-def run_once(database: Path, processor=process, publisher=publish, lease_seconds: float = 900) -> dict:
+def _process_child(connection, target, archive_path: Path, job) -> None:
+    try:
+        target(archive_path, job)
+        connection.send(None)
+    except BaseException as error:  # report any failure to the parent
+        connection.send(f"{type(error).__name__}: {error}")
+        raise SystemExit(1)
+    finally:
+        connection.close()
+
+
+def process_isolated(archive_path: Path, job, target=None) -> None:
+    """Run one heavy job in a fresh process.
+
+    Transcription and diarization load torch, Whisper and pyannote, which
+    keep hundreds of MB allocated in a long-running process even after the
+    job ends. A child process gives all of that back to the OS, so the idle
+    service polling the queue stays small on Bruce's 8 GB of RAM.
+    """
+    import multiprocessing
+
+    context = multiprocessing.get_context("spawn")
+    receiver, sender = context.Pipe(duplex=False)
+    # `target` must be a module-level function so the spawned child can import it.
+    child = context.Process(target=_process_child, args=(sender, target or process, archive_path, job), daemon=False)
+    child.start()
+    sender.close()
+    child.join()
+    crashed = f"Processing exited with code {child.exitcode}."
+    try:
+        # A child that dies without reporting (killed, os._exit) closes the
+        # pipe, which reads as end-of-file rather than a message.
+        message = receiver.recv() if receiver.poll() else crashed
+    except EOFError:
+        message = crashed
+    receiver.close()
+    if message is not None:
+        raise RuntimeError(message)
+
+
+def run_once(database: Path, processor=process_isolated, publisher=publish, lease_seconds: float = 900) -> dict:
     # Speaker confirmations use a durable outbox. Reconcile it before claiming
     # heavy work, but never let one derived-artifact failure block other jobs.
     try:
