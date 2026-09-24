@@ -2,28 +2,28 @@
 import PackageDescription
 
 let package = Package(
-    name: "VideoHQ",
+    name: "Telemprompit",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     products: [
-        .executable(name: "video-hq", targets: ["VideoHQApp"])
+        .executable(name: "telemprompit", targets: ["TelemprompitApp"])
     ],
     dependencies: [
         .package(path: "../lib/PrompterKit")
     ],
     targets: [
         .executableTarget(
-            name: "VideoHQApp",
+            name: "TelemprompitApp",
             dependencies: [
                 .product(name: "PrompterKit", package: "PrompterKit")
             ],
-            path: "Sources/VideoHQApp"
+            path: "Sources/TelemprompitApp"
         ),
         .testTarget(
-            name: "VideoHQAppTests",
-            dependencies: ["VideoHQApp"],
-            path: "tests/VideoHQAppTests"
+            name: "TelemprompitAppTests",
+            dependencies: ["TelemprompitApp"],
+            path: "tests/TelemprompitAppTests"
         )
     ]
 )

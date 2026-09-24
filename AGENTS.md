@@ -115,7 +115,8 @@ mikerosoft.app\
 ├── .gitignore
 ├── tools\
     ├── lib\
-    │   └── run-transcribe.ts      ← shared: Windows transcribe.bat vs POSIX transcribe
+    │   ├── run-transcribe.ts      ← shared: Windows transcribe.bat vs POSIX transcribe
+    │   └── PrompterKit\           ← Swift package: Elgato Prompter display lookup + DisplayLink switch (taskbar, video-hq, telemprompit)
     ├── ghopen\
     │   ├── ghopen.bat             ← opens GitHub repo or PR page in browser
     │   └── deps.ps1               ← checks gh CLI (optional but recommended)
@@ -436,6 +437,31 @@ after every rebuild.
 | `tools/record-it/Sources/RecordItApp/MovieWriter.swift` | Hardware H.264/HEVC + AAC `.mov` writer |
 | `tools/record-it/build-app.sh` | Builds, stages, and signs the app bundle |
 | `tools/record-it/restart.sh` | Stops, rebuilds, and launches the debug app |
+
+---
+
+## telemprompit specifics
+
+SwiftUI/AppKit teleprompter for the Elgato Prompter. Paste notes, step
+through them line by line, or auto-scroll.
+
+### Dev workflow
+
+```bash
+swift test --package-path tools/telemprompit
+bash tools/telemprompit/restart.sh
+```
+
+- `open -g telemprompit://next` (and `previous`, `play`, `pause`, `paste`,
+  `settings`) drives the running app without focusing it. Use it for smoke
+  tests instead of synthesising clicks.
+- Global hotkeys use Carbon `RegisterEventHotKey`. Synthetic `CGEvent`s do
+  not trigger them, so verify them with a real key press or clicker.
+- `tools/lib/PrompterKit` is shared with Taskbar and Video HQ. After changing
+  it, run all three test suites:
+  `swift test --package-path tools/lib/PrompterKit`,
+  `swift test --package-path tools/taskbar`,
+  `swift test --package-path tools/video-hq`.
 
 ---
 

@@ -1,10 +1,9 @@
 import AppKit
+import PrompterKit
 import SwiftUI
 
 enum TeleprompterWindowPlacement {
-    // The taskbar is configured to 31.7 points on this Mac. Reserve a rounded
-    // 32-point strip so its reveal area never overlaps the Prompter window.
-    static let taskbarReservation: CGFloat = 32
+    static let taskbarReservation = PrompterDisplay.taskbarReservation
     static let windowLevel: NSWindow.Level = .normal
 
     static let styleMask: NSWindow.StyleMask = [
@@ -15,18 +14,11 @@ enum TeleprompterWindowPlacement {
     ]
 
     static func isPrompterDisplay(named name: String) -> Bool {
-        let normalized = name.lowercased()
-        return normalized.contains("elgato") && normalized.contains("prom")
+        PrompterDisplay.isPrompterDisplay(named: name)
     }
 
     static func windowFrame(in screenFrame: CGRect) -> CGRect {
-        let reservation = min(taskbarReservation, max(0, screenFrame.height - 240))
-        return CGRect(
-            x: screenFrame.minX,
-            y: screenFrame.minY + reservation,
-            width: screenFrame.width,
-            height: screenFrame.height - reservation
-        )
+        PrompterDisplay.fillFrame(in: screenFrame)
     }
 }
 

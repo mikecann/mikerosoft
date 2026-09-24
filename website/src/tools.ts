@@ -237,6 +237,18 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
+    name: 'telemprompit',
+    desc: 'Teleprompter for the Elgato Prompter: paste notes or Notion bullets, step through them line by line or auto-scroll, mirror for beam-splitter glass, and drive it with a clicker from any app',
+    icon: `${base}/telemprompit/icons/telemprompit.png`,
+    header: `${base}/telemprompit/docs/ss1.png`,
+    screenshots: [
+      `${base}/telemprompit/docs/ss1.png`,
+      `${base}/telemprompit/docs/ss2.png`,
+    ],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/telemprompit',
+    platforms: ['macos'],
+  },
+  {
     name: 'voice-type',
     desc: 'Push-to-talk local voice transcription for Windows and macOS. On Apple Silicon it uses MLX for faster final transcription',
     icon: `${base}/voice-type/icons/sound.png`,
