@@ -1,4 +1,5 @@
 import AppKit
+import PrompterKit
 import QuartzCore
 
 func recordItLaunchURL(
@@ -312,6 +313,7 @@ final class TaskbarController: NSObject {
 
     func start() {
         configureTaskbarAccessibilityMessagingTimeout()
+        DisplayLinkTeleprompterController.shared.log = { log($0) }
         performanceWatchdog.start()
         ControlCenterLightsController.shared.start()
         startAtLoginSync(settings.preferences.startAtLogin)

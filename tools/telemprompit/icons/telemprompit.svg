@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="80" x2="900" y2="960" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1F2937"/>
+      <stop offset="1" stop-color="#030712"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="200" y1="220" x2="820" y2="820" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="1" stop-color="#000000"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <rect x="164" y="214" width="696" height="616" rx="56" fill="url(#glass)" stroke="#374151" stroke-width="10"/>
+  <circle cx="512" cy="150" r="34" fill="#0B1220" stroke="#4B5563" stroke-width="10"/>
+  <circle cx="512" cy="150" r="13" fill="#38BDF8"/>
+  <rect x="290" y="300" width="400" height="36" rx="18" fill="#FFFFFF" opacity="0.22"/>
+  <rect x="290" y="380" width="300" height="36" rx="18" fill="#FFFFFF" opacity="0.22"/>
+  <rect x="290" y="480" width="470" height="56" rx="28" fill="#FFFFFF"/>
+  <rect x="250" y="476" width="16" height="64" rx="8" fill="#FFC933"/>
+  <rect x="290" y="600" width="430" height="36" rx="18" fill="#FFFFFF" opacity="0.5"/>
+  <rect x="330" y="680" width="330" height="36" rx="18" fill="#FFFFFF" opacity="0.5"/>
+  <path d="M196 482 L234 508 L196 534 Z" fill="#FFC933"/>
+</svg>

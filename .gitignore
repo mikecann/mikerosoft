@@ -29,6 +29,7 @@ tools/task-stats/screenshots/*_with_audio.srt
 node_modules/
 tools/*/build/
 tools/*/.build/
+tools/lib/*/.build/
 bun.lock
 bun.lockb
 package-lock.json

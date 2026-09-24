@@ -2,19 +2,31 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-struct DisplayLinkAccessibilityNode: Equatable {
-    var role: String
-    var text: String = ""
-    var boolValue: Bool?
-    var children: [DisplayLinkAccessibilityNode] = []
+public struct DisplayLinkAccessibilityNode: Equatable {
+    public var role: String
+    public var text: String
+    public var boolValue: Bool?
+    public var children: [DisplayLinkAccessibilityNode]
+
+    public init(
+        role: String,
+        text: String = "",
+        boolValue: Bool? = nil,
+        children: [DisplayLinkAccessibilityNode] = []
+    ) {
+        self.role = role
+        self.text = text
+        self.boolValue = boolValue
+        self.children = children
+    }
 }
 
-enum DisplayLinkPrompterSwitchAction: Equatable {
+public enum DisplayLinkPrompterSwitchAction: Equatable {
     case none
     case press
 }
 
-func displayLinkPrompterSwitchAction(current: Bool?, target: Bool) -> DisplayLinkPrompterSwitchAction {
+public func displayLinkPrompterSwitchAction(current: Bool?, target: Bool) -> DisplayLinkPrompterSwitchAction {
     current == target ? .none : .press
 }
 
@@ -23,10 +35,7 @@ private func isDisplayLinkSwitch(_ node: DisplayLinkAccessibilityNode) -> Bool {
 }
 
 private func namesElgatoPrompter(_ text: String) -> Bool {
-    let normalized = text.lowercased()
-    // macOS and DisplayLink sometimes shorten the display name to
-    // "Elgato Prom.". Match the stable product-name stem used by Video HQ.
-    return normalized.contains("elgato") && normalized.contains("prom")
+    PrompterDisplay.isPrompterDisplay(named: text)
 }
 
 private func subtreeNamesElgatoPrompter(_ node: DisplayLinkAccessibilityNode) -> Bool {
@@ -48,7 +57,7 @@ private func firstSwitchPath(
     return nil
 }
 
-func displayLinkTeleprompterSwitchPath(in root: DisplayLinkAccessibilityNode) -> [Int]? {
+public func displayLinkTeleprompterSwitchPath(in root: DisplayLinkAccessibilityNode) -> [Int]? {
     func search(_ node: DisplayLinkAccessibilityNode, path: [Int]) -> [Int]? {
         if isDisplayLinkSwitch(node), namesElgatoPrompter(node.text) {
             return path
@@ -70,17 +79,19 @@ func displayLinkTeleprompterSwitchPath(in root: DisplayLinkAccessibilityNode) ->
     return search(root, path: [])
 }
 
-enum DisplayLinkTeleprompterError: LocalizedError {
+public enum DisplayLinkTeleprompterError: LocalizedError {
     case accessibilityPermissionMissing
     case managerUnavailable
     case menuUnavailable
     case switchUnavailable
     case switchDidNotChange
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .accessibilityPermissionMissing:
-            return "Taskbar does not have Accessibility permission"
+            let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+                ?? ProcessInfo.processInfo.processName
+            return "\(appName) does not have Accessibility permission"
         case .managerUnavailable:
             return "DisplayLink Manager is not available"
         case .menuUnavailable:
@@ -99,14 +110,20 @@ private enum DisplayLinkSwitchUpdate {
     case changed
 }
 
-final class DisplayLinkTeleprompterController {
-    static let shared = DisplayLinkTeleprompterController()
+public final class DisplayLinkTeleprompterController {
+    public static let shared = DisplayLinkTeleprompterController()
+
+    /// Where diagnostics go. Each app points this at its own log.
+    public var log: (String) -> Void = { NSLog("%@", $0) }
+
+    // One controller per process, so switch presses stay serialized on its queue.
+    private init() {}
 
     private let bundleID = "com.displaylink.DisplayLinkUserAgent"
     private let appURL = URL(fileURLWithPath: "/Applications/DisplayLink Manager.app")
-    private let queue = DispatchQueue(label: "com.mikerosoft.taskbar.displaylink-prompter", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.mikerosoft.prompterkit.displaylink-prompter", qos: .userInitiated)
 
-    func setEnabled(_ enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
+    public func setEnabled(_ enabled: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
         queue.async { [weak self] in
             guard let self else { return }
             let result = Result { try self.setEnabledSynchronously(enabled) }
@@ -125,14 +142,15 @@ final class DisplayLinkTeleprompterController {
         }
 
         let application = AXUIElementCreateApplication(app.processIdentifier)
-        setTaskbarAccessibilityMessagingTimeout(application)
+        // Keep a hung DisplayLink UI from blocking this queue for seconds.
+        AXUIElementSetMessagingTimeout(application, 0.25)
 
         switch try updateVisiblePrompterSwitch(enabled, in: application) {
         case .alreadySet:
-            log("DisplayLink Elgato Prompter is already \(enabled ? "enabled" : "disabled")")
+            self.log("DisplayLink Elgato Prompter is already \(enabled ? "enabled" : "disabled")")
             return
         case .changed:
-            log("DisplayLink Elgato Prompter set \(enabled ? "on" : "off")")
+            self.log("DisplayLink Elgato Prompter set \(enabled ? "on" : "off")")
             return
         case .unavailable:
             break
@@ -156,7 +174,7 @@ final class DisplayLinkTeleprompterController {
         for _ in 0..<20 {
             switch try updateVisiblePrompterSwitch(enabled, in: application) {
             case .alreadySet, .changed:
-                log("DisplayLink Elgato Prompter set \(enabled ? "on" : "off")")
+                self.log("DisplayLink Elgato Prompter set \(enabled ? "on" : "off")")
                 return
             case .unavailable:
                 break
@@ -176,7 +194,7 @@ final class DisplayLinkTeleprompterController {
         configuration.activates = false
         NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
             if let error {
-                log("Could not launch DisplayLink Manager: \(error.localizedDescription)")
+                self.log("Could not launch DisplayLink Manager: \(error.localizedDescription)")
             }
         }
 
@@ -212,7 +230,7 @@ final class DisplayLinkTeleprompterController {
         // AXUIElementSetAttributeValue even though it returns success. Invoke
         // the switch's actual action just as a user click would.
         let pressResult = AXUIElementPerformAction(toggle, kAXPressAction as CFString)
-        log("DisplayLink Elgato Prompter AXPress result=\(pressResult.rawValue) current=\(String(describing: currentValue)) target=\(enabled)")
+        self.log("DisplayLink Elgato Prompter AXPress result=\(pressResult.rawValue) current=\(String(describing: currentValue)) target=\(enabled)")
         guard pressResult == .success else {
             throw DisplayLinkTeleprompterError.switchDidNotChange
         }
