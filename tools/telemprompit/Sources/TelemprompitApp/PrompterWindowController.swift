@@ -73,7 +73,13 @@ final class PrompterWindowController: NSObject, NSWindowDelegate {
 
     private func publishDisplayStatus() {
         let name = window.screen?.localizedName ?? "no screen"
-        model.displayStatus = isOnPrompter ? name : "\(name) (Elgato Prompter not found)"
+        if isOnPrompter {
+            model.displayStatus = name
+        } else if PrompterDisplay.prompterScreen() != nil {
+            model.displayStatus = "\(name) (Elgato Prompter is connected)"
+        } else {
+            model.displayStatus = "\(name) (Elgato Prompter not connected)"
+        }
     }
 
     var isOnPrompter: Bool {
