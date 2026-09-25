@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreImage
+import CoreMedia
 import Foundation
 import ImageIO
 import TandemCore
@@ -17,6 +18,16 @@ struct SceneClip {
     var pictureTransform: CGAffineTransform = .identity
     /// Preferred transform of the clip's matte file.
     var matteTransform: CGAffineTransform = .identity
+    /// The files behind the picture and matte tracks, for decoding a frame
+    /// directly when AVFoundation can't (see `FrameRecovery`).
+    var picture: SourceTrack?
+    var matte: SourceTrack?
+
+    /// Media time shown at a timeline time, following speed and freezes.
+    func mediaTime(at time: Time) -> CMTime {
+        let t = clip.freezeFrame ? clip.sourceStart : clip.sourceStart + (time - clip.start).scaled(by: clip.speed)
+        return t.cmTime
+    }
 }
 
 /// The fixed half of rendering: canvas, clips and effect definitions. Each
@@ -28,14 +39,17 @@ final class RenderScene: @unchecked Sendable {
     let clips: [String: SceneClip]
     let registry: EffectRegistry
     let folder: ProjectFolder
+    /// Decodes frames AVFoundation couldn't; nil turns that off.
+    let recovery: FrameRecovery?
 
-    init(canvas: CGSize, frameDuration: Time, format: String?, clips: [String: SceneClip], registry: EffectRegistry, folder: ProjectFolder) {
+    init(canvas: CGSize, frameDuration: Time, format: String?, clips: [String: SceneClip], registry: EffectRegistry, folder: ProjectFolder, recovery: FrameRecovery? = nil) {
         self.canvas = canvas
         self.frameDuration = frameDuration
         self.format = format
         self.clips = clips
         self.registry = registry
         self.folder = folder
+        self.recovery = recovery
     }
 
     var pixelScale: CGFloat { LayerMath.pixelScale(canvas: canvas) }
@@ -101,7 +115,7 @@ struct FrameComposer {
         switch clip.content {
         case .media:
             if let track = ref.pictureTrack {
-                guard let frame = sources.frame(track: track) else { return nil }
+                guard let frame = sources.frame(track: track) ?? recovered(sceneClip.picture, sceneClip, at: time) else { return nil }
                 image = Self.oriented(frame, sceneClip.pictureTransform)
             } else if let url = sceneClip.imageURL, let still = ImageCache.shared.image(at: url) {
                 image = still
@@ -146,7 +160,8 @@ struct FrameComposer {
         }
 
         var cutOut = false
-        if let cutout = video.cutout, cutout.enabled, let track = ref.matteTrack, let matte = sources.frame(track: track) {
+        if let cutout = video.cutout, cutout.enabled, let track = ref.matteTrack,
+           let matte = sources.frame(track: track) ?? recovered(sceneClip.matte, sceneClip, at: time) {
             image = Self.cutout(image, matte: Self.oriented(matte, sceneClip.matteTransform), settings: cutout, displaySize: size, unit: unit)
             cutOut = true
         }
@@ -185,6 +200,15 @@ struct FrameComposer {
     }
 
     // MARK: - Pieces
+
+    /// The frame AVFoundation should have supplied, decoded directly. A
+    /// layer in the stack always has a frame to show, so an empty source
+    /// means a decode failed (open-GOP leading frames), not a gap.
+    func recovered(_ source: SourceTrack?, _ clip: SceneClip, at time: Time) -> CIImage? {
+        guard let source, let recovery = scene.recovery,
+              let pixels = recovery.frame(source, at: clip.mediaTime(at: time)) else { return nil }
+        return CIImage(cvPixelBuffer: pixels)
+    }
 
     /// A decoded frame turned the right way up, origin at 0, 0.
     static func oriented(_ frame: CIImage, _ preferred: CGAffineTransform) -> CIImage {

@@ -177,15 +177,20 @@ enum CompositionAssembler {
         var videoEnds = Array(repeating: Time.zero, count: videoTracks.count)
         var pictureTransforms: [String: CGAffineTransform] = [:]
         var matteTransforms: [String: CGAffineTransform] = [:]
+        var pictureSources: [String: SourceTrack] = [:]
+        var matteSources: [String: SourceTrack] = [:]
         for segment in plan.videoSegments.sorted(by: { $0.timeline.start < $1.timeline.start }) {
             guard let u = url(for: segment), let source = sources[u], let assetTrack = source.video else { continue }
             do {
                 try insert(segment, into: videoTracks[segment.track], from: assetTrack, available: source.videoRange,
                            end: &videoEnds[segment.track], holdLastFrame: true, frameDuration: frameDuration)
+                let direct = SourceTrack(url: u, asset: source.asset, track: assetTrack, timeRange: source.videoRange)
                 if segment.role == .picture {
                     pictureTransforms[segment.clipID] = source.preferredTransform
+                    pictureSources[segment.clipID] = direct
                 } else {
                     matteTransforms[segment.clipID] = source.preferredTransform
+                    matteSources[segment.clipID] = direct
                 }
             } catch {
                 warnings.add("Couldn't place \(u.lastPathComponent) for clip \(segment.clipID): \(error)")
@@ -232,10 +237,13 @@ enum CompositionAssembler {
         var sceneClips = RenderEngine.sceneClips(project, folder: context.folder)
         for (id, transform) in pictureTransforms { sceneClips[id]?.pictureTransform = transform }
         for (id, transform) in matteTransforms { sceneClips[id]?.matteTransform = transform }
+        for (id, source) in pictureSources { sceneClips[id]?.picture = source }
+        for (id, source) in matteSources { sceneClips[id]?.matte = source }
         let canvas = context.renderSize
         let scene = RenderScene(
             canvas: canvas, frameDuration: frameDuration, format: context.format,
-            clips: sceneClips, registry: context.effects, folder: context.folder
+            clips: sceneClips, registry: context.effects, folder: context.folder,
+            recovery: .shared
         )
         let trackIDs = videoTracks.map(\.trackID)
         let videoComposition = AVMutableVideoComposition()
