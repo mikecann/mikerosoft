@@ -145,7 +145,9 @@ public final class ProjectClient: @unchecked Sendable {
     var lockWait: TimeInterval = 15
 
     public init(projectURL: URL, author: String) {
-        self.projectURL = projectURL.standardizedFileURL
+        // One spelling per file (/tmp and /private/tmp are the same folder),
+        // so calls in this process share one open project.
+        self.projectURL = projectURL.standardizedFileURL.resolvingSymlinksInPath()
         self.author = author
     }
 

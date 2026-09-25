@@ -90,6 +90,7 @@ public enum TimelineDump {
         let names = mediaNames(project)
         let speechTrackIDs = Set(TranscriptTools.speechTracks(project).map(\.id))
         var usedMedia: [String] = []
+        var untranscribed: [String] = []
 
         for (label, track, clips) in shown {
             out.append("")
@@ -136,12 +137,18 @@ public enum TimelineDump {
                             if shown.last != all.last { words += "..." }
                         }
                         out += wrap(words.isEmpty ? "(no words)" : "\"\(words)\"", width: options.width, indent: "      ")
-                    } else {
-                        out.append("      (no transcript yet)")
+                    } else if !untranscribed.contains(item.id) {
+                        untranscribed.append(item.id)
                     }
                 }
                 previousEnd = clip.end
             }
+        }
+
+        if !untranscribed.isEmpty {
+            // Said once, after the header, rather than under every clip.
+            let note = "No transcript yet for \(untranscribed.joined(separator: ", ")), so its clips show no words."
+            out.insert(note, at: range ? 4 : 3)
         }
 
         if !usedMedia.isEmpty {

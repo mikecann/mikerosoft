@@ -180,6 +180,14 @@ final class TimelineDumpTests: XCTestCase {
         assertSameText(TimelineDump.render(Self.kitchenSink()), expected)
     }
 
+    func testMissingTranscriptsAreNotedOnce() {
+        let options = TimelineDump.Options(transcripts: { _ in nil })
+        let text = TimelineDump.render(APIFixture.project(), options: options)
+        let lines = text.components(separatedBy: "\n")
+        XCTAssertEqual(lines[3], "No transcript yet for med_camera, so its clips show no words.")
+        XCTAssertEqual(lines.filter { $0.contains("No transcript") }.count, 1)
+    }
+
     func assertSameText(_ actual: String, _ expected: String, file: StaticString = #filePath, line: UInt = #line) {
         guard actual != expected else { return }
         let a = actual.components(separatedBy: "\n")
