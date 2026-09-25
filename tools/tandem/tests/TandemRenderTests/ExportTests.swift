@@ -150,7 +150,7 @@ final class ExportTests: XCTestCase {
         let item = media.item("med_t", "tone.mov", seconds: 2, audio: true)
         let sound = Clip(id: "clip_a", content: .media(mediaID: "med_t"), start: .zero, duration: t(2))
         let project = smallProject(video: [], audio: [Track(kind: .audio, name: "A1", clips: [sound])], media: [item])
-        let out = media.folder.appendingPathComponent("tone.mov")
+        let out = media.folder.appendingPathComponent("tone-out.mov")
         let result = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: preset(loudness: nil), output: out).run()
         XCTAssertEqual(try XCTUnwrap(result.integratedLUFS), -20, accuracy: 0.3)
     }
@@ -248,6 +248,25 @@ final class ExportTests: XCTestCase {
         _ = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: small, output: out).run()
         let size = try await AVURLAsset(url: out).loadTracks(withMediaType: .video)[0].load(.naturalSize)
         XCTAssertEqual(size, CGSize(width: 160, height: 90))
+    }
+
+    func testRefusesOutputsThatCouldDestroyWork() async throws {
+        let media = try TestMedia()
+        let source = try await media.movie("red.mov", seconds: 1, draw: { TestMedia.fill($1, 1, 0, 0) })
+        let clip = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_r", "red.mov", seconds: 1)])
+        let context = RenderContext(project: project, folder: media.projectFolder)
+        for out in [source, media.folder.appendingPathComponent("Video")] {
+            do {
+                _ = try await Exporter(context: context, preset: preset(loudness: nil), output: out).run()
+                XCTFail("expected \(out.lastPathComponent) to be refused")
+            } catch {
+                XCTAssertTrue("\(error)".contains("export"), "\(error)")
+            }
+        }
+        // The source is untouched.
+        let size = (try FileManager.default.attributesOfItem(atPath: source.path)[.size] as? Int) ?? 0
+        XCTAssertGreaterThan(size, 1_000)
     }
 
     func testCancellingStopsAndRemovesTheFile() async throws {

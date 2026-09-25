@@ -59,21 +59,32 @@ actor BaseVideo {
     private var ready: URL?
 
     func url() async throws -> URL {
-        if let ready { return ready }
+        // The temporary folder can be cleaned while the app runs.
+        if let ready, FileManager.default.fileExists(atPath: ready.path) { return ready }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("TandemRender", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent("base-black-v1.mov")
-        if FileManager.default.fileExists(atPath: url.path),
-           let tracks = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video), !tracks.isEmpty {
+        if await Self.usable(url) {
             ready = url
             return url
         }
         let temporary = folder.appendingPathComponent("base-black-\(UUID().uuidString).mov")
         try await Self.write(to: temporary)
-        _ = try? FileManager.default.removeItem(at: url)
-        try FileManager.default.moveItem(at: temporary, to: url)
-        ready = url
-        return url
+        // Another process (the CLI next to the app) may be doing the same:
+        // if the shared name is taken by then, use it, or keep our own copy.
+        if (try? FileManager.default.moveItem(at: temporary, to: url)) != nil || FileManager.default.fileExists(atPath: url.path) {
+            if FileManager.default.fileExists(atPath: temporary.path) { try? FileManager.default.removeItem(at: temporary) }
+            ready = url
+        } else {
+            ready = temporary
+        }
+        return ready!
+    }
+
+    private static func usable(_ url: URL) async -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let tracks = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video) else { return false }
+        return !tracks.isEmpty
     }
 
     /// One black 64x64 frame lasting a second.

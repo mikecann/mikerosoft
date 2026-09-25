@@ -63,8 +63,22 @@ final class ExportJob: @unchecked Sendable {
         if stop { throw RenderError.cancelled }
     }
 
+    /// Refuses outputs that could destroy work: anything but a movie file
+    /// (the snapshot beside `Video` would be `Video.tandem`, the project's
+    /// own name) or a file the project uses as media.
+    func checkOutput() throws {
+        guard ["mp4", "mov", "m4v"].contains(output.pathExtension.lowercased()) else {
+            throw RenderError.export("export to a .mp4, .mov or .m4v file, not \(output.lastPathComponent)")
+        }
+        let target = output.standardizedFileURL.resolvingSymlinksInPath().path
+        if context.project.media.contains(where: { context.folder.url(for: $0).standardizedFileURL.resolvingSymlinksInPath().path == target }) {
+            throw RenderError.export("\(output.lastPathComponent) is media in this project; export somewhere else")
+        }
+    }
+
     func run() async throws -> ExportResult {
         let started = Date()
+        try checkOutput()
         var renderContext = context
         renderContext.useProxies = false
         if let format = preset.format { renderContext.format = format }
