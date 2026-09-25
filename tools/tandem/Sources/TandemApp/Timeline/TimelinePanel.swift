@@ -67,7 +67,7 @@ struct TimelineToolbar: View {
             GraphiteSlider(
                 value: Binding(get: { model.timeline.zoomFraction }, set: { model.timeline.zoomFraction = $0 }),
                 range: 0...1,
-                track: Swatch(0x26292E),
+                track: Theme.zoomTrack,
                 fill: Theme.textMuted
             )
             .frame(width: 84)

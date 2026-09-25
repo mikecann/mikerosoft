@@ -106,7 +106,7 @@ final class ViewerView: NSView, CaptureAware {
             context.restoreGState()
             return
         }
-        context.setFillColor(Swatch(0x131518).cg)
+        context.setFillColor(Theme.canvas.cg)
         context.fill(canvas)
         context.saveGState()
         context.clip(to: canvas)
@@ -192,7 +192,7 @@ final class ViewerView: NSView, CaptureAware {
         shoulders.move(to: CGPoint(x: centreX - unit * 4.8, y: rect.maxY))
         shoulders.addCurve(to: CGPoint(x: centreX + unit * 4.8, y: rect.maxY), control1: CGPoint(x: centreX - unit * 4.4, y: rect.maxY - unit * 3.6), control2: CGPoint(x: centreX + unit * 4.4, y: rect.maxY - unit * 3.6))
         shoulders.closeSubpath()
-        context.setFillColor((cutout ? Swatch(0x3E5570) : Theme.cameraClip.detail).cg)
+        context.setFillColor((cutout ? Theme.cutoutFigure : Theme.cameraClip.detail).cg)
         context.fillEllipse(in: head)
         context.addPath(shoulders)
         context.fillPath()

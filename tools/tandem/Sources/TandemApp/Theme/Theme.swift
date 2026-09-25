@@ -57,6 +57,16 @@ enum Theme {
     static let knob = Swatch(0xE8EAED)
     /// The dimmer behind a sheet.
     static let dimmer = Swatch(0x050607, alpha: 0.62)
+    /// The timeline zoom slider's track, a touch lighter than the others.
+    static let zoomTrack = Swatch(0x26292E)
+    /// Empty thumbnail wells in the media browser.
+    static let thumbnailWell = Swatch(0x1F2328)
+    /// The music note in the media browser.
+    static let musicIcon = Swatch(0x8FA3CF)
+    /// The viewer canvas before there's a picture.
+    static let canvas = Swatch(0x131518)
+    /// The cut-out person in the viewer's layout preview.
+    static let cutoutFigure = Swatch(0x3E5570)
 
     // MARK: - Timeline clips
 

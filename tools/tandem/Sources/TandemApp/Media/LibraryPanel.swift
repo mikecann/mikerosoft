@@ -294,7 +294,7 @@ struct MediaThumbnail: View {
     var body: some View {
         let item = mediaID.flatMap { model.project.media($0) }
         ZStack {
-            RoundedRectangle(cornerRadius: corner).fill(Swatch(0x1F2328).color)
+            RoundedRectangle(cornerRadius: corner).fill(Theme.thumbnailWell.color)
             if let item, let image = Self.image(for: item, analysis: model.session.analysis) {
                 Image(nsImage: image)
                     .resizable()
@@ -429,7 +429,7 @@ private struct AudioRow: View {
         HStack(spacing: 10) {
             Image(systemName: entry.group == .music ? "music.note" : (entry.group == .sfx ? "waveform" : "doc"))
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Swatch(0x8FA3CF).color)
+                .foregroundStyle(Theme.musicIcon.color)
                 .frame(width: 14)
             Text(entry.title)
                 .font(.ui(12))
