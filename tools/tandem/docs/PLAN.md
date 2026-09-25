@@ -43,7 +43,8 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Transitions: dissolve, fade to and from black, push (4 directions), slide, cut slide, wipe, zoom [render]
 - [x] Native titles: Core Text, the four styles, in and out animations, word-by-word captions [render]
 - [x] Audio mix: gain, fades, keyframes, normalisation, voice isolation, crossfades, 3 ms micro-fades, pitch-kept speed changes [render]
-- [ ] Graphic clips (rendered template files) and the pitchShift effect [render]
+- [x] pitchShift audio effect [render]
+- [ ] Graphic template clips (Remotion props rendered in the background) [render]
 - [x] Frame renderer for grabs and tests [render]
 - [x] Exporter: VideoToolbox speed priority, presets, master loudness to -14 LUFS under -1 dBTP, range export, snapshot beside the file [render] (the whole 11 min v14 edit in 156 s, 4.3x real time)
 
@@ -70,7 +71,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Activity feed: agent edits with labels, undo per batch [app]
 - [x] Hosts the API while a project is open [app]
 - [ ] Keyframe editing in the timeline, drops from Finder [app]
-- [~] Exact paused frames from original files (black in VFR gaps today; the viewer uses the player frame) [render]
+- [x] Exact paused frames from original files, including remuxed open-GOP files without a keyframe table [render]
 
 ## Milestone 6: real projects
 
