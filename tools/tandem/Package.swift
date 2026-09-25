@@ -28,12 +28,21 @@ let package = Package(
         .target(name: "TandemRender", dependencies: ["TandemCore", "TandemMedia"], path: "Sources/TandemRender"),
         // Commands shared by the local server, the CLI and MCP.
         .target(name: "TandemAPI", dependencies: ["TandemCore", "TandemMedia", "TandemRender"], path: "Sources/TandemAPI"),
-        .executableTarget(name: "TandemApp", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI"], path: "Sources/TandemApp"),
+        // The macOS app. Its keymap and other defaults ship as resources.
+        .executableTarget(
+            name: "TandemApp",
+            dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI"],
+            path: "Sources/TandemApp",
+            resources: [.copy("Resources/Keymaps")]
+        ),
         .executableTarget(name: "TandemCLI", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI"], path: "Sources/TandemCLI"),
         .testTarget(name: "TandemCoreTests", dependencies: ["TandemCore"], path: "tests/TandemCoreTests"),
         .testTarget(name: "TandemMediaTests", dependencies: ["TandemMedia"], path: "tests/TandemMediaTests"),
         .testTarget(name: "TandemRenderTests", dependencies: ["TandemRender"], path: "tests/TandemRenderTests"),
-        .testTarget(name: "TandemAPITests", dependencies: ["TandemAPI"], path: "tests/TandemAPITests")
+        .testTarget(name: "TandemAPITests", dependencies: ["TandemAPI"], path: "tests/TandemAPITests"),
+        // The app's pure logic: timeline maths, snapping, hit testing, the
+        // keymap and how gestures become edit batches.
+        .testTarget(name: "TandemAppTests", dependencies: ["TandemApp", "TandemCore"], path: "tests/TandemAppTests")
     ],
     swiftLanguageModes: [.v5]
 )
