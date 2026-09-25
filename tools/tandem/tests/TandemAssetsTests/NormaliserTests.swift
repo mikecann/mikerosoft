@@ -245,3 +245,43 @@ final class NormaliserTests: XCTestCase {
         XCTAssertEqual(WAVFile.guessChannels(byteCount: pcm.count, sampleRate: 48_000, expectedSeconds: nil), 1)
     }
 }
+
+final class LottieNormaliserTests: XCTestCase {
+    func testLottieRendersToHEVCWithAlphaTheRightWayUp() async throws {
+        guard AssetNormaliser.canRenderLottie else { throw XCTSkip("built without lottie-ios") }
+        let folder = tempFolder("lottie")
+        let input = folder.appendingPathComponent("original.json")
+        try Generated.lottie(at: input)
+
+        let result = try await AssetNormaliser(lottieLongSide: 100).normalise(input, into: folder)
+
+        XCTAssertEqual(result.format, .lottie)
+        XCTAssertEqual(result.file, "normalised.mov")
+        XCTAssertTrue(result.hasAlpha)
+        XCTAssertEqual(result.width, 100)
+        XCTAssertEqual(result.height, 100)
+        XCTAssertEqual(try XCTUnwrap(result.duration), 0.5, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(result.frameRate), 30, accuracy: 0.01)
+        let movie = folder.appendingPathComponent("normalised.mov")
+        let frames = try await Generated.frameCount(of: movie)
+        XCTAssertEqual(frames, 15)
+        // The square fills the top-left quarter.
+        let topLeft = try await Generated.alpha(of: movie, x: 20, y: 20)
+        let bottomLeft = try await Generated.alpha(of: movie, x: 20, y: 80)
+        let topRight = try await Generated.alpha(of: movie, x: 80, y: 20)
+        XCTAssertGreaterThan(topLeft, 240)
+        XCTAssertLessThan(bottomLeft, 10)
+        XCTAssertLessThan(topRight, 10)
+    }
+
+    func testLottieFallsBackToTheWebPWhenItCantRender() async throws {
+        let folder = tempFolder("lottie-fallback")
+        let broken = folder.appendingPathComponent("original.json")
+        try Data(#"{"v":"5.7.4","fr":30,"ip":0,"op":15,"w":100,"h":100,"layers":"nope"}"#.utf8).write(to: broken)
+        let gif = folder.appendingPathComponent("fallback.gif")
+        try Generated.animatedGIF(at: gif, frames: 4)
+        let result = try await AssetNormaliser().normalise(broken, into: folder, fallbacks: [gif])
+        XCTAssertEqual(result.format, .gif)
+        XCTAssertEqual(result.file, "normalised.mov")
+    }
+}

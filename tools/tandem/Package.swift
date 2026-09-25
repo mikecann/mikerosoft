@@ -17,6 +17,10 @@ let package = Package(
         .library(name: "TandemAPI", targets: ["TandemAPI"]),
         .library(name: "TandemAssets", targets: ["TandemAssets"])
     ],
+    dependencies: [
+        // Renders Lottie stickers to video at import (TandemAssets only).
+        .package(url: "https://github.com/airbnb/lottie-ios.git", from: "4.6.1")
+    ],
     targets: [
         // Timeline model, time maths, edit commands, undo, persistence and the
         // project coordinator. Pure Swift plus Foundation, no media frameworks.
@@ -39,7 +43,7 @@ let package = Package(
         // normalising on import and copying assets into projects.
         .target(
             name: "TandemAssets",
-            dependencies: ["TandemCore", "TandemMedia"],
+            dependencies: ["TandemCore", "TandemMedia", .product(name: "Lottie", package: "lottie-ios")],
             path: "Sources/TandemAssets",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),

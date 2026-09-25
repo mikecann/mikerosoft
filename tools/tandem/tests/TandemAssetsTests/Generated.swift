@@ -96,3 +96,24 @@ enum Generated {
         return count
     }
 }
+
+extension Generated {
+    /// A 100 x 100 Lottie animation at 30 fps, 15 frames long: a red
+    /// 50 x 50 square filling the top-left quarter on a transparent
+    /// background.
+    static func lottie(at url: URL) throws {
+        let json = """
+        {"v":"5.7.4","fr":30,"ip":0,"op":15,"w":100,"h":100,"nm":"test","ddd":0,"assets":[],
+         "layers":[{"ddd":0,"ind":1,"ty":4,"nm":"box","sr":1,
+           "ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":{"a":0,"k":[25,25,0]},"a":{"a":0,"k":[0,0,0]},"s":{"a":0,"k":[100,100,100]}},
+           "ao":0,
+           "shapes":[{"ty":"gr","nm":"g","it":[
+             {"ty":"rc","nm":"r","d":1,"s":{"a":0,"k":[50,50]},"p":{"a":0,"k":[0,0]},"r":{"a":0,"k":0}},
+             {"ty":"fl","nm":"f","c":{"a":0,"k":[1,0,0,1]},"o":{"a":0,"k":100},"r":1},
+             {"ty":"tr","p":{"a":0,"k":[0,0]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100},"sk":{"a":0,"k":0},"sa":{"a":0,"k":0}}
+           ]}],
+           "ip":0,"op":15,"st":0,"bm":0}]}
+        """
+        try json.write(to: url, atomically: true, encoding: .utf8)
+    }
+}

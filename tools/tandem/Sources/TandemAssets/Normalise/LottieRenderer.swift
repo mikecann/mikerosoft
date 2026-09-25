@@ -16,16 +16,14 @@ enum LottieRenderer {
 
     static func render(_ url: URL, to output: URL, longSide: Int) async throws -> VideoInfo {
         let renderer = try await LottieFrameRenderer.make(url: url, longSide: longSide)
-        let frames = await renderer.frameRange
-        let fps = await renderer.framesPerSecond
-        let (width, height) = await (renderer.width, renderer.height)
-        let writer = try AlphaVideoWriter(url: output, width: width, height: height)
+        let fps = renderer.framesPerSecond
+        let writer = try AlphaVideoWriter(url: output, width: renderer.width, height: renderer.height)
         // Frame times on a 60 000 tick clock are exact for 24, 25, 30, 50
         // and 60 fps.
         let timescale: CMTimeScale = 60_000
         var index = 0
         do {
-            for frame in frames {
+            for frame in renderer.frameRange {
                 let image = try await renderer.image(at: CGFloat(frame))
                 let time = CMTime(value: CMTimeValue((Double(index) / fps * Double(timescale)).rounded()), timescale: timescale)
                 try writer.append(image, at: time)
