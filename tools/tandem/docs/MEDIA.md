@@ -169,6 +169,21 @@ Notes on each:
   the exact length. The render module mixes it with the original by
   `voiceIsolation`.
 
+## Wiring it up
+
+- The session should start a `FolderWatcher` when a project opens, call
+  `refreshMedia()` on each batch (it already calls `requestDefaults`), and
+  stop it on close. `scanReport` also returns missing files and notes
+  (clamped take offsets) worth showing.
+- Exports should `await EncoderLock.shared.acquire(priority: .export)`
+  before encoding and `release()` after; proxy and matte builds hand the
+  encoder over within a fifth of a second.
+- `isCached(_:for:)` and `state(_:for:)` answer "is it ready" without
+  decoding a transcript or waveform.
+- A clip whose cutout mode is `.person` can have its matte made with
+  `submit(.matte, for:, settings:)` (matteMode `.person`) and read with
+  `matteURL(for:mode:)`.
+
 ## Speed on the M5 Pro
 
 Real footage, release build (`report.txt` has the latest numbers):
