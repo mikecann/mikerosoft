@@ -17,7 +17,9 @@ enum IsolatedVoiceJob {
     static let sampleRate = 48_000.0
     static let chunk: AVAudioFrameCount = 4096
 
-    /// Measured latency of each model at 48 kHz, used when the unit reports 0.
+    /// Measured latency of each model at 48 kHz in stereo, used only when the
+    /// unit reports 0 (it reports its real latency once running: 3,665 for
+    /// the voice model in stereo, 2,705 in mono).
     static func knownLatency(_ model: VoiceIsolationModel) -> Int {
         switch model {
         case .voice: return 3665
@@ -121,17 +123,21 @@ enum IsolatedVoiceJob {
             let frames = Int(buffer.frameLength)
             let skip = max(0, min(frames, latency - rendered))
             rendered += frames
-            if frames > skip {
-                if skip == 0 {
+            // The render in which the input ran out can reach past its end;
+            // never write more than the source had.
+            var usable = frames - skip
+            if let input = feed.inputFrames { usable = min(usable, max(0, input - written)) }
+            if usable > 0 {
+                if skip == 0, usable == frames {
                     try file.write(from: buffer)
                 } else {
-                    tail.frameLength = AVAudioFrameCount(frames - skip)
+                    tail.frameLength = AVAudioFrameCount(usable)
                     for channel in 0..<channels {
-                        tail.floatChannelData![channel].update(from: buffer.floatChannelData![channel] + skip, count: frames - skip)
+                        tail.floatChannelData![channel].update(from: buffer.floatChannelData![channel] + skip, count: usable)
                     }
                     try file.write(from: tail)
                 }
-                written += frames - skip
+                written += usable
             }
             chunks += 1
             if chunks % 32 == 0 {

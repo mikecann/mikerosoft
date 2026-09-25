@@ -420,6 +420,30 @@ final class RealMediaTests: XCTestCase {
         let after = try await LoudnessJob.measure(source: url, context: context(.loudness))
         report(String(format: "  loudness of the minute: original %.1f LUFS, isolated %.1f LUFS", before.integratedLUFS, after.integratedLUFS))
         XCTAssertEqual(after.integratedLUFS, before.integratedLUFS, accuracy: 3)
+
+        // A mono source: the unit reports a different latency (2,705), so
+        // check that lines up too.
+        let monoSource = folder.appendingPathComponent("mono-source.wav")
+        let minute = try await monoSamples(Self.camera, range: Self.minute)
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        do {
+            let file = try AVAudioFile(forWriting: monoSource, settings: format.settings)
+            let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(minute.count))!
+            pcm.frameLength = pcm.frameCapacity
+            pcm.floatChannelData![0].update(from: minute, count: minute.count)
+            try file.write(from: pcm)
+        }
+        let monoURL = folder.appendingPathComponent("voice-mono.caf")
+        let mono = try await IsolatedVoiceJob.render(source: monoSource, model: .voice, to: monoURL, context: context(.isolatedVoice))
+        XCTAssertEqual(mono.frames, minute.count)
+        let monoFile = try AVAudioFile(forReading: monoURL)
+        monoFile.framePosition = 10 * 48_000
+        let monoBuffer = AVAudioPCMBuffer(pcmFormat: monoFile.processingFormat, frameCapacity: AVAudioFrameCount(original.count))!
+        try monoFile.read(into: monoBuffer, frameCount: AVAudioFrameCount(original.count))
+        let monoVoice = Array(UnsafeBufferPointer(start: monoBuffer.floatChannelData![0], count: Int(monoBuffer.frameLength)))
+        let monoLag = bestLag(Array(minute[(10 * 48_000)..<(10 * 48_000 + original.count)]), monoVoice, maxLag: 5000)
+        report("  mono: latency \(mono.latency) samples, offset against the original \(monoLag) samples")
+        XCTAssertLessThanOrEqual(abs(monoLag), 2)
     }
 
     func monoSamples(_ url: URL, range: CMTimeRange) async throws -> [Float] {

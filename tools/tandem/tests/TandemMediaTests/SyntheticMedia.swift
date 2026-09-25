@@ -136,7 +136,7 @@ enum SyntheticMedia {
         ], commonFormat: .pcmFormatFloat32, interleaved: false)
         var phaseFrame = 0
         for segment in segments {
-            let frames = Int(segment.seconds * sampleRate)
+            let frames = Int((segment.seconds * sampleRate).rounded())
             let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
             buffer.frameLength = AVAudioFrameCount(frames)
             for channel in 0..<channels {

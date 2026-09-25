@@ -262,6 +262,23 @@ final class AnalysisTests: TempFolderTestCase {
         }
     }
 
+    func testIsolatedVoiceIsExactlyAsLongAsTheSourceAtAnyLength() async throws {
+        // Lengths that end part way through a render, in mono (2,705 samples
+        // of latency) and stereo (3,665).
+        let analysis = analysis()
+        for (index, frames) in [69_732, 49_391, 100_003].enumerated() {
+            for channels in [1, 2] {
+                let path = "len\(index)-\(channels).wav"
+                try SyntheticMedia.writeAudioFile(to: file(path), segments: [(Double(frames) / 48_000, 0.3)], sampleRate: 48_000, channels: channels)
+                let voice = try await item(path)
+                let state = await analysis.waitFor(.isolatedVoice, for: voice)
+                XCTAssertEqual(state, .ready)
+                let result = try AVAudioFile(forReading: try XCTUnwrap(analysis.isolatedVoiceURL(for: voice)))
+                XCTAssertEqual(result.length, AVAudioFramePosition(frames), path)
+            }
+        }
+    }
+
     func testResultsSurviveARenameAndAreNotRedone() async throws {
         try SyntheticMedia.writeAudioFile(to: file("music/a.wav"), segments: [(1, 0.25)])
         var a = try await item("music/a.wav")
