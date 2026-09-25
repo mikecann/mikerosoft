@@ -70,7 +70,9 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 
 Originals are pinned while favourited or used in a project. Using an asset in
 a project copies it into the project's `assets/` folder so projects stay
-self-contained.
+self-contained. A different file already there under the same name (a copy
+Mike reworked, or an older version the timeline still plays) is never
+replaced: the new copy goes beside it.
 
 ## Normalising on import (tested on this Mac)
 
