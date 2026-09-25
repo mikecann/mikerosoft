@@ -36,15 +36,16 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 ## Milestone 3: render and export
 
-- [ ] Transform maths shared by viewer and export, with tests [render]
-- [ ] Composition builder: video layers, audio tracks, proxies for playback [render]
-- [ ] Compositor: transform, crop, opacity, solids, adjustment layers, cutout with matte [render]
-- [ ] Effects: colour, HSL, vignette, sharpen, LUT, blur, pixelate, drop shadow, border, rounded corners, Core Image bindings [render]
-- [ ] Transitions: dissolve, fade to and from black, push (4 directions), slide, cut slide, wipe, zoom [render]
-- [ ] Native titles: Core Text, the four styles, in and out animations, word-by-word captions [render]
-- [ ] Audio mix: gain, fades, keyframes, normalisation, voice isolation, crossfades, 3 ms micro-fades [render]
-- [ ] Frame renderer for grabs and tests [render]
-- [ ] Exporter: VideoToolbox speed priority, presets, master loudness to -14 LUFS under -1 dBTP, range export, snapshot beside the file [render]
+- [x] Transform maths shared by viewer and export, with tests [render]
+- [x] Composition builder: video layers, audio tracks, proxies for playback [render]
+- [x] Compositor: transform, crop, opacity, solids, adjustment layers, cutout with matte [render]
+- [x] Effects: colour, HSL, vignette, sharpen, LUT, blur, pixelate, drop shadow, border, rounded corners, Core Image bindings [render]
+- [x] Transitions: dissolve, fade to and from black, push (4 directions), slide, cut slide, wipe, zoom [render]
+- [x] Native titles: Core Text, the four styles, in and out animations, word-by-word captions [render]
+- [x] Audio mix: gain, fades, keyframes, normalisation, voice isolation, crossfades, 3 ms micro-fades, pitch-kept speed changes [render]
+- [ ] Graphic clips (rendered template files) and the pitchShift effect [render]
+- [x] Frame renderer for grabs and tests [render]
+- [x] Exporter: VideoToolbox speed priority, presets, master loudness to -14 LUFS under -1 dBTP, range export, snapshot beside the file [render] (the whole 11 min v14 edit in 156 s, 4.3x real time)
 
 ## Milestone 4: agents
 
@@ -73,7 +74,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 - [x] Import the decision-models EDL into a .tandem project [importer] (676.6 s vs v14 667.3 s: Mike's hand trims after the pipeline)
 - [x] Import Filmora .wfp projects [importer] (v14 487/487 clips and 34/34 transitions exact; 119-project corpus imports without failures)
-- [ ] Render the imported v14 and compare frames against Filmora's export [render]
+- [x] Render the imported v14 and compare frames against Filmora's export [render] (placement exact; grade within about 4/255)
 - [x] `tandem import filmora|edl|compare` in the CLI [integration]
 
 ## Wave 2
