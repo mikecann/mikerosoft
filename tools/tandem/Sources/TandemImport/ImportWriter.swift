@@ -40,7 +40,7 @@ public enum ImportWriter {
             throw ImportError.invalid("\(url.path) already exists and isn't a Tandem project this import can replace. \(advice)")
         }
         if header.revision > 0 {
-            throw ImportError.invalid("\(url.path) has been edited since it was imported (revision \(header.revision)). \(advice)")
+            throw ImportError.invalid("\(url.path) has changed since it was imported (it is at revision \(header.revision)), so it may hold edits. \(advice)")
         }
         if !ProjectJournal.forProject(at: url).entries(after: header.revision).isEmpty {
             throw ImportError.invalid("\(url.path) has edits that weren't saved when Tandem last closed; open it in Tandem to recover them. \(advice)")
