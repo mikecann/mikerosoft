@@ -207,11 +207,12 @@ enum RenderPlanner {
         for track in project.audioTracks where !track.muted && (!soloing || track.solo) {
             let trackWindows = transitionWindows(track, trackIndex: 0)
             let (heads, tails) = extensions(track, trackWindows)
-            let enabled = track.clips.filter(\.enabled)
+            // Muted clips are left out entirely, so they never count as the
+            // neighbour of a seamless join.
+            let enabled = track.clips.filter { $0.enabled && !($0.audio?.muted ?? false) }
             for (index, clip) in enabled.enumerated() {
                 guard case .media(let mediaID) = clip.content, let item = mediaByID[mediaID], item.hasAudio else { continue }
                 let audio = clip.audio ?? AudioProperties()
-                if audio.muted { continue }
 
                 var head = heads[clip.id] ?? .zero
                 let tail = tails[clip.id] ?? .zero

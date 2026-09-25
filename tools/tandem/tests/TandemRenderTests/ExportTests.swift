@@ -82,6 +82,7 @@ final class ExportTests: XCTestCase {
         let (saved, _) = try ProjectFile.load(from: snapshot)
         XCTAssertEqual(saved.media[0].path, media.folder.appendingPathComponent("av.mov").standardizedFileURL.path)
         XCTAssertEqual(saved.metadata["export.preset"], "Test")
+        XCTAssertTrue(saved.metadata["export.loudness"]?.hasSuffix("dBTP") ?? false)
         XCTAssertEqual(saved.videoTracks[0].clips, project.videoTracks[0].clips)
 
         // Colours come through: the frame is the source's blue-ish grey.

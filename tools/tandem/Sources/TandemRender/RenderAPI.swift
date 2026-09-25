@@ -5,7 +5,8 @@ import TandemCore
 import TandemMedia
 
 // Contract for the render module. The API and the app build against these
-// signatures; the bodies are placeholders until the render work lands.
+// signatures; the work happens in the rest of the module (see
+// docs/RENDER.md), and `LayerMath` has the placement maths for the viewer.
 //
 // Transform contract (the viewer and export must agree exactly):
 // - The source frame is scaled so the whole frame fits the canvas
@@ -14,6 +15,8 @@ import TandemMedia
 //   in canvas units: (0, 0) top left, (1, 1) bottom right.
 // - `transform.rotation` is degrees clockwise about that centre.
 // - `crop` hides fractions of the source edges without rescaling.
+// - Opacity multiplies the layer, its shadow included, and the cutout matte
+//   is applied before the shadow, so the shadow follows the person.
 // - Video tracks draw bottom to top: `videoTracks[0]` first.
 
 public struct RenderContext: Sendable {

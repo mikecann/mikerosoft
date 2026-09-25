@@ -294,6 +294,15 @@ final class RenderPlanTests: XCTestCase {
         XCTAssertEqual(env["clip_b"]!.first?.gain, 1)
     }
 
+    func testAClipAfterAMutedOneStillFadesIn() {
+        var a = mediaClip("clip_a", "med_cam", start: 0, duration: 2, source: 10)
+        a.audio = AudioProperties(muted: true)
+        let b = mediaClip("clip_b", "med_cam", start: 2, duration: 2, source: 12)
+        let plan = RenderPlanner.plan(project(video: [], audio: [Track(kind: .audio, name: "Voice", clips: [a, b])]), format: nil, assets: nil)
+        XCTAssertEqual(plan.audioSegments.map(\.clipID), ["clip_b"])
+        XCTAssertEqual(plan.audioSegments[0].envelope.first?.gain, 0)
+    }
+
     func testGainFadesAndKeyframes() {
         var bed = mediaClip("clip_m", "med_music", start: 0, duration: 10, source: 0)
         bed.audio = AudioProperties(gainDB: -31, fadeIn: t(1), fadeOut: t(2))

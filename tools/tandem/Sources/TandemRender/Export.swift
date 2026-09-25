@@ -8,8 +8,9 @@ import VideoToolbox
 /// The export pipeline behind `Exporter`.
 ///
 /// 1. Build the composition at the preset's size and format.
-/// 2. Measure the mix's loudness in a fast audio-only pass (twice when the
-///    limiter will bite, so limiting doesn't pull it under the target).
+/// 2. Measure the mix's loudness in a fast audio-only pass. When the limiter
+///    will bite, a second pass tries a few gains through it at once and
+///    picks the one that lands on the target.
 /// 3. Read composed frames (the same compositor as the viewer), encode them
 ///    with VideoToolbox (hardware, speed priority, preset bitrate), and mux
 ///    them with the mastered audio (gain, true-peak limiter, AAC 48 kHz
@@ -408,6 +409,9 @@ final class ExportJob: @unchecked Sendable {
         project.metadata["export.date"] = ISO8601DateFormatter().string(from: Date())
         project.metadata["export.range"] = "\(range.start.seconds)-\(range.end.seconds)"
         if let format = preset.format { project.metadata["export.format"] = format }
+        if loudness.integratedLUFS.isFinite {
+            project.metadata["export.loudness"] = String(format: "%.2f LUFS, %.2f dBTP", loudness.integratedLUFS, loudness.truePeakDBTP)
+        }
         struct Snapshot: Encodable {
             var revision: Int
             var project: Project
