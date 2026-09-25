@@ -285,10 +285,15 @@ final class EditorModel {
     var primaryClipID: String? {
         if let focused = focusedClipID, selection.contains(focused) { return focused }
         let ordered = TimelineEdits.ordered(selection, in: project)
-        // A camera clip over its screen clip, then any picture, then sound.
+        // What's under the playhead first, a camera clip over its screen
+        // clip, then any picture, then sound.
         let video = ordered.filter { project.location(ofClip: $0)?.track.kind == .video }
-        let camera = video.first { id in project.clip(id).flatMap { media(for: $0) }?.role == .camera }
-        return camera ?? video.first ?? ordered.first
+        let time = playback.time
+        let here = video.filter { id in project.clip(id).map { $0.start <= time && time < $0.end } ?? false }
+        func camera(_ ids: [String]) -> String? {
+            ids.first { id in project.clip(id).flatMap { media(for: $0) }?.role == .camera }
+        }
+        return camera(here) ?? here.first ?? camera(video) ?? video.first ?? ordered.first
     }
 
     var inOutRange: TimeRange? {

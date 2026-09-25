@@ -353,7 +353,9 @@ struct ClipRenderer {
             let x = rect.width > width + 8 ? rect.midX - width / 2 : left + 4
             drawText(text, at: CGPoint(x: x, y: rect.midY - 6), maxX: rect.maxX - 3, font: font, color: style.label)
         case .voice, .audio:
-            if rect.height >= 30 {
+            // Take sound reads from its track, like the design.
+            let role = clip.mediaID.flatMap { project.media($0)?.role }
+            if rect.height >= 30 && role != .camera && role != .screen {
                 drawText(name(of: clip), at: CGPoint(x: left + 6, y: rect.minY + 2), maxX: rect.maxX - 4, font: Theme.Fonts.ui(9.5, .medium), color: style.label.opacity(0.8))
             }
         case .transcript:
