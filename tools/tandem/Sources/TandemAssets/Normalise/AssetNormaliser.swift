@@ -49,7 +49,8 @@ public struct NormalisedAsset: Codable, Equatable, Sendable {
 /// directly:
 ///
 /// - Audio: 48 kHz 24-bit WAV, with loudness (`loudness.json`) and
-///   waveform peaks (`peaks.bin`).
+///   waveform peaks (`peaks.bin`). 48 kHz PCM files and beds over 20
+///   minutes are measured but used as they are.
 /// - Animated GIF, WebP and APNG: HEVC with alpha, via ImageIO.
 /// - WebM: HEVC with alpha, via ffmpeg's `libvpx-vp9` and ProRes 4444.
 /// - Lottie: rendered offscreen with alpha into HEVC with alpha.
@@ -135,14 +136,16 @@ public struct AssetNormaliser: Sendable {
     private func audio(_ original: URL, format: AssetFormat, into folder: URL) async throws -> NormalisedAsset {
         let output = folder.appendingPathComponent("normalised.wav")
         let ffmpeg = self.ffmpeg
-        let analysis = try await Self.offload { try AudioNormaliser.normalise(input: original, output: output, ffmpeg: ffmpeg) }
+        let rewrite = !AudioNormaliser.canUseAsIs(original, format: format)
+        if !rewrite { try? FileManager.default.removeItem(at: output) }
+        let analysis = try await Self.offload { try AudioNormaliser.normalise(input: original, output: rewrite ? output : nil, ffmpeg: ffmpeg) }
         let peaks = folder.appendingPathComponent("peaks.bin")
         try AudioNormaliser.writePeaks(analysis.waveform, to: peaks)
         let loudness = AssetCatalog.finite(analysis.loudness)
         try JSONEncoder.sorted.encode(loudness).write(to: folder.appendingPathComponent("loudness.json"), options: .atomic)
         let thumbnail = try? Thumbnailer.waveform(analysis.waveform, into: folder)
         return NormalisedAsset(
-            format: format, file: output.lastPathComponent, thumbnail: thumbnail, peaks: peaks.lastPathComponent,
+            format: format, file: analysis.wroteOutput ? output.lastPathComponent : nil, thumbnail: thumbnail, peaks: peaks.lastPathComponent,
             loudness: loudness, mediaKind: .audio, duration: analysis.duration, hasAudio: true
         )
     }

@@ -201,7 +201,9 @@ final class GenerationTests: XCTestCase {
         XCTAssertEqual(asset.kind, .sfx)
         XCTAssertEqual(asset.summary, "Short soft click")
         XCTAssertEqual(asset.licenceClass, .aiGenerated)
-        XCTAssertEqual(asset.files.normalised, "normalised.wav")
+        // ElevenLabs sends 48 kHz PCM, so the WAV is used as it is.
+        XCTAssertNil(asset.files.normalised)
+        XCTAssertEqual(library.playableURL(for: asset)?.lastPathComponent, "original.wav")
         XCTAssertEqual(asset.files.peaks, "peaks.bin")
         XCTAssertNotNil(asset.loudness)
         XCTAssertEqual(try XCTUnwrap(asset.duration), 0.5, accuracy: 0.01)

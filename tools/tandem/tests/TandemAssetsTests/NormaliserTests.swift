@@ -44,7 +44,7 @@ final class NormaliserTests: XCTestCase {
     func testMonoStaysMonoAndSilenceHasFiniteLoudness() async throws {
         let folder = tempFolder("mono")
         let input = folder.appendingPathComponent("original.wav")
-        try WAVFile.wrap(pcm16: Data(count: 48_000 * 2), sampleRate: 48_000, channels: 1).write(to: input)
+        try WAVFile.wrap(pcm16: Data(count: 44_100 * 2), sampleRate: 44_100, channels: 1).write(to: input)
         let result = try await normaliser.normalise(input, into: folder)
         let file = try AVAudioFile(forReading: folder.appendingPathComponent("normalised.wav"))
         XCTAssertEqual(file.fileFormat.channelCount, 1)
@@ -283,5 +283,28 @@ final class LottieNormaliserTests: XCTestCase {
         let result = try await AssetNormaliser().normalise(broken, into: folder, fallbacks: [gif])
         XCTAssertEqual(result.format, .gif)
         XCTAssertEqual(result.file, "normalised.mov")
+    }
+}
+
+final class AudioShortcutTests: XCTestCase {
+    func testFortyEightKilohertzPCMIsMeasuredButNotCopied() async throws {
+        let folder = tempFolder("pcm48")
+        let input = folder.appendingPathComponent("original.wav")
+        try Generated.sineWAV(at: input, seconds: 1, sampleRate: 48_000, channels: 2, dbfs: -23)
+
+        let result = try await AssetNormaliser().normalise(input, into: folder)
+
+        XCTAssertNil(result.file)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("normalised.wav").path))
+        XCTAssertEqual(try XCTUnwrap(result.loudness).integratedLUFS, -23, accuracy: 0.2)
+        XCTAssertEqual(result.peaks, "peaks.bin")
+        XCTAssertEqual(try XCTUnwrap(result.duration), 1, accuracy: 0.001)
+    }
+
+    func testOtherRatesAreRewritten() {
+        let folder = tempFolder("pcm44")
+        let input = folder.appendingPathComponent("original.wav")
+        try? Generated.sineWAV(at: input, seconds: 0.2, sampleRate: 44_100)
+        XCTAssertFalse(AudioNormaliser.canUseAsIs(input, format: .wav))
     }
 }

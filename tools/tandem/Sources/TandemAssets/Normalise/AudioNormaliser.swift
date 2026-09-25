@@ -8,24 +8,46 @@ struct AudioAnalysis: Sendable {
     var channels: Int
     var loudness: Loudness
     var waveform: Waveform
+    /// False when the original is used as it is and nothing was written.
+    var wroteOutput: Bool
 }
 
 /// Decodes audio, resamples it to 48 kHz and writes 24-bit PCM WAV,
 /// measuring loudness (EBU R128 via `LoudnessMeter`) and waveform peaks in
 /// the same pass.
+///
+/// Two kinds of file are measured but not rewritten: 48 kHz PCM already in
+/// WAV, AIFF or CAF (a copy would change nothing), and anything longer than
+/// `longestRewrite` that AVFoundation can play (a two hour stock bed would
+/// be a 2 GB WAV).
 enum AudioNormaliser {
     static let sampleRate = 48_000.0
     /// Peaks a second in `peaks.bin`: fine enough for a short click, small
     /// enough for a long bed (3 minutes is 72 KB).
     static let peaksPerSecond = 100
+    /// Seconds; longer files are measured but kept as they are.
+    static let longestRewrite = 20.0 * 60
 
-    static func normalise(input: URL, output: URL, ffmpeg: FFmpeg?) throws -> AudioAnalysis {
+    /// Whether `input` can be used as it is, going by its format and length.
+    static func canUseAsIs(_ input: URL, format: AssetFormat) -> Bool {
+        guard let file = try? AVAudioFile(forReading: input) else { return false }
+        let description = file.fileFormat.streamDescription.pointee
+        let seconds = Double(file.length) / file.fileFormat.sampleRate
+        let isPCM = description.mFormatID == kAudioFormatLinearPCM
+        if isPCM && file.fileFormat.sampleRate == sampleRate && [.wav, .aiff, .caf].contains(format) && file.fileFormat.channelCount <= 2 {
+            return true
+        }
+        return seconds > longestRewrite
+    }
+
+    /// Measures `input` and, when `output` is given, writes the 48 kHz copy.
+    static func normalise(input: URL, output: URL?, ffmpeg: FFmpeg?) throws -> AudioAnalysis {
         do {
             return try convert(input: input, output: output)
         } catch {
             // AVFoundation can't decode Ogg Vorbis or Opus (it may open the
             // file and then fail to read it); ffmpeg can.
-            guard let ffmpeg else {
+            guard let ffmpeg, let output else {
                 if let error = error as? AssetError { throw error }
                 throw AssetError.normaliseFailed("can't decode \(input.lastPathComponent): \(error.localizedDescription)")
             }
@@ -36,7 +58,7 @@ enum AudioNormaliser {
         }
     }
 
-    private static func convert(input: URL, output: URL) throws -> AudioAnalysis {
+    private static func convert(input: URL, output: URL?) throws -> AudioAnalysis {
         let source = try AVAudioFile(forReading: input)
         let inFormat = source.processingFormat
         let channels = AVAudioChannelCount(min(Int(inFormat.channelCount), 2))
@@ -49,7 +71,6 @@ enum AudioNormaliser {
         converter.sampleRateConverterAlgorithm = AVSampleRateConverterAlgorithm_Mastering
         if inFormat.channelCount > 2 { converter.downmix = true }
 
-        try? FileManager.default.removeItem(at: output)
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: sampleRate,
@@ -59,7 +80,11 @@ enum AudioNormaliser {
             AVLinearPCMIsBigEndianKey: false,
             AVLinearPCMIsNonInterleaved: false
         ]
-        let sink = try AVAudioFile(forWriting: output, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        var sink: AVAudioFile?
+        if let output {
+            try? FileManager.default.removeItem(at: output)
+            sink = try AVAudioFile(forWriting: output, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        }
 
         var meter = LoudnessMeter(sampleRate: sampleRate, channels: Int(channels))
         var peaks = PeakAccumulator(bucketLength: Int(sampleRate) / peaksPerSecond)
@@ -103,7 +128,7 @@ enum AudioNormaliser {
             }
             let count = Int(outBuffer.frameLength)
             if count > 0, let data = outBuffer.floatChannelData {
-                try sink.write(from: outBuffer)
+                try sink?.write(from: outBuffer)
                 let planes = (0..<Int(channels)).map { UnsafeBufferPointer(start: data[$0], count: count) }
                 meter.process(planar: planes)
                 peaks.add(planes: planes)
@@ -115,7 +140,8 @@ enum AudioNormaliser {
             duration: Double(frames) / sampleRate,
             channels: Int(channels),
             loudness: meter.result(),
-            waveform: Waveform(samplesPerSecond: peaksPerSecond, peaks: peaks.finish())
+            waveform: Waveform(samplesPerSecond: peaksPerSecond, peaks: peaks.finish()),
+            wroteOutput: sink != nil
         )
     }
 
