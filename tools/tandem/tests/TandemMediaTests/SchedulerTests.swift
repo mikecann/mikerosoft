@@ -253,6 +253,53 @@ final class JobSchedulerTests: XCTestCase {
         XCTAssertEqual(log.events, ["first", "second"])
     }
 
+    func testClosingWithAJobRunningGivesTheEncoderBack() async throws {
+        let lock = EncoderLock()
+        var scheduler: JobScheduler? = JobScheduler(encoderLock: lock)
+        let holding = Gate()
+        scheduler?.submit(job("proxy", .proxy, .timeline) { context in
+            await context.acquireEncoder()
+            holding.open()
+            while true {
+                try await context.checkpoint()
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+        })
+        await holding.wait()
+        scheduler = nil
+        var busy = await lock.isBusy
+        let deadline = Date().addingTimeInterval(3)
+        while busy, Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            busy = await lock.isBusy
+        }
+        XCTAssertFalse(busy, "exports mustn't wait forever for a closed project's proxy")
+    }
+
+    func testNoPointlessPausesWhenStepAsideWouldNotHelp() async throws {
+        var limits = JobScheduler.Limits.standard
+        limits.encoder = 2
+        let scheduler = JobScheduler(limits: limits, encoderLock: EncoderLock())
+        let proxyGate = Gate()
+        let matteRunning = Gate()
+        scheduler.submit(job("proxyA", .proxy, .background) { _ in await proxyGate.wait() })
+        scheduler.submit(job("matte", .matte, .background) { context in
+            for i in 0..<50 {
+                try await context.checkpoint()
+                if i == 2 { matteRunning.open() }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+        })
+        await matteRunning.wait()
+        // Waits for the proxy slot, which the matte doesn't hold.
+        scheduler.submit(job("proxyB", .proxy, .interactive) { _ in })
+        _ = await scheduler.wait(for: "matte")
+        XCTAssertEqual(scheduler.pauses, 0)
+        proxyGate.open()
+        let b = await scheduler.wait(for: "proxyB")
+        XCTAssertEqual(b?.state, .done)
+    }
+
     func testEncoderIsHandedToAnExportBetweenFrames() async throws {
         let lock = EncoderLock()
         let scheduler = JobScheduler(encoderLock: lock)

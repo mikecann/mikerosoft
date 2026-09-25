@@ -92,6 +92,21 @@ final class JobScheduler: @unchecked Sendable {
         self.encoderLock = encoderLock
     }
 
+    /// Whatever is still running sees a cancellation at its next checkpoint
+    /// (and gives the encoder back through its context); paused jobs wake up
+    /// to see it; anyone waiting hears "cancelled".
+    deinit {
+        for entry in entries.values {
+            entry.context?.markCancelled()
+            entry.resume?.resume()
+            entry.resume = nil
+            var status = entry.status
+            status.state = .cancelled
+            entry.waiters.forEach { $0.resume(returning: status) }
+            entry.waiters = []
+        }
+    }
+
     // MARK: - Submitting
 
     /// Queues a job, or raises the priority of the same job if it's already
@@ -125,9 +140,9 @@ final class JobScheduler: @unchecked Sendable {
 
     private func cancel(where matches: (Entry) -> Bool) {
         var resumes: [CheckedContinuation<Void, Never>] = []
-        var finishedQueued: [String] = []
+        var dropped: [(JobStatus, [CheckedContinuation<JobStatus?, Never>])] = []
         lock.withLock {
-            for entry in entries.values where matches(entry) {
+            for entry in Array(entries.values) where matches(entry) {
                 if entry.started {
                     entry.context?.markCancelled()
                     if entry.paused, let resume = entry.resume {
@@ -137,13 +152,26 @@ final class JobScheduler: @unchecked Sendable {
                         resumes.append(resume)
                     }
                 } else {
-                    finishedQueued.append(entry.job.id)
+                    // Removed in the same critical section that found it,
+                    // so a pump on another thread can't start it meanwhile.
+                    entries.removeValue(forKey: entry.job.id)
+                    entry.status.state = .cancelled
+                    remember(entry.status)
+                    dropped.append((entry.status, entry.waiters))
+                    entry.waiters = []
                 }
             }
         }
-        for id in finishedQueued { finish(id: id, state: .cancelled, message: nil) }
+        for (status, waiters) in dropped { waiters.forEach { $0.resume(returning: status) } }
         resumes.forEach { $0.resume() }
         scheduleNotify()
+    }
+
+    /// Call with the lock held.
+    private func remember(_ status: JobStatus) {
+        history.removeAll { $0.id == status.id }
+        history.append(status)
+        if history.count > historyLimit { history.removeFirst(history.count - historyLimit) }
     }
 
     // MARK: - Reading
@@ -212,6 +240,12 @@ final class JobScheduler: @unchecked Sendable {
             perKind[kind, default: 0] += 1
             if JobScheduler.usesEncoder(kind) { encoder += 1 }
         }
+
+        mutating func remove(_ kind: AnalysisKind) {
+            total -= 1
+            perKind[kind, default: 1] -= 1
+            if JobScheduler.usesEncoder(kind) { encoder -= 1 }
+        }
     }
 
     /// Call with the lock held.
@@ -279,19 +313,20 @@ final class JobScheduler: @unchecked Sendable {
                 }
             }
             await context.releaseEncoder()
-            self?.finish(id: job.id, state: state, message: message)
+            self?.finish(entry, state: state, message: message)
         }
     }
 
-    private func finish(id: String, state: JobState, message: String?) {
+    private func finish(_ entry: Entry, state: JobState, message: String?) {
         let outcome = lock.withLock { () -> (JobStatus, [CheckedContinuation<JobStatus?, Never>])? in
-            guard let entry = entries.removeValue(forKey: id) else { return nil }
+            // Only this run's entry: a job with the same ID submitted since
+            // is a different piece of work.
+            guard entries[entry.job.id] === entry else { return nil }
+            entries.removeValue(forKey: entry.job.id)
             entry.status.state = state
             entry.status.message = message
             if state == .done { entry.status.progress = 1 }
-            history.removeAll { $0.id == id }
-            history.append(entry.status)
-            if history.count > historyLimit { history.removeFirst(history.count - historyLimit) }
+            remember(entry.status)
             defer { entry.waiters = [] }
             return (entry.status, entry.waiters)
         }
@@ -320,9 +355,14 @@ final class JobScheduler: @unchecked Sendable {
         lock.withLock {
             guard let entry = entries[id], entry.isRunning else { return false }
             let load = currentLoad()
+            var without = load
+            without.remove(entry.job.kind)
             let rank = Self.kindOrder[entry.job.kind] ?? 99
             return entries.values.contains { other in
-                guard !other.isRunning, sharesLimit(other.job.kind, entry.job.kind), !fits(other.job.kind, load) else { return false }
+                // Only worth stepping aside if that lets the other job start;
+                // otherwise this job would pause and resume at every checkpoint.
+                guard !other.isRunning, sharesLimit(other.job.kind, entry.job.kind),
+                      !fits(other.job.kind, load), fits(other.job.kind, without) else { return false }
                 if other.job.priority != entry.job.priority { return other.job.priority > entry.job.priority }
                 return (Self.kindOrder[other.job.kind] ?? 99) < rank
             }
@@ -333,11 +373,15 @@ final class JobScheduler: @unchecked Sendable {
         a == b || (Self.usesEncoder(a) && Self.usesEncoder(b))
     }
 
+    /// How many times a job has stepped aside, for tests.
+    private(set) var pauses = 0
+
     /// Steps aside until the scheduler picks this job again.
     func pause(id: String) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let proceed = lock.withLock { () -> Bool in
                 guard let entry = entries[id], entry.isRunning, !(entry.context?.isCancelled ?? false) else { return true }
+                pauses += 1
                 entry.paused = true
                 entry.resume = continuation
                 entry.status.state = .queued
@@ -383,6 +427,10 @@ final class JobContext: @unchecked Sendable {
     /// For the job's blocking work, from its priority.
     let qos: DispatchQoS.QoSClass
     private weak var scheduler: JobScheduler?
+    /// Held strongly: a job outliving its scheduler (a project closed
+    /// mid-build) must still give the encoder back. Nil without a scheduler,
+    /// which makes the encoder calls no-ops (standalone runs in tests).
+    private let encoderLock: EncoderLock?
     private let lock = NSLock()
     private var cancelled = false
     private var holdsEncoder = false
@@ -393,6 +441,7 @@ final class JobContext: @unchecked Sendable {
         self.kind = kind
         self.qos = qos
         self.scheduler = scheduler
+        encoderLock = scheduler?.encoderLock
     }
 
     var isCancelled: Bool { lock.withLock { cancelled } || Task.isCancelled }
@@ -411,15 +460,15 @@ final class JobContext: @unchecked Sendable {
     /// Takes the shared hardware encoder at background priority. Exports
     /// (`.export` priority) jump ahead of every queued build.
     func acquireEncoder() async {
-        guard let scheduler, !lock.withLock({ holdsEncoder }) else { return }
-        await scheduler.encoderLock.acquire(priority: .background)
+        guard let encoderLock, !lock.withLock({ holdsEncoder }) else { return }
+        await encoderLock.acquire(priority: .background)
         lock.withLock { holdsEncoder = true }
     }
 
     func releaseEncoder() async {
-        guard let scheduler, lock.withLock({ holdsEncoder }) else { return }
+        guard let encoderLock, lock.withLock({ holdsEncoder }) else { return }
         lock.withLock { holdsEncoder = false }
-        await scheduler.encoderLock.release()
+        await encoderLock.release()
     }
 
     /// Call between frames or chunks: throws if the job was cancelled,
@@ -427,9 +476,8 @@ final class JobContext: @unchecked Sendable {
     /// urgent job, carrying on where it left off afterwards.
     func checkpoint() async throws {
         try checkCancellation()
-        guard let scheduler else { return }
         let holding = lock.withLock { holdsEncoder }
-        if holding {
+        if holding, let encoderLock {
             // An actor hop per frame is cheap, but there's no need for more
             // than a few checks a second.
             let now = Date()
@@ -438,11 +486,12 @@ final class JobContext: @unchecked Sendable {
                 lastEncoderCheck = now
                 return true
             }
-            if due, await scheduler.encoderLock.hasWaiters(above: .background) {
-                await scheduler.encoderLock.release()
-                await scheduler.encoderLock.acquire(priority: .background)
+            if due, await encoderLock.hasWaiters(above: .background) {
+                await encoderLock.release()
+                await encoderLock.acquire(priority: .background)
             }
         }
+        guard let scheduler else { return }
         if scheduler.shouldYield(id: id) {
             if holding { await releaseEncoder() }
             await scheduler.pause(id: id)
