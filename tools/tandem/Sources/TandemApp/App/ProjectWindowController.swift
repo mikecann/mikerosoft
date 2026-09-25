@@ -169,8 +169,9 @@ extension String {
     /// "Move clip" to "move clip", for "Undo move clip".
     var lowercasedFirst: String {
         guard let first = first else { return self }
-        // Keep acronyms and names like "PiP" as they are.
-        if count > 1, self[index(after: startIndex)].isUppercase { return self }
+        // Keep words with capitals inside, like "PiP", as they are.
+        let firstWord = prefix { $0 != " " }
+        if firstWord.dropFirst().contains(where: \.isUppercase) { return self }
         return first.lowercased() + dropFirst()
     }
 }

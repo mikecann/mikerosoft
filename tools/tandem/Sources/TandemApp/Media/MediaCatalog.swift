@@ -135,8 +135,14 @@ enum MediaCatalog {
         }
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
         if !query.isEmpty {
-            let words = query.split(separator: " ").map(String.init)
-            entries = entries.filter { entry in words.allSatisfy { entry.searchText.contains($0) } }
+            // The whole phrase first ("take 2"), then every word in any order.
+            let phrase = entries.filter { $0.searchText.contains(query) }
+            if !phrase.isEmpty {
+                entries = phrase
+            } else {
+                let words = query.split(separator: " ").map(String.init)
+                entries = entries.filter { entry in words.allSatisfy { entry.searchText.contains($0) } }
+            }
         }
         var groups: [MediaGroup] = []
         for kind in MediaGroupKind.allCases where filter == nil || filter == kind {

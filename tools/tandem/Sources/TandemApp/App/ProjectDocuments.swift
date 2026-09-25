@@ -106,7 +106,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
     }
 
     /// `decision-models` becomes "Decision models".
-    static func projectName(forFolder folder: String) -> String {
+    nonisolated static func projectName(forFolder folder: String) -> String {
         let words = folder.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
         guard let first = words.first else { return folder }
         return first.uppercased() + words.dropFirst()

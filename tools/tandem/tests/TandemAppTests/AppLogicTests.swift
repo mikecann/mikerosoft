@@ -1,0 +1,253 @@
+import XCTest
+@testable import TandemApp
+@testable import TandemCore
+@testable import TandemMedia
+
+final class ActivityLogTests: XCTestCase {
+    func testMirrorsTheUndoAndRedoStacks() {
+        var log = ActivityLog()
+        log.record(.edit, revision: 1, label: "Cut", author: "user")
+        log.record(.edit, revision: 2, label: "Tightened pauses", author: "claude")
+        log.record(.edit, revision: 3, label: "Marker", author: "user")
+        XCTAssertEqual(log.recent.map(\.label), ["Marker", "Tightened pauses", "Cut"])
+        XCTAssertEqual(log.lastAgentEntry?.label, "Tightened pauses")
+        XCTAssertEqual(log.undoSteps(through: 2), 2)
+
+        log.record(.undo, revision: 4, label: "Marker", author: "user")
+        XCTAssertEqual(log.recent.map(\.label), ["Tightened pauses", "Cut"])
+        XCTAssertEqual(log.undone.map(\.label), ["Marker"])
+        log.record(.redo, revision: 5, label: "Marker", author: "user")
+        XCTAssertEqual(log.recent.first?.label, "Marker")
+
+        log.record(.undo, revision: 6, label: "Marker", author: "user")
+        log.record(.edit, revision: 7, label: "Blade", author: "user")
+        XCTAssertTrue(log.undone.isEmpty, "a new edit clears redo")
+        log.record(.reload, revision: 8, label: "Reload", author: "system")
+        XCTAssertTrue(log.recent.isEmpty)
+    }
+
+    func testMatchesTheCoordinatorsHistory() throws {
+        let f = try AppFixture()
+        var log = ActivityLog()
+        let token = f.coordinator.observe { event in
+            log.record(event.kind, revision: event.revision, label: event.label, author: event.author)
+        }
+        defer { f.coordinator.removeObserver(token) }
+        try f.coordinator.apply(EditBatch(label: "One", commands: [.addMarker(marker: Marker(time: t(1), name: "A"))]))
+        try f.coordinator.apply(EditBatch(label: "Two", author: "claude", commands: [.addMarker(marker: Marker(time: t(2), name: "B"))]))
+        f.coordinator.undo()
+        XCTAssertEqual(log.recent.map(\.label), f.coordinator.history().map(\.label).filter { $0 != "Build" })
+    }
+
+    func testDisplayNames() {
+        XCTAssertEqual(ActivityLog.displayName("user"), "You")
+        XCTAssertEqual(ActivityLog.displayName("system"), "Tandem")
+        XCTAssertEqual(ActivityLog.displayName("claude"), "Claude")
+    }
+}
+
+final class RecentProjectsTests: XCTestCase {
+    func testNewestFirstWithoutDuplicates() {
+        var recent = RecentProjects()
+        recent.add("/videos/a/A.tandem")
+        recent.add("/videos/b/B.tandem")
+        recent.add("/videos/a/./A.tandem")
+        XCTAssertEqual(recent.paths, ["/videos/a/A.tandem", "/videos/b/B.tandem"])
+        for index in 0..<20 { recent.add("/videos/\(index).tandem") }
+        XCTAssertEqual(recent.paths.count, RecentProjects.limit)
+        XCTAssertEqual(recent.existing { $0.hasSuffix("19.tandem") }.map(\.lastPathComponent), ["19.tandem"])
+    }
+
+    func testVersionNames() {
+        XCTAssertEqual(VersionNaming.nextName(after: "Decision Models.tandem", existing: []), "Decision Models v2.tandem")
+        XCTAssertEqual(VersionNaming.nextName(after: "Decision Models v2.tandem", existing: []), "Decision Models v3.tandem")
+        XCTAssertEqual(VersionNaming.nextName(after: "Video.tandem", existing: ["Video v2.tandem", "video v3.tandem"]), "Video v4.tandem")
+        XCTAssertEqual(VersionNaming.exportName(projectFile: "Video v3.tandem", preset: "", existing: []), "Video v3.mp4")
+        XCTAssertEqual(VersionNaming.exportName(projectFile: "Video.tandem", preset: "Short 9:16", existing: ["Video (Short 9:16).mp4"]), "Video (Short 9:16) 2.mp4")
+    }
+
+    func testProjectNamesFromFolders() {
+        XCTAssertEqual(ProjectDocuments.projectName(forFolder: "decision-models"), "Decision models")
+        XCTAssertEqual(ProjectDocuments.projectName(forFolder: "static_hosting"), "Static hosting")
+    }
+}
+
+final class MediaCatalogTests: XCTestCase {
+    func project() -> Project {
+        var project = Project.standard(name: "Catalog")
+        project.media = [
+            MediaItem(id: "m1", path: "source/2026-09-24_105238-camera.mov", kind: .video, role: .camera, takeID: "b", duration: t(97), hasVideo: true, hasAudio: true),
+            MediaItem(id: "m2", path: "source/2026-09-24_105238-screen.mov", kind: .video, role: .screen, takeID: "b", duration: t(98), hasVideo: true),
+            MediaItem(id: "m3", path: "source/2026-09-24_102826-camera.mov", kind: .video, role: .camera, takeID: "a", duration: t(654), hasVideo: true, hasAudio: true),
+            MediaItem(id: "m4", path: "source/2026-09-24_102826-screen.mov", kind: .video, role: .screen, takeID: "a", duration: t(655), hasVideo: true),
+            MediaItem(id: "m5", path: "motion-graphics/out/clip-07-A.mp4", kind: .video, role: .graphic, duration: t(15), hasVideo: true),
+            MediaItem(id: "m6", path: "music/c3b.mp3", kind: .audio, role: .music, duration: t(124), hasAudio: true),
+            MediaItem(id: "m7", path: "broll/hf-decider.mp4", kind: .video, role: .broll, duration: t(8), hasVideo: true),
+            MediaItem(id: "m8", path: "sfx/whoosh.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)
+        ]
+        return project
+    }
+
+    func testTakesArePairedAndNumberedInTimeOrder() {
+        let groups = MediaCatalog.groups(for: project())
+        XCTAssertEqual(groups.map(\.kind), [.recordings, .graphics, .broll, .music, .sfx])
+        let takes = groups[0].entries
+        XCTAssertEqual(takes.map(\.title), ["Take 1 · 10:28", "Take 2 · 10:52"])
+        XCTAssertEqual(takes[0].subtitle, "10:55 · 2 files")
+        XCTAssertEqual(takes[0].mediaIDs, ["m3", "m4"], "camera first, then the screen")
+        XCTAssertEqual(takes[0].secondaryMediaID, "m4")
+        XCTAssertEqual(groups[1].detail, "motion-graphics/out")
+        XCTAssertEqual(groups[3].entries.first?.subtitle, "2:04")
+    }
+
+    func testSearchMatchesTitlesAndFileNames() {
+        XCTAssertEqual(MediaCatalog.groups(for: project(), search: "decider").flatMap(\.entries).map(\.id), ["m7"])
+        XCTAssertEqual(MediaCatalog.groups(for: project(), search: "take 2").flatMap(\.entries).map(\.id), ["b"])
+        XCTAssertEqual(MediaCatalog.groups(for: project(), search: "102826").flatMap(\.entries).map(\.id), ["a"])
+        XCTAssertTrue(MediaCatalog.groups(for: project(), search: "nothing like this").isEmpty)
+        XCTAssertEqual(MediaCatalog.groups(for: project(), only: .music).map(\.kind), [.music])
+    }
+
+    func testTimeOfDayFromRecordItNames() {
+        XCTAssertEqual(MediaCatalog.timeOfDay(fromFileName: "2026-09-24_102826-camera.mov"), "10:28")
+        XCTAssertNil(MediaCatalog.timeOfDay(fromFileName: "main-camera.mov"))
+    }
+}
+
+final class AppURLCommandTests: XCTestCase {
+    func testParsesCommands() {
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/tmp/a.png")!), .screenshot(out: "/tmp/a.png"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://command?name=bladeAtPlayhead")!), .command(.bladeAtPlayhead))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://seek?t=12.5")!), .seek(t(12.5)))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://select?clips=clip_a,clip_b")!), .select(clipIDs: ["clip_a", "clip_b"]))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://panel?inspector=color&library=effects")!), .panels(library: .effects, inspector: .colour))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://zoom?pps=40")!), .zoom(pixelsPerSecond: 40, scrollSeconds: nil))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://tool?name=slip")!), .tool(.slip))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://inout?in=2&out=5")!), .inOut(start: t(2), end: t(5)))
+    }
+
+    func testRejectsNonsense() {
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://command?name=launchRockets")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://screenshot")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "https://example.com/screenshot?out=/tmp/a.png")!))
+    }
+}
+
+final class PauseTighteningTests: XCTestCase {
+    /// Words at 0-1, 1.1-2, then a 1.5 s pause, then 3.5-4.
+    func transcript() -> Transcript {
+        Transcript(language: "en", engine: "test", words: [
+            TranscriptWord(text: "we", start: t(0), end: t(1)),
+            TranscriptWord(text: "have", start: t(1.1), end: t(2)),
+            TranscriptWord(text: "evals", start: t(3.5), end: t(4)),
+            TranscriptWord(text: "here", start: t(10.2), end: t(11))
+        ])
+    }
+
+    func testFindsLongPausesInTimelineTime() throws {
+        let f = try AppFixture()
+        // The voice clip shows the camera file from 0, at timeline 0.
+        let ranges = PauseTightening.ranges(in: f.project, transcript: { $0.id == "med_camera" ? self.transcript() : nil }, minimum: t(1), keep: t(0.2))
+        XCTAssertEqual(ranges, [TimeRange(start: t(2.2), end: t(3.3)), TimeRange(start: t(4.2), end: t(10))])
+        let batch = try XCTUnwrap(PauseTightening.batch(ranges))
+        XCTAssertEqual(batch.commands.first, .rippleDeleteRange(range: TimeRange(start: t(4.2), end: t(10))), "latest first")
+        try f.apply(batch)
+        XCTAssertEqual(f.clips("Camera").map(\.range).last?.end, t(60) - t(1.1) - t(5.8))
+        assertValid(f.project)
+    }
+
+    func testRespectsTheInOutRange() throws {
+        let f = try AppFixture()
+        let ranges = PauseTightening.ranges(in: f.project, transcript: { _ in self.transcript() }, minimum: t(1), keep: t(0.2), within: TimeRange(start: t(0), end: t(5)))
+        XCTAssertEqual(ranges, [TimeRange(start: t(2.2), end: t(3.3)), TimeRange(start: t(4.2), end: t(5))])
+    }
+}
+
+final class CanvasGeometryTests: XCTestCase {
+    let canvas = CGRect(x: 0, y: 0, width: 1600, height: 900)
+
+    func testFullAndPictureInPicture() {
+        let full = CanvasGeometry.frame(source: CGSize(width: 3840, height: 2160), transform: Transform(), canvas: canvas)
+        XCTAssertEqual(full, canvas)
+        let pip = CanvasGeometry.frame(source: CGSize(width: 3840, height: 2160), transform: Transform(position: LayoutPreset.pipRightPosition, scale: 0.5), canvas: canvas)
+        XCTAssertEqual(pip.width, 800)
+        XCTAssertEqual(pip.midX, 1392, accuracy: 0.001)
+        XCTAssertEqual(pip.midY, 693, accuracy: 0.001)
+    }
+
+    func testAspectFitAndCrop() {
+        // A 16:10 screen recording on a 16:9 canvas fits by height.
+        let screen = CanvasGeometry.frame(source: CGSize(width: 3200, height: 2000), transform: Transform(), canvas: canvas)
+        XCTAssertEqual(screen.height, 900)
+        XCTAssertEqual(screen.width, 1440)
+        let cropped = CanvasGeometry.cropped(canvas, crop: Crop(left: 0.25, top: 0, right: 0.25, bottom: 0.1))
+        XCTAssertEqual(cropped, CGRect(x: 400, y: 0, width: 800, height: 810))
+    }
+
+    func testCanvasFitsThePanel() {
+        let rect = CanvasGeometry.canvasRect(in: CGRect(x: 0, y: 0, width: 882, height: 477), width: 3840, height: 2160)
+        XCTAssertEqual(rect.height, 449)
+        XCTAssertEqual(rect.midX, 441, accuracy: 1)
+    }
+
+    func testDragsAndZoomRectangles() {
+        let moved = CanvasGeometry.moved(Transform(), by: CGSize(width: 160, height: -90), canvas: canvas)
+        XCTAssertEqual(moved.position.x, 0.6, accuracy: 1e-9)
+        XCTAssertEqual(moved.position.y, 0.4, accuracy: 1e-9)
+        let scaled = CanvasGeometry.scaled(Transform(scale: 0.5), centre: CGPoint(x: 800, y: 450), from: CGPoint(x: 1000, y: 450), to: CGPoint(x: 1200, y: 450))
+        XCTAssertEqual(scaled.scale, 1, accuracy: 1e-9)
+        let rect = CanvasGeometry.sourceRect(for: CGRect(x: 400, y: 225, width: 800, height: 450), clipFrame: canvas)
+        XCTAssertEqual(rect, Rect(x: 0.25, y: 0.25, width: 0.5, height: 0.5))
+        XCTAssertNil(CanvasGeometry.sourceRect(for: CGRect(x: 5000, y: 0, width: 10, height: 10), clipFrame: canvas))
+    }
+}
+
+final class SmallPieceTests: XCTestCase {
+    func testTranscriptPhrasesBreakAtPauses() {
+        let words: [(text: String, start: Time, end: Time)] = [
+            ("so", t(0), t(0.2)), ("here", t(0.25), t(0.5)), ("we", t(1.5), t(1.6)), ("go", t(1.62), t(1.9))
+        ]
+        let phrases = TranscriptPhrase.group(words)
+        XCTAssertEqual(phrases.map(\.text), ["so here", "we go"])
+        XCTAssertEqual(phrases[1].start, t(1.5))
+    }
+
+    func testMediaDragPayload() {
+        XCTAssertEqual(MediaDrag.ids(from: MediaDrag.payload(["med_a", "med_b"])), ["med_a", "med_b"])
+        XCTAssertEqual(MediaDrag.ids(from: "hello"), [])
+    }
+
+    func testInspectorPatchesApply() throws {
+        let f = try AppFixture()
+        let camera = f.clip("Camera")
+        try f.apply(InspectorEdits.transform(camera.id, Transform(position: Point(x: 0.3, y: 0.4), scale: 0.7, rotation: 5), label: "Transform"))
+        XCTAssertEqual(f.clip("Camera").video?.transform, Transform(position: Point(x: 0.3, y: 0.4), scale: 0.7, rotation: 5))
+        try f.apply(InspectorEdits.shadowOpacity(f.clip("Camera"), percent: 40, newID: "fx_shadow"))
+        XCTAssertEqual(f.clip("Camera").video?.effects.first?.params["opacity"], .number(40))
+        try f.apply(InspectorEdits.shadowOpacity(f.clip("Camera"), percent: 70))
+        XCTAssertEqual(f.clip("Camera").video?.effects.count, 1, "the second change edits the same shadow")
+        XCTAssertEqual(f.clip("Camera").video?.effects.first?.params["opacity"], .number(70))
+        try f.apply(InspectorEdits.audio([f.clip("Voice").id], ["gainDB": .number(-3)], label: "Gain"))
+        XCTAssertEqual(f.clip("Voice").audio?.gainDB, -3)
+        XCTAssertEqual(f.clip("Voice").audio?.normalizeTo, -14, "untouched fields stay")
+        let look = [Effect(id: "fx_look", type: "colorAdjust", params: ["contrast": .number(8)])]
+        try f.apply(InspectorEdits.look("med_camera", look, label: "Look"))
+        let item = try XCTUnwrap(f.project.media("med_camera"))
+        try f.apply(InspectorEdits.lookParam(item, effectID: "fx_look", key: "contrast", value: .number(12), label: "Look"))
+        XCTAssertEqual(f.project.media("med_camera")?.look.first?.params["contrast"], .number(12))
+    }
+
+    func testParamFormatting() {
+        let definition = EffectRegistry.standard.definition("dropShadow")!
+        XCTAssertEqual(ParamFormatting.format(60, definition.param("opacity")!), "60%")
+        XCTAssertEqual(ParamFormatting.format(4, definition.param("distance")!), "4 px")
+        let colour = EffectRegistry.standard.definition("colorAdjust")!
+        XCTAssertEqual(ParamFormatting.format(0.1, colour.param("exposure")!), "+0.10")
+        XCTAssertEqual(ParamFormatting.format(-8, colour.param("contrast")!), "−8")
+    }
+
+    func testLowercasedFirstKeepsAcronyms() {
+        XCTAssertEqual("Move clip".lowercasedFirst, "move clip")
+        XCTAssertEqual("PiP right".lowercasedFirst, "PiP right")
+    }
+}
