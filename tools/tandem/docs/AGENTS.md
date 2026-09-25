@@ -169,7 +169,10 @@ changed, and the new length. IDs it reports are made up fresh by the real
 run.
 
 **Retries.** Give a batch an `idempotencyKey` and a retry with the same key
-returns the first result instead of applying it twice.
+returns the first result instead of applying it twice. An `interrupted`
+error means the app went away (quit or crashed) after it got the call but
+before it answered, so an edit may have been applied: check `tandem
+history` before sending it again.
 
 **Undo.** `undo` reverts the last batch, whoever made it, so pass
 `expectedRevision` to undo only if nothing happened since your edit. With

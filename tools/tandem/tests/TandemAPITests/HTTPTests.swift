@@ -295,6 +295,44 @@ final class ProjectClientTests: XCTestCase {
         XCTAssertEqual(frame.bytes, FakeRenderer.png.count)
     }
 
+    func testAnEditCutOffMidCallIsntSentTwice() async throws {
+        // The app takes an edit, applies (and journals) it, then quits or
+        // crashes before it answers. Sending the edit again, now headless,
+        // would apply it a second time.
+        let folder = TempFolder()
+        let url = try APIFixture.write(to: folder.url)
+        let move = ApplyRequest(commands: [.moveClips(clipIDs: ["clip_brl1"], delta: t(1), includeLinked: false)])
+        // Stands in for the app: a server advertised in this project's lock
+        // by another process.
+        let app = try await HTTPTests.Served()
+        defer { app.stop() }
+        let lockURL = ProjectSession.lockURL(for: url)
+        try FileManager.default.createDirectory(at: lockURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let owner = ProjectSession.Lock(pid: 1, owner: .app, started: Date(), port: app.port, token: app.server.token)
+        guard case .acquired(let lock) = try LockHandle.acquire(lockURL, lock: owner) else { return XCTFail("couldn't take the lock") }
+        app.harness.service.onCall = { operation, _ in
+            guard operation == "apply" else { return }
+            lock.release()
+            try? headless(url) { _ = try $0.apply(move, context: CallContext()) }
+            app.server.stop()
+        }
+        let client = ProjectClient(projectURL: url, author: "claude")
+        client.analysis = FakeAnalysis()
+        client.renderer = FakeRenderer()
+        XCTAssertEqual(client.route, .remote(port: app.port, owner: "app", pid: 1))
+
+        do {
+            _ = try await client.call(move)
+            XCTFail("an edit cut off mid-call must not be sent again")
+        } catch let error as ServiceError {
+            XCTAssertEqual(error.code, "interrupted", "\(error)")
+        }
+        XCTAssertEqual(try ProjectFile.load(from: url).project.clip("clip_brl1")?.start, t(21), "moved once")
+        // Reads are still retried, and find the project headless.
+        let status = try await client.call(StatusRequest())
+        XCTAssertTrue(status.headless)
+    }
+
     func testConcurrentHeadlessCallsShareOneSession() async throws {
         let folder = TempFolder()
         let url = try APIFixture.write(to: folder.url)
