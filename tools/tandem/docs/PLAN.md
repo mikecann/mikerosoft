@@ -19,8 +19,8 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Validator and random-edit invariant tests [core]
 - [x] Journal with seeded IDs, atomic saves, backups, crash recovery [core]
 - [x] Project session: lock, autosave, recovery [api]
-- [ ] Layout presets (Full, Corner, Split, Short) and zoom-to-rectangle as commands [core]
-- [ ] JSON schema for commands, generated for MCP and docs [api]
+- [x] Layout presets (full, PiP right, PiP left, split) and zoom-to-region as commands [core]
+- [x] JSON schema for commands, checked against every EditCommand case [api]
 
 ## Milestone 2: media
 
@@ -48,13 +48,13 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 ## Milestone 4: agents
 
-- [ ] Service: status, media, transcript, search, timeline, apply, undo, redo, frame, clip, export, loudness, validate, watch [api]
-- [ ] Readable timeline dump for agents (compact text and JSON) [api]
-- [ ] Local HTTP server with token, event stream for watch [api]
-- [ ] `tandem` CLI, headless when the app is closed, talks to the app when open [api]
-- [ ] `tandem mcp` stdio server [api]
-- [ ] Transcript tools: find phrase, list pauses, tighten pauses [api]
-- [ ] docs/AGENTS.md [api]
+- [x] Service: status, media, transcript, search, timeline, apply (with dry run), undo, redo, history, frame, clip, export, loudness, validate, watch, effects, screenshot [api]
+- [x] Readable timeline dump for agents (text, --summary, --words, JSON) [api]
+- [x] Local HTTP server with token, event stream for watch [api]
+- [x] `tandem` CLI, headless when the app is closed (undo kept on disk), talks to the app when open [api]
+- [x] `tandem mcp` stdio server (both MCP protocol eras) [api]
+- [x] Transcript tools: find phrase, list pauses, tighten pauses [api]
+- [x] docs/AGENTS.md with an example of every command, checked by tests [api]
 
 ## Milestone 5: the app
 
@@ -71,15 +71,16 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 ## Milestone 6: real projects
 
-- [ ] Import the decision-models EDL into a .tandem project [importer]
-- [ ] Import Filmora .wfp projects (best effort) [importer]
-- [ ] Rebuild decision-models and compare against the v14 export [all]
+- [x] Import the decision-models EDL into a .tandem project [importer] (676.6 s vs v14 667.3 s: Mike's hand trims after the pipeline)
+- [x] Import Filmora .wfp projects [importer] (v14 487/487 clips and 34/34 transitions exact; 119-project corpus imports without failures)
+- [ ] Render the imported v14 and compare frames against Filmora's export [render]
+- [x] `tandem import filmora|edl|compare` in the CLI [integration]
 
 ## Wave 2
 
-- [ ] Asset library: local index (SQLite FTS5), packs, browser with hover previews, copy into the project on use
+- [~] Asset library: catalogue (SQLite FTS5), providers, normalising, credits [assets]; browser UI after the app lands
 - [ ] Sources: Freesound (CC0), Pexels and Pixabay, ElevenLabs sound effects, LottieFiles, Google Fonts; paid libraries through a watched folder
-- [ ] Title and template pack: plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
+- [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
 - [ ] Stickers: Lottie and HEVC with alpha
 - [ ] Portrait short layout (screen top, camera bottom, captions between)
 - [ ] Segment render cache for fast re-exports

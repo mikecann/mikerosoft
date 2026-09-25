@@ -336,6 +336,18 @@ final class TransitionTests: XCTestCase {
         }
     }
 
+    func testTransitionIntoAStillNeedsNoHandles() throws {
+        let (f, c) = try Fixture.edited()
+        try c.run("Still", .addMedia(item: MediaItem(id: "med_still", path: "images/slide.png", kind: .image, role: .image, width: 1920, height: 1080)))
+        try c.run("Place", .placeMedia(mediaIDs: ["med_still"], at: t(25), duration: t(4)))
+        let (a, b) = (c.clips("B-roll")[0].id, c.clips("B-roll")[1].id)
+        try c.run("Push", .addTransition(
+            trackID: f.track("B-roll").id,
+            transition: Transition(type: .push, direction: .left, duration: t(0.7), fromClipID: a, toClipID: b)
+        ))
+        XCTAssertEqual(c.project.track(named: "B-roll")!.transitions.count, 1)
+    }
+
     func testTailTransitionFollowsASplit() throws {
         let (f, c) = try Fixture.edited()
         let camera = f.clips("Camera")[0].id
@@ -481,6 +493,8 @@ final class ValidatorTests: XCTestCase {
 final class RandomEditTests: XCTestCase {
     func testRandomEditsKeepInvariants() throws {
         var rng = SplitMix64(seed: 42)
+        var applied = 0
+        var attempted = 0
         for round in 0..<8 {
             let (_, c) = try Fixture.edited()
             for step in 0..<60 {
@@ -503,7 +517,8 @@ final class RandomEditTests: XCTestCase {
                     .insertTime(at: time, duration: Time(seconds: 1))
                 ]
                 let command = commands[Int(rng.next() % UInt64(commands.count))]
-                _ = try? c.run("Random \(round).\(step)", command)
+                attempted += 1
+                if (try? c.run("Random \(round).\(step)", command)) != nil { applied += 1 }
                 let after = c.project
                 assertValid(after)
                 var groups: [String: [Clip]] = [:]
@@ -515,6 +530,16 @@ final class RandomEditTests: XCTestCase {
                 }
                 if after.allTracks.allSatisfy({ $0.clips.isEmpty }) { break }
             }
+            // Whatever the edits did, the file round trip and undo must be exact.
+            let data = try ProjectFile.encoder().encode(c.project)
+            XCTAssertEqual(try JSONDecoder().decode(Project.self, from: data), c.project, "JSON round trip in round \(round)")
+            let edited = c.project
+            while c.undo() != nil {}
+            XCTAssertEqual(c.project.allTracks.flatMap(\.clips).count, Fixture().project.allTracks.flatMap(\.clips).count)
+            while c.redo() != nil {}
+            XCTAssertEqual(c.project, edited)
         }
+        // Make sure the test exercises real edits, not just rejected ones.
+        XCTAssertGreaterThan(Double(applied) / Double(attempted), 0.4, "\(applied) of \(attempted) random edits applied")
     }
 }

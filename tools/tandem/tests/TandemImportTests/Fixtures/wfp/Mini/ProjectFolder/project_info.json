@@ -1,0 +1,15 @@
+{
+ "project_file_name": "Mini Filmora",
+ "project_timeline_duration": 220000000,
+ "project_timeline_framerate": [
+  25,
+  1
+ ],
+ "project_timeline_resolution": [
+  3840,
+  2160
+ ],
+ "timeline_mediaId": "AA-BB-CC",
+ "project_guid": "12-34-56",
+ "project_editor_modify_version": "16.0.9.13337"
+}

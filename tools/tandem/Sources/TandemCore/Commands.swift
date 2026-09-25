@@ -62,6 +62,10 @@ public enum EditCommand: Codable, Equatable, Sendable {
     case closeGap(trackID: String, at: Time)
     /// Opens up empty time at `at`, pushing everything later to the right.
     case insertTime(at: Time, duration: Time, trackIDs: [String]? = nil)
+    /// Expands a template (section card, call to action) into linked clips
+    /// at `at`, filling `{{field}}` placeholders from `values`. Media the
+    /// template uses must already be in the project (matched by path).
+    case insertTemplate(template: Template, at: Time, values: [String: String]? = nil, mode: InsertMode? = nil)
 
     // MARK: Cutting and trimming
 
@@ -99,6 +103,14 @@ public enum EditCommand: Codable, Equatable, Sendable {
     case updateClip(clipID: String, patch: JSONValue)
     case link(clipIDs: [String])
     case unlink(clipIDs: [String])
+    /// Sets a one-key layout (full, PiP right, PiP left, split) on video
+    /// clips. Audio clips in the list are skipped.
+    case applyLayout(clipIDs: [String], preset: LayoutPreset)
+    /// Zooms a video clip into a rectangle of its source (0...1 from the top
+    /// left). Without `at` the zoom is static. With `at` (timeline time) it
+    /// animates there over `duration` (default 0.5 s) with an ease; zoom back
+    /// out later with the rectangle `{x: 0, y: 0, width: 1, height: 1}`.
+    case zoomToRegion(clipID: String, rect: Rect, at: Time? = nil, duration: Time? = nil)
 
     // MARK: Transitions
 
