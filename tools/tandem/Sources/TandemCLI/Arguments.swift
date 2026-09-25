@@ -11,12 +11,15 @@ struct Arguments {
     var command: String?
     var positionals: [String] = []
     var options: [String: String] = [:]
+    /// Every value of options that can repeat, like `--search a --search b`.
+    var repeated: [String: [String]] = [:]
     var flags: Set<String> = []
 
     /// Options that take a value.
     static let valueOptions: Set<String> = [
         "project", "author", "from", "to", "min", "keep", "limit", "label", "key", "expect",
-        "output", "preset", "width", "height", "port", "timeout", "name", "format"
+        "output", "preset", "width", "height", "port", "timeout", "name", "format",
+        "out", "search", "rewrite", "recipe"
     ]
     /// Options that are on or off.
     static let flagOptions: Set<String> = ["json", "refresh", "words", "summary", "apply", "dry-run", "help", "version", "once"]
@@ -44,7 +47,9 @@ struct Arguments {
                     name = String(name[..<equals])
                 }
                 if valueOptions.contains(name) {
-                    result.options[name] = try inline ?? value(for: name)
+                    let given = try inline ?? value(for: name)
+                    result.options[name] = given
+                    result.repeated[name, default: []].append(given)
                 } else if flagOptions.contains(name) {
                     guard inline == nil else { throw UsageError(message: "--\(name) doesn't take a value.") }
                     result.flags.insert(name)
@@ -57,7 +62,9 @@ struct Arguments {
                 let short = String(argument.dropFirst())
                 guard let name = shortOptions[short] else { throw UsageError(message: "Unknown option \(argument).") }
                 if valueOptions.contains(name) {
-                    result.options[name] = try value(for: name)
+                    let given = try value(for: name)
+                    result.options[name] = given
+                    result.repeated[name, default: []].append(given)
                 } else {
                     result.flags.insert(name)
                 }
@@ -72,6 +79,9 @@ struct Arguments {
     }
 
     func has(_ flag: String) -> Bool { flags.contains(flag) }
+
+    /// All values given for an option that may repeat.
+    func values(_ name: String) -> [String] { repeated[name] ?? [] }
 
     /// Fails when an option or flag was given that `command` doesn't use.
     func check(allowed: Set<String>, command: String) throws {

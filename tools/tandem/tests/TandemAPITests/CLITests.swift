@@ -245,3 +245,42 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(mcp.terminationStatus, 0, "exits when stdin closes")
     }
 }
+
+/// `tandem import`, wired in at integration.
+final class ImportCLITests: XCTestCase {
+    let cli = CLITests()
+
+    override func setUpWithError() throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+    }
+
+    func testImportUsageErrors() throws {
+        let folder = TempFolder()
+        let bare = try cli.tandem("import", in: folder.url)
+        XCTAssertEqual(bare.status, 2)
+        XCTAssertTrue(bare.stderr.contains("needs filmora, edl or compare"), bare.stderr)
+        let typo = try cli.tandem("import", "filmroa", "x.wfp", in: folder.url)
+        XCTAssertEqual(typo.status, 2)
+        XCTAssertTrue(typo.stderr.contains("Did you mean `tandem import filmora`?"), typo.stderr)
+        let noRecipe = try cli.tandem("import", "edl", in: folder.url)
+        XCTAssertEqual(noRecipe.status, 2)
+        XCTAssertTrue(noRecipe.stderr.contains("needs --recipe"), noRecipe.stderr)
+        let missing = try cli.tandem("import", "filmora", "nope.wfp", in: folder.url)
+        XCTAssertEqual(missing.status, 1)
+    }
+
+    func testCompareTwoCuts() throws {
+        let folder = TempFolder()
+        let coordinator = ProjectCoordinator(project: APIFixture.project())
+        let a = folder.url.appendingPathComponent("a.tandem")
+        let b = folder.url.appendingPathComponent("b.tandem")
+        try ProjectFile.save(coordinator.project, revision: 1, to: a)
+        try coordinator.apply(EditBatch(label: "Tighten", commands: [.rippleDeleteRange(range: TimeRange(start: Time(seconds: 10), end: Time(seconds: 11)))]))
+        try ProjectFile.save(coordinator.project, revision: 2, to: b)
+        let result = try cli.tandem("import", "compare", "a.tandem", "b.tandem", "--json", in: folder.url)
+        XCTAssertEqual(result.status, 0, result.stderr)
+        let json = try JSONDecoder().decode(JSONValue.self, from: Data(result.stdout.utf8))
+        guard case .object(let fields) = json else { return XCTFail("not an object: \(result.stdout)") }
+        XCTAssertNotNil(fields["matchedVoice"])
+    }
+}

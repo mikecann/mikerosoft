@@ -50,9 +50,18 @@ tandem frame <time> [-o out.png]   tandem clip <start> <end> [-o out.mp4]
 tandem export [--preset youtube4k] [-o out.mp4] [--from T] [--to T]
 tandem loudness    tandem effects    tandem schema    tandem watch [--once]
 tandem new <path.tandem>           tandem serve    tandem mcp
+tandem import filmora <file.wfp> [--out DIR]     a Filmora project as a .tandem
+tandem import edl [edl.json] --recipe decision-models [--out DIR]
+tandem import compare <a.tandem> <b.tandem>      how two cuts of one take differ
 ```
 
 `tandem help <command>` explains each one.
+
+Imports write `<out>/<name>/<name>.tandem` with a report beside it
+(`<name>.import.txt` for people, `.import.json` for agents) listing anything
+that couldn't be carried over. Filmora media paths saved on another Mac are
+fixed with `--rewrite /Users/old/=/Users/new/`, and moved files are found
+with `--search <folder>`.
 
 ### When the app is open
 

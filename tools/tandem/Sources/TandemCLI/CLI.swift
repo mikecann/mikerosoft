@@ -79,6 +79,8 @@ struct CLI {
             return try await serve(args)
         case "mcp":
             return await mcp(args)
+        case "import":
+            return try await ImportCommand(directory: directory).run(args)
         default:
             break
         }

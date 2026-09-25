@@ -32,7 +32,7 @@ let package = Package(
         // They build through the coordinator, so imports always validate.
         .target(name: "TandemImport", dependencies: ["TandemCore", "TandemMedia"], path: "Sources/TandemImport"),
         .executableTarget(name: "TandemApp", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI"], path: "Sources/TandemApp"),
-        .executableTarget(name: "TandemCLI", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI"], path: "Sources/TandemCLI"),
+        .executableTarget(name: "TandemCLI", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI", "TandemImport"], path: "Sources/TandemCLI"),
         .testTarget(name: "TandemCoreTests", dependencies: ["TandemCore"], path: "tests/TandemCoreTests"),
         .testTarget(name: "TandemMediaTests", dependencies: ["TandemMedia"], path: "tests/TandemMediaTests"),
         .testTarget(name: "TandemRenderTests", dependencies: ["TandemRender"], path: "tests/TandemRenderTests"),
