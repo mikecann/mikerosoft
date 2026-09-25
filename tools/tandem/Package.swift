@@ -37,7 +37,13 @@ let package = Package(
         // Importers: Filmora .wfp projects and the JSON EDLs agents cut with.
         // They build through the coordinator, so imports always validate.
         .target(name: "TandemImport", dependencies: ["TandemCore", "TandemMedia"], path: "Sources/TandemImport"),
-        .executableTarget(name: "TandemApp", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI"], path: "Sources/TandemApp"),
+        // The macOS app. Its keymap and other defaults ship as resources.
+        .executableTarget(
+            name: "TandemApp",
+            dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI", "TandemAssets"],
+            path: "Sources/TandemApp",
+            resources: [.copy("Resources/Keymaps")]
+        ),
         .executableTarget(name: "TandemCLI", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI", "TandemImport", "TandemAssets"], path: "Sources/TandemCLI"),
         .testTarget(name: "TandemCoreTests", dependencies: ["TandemCore"], path: "tests/TandemCoreTests"),
         .testTarget(name: "TandemMediaTests", dependencies: ["TandemMedia"], path: "tests/TandemMediaTests"),
@@ -64,7 +70,10 @@ let package = Package(
             dependencies: ["TandemAssets"],
             path: "tests/TandemAssetsTests",
             resources: [.copy("Fixtures")]
-        )
+        ),
+        // The app's pure logic: timeline maths, snapping, hit testing, the
+        // keymap and how gestures become edit batches.
+        .testTarget(name: "TandemAppTests", dependencies: ["TandemApp", "TandemCore"], path: "tests/TandemAppTests")
     ],
     swiftLanguageModes: [.v5]
 )
