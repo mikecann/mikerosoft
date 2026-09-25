@@ -68,7 +68,7 @@ extension EditCommand {
         switch self {
         case .updateProject: return "Update project"
         case .updateSettings: return "Change project settings"
-        case .addTrack(let kind, let name, _, _): return name.map { "Add track \"\($0)\"" } ?? "Add \(kind.rawValue) track"
+        case .addTrack(let kind, let name, _, _): return name.map { "Add track \($0)" } ?? "Add \(kind.rawValue) track"
         case .removeTrack: return "Remove track"
         case .moveTrack: return "Move track"
         case .updateTrack: return "Update track"
@@ -102,7 +102,7 @@ extension EditCommand {
         case .removeEffect: return "Remove effect"
         case .moveEffect: return "Reorder effects"
         case .setKeyframes(_, let parameter, let keyframes): return keyframes.isEmpty ? "Remove \(parameter) animation" : "Animate \(parameter)"
-        case .addMarker(let marker): return "Add marker \"\(marker.name)\""
+        case .addMarker(let marker): return marker.name.isEmpty ? "Add marker" : "Add marker \(marker.name)"
         case .updateMarker: return "Update marker"
         case .removeMarker: return "Remove marker"
         }

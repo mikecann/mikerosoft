@@ -1,0 +1,569 @@
+import Foundation
+import TandemCore
+
+/// `tandem mcp`: the service as MCP tools over stdio (newline-delimited
+/// JSON-RPC 2.0).
+///
+/// It speaks both eras of MCP. Clients on 2025-11-25 and earlier open with
+/// `initialize` and `notifications/initialized`; clients on 2026-07-28 send
+/// the protocol version, capabilities and client info in each request's
+/// `_meta` (and may probe with `server/discover`). Every tool call goes
+/// through `ProjectClient`, so it reaches the app when the app has the
+/// project open and opens the file directly otherwise.
+public final class MCPServer: @unchecked Sendable {
+    public static let modernVersions = ["2026-07-28"]
+    public static let legacyVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
+    public static var supportedVersions: [String] { modernVersions + legacyVersions }
+
+    public struct Options: Sendable {
+        /// `--project`: the project to use when a call doesn't name one.
+        public var project: String?
+        /// Where to look for a project when none is named.
+        public var directory: URL
+        /// `--author` or `$TANDEM_AUTHOR`. Otherwise edits are credited to
+        /// the client's name (claude, codex...).
+        public var author: String?
+        public var environment: [String: String]
+
+        public init(project: String? = nil, directory: URL, author: String? = nil, environment: [String: String] = ProcessInfo.processInfo.environment) {
+            self.project = project
+            self.directory = directory
+            self.author = author
+            self.environment = environment
+        }
+    }
+
+    public let options: Options
+    /// Makes the client for a project; tests swap in fakes.
+    var makeClient: (URL, String) -> ProjectClient = { ProjectClient(projectURL: $0, author: $1) }
+
+    private let output: FileHandle
+    private let writeLock = NSLock()
+    private let stateLock = NSLock()
+    private var legacyClientName: String?
+    private var tasks: [String: Task<Void, Never>] = [:]
+    private var cancelled: Set<String> = []
+
+    public init(options: Options, output: FileHandle = .standardOutput) {
+        self.options = options
+        self.output = output
+    }
+
+    /// Reads requests from `input` until it closes.
+    public func run(input: FileHandle = .standardInput) async {
+        for await line in LineReader.lines(input) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            receive(trimmed)
+        }
+        await drain()
+    }
+
+    /// Handles one message. Requests run concurrently; responses are
+    /// written as each finishes.
+    func receive(_ line: String) {
+        guard let data = line.data(using: .utf8), let message = try? JSONDecoder().decode(JSONValue.self, from: data),
+              case .object(let fields) = message else {
+            write(Self.error(id: .null, code: -32700, message: "Parse error: each line must be one JSON-RPC message."))
+            return
+        }
+        guard case .string(let method)? = fields["method"] else {
+            // A response or something else we never asked for.
+            return
+        }
+        let params = fields["params"] ?? .object([:])
+        guard let id = fields["id"], id != .null else {
+            notification(method, params)
+            return
+        }
+        let key = Self.key(id)
+        // Registered under the lock so a quick call can't finish (and
+        // unregister) before it's registered.
+        stateLock.withLock {
+            tasks[key] = Task { [weak self] in
+                guard let self else { return }
+                let response = await self.request(method, params: params, id: id)
+                let dropped = self.stateLock.withLock { () -> Bool in
+                    self.tasks.removeValue(forKey: key)
+                    return self.cancelled.remove(key) != nil
+                }
+                if !dropped { self.write(response) }
+            }
+        }
+    }
+
+    private func notification(_ method: String, _ params: JSONValue) {
+        switch method {
+        case "notifications/cancelled":
+            guard case .object(let fields) = params, let id = fields["requestId"] else { return }
+            let key = Self.key(id)
+            stateLock.lock()
+            let task = tasks[key]
+            if task != nil { cancelled.insert(key) }
+            stateLock.unlock()
+            task?.cancel()
+        default:
+            // notifications/initialized and anything else need no answer.
+            break
+        }
+    }
+
+    /// Waits for running calls when input ends, cancelling slow ones.
+    private func drain() async {
+        let running = stateLock.withLock { Array(tasks.values) }
+        let deadline = Date().addingTimeInterval(5)
+        for task in running {
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining <= 0 { task.cancel(); continue }
+            let timer = Task {
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                task.cancel()
+            }
+            await task.value
+            timer.cancel()
+        }
+    }
+
+    // MARK: - Requests
+
+    func request(_ method: String, params: JSONValue, id: JSONValue) async -> JSONValue {
+        let meta = Self.meta(params)
+        var modern = false
+        if case .string(let version)? = meta["io.modelcontextprotocol/protocolVersion"] {
+            if Self.modernVersions.contains(version) {
+                modern = true
+                guard meta["io.modelcontextprotocol/clientCapabilities"] != nil else {
+                    return Self.error(id: id, code: -32602, message: "Missing _meta[\"io.modelcontextprotocol/clientCapabilities\"].")
+                }
+            } else if !Self.legacyVersions.contains(version) {
+                return Self.error(id: id, code: -32022, message: "Unsupported protocol version", data: .object([
+                    "supported": .array(Self.supportedVersions.map(JSONValue.string)),
+                    "requested": .string(version)
+                ]))
+            }
+        }
+        let clientName = Self.clientName(meta["io.modelcontextprotocol/clientInfo"]) ?? stateLocked { legacyClientName }
+
+        var result: JSONValue
+        switch method {
+        case "initialize":
+            return Self.response(id: id, result: initialize(params))
+        case "ping":
+            result = .object([:])
+        case "server/discover":
+            result = discover()
+        case "tools/list":
+            var fields: [String: JSONValue] = ["tools": .array(MCPTools.all.map(\.definition))]
+            if modern {
+                fields["ttlMs"] = .number(3_600_000)
+                fields["cacheScope"] = .string("public")
+            }
+            result = .object(fields)
+        case "tools/call":
+            do {
+                result = try await callTool(params, clientName: clientName)
+            } catch let error as MCPProtocolError {
+                return Self.error(id: id, code: error.code, message: error.message)
+            } catch {
+                return Self.error(id: id, code: -32603, message: error.localizedDescription)
+            }
+        default:
+            return Self.error(id: id, code: -32601, message: "Method not found: \(method)")
+        }
+        if modern, case .object(var fields) = result {
+            fields["resultType"] = .string("complete")
+            var resultMeta: [String: JSONValue] = [:]
+            if case .object(let existing)? = fields["_meta"] { resultMeta = existing }
+            resultMeta["io.modelcontextprotocol/serverInfo"] = Self.serverInfo
+            fields["_meta"] = .object(resultMeta)
+            result = .object(fields)
+        }
+        return Self.response(id: id, result: result)
+    }
+
+    private func initialize(_ params: JSONValue) -> JSONValue {
+        var requested: String?
+        if case .object(let fields) = params {
+            if case .string(let version)? = fields["protocolVersion"] { requested = version }
+            if let name = Self.clientName(fields["clientInfo"]) {
+                stateLocked { legacyClientName = name }
+            }
+        }
+        let version = requested.flatMap { Self.legacyVersions.contains($0) ? $0 : nil } ?? Self.legacyVersions[0]
+        return .object([
+            "protocolVersion": .string(version),
+            "capabilities": .object(["tools": .object(["listChanged": .bool(false)])]),
+            "serverInfo": Self.serverInfo,
+            "instructions": .string(Self.instructions)
+        ])
+    }
+
+    private func discover() -> JSONValue {
+        .object([
+            "supportedVersions": .array(Self.supportedVersions.map(JSONValue.string)),
+            "capabilities": .object(["tools": .object(["listChanged": .bool(false)])]),
+            "instructions": .string(Self.instructions),
+            "ttlMs": .number(3_600_000),
+            "cacheScope": .string("public")
+        ])
+    }
+
+    static let serverInfo: JSONValue = .object([
+        "name": .string("tandem"),
+        "title": .string("Tandem video editor"),
+        "version": .string(TandemAPI.version)
+    ])
+
+    static let instructions = """
+    Tandem is Mike's video editor. These tools read and edit a .tandem project: the app's copy when the app has it open, otherwise the file. \
+    Start with `timeline` (add words: true to see what's said in each voice clip). Change things with `apply`, a batch of edit commands applied \
+    atomically as one undo step credited to you; pass expectedRevision from your last read so you never edit a timeline that changed under you, \
+    and try dryRun: true when unsure. `undo` reverts your last edit. `search` finds a phrase's timeline time, `pauses` lists silences and \
+    `tighten` shortens them (a dry run unless apply: true). `frame` shows a moment, `clip` renders a review MP4. Times are seconds or mm:ss.mmm. \
+    Pass `project` (a .tandem path) when the server wasn't started in the video's folder.
+    """
+
+    private func callTool(_ params: JSONValue, clientName: String?) async throws -> JSONValue {
+        guard case .object(let fields) = params, case .string(let name)? = fields["name"] else {
+            throw MCPProtocolError(code: -32602, message: "tools/call needs a tool name.")
+        }
+        guard let tool = MCPTools.named(name) else {
+            throw MCPProtocolError(code: -32602, message: "Unknown tool: \(name)")
+        }
+        var arguments: [String: JSONValue] = [:]
+        if case .object(let given)? = fields["arguments"] { arguments = given }
+        let asJSON = arguments["json"] == .bool(true)
+        var projectPath: String?
+        if case .string(let path)? = arguments["project"] { projectPath = path }
+        arguments.removeValue(forKey: "project")
+        arguments.removeValue(forKey: "json")
+        let author = options.author ?? options.environment["TANDEM_AUTHOR"] ?? clientName.map(Self.author(fromClient:)) ?? "agent"
+        do {
+            let body = try JSONEncoder().encode(JSONValue.object(tool.defaults.merging(arguments) { _, given in given }))
+            let content = try await run(tool.operation, body: body, projectPath: projectPath, author: author, asJSON: asJSON)
+            return .object(["content": .array(content), "isError": .bool(false)])
+        } catch {
+            let message = ServiceError.wrap(error).message
+            return .object(["content": .array([.object(["type": .string("text"), "text": .string(message)])]), "isError": .bool(true)])
+        }
+    }
+
+    private func run(_ operation: ServiceOperation, body: Data, projectPath: String?, author: String, asJSON: Bool) async throws -> [JSONValue] {
+        try await run(operation.callType, body: body, projectPath: projectPath, author: author, asJSON: asJSON)
+    }
+
+    private func run<C: ServiceCall>(_ type: C.Type, body: Data, projectPath: String?, author: String, asJSON: Bool) async throws -> [JSONValue] {
+        let call = try ServiceJSON.decodeRequest(C.self, from: body)
+        let result: C.Result
+        if let effects = call as? EffectsRequest {
+            // The catalogue doesn't need a project.
+            result = try EffectsResult.catalog(type: effects.type) as! C.Result
+        } else {
+            let url = try ProjectLocator.find(projectPath ?? options.project, in: options.directory, environment: options.environment)
+            result = try await makeClient(url, author).call(call)
+        }
+        var content: [JSONValue] = []
+        if let image = result as? ImageResult, let png = image.png {
+            content.append(.object(["type": .string("image"), "data": .string(png), "mimeType": .string("image/png")]))
+        }
+        let text: String
+        if asJSON {
+            text = String(decoding: try ServiceJSON.encoder(pretty: true).encode(result), as: UTF8.self)
+        } else {
+            text = result.readableText
+        }
+        content.append(.object(["type": .string("text"), "text": .string(text)]))
+        return content
+    }
+
+    // MARK: - Helpers
+
+    /// A short author name from the client's name: "claude-code" is
+    /// credited as "claude".
+    static func author(fromClient name: String) -> String {
+        let lower = name.lowercased()
+        for known in ["claude", "codex", "cursor", "gemini"] where lower.contains(known) { return known }
+        return name
+    }
+
+    static func clientName(_ info: JSONValue?) -> String? {
+        guard case .object(let fields)? = info, case .string(let name)? = fields["name"], !name.isEmpty else { return nil }
+        return name
+    }
+
+    static func meta(_ params: JSONValue) -> [String: JSONValue] {
+        guard case .object(let fields) = params, case .object(let meta)? = fields["_meta"] else { return [:] }
+        return meta
+    }
+
+    static func key(_ id: JSONValue) -> String {
+        switch id {
+        case .string(let s): return "s:\(s)"
+        case .number(let n): return "n:\(n)"
+        default: return "other"
+        }
+    }
+
+    static func response(id: JSONValue, result: JSONValue) -> JSONValue {
+        .object(["jsonrpc": .string("2.0"), "id": id, "result": result])
+    }
+
+    static func error(id: JSONValue, code: Int, message: String, data: JSONValue? = nil) -> JSONValue {
+        var error: [String: JSONValue] = ["code": .number(Double(code)), "message": .string(message)]
+        if let data { error["data"] = data }
+        return .object(["jsonrpc": .string("2.0"), "id": id, "error": .object(error)])
+    }
+
+    private func stateLocked<T>(_ body: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return body()
+    }
+
+    func write(_ message: JSONValue) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard var data = try? encoder.encode(message) else { return }
+        data.append(0x0A)
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        do {
+            try output.write(contentsOf: data)
+        } catch {
+            log("couldn't write a response: \(error.localizedDescription)")
+        }
+    }
+
+    private func log(_ text: String) {
+        FileHandle.standardError.write(Data("tandem mcp: \(text)\n".utf8))
+    }
+}
+
+struct MCPProtocolError: Error {
+    var code: Int
+    var message: String
+}
+
+/// The MCP tool list: one tool per service operation.
+enum MCPTools {
+    struct Tool {
+        var name: String
+        var title: String
+        var description: String
+        var operation: ServiceOperation
+        var properties: [String: JSONValue]
+        var required: [String] = []
+        var readOnly: Bool
+        var idempotent = false
+        /// Arguments filled in when the caller leaves them out.
+        var defaults: [String: JSONValue] = [:]
+
+        var definition: JSONValue {
+            var properties = self.properties
+            properties["project"] = S.string("Path to the .tandem file (or its folder). Defaults to the one the server was started with, or the one in its folder.")
+            properties["json"] = S.boolean("Return the raw JSON result instead of readable text.")
+            var schema: [String: JSONValue] = [
+                "type": .string("object"),
+                "properties": .object(properties),
+                "additionalProperties": .bool(false)
+            ]
+            if !required.isEmpty { schema["required"] = .array(required.map(JSONValue.string)) }
+            return .object([
+                "name": .string(name),
+                "title": .string(title),
+                "description": .string(description),
+                "inputSchema": .object(schema),
+                "annotations": .object([
+                    "title": .string(title),
+                    "readOnlyHint": .bool(readOnly),
+                    "destructiveHint": .bool(false),
+                    "idempotentHint": .bool(idempotent),
+                    "openWorldHint": .bool(false)
+                ])
+            ])
+        }
+    }
+
+    static func named(_ name: String) -> Tool? {
+        all.first { $0.name == name }
+    }
+
+    static func time(_ description: String) -> JSONValue {
+        .object(["type": .array([.string("number"), .string("string")]), "description": .string(description + " Seconds or mm:ss.mmm.")])
+    }
+
+    static var applyProperties: [String: JSONValue] {
+        guard case .object(let batch) = CommandSchema.batch, case .object(let properties)? = batch["properties"] else { return [:] }
+        return properties
+    }
+
+    static let all: [Tool] = [
+        Tool(
+            name: "status", title: "Project status",
+            description: "The project's name, revision, length, unsaved changes, who has it open, undo and redo, and background jobs.",
+            operation: .status, properties: [:], readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "timeline", title: "Read the timeline",
+            description: "The edit as compact text: tracks top to bottom as the app shows them, one line per clip with its ID, timeline range, media and source range, link group and settings, plus transitions, gaps and markers. Use from/to to focus on part of it, words: true to see what's said in each voice clip, or format: json for the project JSON.",
+            operation: .timeline,
+            properties: [
+                "from": time("Only clips overlapping from this time."),
+                "to": time("Only clips overlapping up to this time."),
+                "words": S.boolean("Show the words each voice clip plays."),
+                "format": S.enumeration(["text", "json"], "text (default) or json.")
+            ],
+            readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "media", title: "List media",
+            description: "Media files in the project with their role, length, how many clips use them and analysis status (transcript, loudness, proxy, cutout matte). refresh: true scans the project folder for new files first.",
+            operation: .media, properties: ["refresh": S.boolean("Scan the folder for new files first.")], readOnly: false
+        ),
+        Tool(
+            name: "transcript", title: "Read a transcript",
+            description: "Word timings. With a clip ID the words that clip plays in timeline time; with a media ID the whole file in file time; with no ID everything said on the timeline.",
+            operation: .transcript,
+            properties: ["id": S.string("A clip ID or media ID. Leave out for the whole timeline."), "from": time("Start of the range."), "to": time("End of the range.")],
+            readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "search", title: "Find a phrase",
+            description: "Finds where a phrase is said, as timeline ranges with the clips that play it (ignoring case and punctuation). Also lists matches in material that isn't on the timeline.",
+            operation: .search,
+            properties: ["phrase": S.string("Words to find."), "limit": S.integer("At most this many hits.")],
+            required: ["phrase"], readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "pauses", title: "List pauses",
+            description: "Silences between words on the voice tracks, in timeline time, with the words either side.",
+            operation: .pauses,
+            properties: ["min": time("Shortest pause to list. Default 0.6 s."), "from": time("Start of the range."), "to": time("End of the range.")],
+            readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "tighten", title: "Tighten pauses",
+            description: "Shortens every pause longer than min down to keep, with frame-aligned ripple deletes that cut the whole take and let B-roll, music and titles follow. A dry run that returns the plan and the commands unless apply: true.",
+            operation: .tighten,
+            properties: [
+                "min": time("Pauses at least this long get shortened. Default 0.6 s."),
+                "keep": time("How much of each pause to keep. Default 0.15 s."),
+                "apply": S.boolean("Make the cut. Without it nothing changes."),
+                "from": time("Only pauses after this time."), "to": time("Only pauses before this time."),
+                "label": S.string("Undo label."), "author": S.string("Who made the edit."),
+                "expectedRevision": S.integer("Refuse unless the project is at this revision.")
+            ],
+            readOnly: false
+        ),
+        Tool(
+            name: "apply", title: "Edit the project",
+            description: "Applies a batch of edit commands atomically as one undo step. If any command fails nothing changes and the error says which one and why. Returns the new revision, created IDs and warnings. See the command list in the schema; times are seconds.",
+            operation: .apply, properties: applyProperties, required: ["commands"], readOnly: false
+        ),
+        Tool(
+            name: "undo", title: "Undo",
+            description: "Undoes the last edit. Pass expectedRevision so you only undo your own edit if nothing changed since.",
+            operation: .undo, properties: ["expectedRevision": S.integer("Refuse unless the project is at this revision.")], readOnly: false
+        ),
+        Tool(
+            name: "redo", title: "Redo",
+            description: "Redoes the last undone edit.",
+            operation: .redo, properties: ["expectedRevision": S.integer("Refuse unless the project is at this revision.")], readOnly: false
+        ),
+        Tool(
+            name: "history", title: "Edit history",
+            description: "What undo would undo (newest first, with who made each edit) and recent changes.",
+            operation: .history, properties: ["limit": S.integer("How many entries. Default 20.")], readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "validate", title: "Check the project",
+            description: "Checks the project for problems: overlaps, clips past the end of their media, missing files, broken transitions.",
+            operation: .validate, properties: [:], readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "frame", title: "Look at a frame",
+            description: "Renders the timeline at a time and returns the picture. Default 1280 px wide; pass output to save a PNG instead.",
+            operation: .frame,
+            properties: [
+                "time": time("Timeline time."),
+                "maxWidth": S.integer("Largest width in pixels. Default 1280."),
+                "maxHeight": S.integer("Largest height in pixels."),
+                "output": S.string("Save the PNG here instead of returning it (absolute, or relative to the project folder)."),
+                "format": S.string("An alternate output format ID, like portrait.")
+            ],
+            required: ["time"], readOnly: true, idempotent: true, defaults: ["maxWidth": .number(1280)]
+        ),
+        Tool(
+            name: "screenshot", title: "Screenshot the app",
+            description: "Captures the Tandem app's window, to see what Mike sees. Needs the app open.",
+            operation: .screenshot, properties: ["output": S.string("Save the PNG here instead of returning it.")], readOnly: true
+        ),
+        Tool(
+            name: "clip", title: "Render a review clip",
+            description: "Renders part of the timeline to an MP4 (720p review preset by default) so the edit can be watched. Returns the file path.",
+            operation: .clip,
+            properties: [
+                "start": time("Timeline start."), "end": time("Timeline end."),
+                "output": S.string("Where to write the MP4. Default: exports/review <start>-<end>.mp4."),
+                "preset": S.string("Export preset: review (default), youtube1080, youtube4k, short.")
+            ],
+            required: ["start", "end"], readOnly: false
+        ),
+        Tool(
+            name: "export", title: "Export the video",
+            description: "Renders the timeline (or a range) with an export preset, loudness-matched to the project target. Returns the file path and measured loudness.",
+            operation: .export,
+            properties: [
+                "preset": S.string("youtube4k (default), youtube1080, review, short."),
+                "output": S.string("Where to write the file. Default: exports/<name> r<revision>.mp4."),
+                "from": time("Start of the range."), "to": time("End of the range."),
+                "format": S.string("An alternate output format ID, like portrait.")
+            ],
+            readOnly: false
+        ),
+        Tool(
+            name: "loudness", title: "Loudness",
+            description: "Measured loudness of each file with sound, the project's target, and the gain each levelled clip gets.",
+            operation: .loudness, properties: ["mediaID": S.string("Just this file.")], readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "watch", title: "Wait for a change",
+            description: "Waits until the project moves past a revision (default: now), for example to react when Mike edits in the app. Returns the changes, or changed: false after the timeout.",
+            operation: .watch,
+            properties: ["revision": S.integer("Wait for a revision after this one."), "timeout": S.number("Seconds to wait. Default 30, at most 600.")],
+            readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "effects", title: "Effects and layouts",
+            description: "The effects addEffect accepts with their parameters and defaults, the transition types, the layout presets and the parameters setKeyframes can animate.",
+            operation: .effects, properties: ["type": S.string("Just this effect type.")], readOnly: true, idempotent: true
+        )
+    ]
+}
+
+/// Lines from a file handle, read on a thread of their own so a blocking
+/// read never ties up a thread of Swift's concurrency pool.
+public enum LineReader {
+    public static func lines(_ handle: FileHandle) -> AsyncStream<String> {
+        AsyncStream { continuation in
+            let thread = Thread {
+                var buffer = Data()
+                while true {
+                    let chunk = handle.availableData
+                    if chunk.isEmpty { break }
+                    buffer.append(chunk)
+                    while let newline = buffer.firstIndex(of: 0x0A) {
+                        var line = buffer[buffer.startIndex..<newline]
+                        if line.last == 0x0D { line = line.dropLast() }
+                        continuation.yield(String(decoding: line, as: UTF8.self))
+                        buffer.removeSubrange(buffer.startIndex...newline)
+                    }
+                }
+                if !buffer.isEmpty { continuation.yield(String(decoding: buffer, as: UTF8.self)) }
+                continuation.finish()
+            }
+            thread.name = "tandem line reader"
+            thread.start()
+        }
+    }
+}
