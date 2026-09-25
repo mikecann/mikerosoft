@@ -19,6 +19,7 @@ final class WelcomeWindowController: NSWindowController {
         window.backgroundColor = Theme.panel.ns
         window.appearance = NSAppearance(named: .darkAqua)
         window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
         state.documents = documents

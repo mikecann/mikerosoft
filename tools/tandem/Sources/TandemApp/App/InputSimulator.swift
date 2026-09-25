@@ -21,6 +21,8 @@ enum InputSimulator {
         var kind: Kind
         var at: CGPoint
         var modifiers: NSEvent.ModifierFlags
+        /// A plain key held during the gesture, like Z for zoom rectangles.
+        var heldKey: String? = nil
     }
 
     nonisolated static func parse(_ query: [String: String]) -> Gesture? {
@@ -40,7 +42,7 @@ enum InputSimulator {
         let drag = numbers(query["drag"])
         if drag.count == 4 {
             let steps = Int(query["steps"] ?? "") ?? 12
-            return Gesture(kind: .drag(to: CGPoint(x: drag[2], y: drag[3]), steps: max(1, steps)), at: CGPoint(x: drag[0], y: drag[1]), modifiers: flags)
+            return Gesture(kind: .drag(to: CGPoint(x: drag[2], y: drag[3]), steps: max(1, steps)), at: CGPoint(x: drag[0], y: drag[1]), modifiers: flags, heldKey: query["hold"])
         }
         let click = numbers(query["click"])
         if click.count == 2 {

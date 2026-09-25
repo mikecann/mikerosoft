@@ -114,8 +114,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             front?.model.inPoint = start
             front?.model.outPoint = end
         case .simulate(let gesture):
-            guard let window = front?.window else { return }
+            guard let front, let window = front.window else { return }
+            if gesture.heldKey == "z" { front.model.zoomKeyHeld = true }
             InputSimulator.run(gesture, in: window)
+            if gesture.heldKey == "z" { front.model.zoomKeyHeld = false }
         case .debug(let out):
             guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
             try? WindowSnapshot.describe(window).write(toFile: out, atomically: true, encoding: .utf8)

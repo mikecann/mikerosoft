@@ -31,6 +31,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         window.minSize = NSSize(width: 1_080, height: 660)
         window.isMovableByWindowBackground = false
         window.tabbingMode = .disallowed
+        // The controller owns the window; AppKit mustn't release it too.
+        window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("Tandem project")
         super.init(window: window)
         window.delegate = self

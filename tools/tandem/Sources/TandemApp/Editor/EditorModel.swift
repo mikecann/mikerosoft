@@ -113,8 +113,6 @@ final class EditorModel {
     @ObservationIgnored private var jobToken: UUID?
     @ObservationIgnored private var dirtyTimer: Timer?
     @ObservationIgnored private var statusWork: DispatchWorkItem?
-    /// Called after the project changes, for AppKit views.
-    @ObservationIgnored var onProjectChange: [() -> Void] = []
 
     init(session: ProjectSession) {
         self.session = session
@@ -257,7 +255,6 @@ final class EditorModel {
         if pruned != selection { selection = pruned }
         if let id = selectedTransitionID, project.location(ofTransition: id) == nil { selectedTransitionID = nil }
         playback.projectChanged(duration: project.duration, frameRate: project.settings.frameRate)
-        for callback in onProjectChange { callback() }
     }
 
     // MARK: - Media
