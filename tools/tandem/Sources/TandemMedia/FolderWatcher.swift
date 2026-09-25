@@ -40,6 +40,8 @@ public final class FolderWatcher: @unchecked Sendable {
     private let roots: [String]
     /// Full rescans so far, for tests.
     private(set) var rescans = 0
+    /// Files waiting to settle: what they looked like and since when.
+    private var watching: [String: (stat: FileStat, since: Date)] = [:]
     private let onQueue = DispatchSpecificKey<Bool>()
     /// What the FSEvents callback holds: a weak route back to the watcher,
     /// so a callback racing with deinit finds nil instead of a dead object.
@@ -51,7 +53,8 @@ public final class FolderWatcher: @unchecked Sendable {
 
     /// - Parameters:
     ///   - debounce: quiet time after the last event before looking.
-    ///   - settleTime: how long a file must be unchanged before it's reported.
+    ///   - settleTime: how long a file must stay unchanged (size and date, by
+    ///     this Mac's clock) before it's reported.
     ///   - handler: called on a private queue with each batch of changes.
     public init(folder: ProjectFolder, debounce: TimeInterval = 1, settleTime: TimeInterval = 2, handler: @escaping @Sendable (Changes) -> Void) {
         self.folder = folder
@@ -86,7 +89,6 @@ public final class FolderWatcher: @unchecked Sendable {
     public func start() throws {
         try onWatcherQueue {
             guard stream == nil else { return }
-            known = snapshot()
             let route = Unmanaged.passRetained(Route(self))
             self.route = route
             var context = FSEventStreamContext(version: 0, info: route.toOpaque(), retain: nil, release: nil, copyDescription: nil)
@@ -106,6 +108,9 @@ public final class FolderWatcher: @unchecked Sendable {
                 throw MediaError.failed("Couldn't start watching \(folder.root.path)")
             }
             stream = created
+            // After the stream starts, so a file made in between is in the
+            // snapshot or in an event (its events wait on this queue).
+            known = snapshot()
         }
     }
 
@@ -117,6 +122,7 @@ public final class FolderWatcher: @unchecked Sendable {
         check?.cancel()
         check = nil
         pending = []
+        watching = [:]
         guard let stream else { return }
         FSEventStreamStop(stream)
         FSEventStreamInvalidate(stream)
@@ -192,17 +198,30 @@ public final class FolderWatcher: @unchecked Sendable {
         pending = []
         var changes = Changes()
         var unsettled: Set<String> = []
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let now = Date()
         for path in candidates.sorted() {
             let stat = try? FileStat(folder.url(forPath: path))
             guard let stat else {
+                watching[path] = nil
                 if known.removeValue(forKey: path) != nil { changes.removed.append(path) }
                 continue
             }
-            if Double(now - stat.modified) / 1000 < settleTime {
-                unsettled.insert(path)
-                continue
+            // Settled means unchanged for `settleTime` by this Mac's clock,
+            // not by the file's date, which can be in the future (a camera
+            // clock ahead) or long past (a copy keeps its date while it grows).
+            if settleTime > 0 {
+                if let seen = watching[path], seen.stat == stat {
+                    if now.timeIntervalSince(seen.since) < settleTime {
+                        unsettled.insert(path)
+                        continue
+                    }
+                } else {
+                    watching[path] = (stat, now)
+                    unsettled.insert(path)
+                    continue
+                }
             }
+            watching[path] = nil
             if let previous = known[path] {
                 if previous != stat {
                     changes.changed.append(path)
@@ -215,7 +234,7 @@ public final class FolderWatcher: @unchecked Sendable {
         }
         if !unsettled.isEmpty {
             pending.formUnion(unsettled)
-            schedule(after: max(0.2, settleTime / 2))
+            schedule(after: max(0.1, min(settleTime / 2, 1)))
         }
         if !changes.isEmpty { handler(changes) }
     }

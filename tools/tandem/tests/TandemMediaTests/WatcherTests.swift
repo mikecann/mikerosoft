@@ -103,6 +103,18 @@ final class FolderWatcherTests: TempFolderTestCase {
         XCTAssertEqual(collector.merged.added, ["broll/clip.mov"])
     }
 
+    func testFilesDatedInTheFutureStillSettle() throws {
+        let collector = Collector()
+        let watcher = FolderWatcher(folder: ProjectFolder(root: temp), debounce: 0.05, settleTime: 0.3) { collector.add($0) }
+        try watcher.start()
+        defer { watcher.stop() }
+        let reported = collector.expectBatch(self, "future file")
+        touch("source/ahead-camera.mov")
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 3600)], ofItemAtPath: file("source/ahead-camera.mov").path)
+        wait(for: [reported], timeout: 5)
+        XCTAssertEqual(collector.merged.added, ["source/ahead-camera.mov"])
+    }
+
     func testStopEndsReporting() throws {
         let collector = Collector()
         let watcher = FolderWatcher(folder: ProjectFolder(root: temp), debounce: 0.05, settleTime: 0) { collector.add($0) }
