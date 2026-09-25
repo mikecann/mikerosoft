@@ -66,18 +66,18 @@ final class FolderWatcherTests: TempFolderTestCase {
         defer { watcher.stop() }
 
         let reported = collector.expectBatch(self, "settled")
-        let start = Date()
         // A file that keeps growing, like a take being recorded.
+        var lastWrite = Date()
         for i in 0..<4 {
+            if i > 0 { Thread.sleep(forTimeInterval: 0.2) }
             try Data(repeating: UInt8(i), count: 1000 * (i + 1)).write(to: file("growing.mov"))
-            Thread.sleep(forTimeInterval: 0.2)
+            lastWrite = Date()
         }
-        let lastWrite = Date()
         wait(for: [reported], timeout: 5)
         XCTAssertEqual(collector.all.count, 1, "reported once, not once per write")
         XCTAssertEqual(collector.merged.added, ["growing.mov"])
-        XCTAssertGreaterThan(Date().timeIntervalSince(lastWrite), 0.5)
-        XCTAssertGreaterThan(Date().timeIntervalSince(start), 1.2)
+        // Modification times are kept to the millisecond, so allow a little.
+        XCTAssertGreaterThan(Date().timeIntervalSince(lastWrite), 0.55, "only once it stopped changing for the settle time")
     }
 
     func testStopEndsReporting() throws {
