@@ -16,8 +16,8 @@ enum Help {
         CommandHelp(name: "status", usage: "tandem status", summary: "Revision, length, unsaved changes, who has it open, undo and background jobs.", options: []),
         CommandHelp(name: "media", usage: "tandem media [--refresh]", summary: "Media files, how many clips use each, and analysis status.", options: ["refresh"],
                     details: "--refresh scans the project folder for new files first."),
-        CommandHelp(name: "timeline", usage: "tandem timeline [--from <time>] [--to <time>] [--words] [--json]", summary: "The edit as readable text (or the project JSON).", options: ["from", "to", "words"],
-                    details: "Tracks top to bottom as the app shows them, one line per clip. --words adds what's said in each voice clip; --json prints the project JSON."),
+        CommandHelp(name: "timeline", usage: "tandem timeline [--from <time>] [--to <time>] [--words] [--summary] [--json]", summary: "The edit as readable text (or the project JSON).", options: ["from", "to", "words", "summary"],
+                    details: "Tracks top to bottom as the app shows them, one line per clip. --summary gives one line per track, for finding your way round a long edit; --words adds what's said in each voice clip; --json prints the project JSON."),
         CommandHelp(name: "apply", usage: "tandem apply <file.json | -> [--dry-run] [--expect <revision>] [--label <text>] [--key <id>]", summary: "Apply a batch of edit commands as one undo step.", options: ["dry-run", "expect", "label", "key"],
                     details: """
                     The JSON can be a batch {"label": ..., "commands": [...]}, a list of commands, or one command like {"blade": {"at": 12.5}}.

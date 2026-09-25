@@ -180,6 +180,46 @@ final class TimelineDumpTests: XCTestCase {
         assertSameText(TimelineDump.render(Self.kitchenSink()), expected)
     }
 
+    func testSharedSettingsAreSaidOnceInTheTrackHeader() {
+        var project = Project(id: "prj_pip", name: "PiP")
+        project.media = [MediaItem(id: "med_cam", path: "cam.mov", kind: .video, role: .camera, duration: t(100), hasVideo: true)]
+        var clips: [Clip] = []
+        for index in 0..<5 {
+            var video = VideoProperties(transform: Transform(position: Point(x: 0.87, y: 0.77), scale: 0.5), cutout: Cutout(), layoutPreset: "pipRight")
+            if index == 3 { video.transform.position = Point(x: 0.13, y: 0.77) }
+            if index == 4 { video = VideoProperties(layoutPreset: "full") }
+            clips.append(Clip(id: "clip_\(index)", content: .media(mediaID: "med_cam"), start: t(Double(index)), duration: t(1), sourceStart: t(Double(index)), video: video))
+        }
+        project.videoTracks = [Track(id: "trk_cam", kind: .video, name: "Camera", clips: clips, rippleMode: .cut)]
+        let lines = TimelineDump.render(project).components(separatedBy: "\n")
+        XCTAssertTrue(lines.contains("V1 Camera  trk_cam  cut  (most clips: layout pipRight, scale 0.5 at 0.87,0.77, cutout)"), lines.joined(separator: "\n"))
+        XCTAssertTrue(lines.contains("  clip_0  00:00.000-00:01.000  1.000s  cam.mov [00:00.000-00:01.000]"))
+        XCTAssertTrue(lines.contains("  clip_3  00:03.000-00:04.000  1.000s  cam.mov [00:03.000-00:04.000]  scale 0.5 at 0.13,0.77"), "a different scale replaces the usual one")
+        XCTAssertTrue(lines.contains("  clip_4  00:04.000-00:05.000  1.000s  cam.mov [00:04.000-00:05.000]  layout full  not: scale 0.5 at 0.87,0.77, cutout"))
+    }
+
+    func testSummarySnapshot() {
+        let expected = """
+        Decision Models: 01:00.000 long, 3840x2160 at 30 fps, revision 7
+        8 tracks, 9 clips, 4 media files. Read part of it in full with from and to.
+
+        Markers
+          00:30.000  section  "Section 2"  mk_s2
+
+        Tracks, top to bottom
+          V5 Text      trk_text      follow  1 clip   00:02.000-00:05.000  3.000s of content
+          V4 Graphics  trk_graphics  follow  empty
+          V3 B-roll    trk_broll     follow  1 clip   00:20.000-00:25.000  5.000s of content
+          V2 Camera    trk_camera    cut     2 clips  00:00.000-01:00.000  01:00.000 of content  1 transition
+          V1 Screen    trk_screen    cut     2 clips  00:00.000-01:00.000  01:00.000 of content
+          A1 Voice     trk_voice     cut     2 clips  00:00.000-01:00.000  01:00.000 of content
+          A2 Music     trk_music     follow  1 clip   00:00.000-01:00.000  01:00.000 of content
+          A3 SFX       trk_sfx       follow  empty
+
+        """
+        assertSameText(TimelineDump.summary(APIFixture.project(), revision: 7), expected)
+    }
+
     func testMissingTranscriptsAreNotedOnce() {
         let options = TimelineDump.Options(transcripts: { _ in nil })
         let text = TimelineDump.render(APIFixture.project(), options: options)

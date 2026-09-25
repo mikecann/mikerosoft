@@ -38,7 +38,7 @@ mistakes); with `--json` the error is printed as `{"error": {...}}`.
 
 ```
 tandem status                      revision, length, who has it open, jobs
-tandem timeline [--from T] [--to T] [--words] [--json]
+tandem timeline [--summary] [--from T] [--to T] [--words] [--json]
 tandem media [--refresh]           files, clip counts, analysis status
 tandem transcript [<clip or media id>] [--from T] [--to T]
 tandem search "<phrase>"           where a phrase is said
@@ -265,9 +265,16 @@ Media
 
 Each track line has the track's ID for commands that need one. Transitions
 (`~`) sit between the clips they join, and gaps in the take are listed as
-`gap`. `--from 1:00 --to 2:00` focuses on part of the timeline, `--words`
-prints what each voice clip says under it, and `--json` gives the project
-JSON (tracks keep only the clips in the range).
+`gap`. When most of a track's clips share a setting (a PiP camera track's
+`layout pipRight, scale 0.5 at 0.87,0.77, cutout, fx dropShadow`), the track line says it
+once as `(most clips: ...)`, each clip lists only what's different, and
+`not: ...` marks a clip that lacks one of them.
+
+A real edit runs to hundreds of clips, so start with `--summary` (one line
+per track with its clip count, span and gaps, plus the markers), then read a
+part in full with `--from 1:00 --to 2:00`. `--words` prints what each voice
+clip says under it, and `--json` gives the project JSON (tracks keep only the
+clips in the range).
 
 - `transcript <clip ID>` gives word timings in timeline time;
   `transcript <media ID>` gives the whole file in file time; with no ID you
@@ -842,7 +849,7 @@ the picture directly, so you can look at the result of an edit.
 | --- | --- | --- | --- |
 | status | `tandem status` | `POST /v1/status` | `status` |
 | media | `tandem media [--refresh]` | `POST /v1/media {"refresh": true}` | `media` |
-| timeline | `tandem timeline [--from] [--to] [--words] [--json]` | `POST /v1/timeline {"from", "to", "words", "format"}` | `timeline` |
+| timeline | `tandem timeline [--summary] [--from] [--to] [--words] [--json]` | `POST /v1/timeline {"summary", "from", "to", "words", "format"}` | `timeline` |
 | transcript | `tandem transcript [<id>]` | `POST /v1/transcript {"id"}` | `transcript` |
 | search | `tandem search "<phrase>"` | `POST /v1/search {"phrase"}` | `search` |
 | pauses | `tandem pauses [--min]` | `POST /v1/pauses {"min"}` | `pauses` |

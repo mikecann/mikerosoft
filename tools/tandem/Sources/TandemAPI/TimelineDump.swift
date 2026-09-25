@@ -31,6 +31,63 @@ public enum TimelineDump {
         }
     }
 
+    /// One line per track (clips, the span they cover, gaps in the take)
+    /// and the markers: enough to find your way round a long edit before
+    /// reading part of it in full.
+    public static func summary(_ project: Project, revision: Int? = nil) -> String {
+        var out: [String] = []
+        let settings = project.settings
+        var header = "\(project.name): \(project.duration) long, \(settings.width)x\(settings.height) at \(CommandText.number(settings.frameRate.framesPerSecond)) fps"
+        if let revision { header += ", revision \(revision)" }
+        out.append(header)
+        let clipCount = project.allTracks.reduce(0) { $0 + $1.clips.count }
+        out.append("\(project.allTracks.count) tracks, \(clipCount) clips, \(project.media.count) media files. Read part of it in full with from and to.")
+        if !project.markers.isEmpty {
+            out.append("")
+            out.append("Markers")
+            for marker in project.markers {
+                out.append("  \(marker.time)  \(marker.kind.rawValue)  \"\(marker.name)\"  \(marker.id)")
+            }
+        }
+        out.append("")
+        out.append("Tracks, top to bottom")
+        var rows: [(String, Track)] = []
+        for (index, track) in project.videoTracks.enumerated().reversed() { rows.append(("V\(index + 1)", track)) }
+        for (index, track) in project.audioTracks.enumerated() { rows.append(("A\(index + 1)", track)) }
+        // A small table: the fixed columns are padded so the rest lines up.
+        var table: [[String]] = []
+        for (label, track) in rows {
+            var row = ["\(label) \(track.name)", track.id, track.rippleMode.rawValue]
+            if track.clips.isEmpty {
+                row += ["empty", "", ""]
+            } else {
+                let covered = TimeRange.union(track.clips.map(\.range))
+                let total = covered.reduce(Time.zero) { $0 + $1.duration }
+                row.append(track.clips.count == 1 ? "1 clip" : "\(track.clips.count) clips")
+                row.append("\(track.clips[0].start)-\(track.end)")
+                row.append("\(TimeText.duration(total)) of content")
+                if track.rippleMode == .cut && covered.count > 1 {
+                    row.append(covered.count == 2 ? "1 gap" : "\(covered.count - 1) gaps")
+                }
+                if !track.transitions.isEmpty { row.append(track.transitions.count == 1 ? "1 transition" : "\(track.transitions.count) transitions") }
+            }
+            if track.locked { row.append("locked") }
+            if track.hidden { row.append("hidden") }
+            if track.muted { row.append("muted") }
+            table.append(row)
+        }
+        let padded = 6
+        let widths = (0..<padded).map { column in table.map { $0.count > column ? $0[column].count : 0 }.max() ?? 0 }
+        for row in table {
+            var cells: [String] = []
+            for (column, cell) in row.enumerated() {
+                cells.append(column < padded - 1 ? cell.padding(toLength: widths[column], withPad: " ", startingAt: 0) : cell)
+            }
+            out.append(("  " + cells.joined(separator: "  ")).replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression))
+        }
+        return out.joined(separator: "\n") + "\n"
+    }
+
     public static func render(_ project: Project, revision: Int? = nil, options: Options = Options()) -> String {
         var out: [String] = []
         let settings = project.settings
@@ -100,7 +157,13 @@ public enum TimelineDump {
             if track.muted { flags.append("muted") }
             if track.solo { flags.append("solo") }
             if !track.targeted { flags.append("untargeted") }
-            out.append("\(label) \(track.name)  \(track.id)  \(flags.joined(separator: " "))")
+            // Settings most of the track's clips share are said once, in
+            // the header, and each clip lists only what's different.
+            let settings = clips.map { clipSettings($0, links: linkNumbers, names: names) }
+            let usual = usualSettings(settings)
+            var header = "\(label) \(track.name)  \(track.id)  \(flags.joined(separator: " "))"
+            if !usual.isEmpty { header += "  (most clips: \(usual.joined(separator: ", ")))" }
+            out.append(header)
             if clips.isEmpty {
                 out.append(range ? "  (nothing here in this range)" : "  (empty)")
                 continue
@@ -108,7 +171,7 @@ public enum TimelineDump {
             let heads = Dictionary(track.transitions.filter { $0.fromClipID == nil }.compactMap { t in t.toClipID.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
             let tails = Dictionary(track.transitions.compactMap { t in t.fromClipID.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
             var previousEnd: Time? = range ? nil : .zero
-            for clip in clips {
+            for (clip, own) in zip(clips, settings) {
                 if track.rippleMode == .cut, let previousEnd, clip.start > previousEnd {
                     out.append("    gap \(previousEnd)-\(clip.start) (\(TimeText.duration(clip.start - previousEnd)))")
                 }
@@ -118,7 +181,13 @@ public enum TimelineDump {
                 let id = clip.id.padding(toLength: idWidth, withPad: " ", startingAt: 0)
                 let length = String(repeating: " ", count: max(0, lengthWidth - TimeText.duration(clip.duration).count)) + TimeText.duration(clip.duration)
                 var parts = ["  \(id)", "\(clip.start)-\(clip.end)", length, content(clip, project: project, names: names)]
-                parts += clipSettings(clip, links: linkNumbers, names: names)
+                parts += own.filter { !usual.contains($0) }
+                // A usual setting the clip doesn't have is only worth saying
+                // when nothing of its kind replaces it ("gain 3.9 dB" already
+                // says it isn't the usual gain).
+                let kinds = Set(own.map(settingKind))
+                let missing = usual.filter { !own.contains($0) && !kinds.contains(settingKind($0)) }
+                if !missing.isEmpty { parts.append("not: " + missing.joined(separator: ", ")) }
                 out.append(parts.joined(separator: "  "))
                 if let mediaID = clip.mediaID, !usedMedia.contains(mediaID) { usedMedia.append(mediaID) }
                 if let transition = tails[clip.id] {
@@ -172,6 +241,34 @@ public enum TimelineDump {
             }
         }
         return out.joined(separator: "\n") + "\n"
+    }
+
+    /// Settings shared by at least 60% of a track's clips (four or more),
+    /// in the order they first appear. Link groups and names belong to one
+    /// clip, so they never count.
+    static func usualSettings(_ settings: [[String]]) -> [String] {
+        guard settings.count >= 4 else { return [] }
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for list in settings {
+            for setting in Set(list) where !setting.hasPrefix("linked #") && !setting.hasPrefix("named ") {
+                if counts[setting] == nil { order.append(setting) }
+                counts[setting, default: 0] += 1
+            }
+        }
+        let needed = Int((Double(settings.count) * 0.6).rounded(.up))
+        let usual = Set(order.filter { counts[$0, default: 0] >= needed })
+        // Keep the order settings have on a clip line.
+        var ordered: [String] = []
+        for list in settings {
+            for setting in list where usual.contains(setting) && !ordered.contains(setting) { ordered.append(setting) }
+        }
+        return ordered
+    }
+
+    /// What a setting is about: its first word ("gain", "scale", "layout").
+    static func settingKind(_ setting: String) -> String {
+        String(setting.prefix { $0 != " " })
     }
 
     /// Short names for media: the file name, or the path when two files
@@ -240,8 +337,8 @@ public enum TimelineDump {
         }
         if let audio = clip.audio {
             if audio.muted { parts.append("muted") }
-            if audio.gainDB != 0 { parts.append("gain \(num(audio.gainDB)) dB") }
-            if let target = audio.normalizeTo { parts.append("level \(num(target)) LUFS") }
+            if audio.gainDB != 0 { parts.append("gain \(decibels(audio.gainDB)) dB") }
+            if let target = audio.normalizeTo { parts.append("level \(decibels(target)) LUFS") }
             if audio.fadeIn > .zero { parts.append("fade in \(TimeText.duration(audio.fadeIn))") }
             if audio.fadeOut > .zero { parts.append("fade out \(TimeText.duration(audio.fadeOut))") }
             if audio.voiceIsolation > 0 { parts.append("isolate voice \(num(audio.voiceIsolation))") }
@@ -269,6 +366,11 @@ public enum TimelineDump {
 
     static func direction(_ transition: Transition) -> String {
         transition.direction.map { " \($0.rawValue)" } ?? ""
+    }
+
+    /// Levels to a tenth of a dB, which is all anyone hears.
+    static func decibels(_ value: Double) -> String {
+        CommandText.number((value * 10).rounded() / 10)
     }
 
     static func num(_ value: Double) -> String {

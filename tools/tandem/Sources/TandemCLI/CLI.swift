@@ -95,7 +95,10 @@ struct CLI {
             return show(try await client().call(MediaRequest(refresh: args.has("refresh"))), json: json)
         case "timeline":
             try args.expectPositionals(atMost: 0, command: name)
-            let request = TimelineRequest(from: try time(args, "from"), to: try time(args, "to"), format: json ? .json : .text, words: args.has("words"))
+            let request = TimelineRequest(
+                from: try time(args, "from"), to: try time(args, "to"), format: json ? .json : .text,
+                words: args.has("words"), summary: args.has("summary")
+            )
             return show(try await client().call(request), json: json)
         case "apply":
             try args.expectPositionals(atMost: 1, command: name)

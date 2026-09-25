@@ -136,12 +136,15 @@ public struct TimelineRequest: ServiceCall {
     public var format: Format?
     /// Add what's said in each speech clip (text form only).
     public var words: Bool?
+    /// Just one line per track and the markers (text form only).
+    public var summary: Bool?
 
-    public init(from: Time? = nil, to: Time? = nil, format: Format? = nil, words: Bool? = nil) {
+    public init(from: Time? = nil, to: Time? = nil, format: Format? = nil, words: Bool? = nil, summary: Bool? = nil) {
         self.from = from
         self.to = to
         self.format = format
         self.words = words
+        self.summary = summary
     }
 
     public init(from decoder: Decoder) throws {
@@ -150,10 +153,11 @@ public struct TimelineRequest: ServiceCall {
         to = try c.decodeTime(.to)
         format = try c.decodeIfPresent(Format.self, forKey: .format)
         words = try c.decodeIfPresent(Bool.self, forKey: .words)
+        summary = try c.decodeIfPresent(Bool.self, forKey: .summary)
     }
 
     public func run(on service: TandemService, context: CallContext) async throws -> TimelineResult {
-        try service.timeline(from: from, to: to, format: format ?? .text, words: words ?? false)
+        try service.timeline(from: from, to: to, format: format ?? .text, words: words ?? false, summary: summary ?? false)
     }
 }
 

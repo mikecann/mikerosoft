@@ -201,7 +201,7 @@ public final class TandemService: @unchecked Sendable {
 
     // MARK: - timeline
 
-    public func timeline(from: Time?, to: Time?, format: TimelineRequest.Format, words: Bool) throws -> TimelineResult {
+    public func timeline(from: Time?, to: Time?, format: TimelineRequest.Format, words: Bool, summary: Bool = false) throws -> TimelineResult {
         if let from, let to, to <= from {
             throw ServiceError(.badRequest, "`to` (\(to)) must be after `from` (\(from)).")
         }
@@ -209,6 +209,8 @@ public final class TandemService: @unchecked Sendable {
         switch format {
         case .json:
             return TimelineResult(revision: revision, text: nil, project: TimelineDump.filtered(project, from: from, to: to))
+        case .text where summary:
+            return TimelineResult(revision: revision, text: TimelineDump.summary(project, revision: revision), project: nil)
         case .text:
             var options = TimelineDump.Options()
             options.from = from

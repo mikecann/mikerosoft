@@ -446,12 +446,13 @@ enum MCPTools {
         ),
         Tool(
             name: "timeline", title: "Read the timeline",
-            description: "The edit as compact text: tracks top to bottom as the app shows them, one line per clip with its ID, timeline range, media and source range, link group and settings, plus transitions, gaps and markers. Use from/to to focus on part of it, words: true to see what's said in each voice clip, or format: json for the project JSON.",
+            description: "The edit as compact text: tracks top to bottom as the app shows them, one line per clip with its ID, timeline range, media and source range, link group and settings, plus transitions, gaps and markers. On a long project start with summary: true (one line per track), then read a part with from/to. words: true shows what's said in each voice clip; format: json gives the project JSON.",
             operation: .timeline,
             properties: [
                 "from": time("Only clips overlapping from this time."),
                 "to": time("Only clips overlapping up to this time."),
                 "words": S.boolean("Show the words each voice clip plays."),
+                "summary": S.boolean("Just one line per track and the markers."),
                 "format": S.enumeration(["text", "json"], "text (default) or json.")
             ],
             readOnly: true, idempotent: true
