@@ -55,6 +55,7 @@ relative to that folder.
   .tandem/
     backups/               the previous 20 saves
     <name>.journal.jsonl   committed edits since the last save (crash recovery)
+    <name>.undo.json       undo history for edits made headless, and idempotency keys
     <name>.lock            pid and owner (app or cli), plus the API port and token
     cache/                 analysis results keyed by content hash
 ```
@@ -193,7 +194,9 @@ exports are tagged TV-range BT.709.
 ## API
 
 `ProjectSession` opens a project, replays the journal after a crash, takes the
-lock and autosaves a second after each edit. While the app has a project open
+lock and autosaves a second after each edit. A save clears only the journal
+entries it wrote, and saves and the journal follow the folder if it's renamed
+or moved while the project is open. While the app has a project open
 it serves a local HTTP API on 127.0.0.1 (port and token in the lock file) and
 the CLI talks to it. When no app has the project open, the CLI opens the file
 itself.
