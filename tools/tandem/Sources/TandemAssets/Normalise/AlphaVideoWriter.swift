@@ -71,8 +71,14 @@ final class AlphaVideoWriter {
     /// Appends a frame drawn by `draw` into a cleared context (origin at the
     /// bottom left, as usual for Core Graphics).
     func append(at time: CMTime, draw: (CGContext, Int, Int) throws -> Void) throws {
+        // The hardware encoder is shared with exports and other apps; wait
+        // for it, but not forever.
+        let deadline = Date().addingTimeInterval(120)
         while !input.isReadyForMoreMediaData {
             if writer.status == .failed { break }
+            guard Date() < deadline else {
+                throw AssetError.normaliseFailed("the video encoder stayed busy for two minutes writing \(url.lastPathComponent)")
+            }
             Thread.sleep(forTimeInterval: 0.002)
         }
         guard writer.status == .writing, let pool = adaptor.pixelBufferPool else {
