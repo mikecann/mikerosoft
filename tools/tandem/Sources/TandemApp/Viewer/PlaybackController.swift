@@ -321,13 +321,11 @@ final class PlaybackController {
         return lastFrame
     }
 
-    /// Paused frames from the originals over the proxy player. Off because
-    /// exact grabs of a screen recording's variable frame rate gaps come
-    /// back black from the originals (v14 at 6:44, main-screen 16:05), while
-    /// the proxies, which carry every frame's duration, and exports, which
-    /// read in order, are right. Turn on once the render module fills those
-    /// gaps for grabs.
-    static let stillsFromOriginals = false
+    /// Paused frames from the originals over the proxy player, so a paused
+    /// frame is full resolution. The render module decodes the frames that
+    /// remuxed open-GOP files can't seek to (they used to come back black,
+    /// v14 at 6:44), so this is safe to leave on.
+    static let stillsFromOriginals = true
 
     /// Once the playhead has rested for a moment, renders the exact frame
     /// from the originals and lays it over the player. Only needed while
