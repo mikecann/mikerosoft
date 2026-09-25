@@ -61,11 +61,15 @@ extension EditCommand {
         }
     }
 
-    /// A short description for undo labels and dry runs, like
+}
+
+/// Words for commands: undo labels, dry runs.
+public enum CommandText {
+    /// A short description of one command, like
     /// "Ripple delete 00:10.000-00:12.000".
-    public var summary: String {
+    public static func summary(_ command: EditCommand) -> String {
         func count(_ n: Int, _ noun: String) -> String { n == 1 ? "1 \(noun)" : "\(n) \(noun)s" }
-        switch self {
+        switch command {
         case .updateProject: return "Update project"
         case .updateSettings: return "Change project settings"
         case .addTrack(let kind, let name, _, _): return name.map { "Add track \($0)" } ?? "Add \(kind.rawValue) track"
@@ -87,7 +91,7 @@ extension EditCommand {
         case .roll: return "Roll edit"
         case .slip: return "Slip clip"
         case .slide: return "Slide clip"
-        case .setSpeed(_, let speed, _, _): return "Speed \(Self.number(speed))x"
+        case .setSpeed(_, let speed, _, _): return "Speed \(number(speed))x"
         case .moveClips(let ids, _, _, _, _): return "Move \(count(ids.count, "clip"))"
         case .updateClip: return "Update clip"
         case .link: return "Link clips"
@@ -108,14 +112,15 @@ extension EditCommand {
         }
     }
 
+    /// A number without a needless ".0": 2, 1.5.
     static func number(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(format: "%g", value)
+        value == value.rounded() && abs(value) < 1e15 ? String(Int(value)) : String(format: "%g", value)
     }
 
     /// A label for a batch with no label of its own.
     public static func label(for commands: [EditCommand]) -> String {
         guard let first = commands.first else { return "Edit" }
-        if commands.count == 1 { return first.summary }
+        if commands.count == 1 { return summary(first) }
         if commands.allSatisfy({ $0.commandCase == first.commandCase }) {
             switch first.commandCase {
             case .rippleDeleteRange: return "\(commands.count) ripple deletes"
@@ -123,7 +128,7 @@ extension EditCommand {
             default: break
             }
         }
-        return "\(first.summary) and \(commands.count - 1) more"
+        return "\(summary(first)) and \(commands.count - 1) more"
     }
 }
 

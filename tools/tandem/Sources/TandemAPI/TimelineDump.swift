@@ -34,7 +34,7 @@ public enum TimelineDump {
     public static func render(_ project: Project, revision: Int? = nil, options: Options = Options()) -> String {
         var out: [String] = []
         let settings = project.settings
-        var header = "\(project.name): \(project.duration) long, \(settings.width)x\(settings.height) at \(EditCommand.number(settings.frameRate.framesPerSecond)) fps"
+        var header = "\(project.name): \(project.duration) long, \(settings.width)x\(settings.height) at \(CommandText.number(settings.frameRate.framesPerSecond)) fps"
         if let revision { header += ", revision \(revision)" }
         out.append(header)
         let range = options.from != nil || options.to != nil
@@ -164,7 +164,7 @@ public enum TimelineDump {
                 if let duration = item.duration { parts.append(duration.description) }
                 if let w = item.width, let h = item.height {
                     var picture = "\(w)x\(h)"
-                    if let rate = item.frameRate { picture += " \(EditCommand.number((rate.framesPerSecond * 100).rounded() / 100))fps" }
+                    if let rate = item.frameRate { picture += " \(CommandText.number((rate.framesPerSecond * 100).rounded() / 100))fps" }
                     parts.append(picture)
                 }
                 if let take = item.takeID { parts.append("take \(take) +\(TimeText.duration(item.takeOffset ?? .zero))") }
@@ -217,7 +217,7 @@ public enum TimelineDump {
         }
         if let group = clip.linkGroup, let number = links[group] { parts.append("linked #\(number)") }
         if !clip.enabled { parts.append("disabled") }
-        if clip.speed != 1 { parts.append("speed \(EditCommand.number(clip.speed))x") }
+        if clip.speed != 1 { parts.append("speed \(CommandText.number(clip.speed))x") }
         if let video = clip.video {
             if let preset = video.layoutPreset { parts.append("layout \(preset)") }
             let t = video.transform
@@ -273,7 +273,7 @@ public enum TimelineDump {
 
     static func num(_ value: Double) -> String {
         let rounded = (value * 1000).rounded() / 1000
-        return EditCommand.number(rounded)
+        return CommandText.number(rounded)
     }
 
     static func hex(_ color: RGBA) -> String {

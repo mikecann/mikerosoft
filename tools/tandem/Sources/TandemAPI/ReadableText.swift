@@ -11,7 +11,7 @@ extension StatusResult: ReadableResult {
     public var readableText: String {
         var lines = ["\(name) (\((path as NSString).lastPathComponent))"]
         let saved = dirty ? "unsaved changes" : "saved"
-        lines.append("  revision \(revision), \(saved), \(duration) long, \(width)x\(height) at \(EditCommand.number(frameRate)) fps")
+        lines.append("  revision \(revision), \(saved), \(duration) long, \(width)x\(height) at \(CommandText.number(frameRate)) fps")
         lines.append("  \(tracks) tracks, \(clips) clips, \(media) media files, \(markers) markers")
         if headless {
             lines.append("  open in: nothing else, read from the file for this command")
@@ -353,7 +353,7 @@ extension EffectsResult: ReadableResult {
             lines.append("  \(effect.type)  \(effect.domain.rawValue)  \(effect.summary)")
             for param in effect.params {
                 var range = ""
-                if let min = param.min, let max = param.max { range = " \(EditCommand.number(min))...\(EditCommand.number(max))" }
+                if let min = param.min, let max = param.max { range = " \(CommandText.number(min))...\(CommandText.number(max))" }
                 let unit = param.unit.map { " \($0)" } ?? ""
                 lines.append("    \(param.key): \(param.kind.rawValue)\(range)\(unit), default \(Self.text(param.defaultValue))")
             }
@@ -366,7 +366,7 @@ extension EffectsResult: ReadableResult {
 
     static func text(_ value: ParamValue) -> String {
         switch value {
-        case .number(let n): return EditCommand.number(n)
+        case .number(let n): return CommandText.number(n)
         case .bool(let b): return b ? "true" : "false"
         case .string(let s): return "\"\(s)\""
         case .point(let p): return "(\(p.x), \(p.y))"

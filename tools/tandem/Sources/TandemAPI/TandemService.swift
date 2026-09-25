@@ -48,7 +48,7 @@ public final class TandemService: @unchecked Sendable {
     ) {
         self.session = session
         self.mode = mode
-        self.analysis = analysis ?? session.analysis
+        self.analysis = analysis ?? MediaAnalysisSource(session.analysis)
         self.renderer = renderer
         self.history = HeadlessHistory(projectURL: session.fileURL)
         // Observers run inside the coordinator's queue, so they must not
@@ -340,7 +340,7 @@ public final class TandemService: @unchecked Sendable {
             throw ServiceError(.badRequest, "The batch has no commands.")
         }
         let batch = EditBatch(
-            label: request.label ?? EditCommand.label(for: request.commands),
+            label: request.label ?? CommandText.label(for: request.commands),
             author: request.author ?? context.author,
             commands: request.commands,
             expectedRevision: request.expectedRevision,
@@ -576,8 +576,8 @@ public final class TandemService: @unchecked Sendable {
 
     func preset(named name: String?, default fallback: ExportPreset) throws -> ExportPreset {
         guard let name else { return fallback }
-        guard let preset = ExportPreset.named(name) else {
-            let known = ExportPreset.all.map(\.slugName).joined(separator: ", ")
+        guard let preset = PresetNames.find(name) else {
+            let known = ExportPreset.all.map(PresetNames.short).joined(separator: ", ")
             throw ServiceError(.notFound, "No export preset \"\(name)\". Presets: \(known).")
         }
         return preset

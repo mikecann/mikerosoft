@@ -2,23 +2,25 @@ import XCTest
 @testable import TandemAPI
 @testable import TandemCore
 
+// Test-only helpers for digging into JSON, with labels so they can't clash
+// with anything TandemCore adds to JSONValue.
 extension JSONValue {
-    subscript(key: String) -> JSONValue? {
+    subscript(json key: String) -> JSONValue? {
         if case .object(let fields) = self { return fields[key] }
         return nil
     }
 
-    subscript(index: Int) -> JSONValue? {
+    subscript(json index: Int) -> JSONValue? {
         if case .array(let items) = self, items.indices.contains(index) { return items[index] }
         return nil
     }
 
-    var string: String? {
+    var testString: String? {
         if case .string(let s) = self { return s }
         return nil
     }
 
-    var array: [JSONValue]? {
+    var testArray: [JSONValue]? {
         if case .array(let items) = self { return items }
         return nil
     }
@@ -66,7 +68,7 @@ final class MCPHarness {
     func call(_ id: Int, _ method: String, _ params: String = "{}") async throws -> JSONValue {
         send(#"{"jsonrpc": "2.0", "id": \#(id), "method": "\#(method)", "params": \#(params)}"#)
         let response = try await receive()
-        XCTAssertEqual(response["id"], .number(Double(id)))
+        XCTAssertEqual(response[json: "id"], .number(Double(id)))
         return response
     }
 
@@ -87,31 +89,31 @@ final class MCPTests: XCTestCase {
     func testLegacyHandshakeListAndCall() async throws {
         let mcp = try MCPHarness()
         let initialize = try await mcp.call(1, "initialize", #"{"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "claude-code", "version": "2.1"}}"#)
-        XCTAssertEqual(initialize["result"]?["protocolVersion"], .string("2025-11-25"))
-        XCTAssertEqual(initialize["result"]?["serverInfo"]?["name"], .string("tandem"))
-        XCTAssertNotNil(initialize["result"]?["capabilities"]?["tools"])
-        XCTAssertNil(initialize["result"]?["resultType"], "legacy results stay as they were")
+        XCTAssertEqual(initialize[json: "result"]?[json: "protocolVersion"], .string("2025-11-25"))
+        XCTAssertEqual(initialize[json: "result"]?[json: "serverInfo"]?[json: "name"], .string("tandem"))
+        XCTAssertNotNil(initialize[json: "result"]?[json: "capabilities"]?[json: "tools"])
+        XCTAssertNil(initialize[json: "result"]?[json: "resultType"], "legacy results stay as they were")
         mcp.send(#"{"jsonrpc": "2.0", "method": "notifications/initialized"}"#)
 
         let list = try await mcp.call(2, "tools/list")
-        let tools = try XCTUnwrap(list["result"]?["tools"]?.array)
-        XCTAssertEqual(tools.compactMap { $0["name"]?.string }, MCPTools.all.map(\.name))
-        let apply = try XCTUnwrap(tools.first { $0["name"] == .string("apply") })
-        XCTAssertEqual(apply["inputSchema"]?["required"], .array([.string("commands")]))
-        XCTAssertNotNil(apply["inputSchema"]?["properties"]?["commands"]?["items"]?["oneOf"])
-        XCTAssertEqual(apply["annotations"]?["readOnlyHint"], .bool(false))
+        let tools = try XCTUnwrap(list[json: "result"]?[json: "tools"]?.testArray)
+        XCTAssertEqual(tools.compactMap { $0[json: "name"]?.testString }, MCPTools.all.map(\.name))
+        let apply = try XCTUnwrap(tools.first { $0[json: "name"] == .string("apply") })
+        XCTAssertEqual(apply[json: "inputSchema"]?[json: "required"], .array([.string("commands")]))
+        XCTAssertNotNil(apply[json: "inputSchema"]?[json: "properties"]?[json: "commands"]?[json: "items"]?[json: "oneOf"])
+        XCTAssertEqual(apply[json: "annotations"]?[json: "readOnlyHint"], .bool(false))
 
         let status = try await mcp.tool(3, "status")
-        XCTAssertEqual(status["result"]?["isError"], .bool(false))
-        let text = try XCTUnwrap(status["result"]?["content"]?[0]?["text"]?.string)
+        XCTAssertEqual(status[json: "result"]?[json: "isError"], .bool(false))
+        let text = try XCTUnwrap(status[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString)
         XCTAssertTrue(text.hasPrefix("Decision Models (Decision Models.tandem)"), text)
 
         let edit = try await mcp.tool(4, "apply", #"{"commands": [{"blade": {"at": "00:10.000"}}], "expectedRevision": 1}"#)
-        let editText = try XCTUnwrap(edit["result"]?["content"]?[0]?["text"]?.string)
+        let editText = try XCTUnwrap(edit[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString)
         XCTAssertTrue(editText.hasPrefix("Applied \"Cut at 00:10.000\" by claude as revision 2."), "credited to the client: \(editText)")
 
         let history = try await mcp.tool(5, "history", #"{"json": true}"#)
-        let historyJSON = try XCTUnwrap(history["result"]?["content"]?[0]?["text"]?.string)
+        let historyJSON = try XCTUnwrap(history[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString)
         let decoded = try ServiceJSON.decoder().decode(HistoryResult.self, from: Data(historyJSON.utf8))
         XCTAssertEqual(decoded.undo.first?.label, "Cut at 00:10.000")
         await mcp.close()
@@ -120,24 +122,24 @@ final class MCPTests: XCTestCase {
     func testModernStatelessRequests() async throws {
         let mcp = try MCPHarness()
         let discover = try await mcp.call(1, "server/discover", #"{"_meta": \#(Self.modernMeta)}"#)
-        XCTAssertEqual(discover["result"]?["resultType"], .string("complete"))
-        XCTAssertEqual(discover["result"]?["supportedVersions"]?[0], .string("2026-07-28"))
-        XCTAssertEqual(discover["result"]?["_meta"]?["io.modelcontextprotocol/serverInfo"]?["name"], .string("tandem"))
+        XCTAssertEqual(discover[json: "result"]?[json: "resultType"], .string("complete"))
+        XCTAssertEqual(discover[json: "result"]?[json: "supportedVersions"]?[json: 0], .string("2026-07-28"))
+        XCTAssertEqual(discover[json: "result"]?[json: "_meta"]?[json: "io.modelcontextprotocol/serverInfo"]?[json: "name"], .string("tandem"))
 
         let list = try await mcp.call(2, "tools/list", #"{"_meta": \#(Self.modernMeta)}"#)
-        XCTAssertEqual(list["result"]?["cacheScope"], .string("public"))
-        XCTAssertNotNil(list["result"]?["ttlMs"])
+        XCTAssertEqual(list[json: "result"]?[json: "cacheScope"], .string("public"))
+        XCTAssertNotNil(list[json: "result"]?[json: "ttlMs"])
 
         let edit = try await mcp.tool(3, "apply", #"{"commands": [{"blade": {"at": 10}}]}"#, meta: Self.modernMeta)
-        XCTAssertEqual(edit["result"]?["resultType"], .string("complete"))
-        let text = try XCTUnwrap(edit["result"]?["content"]?[0]?["text"]?.string)
+        XCTAssertEqual(edit[json: "result"]?[json: "resultType"], .string("complete"))
+        let text = try XCTUnwrap(edit[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString)
         XCTAssertTrue(text.contains("by codex"), "the client info in _meta names the author: \(text)")
 
         let unsupported = try await mcp.call(4, "tools/list", #"{"_meta": {"io.modelcontextprotocol/protocolVersion": "2031-01-01", "io.modelcontextprotocol/clientCapabilities": {}}}"#)
-        XCTAssertEqual(unsupported["error"]?["code"], .number(-32022))
-        XCTAssertEqual(unsupported["error"]?["data"]?["requested"], .string("2031-01-01"))
+        XCTAssertEqual(unsupported[json: "error"]?[json: "code"], .number(-32022))
+        XCTAssertEqual(unsupported[json: "error"]?[json: "data"]?[json: "requested"], .string("2031-01-01"))
         let missing = try await mcp.call(5, "tools/list", #"{"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28"}}"#)
-        XCTAssertEqual(missing["error"]?["code"], .number(-32602))
+        XCTAssertEqual(missing[json: "error"]?[json: "code"], .number(-32602))
         await mcp.close()
     }
 
@@ -145,40 +147,40 @@ final class MCPTests: XCTestCase {
         let mcp = try MCPHarness(author: "tester")
         mcp.send("this isn't json")
         let parse = try await mcp.receive()
-        XCTAssertEqual(parse["error"]?["code"], .number(-32700))
+        XCTAssertEqual(parse[json: "error"]?[json: "code"], .number(-32700))
 
         let method = try await mcp.call(1, "resources/list")
-        XCTAssertEqual(method["error"]?["code"], .number(-32601))
+        XCTAssertEqual(method[json: "error"]?[json: "code"], .number(-32601))
 
         let unknown = try await mcp.tool(2, "explode")
-        XCTAssertEqual(unknown["error"]?["code"], .number(-32602))
+        XCTAssertEqual(unknown[json: "error"]?[json: "code"], .number(-32602))
 
         // A failed edit is a tool result the model can read and fix.
         let failed = try await mcp.tool(3, "apply", #"{"commands": [{"trim": {"clipID": "clip_cam1", "edge": "end", "to": 5, "rippel": true}}]}"#)
-        XCTAssertEqual(failed["result"]?["isError"], .bool(true))
-        let message = try XCTUnwrap(failed["result"]?["content"]?[0]?["text"]?.string)
+        XCTAssertEqual(failed[json: "result"]?[json: "isError"], .bool(true))
+        let message = try XCTUnwrap(failed[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString)
         XCTAssertTrue(message.contains("did you mean \"ripple\""), message)
 
         let stale = try await mcp.tool(4, "apply", #"{"commands": [{"blade": {"at": 10}}], "expectedRevision": 99}"#)
-        XCTAssertEqual(stale["result"]?["isError"], .bool(true))
-        XCTAssertTrue(stale["result"]?["content"]?[0]?["text"]?.string?.contains("expected revision 99") ?? false)
+        XCTAssertEqual(stale[json: "result"]?[json: "isError"], .bool(true))
+        XCTAssertTrue(stale[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString?.contains("expected revision 99") ?? false)
 
         let elsewhere = try await mcp.tool(5, "status", #"{"project": "/nowhere/at/all.tandem"}"#)
-        XCTAssertEqual(elsewhere["result"]?["isError"], .bool(true))
+        XCTAssertEqual(elsewhere[json: "result"]?[json: "isError"], .bool(true))
         await mcp.close()
     }
 
     func testFrameComesBackAsAnImage() async throws {
         let mcp = try MCPHarness()
         let frame = try await mcp.tool(1, "frame", #"{"time": 12}"#)
-        let content = try XCTUnwrap(frame["result"]?["content"]?.array)
-        XCTAssertEqual(content.first?["type"], .string("image"))
-        XCTAssertEqual(content.first?["mimeType"], .string("image/png"))
-        XCTAssertEqual(content.first?["data"], .string(FakeRenderer.png.base64EncodedString()))
-        XCTAssertEqual(content.last?["type"], .string("text"))
+        let content = try XCTUnwrap(frame[json: "result"]?[json: "content"]?.testArray)
+        XCTAssertEqual(content.first?[json: "type"], .string("image"))
+        XCTAssertEqual(content.first?[json: "mimeType"], .string("image/png"))
+        XCTAssertEqual(content.first?[json: "data"], .string(FakeRenderer.png.base64EncodedString()))
+        XCTAssertEqual(content.last?[json: "type"], .string("text"))
 
         let effects = try await mcp.tool(2, "effects", #"{"type": "dropShadow"}"#)
-        XCTAssertTrue(effects["result"]?["content"]?[0]?["text"]?.string?.contains("dropShadow") ?? false)
+        XCTAssertTrue(effects[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString?.contains("dropShadow") ?? false)
         await mcp.close()
     }
 
@@ -188,7 +190,7 @@ final class MCPTests: XCTestCase {
         try await Task.sleep(nanoseconds: 200_000_000)
         mcp.send(#"{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1, "reason": "user"}}"#)
         let ping = try await mcp.call(2, "ping")
-        XCTAssertEqual(ping["result"], .object([:]), "the next message is the ping's answer, not the cancelled watch")
+        XCTAssertEqual(ping[json: "result"], .object([:]), "the next message is the ping's answer, not the cancelled watch")
         await mcp.close()
     }
 
@@ -196,9 +198,9 @@ final class MCPTests: XCTestCase {
         let mcp = try MCPHarness()
         mcp.send(#"[{"jsonrpc": "2.0", "id": 1, "method": "ping"}, {"jsonrpc": "2.0", "method": "notifications/initialized"}, {"jsonrpc": "2.0", "id": "b", "method": "tools/list"}]"#)
         let answers = try await mcp.receive()
-        let items = try XCTUnwrap(answers.array)
-        XCTAssertEqual(items.map { $0["id"] }, [.number(1), .string("b")], "one answer per request, none for the notification")
-        XCTAssertNotNil(items[1]["result"]?["tools"])
+        let items = try XCTUnwrap(answers.testArray)
+        XCTAssertEqual(items.map { $0[json: "id"] }, [.number(1), .string("b")], "one answer per request, none for the notification")
+        XCTAssertNotNil(items[1][json: "result"]?[json: "tools"])
         await mcp.close()
     }
 

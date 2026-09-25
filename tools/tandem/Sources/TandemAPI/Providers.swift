@@ -19,25 +19,39 @@ public protocol AnalysisSource: AnyObject, Sendable {
     func removeJobsObserver(_ token: UUID)
 }
 
-extension MediaAnalysis: AnalysisSource {
+/// The real analysis, through `MediaAnalysis`'s documented methods. An
+/// adapter rather than an extension, so nothing here can clash with names
+/// the media module adds.
+public final class MediaAnalysisSource: AnalysisSource, @unchecked Sendable {
+    public let analysis: MediaAnalysis
+
+    public init(_ analysis: MediaAnalysis) {
+        self.analysis = analysis
+    }
+
+    public func transcript(for item: MediaItem) -> Transcript? { analysis.transcript(for: item) }
+    public func loudness(for item: MediaItem) -> Loudness? { analysis.loudness(for: item) }
+
     public func isReady(_ kind: AnalysisKind, for item: MediaItem) -> Bool {
         switch kind {
-        case .thumbnails: return thumbnails(for: item) != nil
-        case .waveform: return waveform(for: item) != nil
-        case .loudness: return loudness(for: item) != nil
-        case .proxy: return proxyURL(for: item) != nil
-        case .transcript: return transcript(for: item) != nil
-        case .matte: return matteURL(for: item) != nil
-        case .isolatedVoice: return isolatedVoiceURL(for: item) != nil
+        case .thumbnails: return analysis.thumbnails(for: item) != nil
+        case .waveform: return analysis.waveform(for: item) != nil
+        case .loudness: return analysis.loudness(for: item) != nil
+        case .proxy: return analysis.proxyURL(for: item) != nil
+        case .transcript: return analysis.transcript(for: item) != nil
+        case .matte: return analysis.matteURL(for: item) != nil
+        case .isolatedVoice: return analysis.isolatedVoiceURL(for: item) != nil
         }
     }
 
+    public var jobs: [JobStatus] { analysis.jobs }
+
     public func observeJobs(_ handler: @escaping @Sendable ([JobStatus]) -> Void) -> UUID {
-        observe(handler)
+        analysis.observe(handler)
     }
 
     public func removeJobsObserver(_ token: UUID) {
-        removeObserver(token)
+        analysis.removeObserver(token)
     }
 }
 
@@ -71,17 +85,17 @@ public struct DefaultRenderBackend: RenderBackend {
     }
 }
 
-extension ExportPreset {
-    /// Finds a preset by name, ignoring case, spaces and punctuation, so
-    /// `youtube4k`, `YouTube 4K` and `youtube-4k` all work. `review` and
-    /// `short` match their presets too.
-    public static func named(_ name: String) -> ExportPreset? {
+/// Export presets by name, forgiving about case, spaces and punctuation, so
+/// `youtube4k`, `YouTube 4K` and `youtube-4k` all work, and `review` and
+/// `short` find their presets.
+public enum PresetNames {
+    public static func find(_ name: String) -> ExportPreset? {
         let wanted = slug(name)
-        return all.first { slug($0.name) == wanted || slug($0.name).hasPrefix(wanted) }
+        return ExportPreset.all.first { slug($0.name) == wanted || slug($0.name).hasPrefix(wanted) }
     }
 
     /// A short name for the CLI: `youtube4k`, `youtube1080p`, `review720p`, `short916`.
-    public var slugName: String { Self.slug(name) }
+    public static func short(_ preset: ExportPreset) -> String { slug(preset.name) }
 
     static func slug(_ text: String) -> String {
         String(text.lowercased().filter { $0.isLetter || $0.isNumber })

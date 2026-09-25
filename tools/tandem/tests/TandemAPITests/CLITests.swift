@@ -230,15 +230,15 @@ final class CLITests: XCTestCase {
 
         send(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"1"}}}"#)
         let initialize = try await next()
-        XCTAssertEqual(initialize["result"]?["protocolVersion"], .string("2025-06-18"))
+        XCTAssertEqual(initialize[json: "result"]?[json: "protocolVersion"], .string("2025-06-18"))
         send(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
         send(#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"timeline","arguments":{"from":20,"to":25}}}"#)
         let timeline = try await next()
-        let text = timeline["result"]?["content"]?[0]?["text"]?.string ?? ""
+        let text = timeline[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString ?? ""
         XCTAssertTrue(text.contains("clip_brl1  00:20.000-00:25.000"), text)
         send(#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"apply","arguments":{"commands":[{"blade":{"at":22}}]}}}"#)
         let apply = try await next()
-        XCTAssertTrue(apply["result"]?["content"]?[0]?["text"]?.string?.contains("by claude as revision 2") ?? false, "\(apply)")
+        XCTAssertTrue(apply[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString?.contains("by claude as revision 2") ?? false, "\(apply)")
 
         try input.fileHandleForWriting.close()
         mcp.waitUntilExit()
