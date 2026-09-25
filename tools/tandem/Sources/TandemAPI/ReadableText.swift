@@ -54,15 +54,26 @@ extension MediaResult: ReadableResult {
             if let take = item.takeID { parts.append("take \(take) +\(TimeText.duration(item.takeOffset ?? .zero))") }
             parts.append(item.clips == 1 ? "1 clip" : "\(item.clips) clips")
             if !item.exists { parts.append("MISSING FILE") }
-            let analysis = item.analysis.keys.sorted().map { key -> String in
-                let state = item.analysis[key]!
-                if let progress = state.progress { return "\(key) \(Int(progress * 100))%" }
-                return "\(key) \(state.state)"
-            }
-            if !analysis.isEmpty { parts.append("(" + analysis.joined(separator: ", ") + ")") }
+            parts.append(Self.analysisSummary(item.analysis))
             lines.append(parts.joined(separator: "  "))
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+extension MediaResult {
+    /// "transcript ready, proxy 45%, matte queued", leaving out analyses
+    /// nobody has asked for yet.
+    static func analysisSummary(_ analysis: [String: AnalysisState]) -> String {
+        let order = ["transcript", "loudness", "waveform", "thumbnails", "proxy", "matte", "isolatedVoice"]
+        let keys = analysis.keys.sorted { (order.firstIndex(of: $0) ?? 99, $0) < (order.firstIndex(of: $1) ?? 99, $1) }
+        let started = keys.compactMap { key -> String? in
+            guard let state = analysis[key], state.state != "none" else { return nil }
+            if let progress = state.progress { return "\(key) \(Int(progress * 100))%" }
+            return "\(key) \(state.state)"
+        }
+        if analysis.isEmpty { return "(no analysis applies)" }
+        return started.isEmpty ? "(not analysed yet)" : "(" + started.joined(separator: ", ") + ")"
     }
 }
 
@@ -198,7 +209,12 @@ extension ApplyResult: ReadableResult {
         } else {
             lines.append("Applied \"\(label)\" by \(author) as revision \(revision).")
         }
-        if !createdIDs.isEmpty { lines.append("Created: \(createdIDs.joined(separator: ", "))") }
+        if !createdIDs.isEmpty {
+            // Big batches create hundreds of IDs; the JSON result has them all.
+            let shown = createdIDs.prefix(12).joined(separator: ", ")
+            let more = createdIDs.count > 12 ? ", and \(createdIDs.count - 12) more (--json lists them all)" : ""
+            lines.append("Created: \(shown)\(more)")
+        }
         var changes: [String] = []
         if !added.isEmpty { changes.append("\(added.count) clip\(added.count == 1 ? "" : "s") added") }
         if !removed.isEmpty { changes.append("\(removed.count) removed (\(removed.joined(separator: ", ")))") }
@@ -278,22 +294,39 @@ extension LoudnessResult: ReadableResult {
             if let lufs = item.integratedLUFS, let peak = item.truePeakDBTP {
                 lines.append(String(format: "  %@  %@  %.1f LUFS, peak %.1f dBTP, range %.1f LU", item.mediaID, item.path, lufs, peak, item.loudnessRange ?? 0))
             } else {
-                lines.append("  \(item.mediaID)  \(item.path)  not measured yet (\(item.state))")
+                let state = item.state == "none" ? "" : " (\(item.state))"
+                lines.append("  \(item.mediaID)  \(item.path)  not measured yet\(state)")
             }
         }
-        let levelled = clips.filter { $0.normalizeTo != nil || $0.gainDB != 0 }
-        if !levelled.isEmpty {
+        // Clips are grouped by how they're set, since a take has hundreds
+        // of pieces that all share the same levelling. The JSON lists each.
+        struct Setting: Hashable {
+            var track: String
+            var mediaID: String
+            var normalizeTo: Double?
+            var normalizeGainDB: Double?
+            var gainDB: Double
+        }
+        var groups: [Setting: [String]] = [:]
+        var order: [Setting] = []
+        for clip in clips where clip.normalizeTo != nil || clip.gainDB != 0 {
+            let key = Setting(track: clip.track, mediaID: clip.mediaID, normalizeTo: clip.normalizeTo, normalizeGainDB: clip.normalizeGainDB, gainDB: clip.gainDB)
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(clip.clipID)
+        }
+        if !order.isEmpty {
             lines.append("Clip levels:")
-            for clip in levelled {
-                var parts = ["  \(clip.clipID)  \(clip.track)"]
-                if let target = clip.normalizeTo {
-                    if let gain = clip.normalizeGainDB {
+            for key in order {
+                let ids = groups[key] ?? []
+                var parts = ["  \(key.track)", ids.count == 1 ? ids[0] : "\(ids.count) clips of \(key.mediaID)"]
+                if let target = key.normalizeTo {
+                    if let gain = key.normalizeGainDB {
                         parts.append(String(format: "levelled to %.1f LUFS (%+.1f dB)", target, gain))
                     } else {
-                        parts.append(String(format: "levelled to %.1f LUFS once measured", target))
+                        parts.append(String(format: "levelled to %.1f LUFS once the file is measured", target))
                     }
                 }
-                if clip.gainDB != 0 { parts.append(String(format: "gain %+.1f dB", clip.gainDB)) }
+                if key.gainDB != 0 { parts.append(String(format: "gain %+.1f dB", key.gainDB)) }
                 lines.append(parts.joined(separator: "  "))
             }
         }
