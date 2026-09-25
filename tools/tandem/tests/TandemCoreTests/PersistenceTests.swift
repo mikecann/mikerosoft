@@ -39,4 +39,33 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(own.count, 2, "Video keeps its own newest two: \(own)")
         XCTAssertTrue(own.contains("Video 2026-09-24 09.00.00.tandem"), "\(own)")
     }
+
+    // MARK: - Journal
+
+    func journal() -> ProjectJournal {
+        ProjectJournal.forProject(at: folder.appendingPathComponent("Video.tandem"))
+    }
+
+    func marker(_ id: String, at seconds: Double) -> EditBatch {
+        EditBatch(label: "Marker \(id)", commands: [.addMarker(marker: Marker(id: id, time: t(seconds), name: id))])
+    }
+
+    func testAReloadIsReplayedAfterACrash() throws {
+        // The undo history kept on disk for CLI edits comes back through
+        // `reload`. Edits after it are relative to the reloaded project, so
+        // a replay has to land on it too.
+        let saved = Project.standard(name: "Video")
+        let journal = journal()
+        let coordinator = ProjectCoordinator(project: saved, revision: 0, journal: journal)
+        try coordinator.apply(marker("mk_a", at: 1))
+        var restored = saved
+        restored.markers = [Marker(id: "mk_old", time: t(9), name: "Old")]
+        coordinator.reload(restored)
+        try coordinator.apply(marker("mk_b", at: 2))
+
+        let recovered = try XCTUnwrap(journal.recover(project: saved, revision: 0))
+        XCTAssertEqual(recovered.revision, coordinator.revision)
+        XCTAssertEqual(recovered.project, coordinator.project)
+        XCTAssertEqual(recovered.project.markers.map(\.id), ["mk_b", "mk_old"], "mk_a was replaced by the reload")
+    }
 }

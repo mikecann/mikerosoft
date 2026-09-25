@@ -41,6 +41,31 @@ final class ProjectSessionTests: XCTestCase {
         reopened.close()
     }
 
+    func testAnUndoFromTheDiskHistorySurvivesACrash() throws {
+        // A CLI edit, then the app opens the project and an agent undoes
+        // that edit through the app's API (from the history kept on disk),
+        // then edits on. The app dies before autosaving.
+        let url = try APIFixture.write(to: folder)
+        let original = try ProjectFile.load(from: url).project
+        try headless(url) { service in
+            _ = try service.apply(ApplyRequest(label: "Cut", commands: [.blade(at: t(10))]), context: CallContext(author: "claude"))
+        }
+        let session = try ProjectSession.open(url, owner: .app)
+        session.autosaveDelay = 3600
+        let service = TandemService(session: session, mode: .hosted, analysis: FakeAnalysis(), renderer: FakeRenderer())
+        XCTAssertEqual(try service.undo(expectedRevision: nil).label, "Cut")
+        try service.apply(ApplyRequest(label: "Marker", commands: [.addMarker(marker: Marker(id: "mk_after", time: t(3), name: "After"))]), context: CallContext(author: "claude"))
+        let expected = session.coordinator.project
+        service.shutdown()
+        try FileManager.default.removeItem(at: ProjectSession.lockURL(for: url))
+
+        let reopened = try ProjectSession.open(url, owner: .app)
+        defer { reopened.close() }
+        XCTAssertTrue(reopened.recoveredEdits)
+        XCTAssertEqual(reopened.coordinator.project, expected, "the undone cut stays undone")
+        XCTAssertEqual(reopened.coordinator.project.track(named: "Camera")?.clips, original.track(named: "Camera")?.clips)
+    }
+
     func testAutosaveWritesAfterAnEdit() throws {
         let url = folder.appendingPathComponent("Auto.tandem")
         let session = try ProjectSession.create(at: url, owner: .cli)

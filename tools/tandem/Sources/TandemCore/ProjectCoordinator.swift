@@ -144,6 +144,9 @@ public final class ProjectCoordinator: @unchecked Sendable {
             _revision += 1
             undoStack.removeAll()
             redoStack.removeAll()
+            // Journaled like an undo: edits after this are relative to the
+            // new project, so a replay after a crash has to start from it.
+            journal?.appendSnapshot(project: project, revision: _revision, reason: "reload")
             notify(ChangeEvent(kind: .reload, revision: _revision, label: "Reload", author: "system"))
         }
     }
