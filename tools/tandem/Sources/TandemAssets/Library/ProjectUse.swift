@@ -201,13 +201,22 @@ extension AssetLibrary {
     // MARK: - Credits
 
     /// Credits for every asset the project uses now: assets recorded as
-    /// used in this project whose media is still in it.
-    public func credits(for project: Project) throws -> ProjectCredits {
+    /// used in this project whose media is still in it. Fonts and LUTs have
+    /// no media item, so they count while their copy is still in the
+    /// project folder (or always, when no folder is given).
+    public func credits(for project: Project, in folder: ProjectFolder? = nil) throws -> ProjectCredits {
         let mediaIDs = Set(project.media.map(\.id))
         let mediaPaths = Set(project.media.map(\.path))
         var ids: [String] = []
         for use in try catalog.usage(forProject: project.id) {
-            let current = use.mediaID.map(mediaIDs.contains) ?? false || use.mediaPath.map(mediaPaths.contains) ?? false
+            let current: Bool
+            if let mediaID = use.mediaID {
+                current = mediaIDs.contains(mediaID) || use.mediaPath.map(mediaPaths.contains) ?? false
+            } else if let path = use.mediaPath, let folder {
+                current = FileManager.default.fileExists(atPath: folder.url(forPath: path).path)
+            } else {
+                current = true
+            }
             if current, !ids.contains(use.assetID) { ids.append(use.assetID) }
         }
         return try credits(assetIDs: ids)

@@ -516,3 +516,28 @@ final class ImportFolderRobustnessTests: XCTestCase {
         XCTAssertEqual(try library.search(AssetQuery(text: "cover")).first?.kind, .icon)
     }
 }
+
+final class FontCreditTests: XCTestCase {
+    func testFontsCountTowardsCreditsWhileTheirCopyIsThere() async throws {
+        guard let font = Generated.systemFont() else { throw XCTSkip("no system TTF found") }
+        let imports = tempFolder("envato-fonts")
+        try FileManager.default.copyItem(at: font, to: imports.appendingPathComponent("Brand.ttf"))
+        let library = try makeLibrary()
+        try await library.addImportFolder(imports, licence: FolderLicence.presets["envato"])
+        let asset = try XCTUnwrap(library.search(AssetQuery(kinds: [.font])).first)
+        let folder = ProjectFolder(root: tempFolder("project"))
+        var project = Project.standard(name: "Fonts")
+        let placement = try await library.use(asset.id, in: folder, projectID: project.id)
+        XCTAssertNil(placement.mediaItem)
+
+        let credits = try library.credits(for: project, in: folder)
+        XCTAssertEqual(credits.assets.map(\.id), [asset.id])
+        XCTAssertTrue(credits.warnings.first?.hasPrefix("1 asset from Envato Elements.") == true)
+
+        try FileManager.default.removeItem(at: folder.url(forPath: placement.files[0]))
+        XCTAssertTrue(try library.credits(for: project, in: folder).assets.isEmpty)
+        // Without a folder to check, it errs towards crediting.
+        project.metadata["note"] = "unchanged"
+        XCTAssertEqual(try library.credits(for: project).assets.map(\.id), [asset.id])
+    }
+}
