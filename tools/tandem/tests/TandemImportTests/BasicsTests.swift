@@ -221,3 +221,85 @@ final class ImportRequestTests: XCTestCase {
         XCTAssertEqual(ImportRequest.fileName("  "), "Imported")
     }
 }
+
+final class ProjectBuilderTests: XCTestCase {
+    func testARejectedBatchStillAppliesItsGoodCommands() {
+        var project = Project.standard(name: "Build")
+        project.media = [MediaItem(id: "med_a", path: "/a.mov", kind: .video, role: .camera, duration: t(10), hasVideo: true, hasAudio: true)]
+        let builder = ProjectBuilder(project: project, report: ImportReport(source: "x", importer: "test", projectName: "Build"))
+        let camera = project.track(named: "Camera")!.id
+        let failed = builder.apply("Place", [
+            .init(.insertClip(trackID: camera, clip: Clip(id: "clip_a", content: .media(mediaID: "med_a"), start: t(0), duration: t(4))), "first"),
+            .init(.insertClip(trackID: camera, clip: Clip(id: "clip_b", content: .media(mediaID: "med_a"), start: t(2), duration: t(4))), "overlapping", at: t(2)),
+            .init(.insertClip(trackID: camera, clip: Clip(id: "clip_c", content: .media(mediaID: "med_a"), start: t(5), duration: t(4))), "third")
+        ])
+        XCTAssertEqual(failed, [1])
+        XCTAssertEqual(builder.project.clips(on: "Camera").map(\.id), ["clip_a", "clip_c"])
+        XCTAssertEqual(builder.report.count(.failed), 1)
+        XCTAssertEqual(builder.report.items(.failed).first?.at, [2])
+    }
+
+    func testFreeTrackAddsTracksToAFamilyAsNeeded() {
+        let builder = ProjectBuilder(project: Project.standard(name: "Build"), report: ImportReport(source: "x", importer: "test", projectName: "Build"))
+        let first = builder.freeTrack(.audio, family: "SFX", range: TimeRange(start: t(0), end: t(1)))
+        XCTAssertEqual(first, builder.project.track(named: "SFX")?.id, "an empty track of the family is used first")
+        let text = builder.freeTrack(.video, family: "Text", range: TimeRange(start: t(0), end: t(1)))!
+        builder.apply("Title", [.init(.insertClip(trackID: text, clip: Clip(content: .text(TextContent(text: "A")), start: t(0), duration: t(1))), "title")])
+        let second = builder.freeTrack(.video, family: "Text", range: TimeRange(start: t(0.5), end: t(2)))
+        XCTAssertNotEqual(second, text)
+        XCTAssertEqual(builder.project.track(second!)?.name, "Text 2")
+        XCTAssertEqual(builder.project.track(second!)?.rippleMode, .follow)
+        let textIndex = builder.project.location(ofTrack: text)!.index
+        XCTAssertEqual(builder.project.location(ofTrack: second!)!.index, textIndex + 1, "the new lane sits just above")
+    }
+}
+
+final class FilmoraLaneTests: XCTestCase {
+    /// Writes a one-track Filmora project whose clips are given as
+    /// (begin, end, in) seconds, with ends in the form Filmora saves them.
+    func project(clips: [(Double, Double, Double)], inclusiveEnds: Bool) throws -> URL {
+        let folder = try Fixtures.temporaryFolder().appendingPathComponent("Lanes.wfp.dir")
+        let medias = folder.appendingPathComponent("ProjectFolder/Medias/TL")
+        try FileManager.default.createDirectory(at: medias, withIntermediateDirectories: true)
+        let ticks = 10_000_000.0
+        let clipJSON = clips.enumerated().map { index, clip in
+            let end = Int64(clip.1 * ticks) - (inclusiveEnds ? 1 : 0)
+            return """
+            {"type": 1, "tlBegin": \(Int64(clip.0 * ticks)), "tlEnd": \(end), "inPoint": \(Int64(clip.2 * ticks)), "outPoint": \(Int64((clip.2 + clip.1 - clip.0) * ticks)), "thisUId": "c\(index)", "sourceUuid": "cam", "filename": "file://FIXTURE/take-camera.mov"}
+            """
+        }.joined(separator: ",")
+        let timeline = """
+        {"currentTimelineId": 1, "resources": [{"sourceUuid": "cam", "filename": "file://FIXTURE/take-camera.mov", "mediaLength": 1200000000, "streamType": 2, "videoStreamCount": 1}],
+         "timelineInfos": [{"timelineId": 1, "trackInfos": [{"trackType": 1, "clipList": [\(clipJSON)]}]}]}
+        """
+        try Data(timeline.utf8).write(to: medias.appendingPathComponent("timeline.wesproj"))
+        try Data(#"{"timeline_mediaId": "TL", "project_timeline_framerate": [30, 1], "project_timeline_resolution": [1920, 1080]}"#.utf8)
+            .write(to: folder.appendingPathComponent("ProjectFolder/project_info.json"))
+        return folder
+    }
+
+    func importLanes(_ url: URL) async throws -> ImportResult {
+        try await FilmoraImporter(locating: MediaLocating(prober: FakeProbe(media: ["take-camera.mov": .video(120)]))).importProject(at: url)
+    }
+
+    func testClipsThatMeetStillMeetWhateverTheEndConvention() async throws {
+        for inclusive in [true, false] {
+            let url = try project(clips: [(0, 1.00001, 10), (1.00001, 2.5, 20), (2.5, 4, 30)], inclusiveEnds: inclusive)
+            defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+            let clips = try await importLanes(url).project.videoTracks[0].clips
+            XCTAssertEqual(clips.count, 3)
+            XCTAssertEqual(clips[0].end, clips[1].start, "inclusive: \(inclusive)")
+            XCTAssertEqual(clips[1].end, clips[2].start, "inclusive: \(inclusive)")
+        }
+    }
+
+    func testRealOverlapsGoToAnExtraTrack() async throws {
+        let url = try project(clips: [(0, 3, 10), (2, 5, 20), (5, 6, 30)], inclusiveEnds: true)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let result = try await importLanes(url)
+        assertValid(result.project)
+        XCTAssertEqual(result.project.videoTracks.map(\.name), ["Camera", "Camera extra"])
+        XCTAssertEqual(result.project.videoTracks.map { $0.clips.count }, [2, 1])
+        XCTAssertEqual(result.report.count(.note) > 0, true)
+    }
+}

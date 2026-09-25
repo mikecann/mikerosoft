@@ -265,3 +265,57 @@ final class DecisionModelsRecipeTests: XCTestCase {
         }
     }
 }
+
+extension EDLImporterTests {
+    func importEDL(_ edl: SegmentEDL, _ edit: (inout EDLRecipe) -> Void = { _ in }) async throws -> ImportResult {
+        var recipe = try EDLRecipe.load(from: Fixtures.url("edl/mini-recipe.json"))
+        recipe.intro = nil
+        recipe.cutAdjustments = nil
+        recipe.layoutOverrides = nil
+        recipe.inserts = nil
+        recipe.sections = nil
+        recipe.sfx = nil
+        edit(&recipe)
+        return try await EDLImporter(recipe: recipe, locating: MediaLocating(prober: FakeProbe(media: Self.media))).importEDL(edl, source: "inline")
+    }
+
+    func testTopLevelOverlaysAndScreenOffsets() async throws {
+        let edl = SegmentEDL(
+            segments: [
+                .init(start: 10, end: 14, layout: .cam),
+                .init(start: 20, end: 25, layout: .screen, screenOffset: 0.5)
+            ],
+            overlays: [.init(timeline: 2, duration: 1.5, screenAt: 60)]
+        )
+        let p = try await importEDL(edl).project
+        assertValid(p)
+        // The overlay sits 2 s into the EDL's own timeline, showing take time 60.
+        let broll = p.clips(on: "B-roll")
+        XCTAssertEqual(broll.map(\.range), [TimeRange(start: t(2), end: t(3.5))])
+        XCTAssertEqual(broll[0].sourceStart, t(60))
+        // The screen of the second segment runs half a second ahead of the voice.
+        let screen = p.clips(on: "Screen")
+        XCTAssertEqual(screen[1].sourceStart, t(20.5))
+        XCTAssertEqual(p.clips(on: "Camera")[1].sourceStart, t(20))
+    }
+
+    func testSegmentsStayInsideTheirRecordingSession() async throws {
+        // Take B starts at EDL time 100; a segment running past it is cut there.
+        let edl = SegmentEDL(segments: [.init(start: 95, end: 102, layout: .cam), .init(start: 103, end: 106, layout: .cam)])
+        let result = try await importEDL(edl)
+        assertValid(result.project)
+        let camera = result.project.clips(on: "Camera")
+        XCTAssertEqual(camera.map(\.duration), [t(5), t(3)])
+        XCTAssertEqual(camera[1].sourceStart, t(3), "take B's own clock")
+        XCTAssertTrue(result.report.items(.approximated).contains { $0.message.contains("recording session") })
+    }
+
+    func testUnmatchedCutAdjustmentsAreNoted() async throws {
+        let edl = SegmentEDL(segments: [.init(start: 10, end: 14, layout: .cam)])
+        let result = try await importEDL(edl) { recipe in
+            recipe.cutAdjustments = [.init(start: 50, end: 55, newStart: 49.8, newEnd: 55.2)]
+        }
+        XCTAssertTrue(result.report.items(.note).contains { $0.message.contains("matched no segment") })
+        XCTAssertEqual(result.project.clips(on: "Camera").map(\.range), [TimeRange(start: .zero, end: t(4))])
+    }
+}
