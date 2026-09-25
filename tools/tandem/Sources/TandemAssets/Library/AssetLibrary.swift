@@ -16,6 +16,7 @@ import TandemMedia
 ///                              normalised.<ext> peaks.bin loudness.json
 ///     cache/http/<provider>/   provider responses, kept per provider rules
 ///     providers/               small provider state (refused permissions)
+///     staging/                 generations on their way in, emptied after
 ///
 /// Previews live in `~/Library/Caches/Tandem/AssetPreviews/`, size capped.
 public final class AssetLibrary: @unchecked Sendable {
