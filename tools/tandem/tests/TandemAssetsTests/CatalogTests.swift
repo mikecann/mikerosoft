@@ -309,3 +309,31 @@ final class VacuumTests: XCTestCase {
         XCTAssertEqual(try catalog.count(AssetQuery(text: "asset")), 10)
     }
 }
+
+final class SearchAsYouTypeTests: XCTestCase {
+    func testEveryPrefixOfAWordFindsIt() throws {
+        let catalog = try makeCatalog()
+        try catalog.upsert([
+            sampleAsset(id: "gen", name: "Generated click"),
+            sampleAsset(id: "run", name: "Running footsteps"),
+            sampleAsset(id: "stop", name: "Stopped engine")
+        ])
+        for typed in ["gen", "gener", "genera", "generat", "generate", "generated"] {
+            XCTAssertEqual(try catalog.search(AssetQuery(text: typed)).map(\.providerID), ["gen"], typed)
+        }
+        for typed in ["run", "runn", "runni", "runnin", "running", "runs"] {
+            XCTAssertEqual(try catalog.search(AssetQuery(text: typed)).map(\.providerID), ["run"], typed)
+        }
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "stop")).map(\.providerID), ["stop"])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "footstep")).map(\.providerID), ["run"])
+    }
+
+    func testWordForms() {
+        XCTAssertEqual(SearchWords.variants("clicks"), ["clicks", "click"])
+        XCTAssertTrue(SearchWords.variants("typing").contains("typ"))
+        XCTAssertTrue(SearchWords.variants("running").contains("run"))
+        XCTAssertTrue(SearchWords.variants("batteries").contains("battery"))
+        XCTAssertEqual(SearchWords.variants("glass"), ["glass"])
+        XCTAssertEqual(SearchWords.variants("go"), ["go"])
+    }
+}

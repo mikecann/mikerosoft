@@ -86,7 +86,7 @@ public final class AssetCatalog: @unchecked Sendable {
     CREATE VIRTUAL TABLE IF NOT EXISTS assets_fts USING fts5(
         name, tags, summary, provider, provider_id, kind,
         content = 'assets', content_rowid = 'key',
-        tokenize = 'porter unicode61 remove_diacritics 2'
+        tokenize = 'unicode61 remove_diacritics 2'
     );
     CREATE TRIGGER IF NOT EXISTS assets_fts_insert AFTER INSERT ON assets BEGIN
         INSERT INTO assets_fts(rowid, name, tags, summary, provider, provider_id, kind)
@@ -353,7 +353,10 @@ public final class AssetCatalog: @unchecked Sendable {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
         guard !words.isEmpty else { return nil }
-        return words.map { "\"\($0)\"*" }.joined(separator: " ")
+        // Parenthesised groups need an explicit AND between them.
+        return words.map { word in
+            "(" + SearchWords.variants(word).map { "\"\($0)\"*" }.joined(separator: " OR ") + ")"
+        }.joined(separator: " AND ")
     }
 
     /// Emoji typed into a search ("🚀"). The tokenizer drops them, so they
