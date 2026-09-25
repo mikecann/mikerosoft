@@ -213,7 +213,7 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
         while let file = enumerator?.nextObject() as? URL {
             let values = try? file.resourceValues(forKeys: Set(keys))
             guard values?.isRegularFile == true else { continue }
-            let relative = String(file.standardizedFileURL.path.dropFirst(root.path.count + 1))
+            guard let relative = Paths.relative(file, to: root) else { continue }
             if file.lastPathComponent == FolderLicence.fileName { continue }
             let format = FormatSniffer.fromExtension(file.pathExtension)
             let isLottie = file.pathExtension.lowercased() == "json" && FormatSniffer.isLottie(file)

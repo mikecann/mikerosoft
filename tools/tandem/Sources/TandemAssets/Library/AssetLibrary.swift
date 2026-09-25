@@ -56,8 +56,10 @@ public final class AssetLibrary: @unchecked Sendable {
         settings: AssetSettings? = nil,
         providers: [AssetProvider]? = nil
     ) throws {
+        // Create the folder before standardising: standardizedFileURL only
+        // drops a leading /private from paths that exist.
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         self.root = root.standardizedFileURL
-        try FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
         catalog = try AssetCatalog(url: self.root.appendingPathComponent("catalog.sqlite"))
         self.normaliser = normaliser
         let settings = settings ?? AssetSettings.load(from: self.root)
@@ -140,6 +142,14 @@ public final class AssetLibrary: @unchecked Sendable {
     public func folder(for asset: Asset) -> URL {
         root.appendingPathComponent(asset.provider, isDirectory: true)
             .appendingPathComponent(Self.folderName(for: asset.providerID), isDirectory: true)
+    }
+
+    /// An asset folder's path relative to the root, as stored in the catalogue.
+    func relativeFolder(_ folder: URL) throws -> String {
+        guard let relative = Paths.relative(folder, to: root) else {
+            throw AssetError.invalid("\(folder.path) isn't inside the library at \(root.path)")
+        }
+        return relative
     }
 
     /// The files the library keeps for an asset.
@@ -304,8 +314,8 @@ public final class AssetLibrary: @unchecked Sendable {
         var asset = fetched.asset
         asset.id = id
         let original = fetched.file
-        let inFolder = original.deletingLastPathComponent().standardizedFileURL.path == folder.standardizedFileURL.path
-        asset.files.folder = String(folder.standardizedFileURL.path.dropFirst(root.path.count + 1))
+        let inFolder = Paths.relative(original, to: folder) == original.lastPathComponent
+        asset.files.folder = try relativeFolder(folder)
         asset.files.original = inFolder ? original.lastPathComponent : original.standardizedFileURL.path
         let extras = fetched.extras.filter { FileManager.default.fileExists(atPath: $0.path) }
         if !extras.isEmpty { asset.remote["extraFiles"] = extras.map(\.lastPathComponent).joined(separator: "\n") }
@@ -412,7 +422,7 @@ public final class AssetLibrary: @unchecked Sendable {
             try? FileManager.default.removeItem(at: original)
             try FileManager.default.moveItem(at: take.file, to: original)
             asset.state = .original
-            asset.files.folder = String(folder.standardizedFileURL.path.dropFirst(root.path.count + 1))
+            asset.files.folder = try relativeFolder(folder)
             asset.files.original = original.lastPathComponent
             try catalog.upsert(asset)
             try catalog.addLicence(try await provider.licence(for: asset), for: asset.id)

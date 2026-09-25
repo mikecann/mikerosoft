@@ -264,6 +264,25 @@ public struct ProviderEnvironment: Sendable {
     }
 }
 
+/// Paths inside a folder, compared carefully: `standardizedFileURL` drops
+/// a leading `/private` only once a path exists, so two URLs for the same
+/// place can disagree depending on when they were made.
+enum Paths {
+    /// `file`'s path relative to `root`, or nil when it isn't inside it.
+    static func relative(_ file: URL, to root: URL) -> String? {
+        let candidates = [
+            (file.path, root.path),
+            (file.standardizedFileURL.path, root.standardizedFileURL.path),
+            (file.resolvingSymlinksInPath().path, root.resolvingSymlinksInPath().path)
+        ]
+        for (path, base) in candidates {
+            let prefix = base.hasSuffix("/") ? base : base + "/"
+            if path.hasPrefix(prefix) { return String(path.dropFirst(prefix.count)) }
+        }
+        return nil
+    }
+}
+
 /// File name helpers shared by providers.
 enum ProviderFiles {
     /// `original.<ext>` in `folder`.

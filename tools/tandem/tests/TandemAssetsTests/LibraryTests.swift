@@ -367,3 +367,25 @@ final class RemoveTests: XCTestCase {
         XCTAssertThrowsError(try library.remove("elevenlabs:nope"))
     }
 }
+
+final class PathTests: XCTestCase {
+    func testALibraryUnderPrivateTmpKeepsItsFoldersStraight() async throws {
+        // /private/tmp standardises to /tmp only once it exists, which once
+        // garbled the stored folder names.
+        let base = URL(fileURLWithPath: "/private/tmp/tandem-assets-tests-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: base) }
+        let transport = try notoTransport()
+        let library = try AssetLibrary(root: base.appendingPathComponent("Assets"), previewFolder: base.appendingPathComponent("Previews"), transport: transport, secrets: StaticSecretStore())
+        _ = await library.searchProviders(ProviderQuery(text: "rocket"), providerIDs: ["noto"])
+        let asset = try await library.fetch("noto:1f680")
+        XCTAssertEqual(asset.files.folder, "noto/1f680")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(library.url(for: asset, .meta)).path))
+    }
+
+    func testRelativePaths() {
+        let root = URL(fileURLWithPath: "/a/b")
+        XCTAssertEqual(Paths.relative(URL(fileURLWithPath: "/a/b/c/d.wav"), to: root), "c/d.wav")
+        XCTAssertNil(Paths.relative(URL(fileURLWithPath: "/a/bc/d.wav"), to: root))
+        XCTAssertNil(Paths.relative(URL(fileURLWithPath: "/x/d.wav"), to: root))
+    }
+}
