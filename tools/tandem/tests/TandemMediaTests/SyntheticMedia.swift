@@ -244,9 +244,6 @@ class TempFolderTestCase: XCTestCase {
             .appendingPathComponent("tandem-media-tests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
-        // Resolve /var -> /private/var so paths compare equal to what
-        // FileManager and FSEvents report.
-        temp = temp.resolvingSymlinksInPath()
     }
 
     override func tearDownWithError() throws {
