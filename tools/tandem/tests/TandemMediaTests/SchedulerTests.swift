@@ -210,6 +210,49 @@ final class JobSchedulerTests: XCTestCase {
         XCTAssertEqual(log.events, ["matte start", "proxy", "matte end"])
     }
 
+    func testAMatteStepsAsideForAProxyOfTheSamePriority() async throws {
+        let scheduler = JobScheduler(limits: .standard, encoderLock: EncoderLock())
+        let log = EventLog()
+        let running = Gate()
+        let proxyDone = Gate()
+        scheduler.submit(job("matte", .matte, .background) { context in
+            await context.acquireEncoder()
+            for i in 0..<3000 {
+                try await context.checkpoint()
+                if i == 3 { running.open() }
+                if proxyDone.opened { break }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            log.add("matte end")
+        })
+        await running.wait()
+        scheduler.submit(job("proxy", .proxy, .background) { context in
+            await context.acquireEncoder()
+            log.add("proxy")
+            proxyDone.open()
+        })
+        _ = await scheduler.wait(for: "matte")
+        XCTAssertEqual(log.events, ["proxy", "matte end"])
+    }
+
+    func testSameKindAtTheSamePriorityDoesNotPreempt() async throws {
+        let scheduler = JobScheduler(limits: .standard, encoderLock: EncoderLock())
+        let log = EventLog()
+        let running = Gate()
+        scheduler.submit(job("first", .proxy, .timeline) { context in
+            for i in 0..<30 {
+                try await context.checkpoint()
+                if i == 3 { running.open() }
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            log.add("first")
+        })
+        await running.wait()
+        scheduler.submit(job("second", .proxy, .timeline) { _ in log.add("second") })
+        _ = await scheduler.wait(for: "second")
+        XCTAssertEqual(log.events, ["first", "second"])
+    }
+
     func testEncoderIsHandedToAnExportBetweenFrames() async throws {
         let lock = EncoderLock()
         let scheduler = JobScheduler(encoderLock: lock)

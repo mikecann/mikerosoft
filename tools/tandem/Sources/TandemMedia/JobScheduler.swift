@@ -312,14 +312,19 @@ final class JobScheduler: @unchecked Sendable {
         scheduleNotify()
     }
 
-    /// True when a more urgent job is waiting for a slot this job holds.
+    /// True when a more urgent job is waiting for a slot this job holds:
+    /// one with a higher priority, or the same priority and a kind that goes
+    /// first. So a new take's proxy doesn't wait 15 minutes behind the
+    /// previous take's matte.
     func shouldYield(id: String) -> Bool {
         lock.withLock {
             guard let entry = entries[id], entry.isRunning else { return false }
             let load = currentLoad()
+            let rank = Self.kindOrder[entry.job.kind] ?? 99
             return entries.values.contains { other in
-                !other.isRunning && other.job.priority > entry.job.priority
-                    && sharesLimit(other.job.kind, entry.job.kind) && !fits(other.job.kind, load)
+                guard !other.isRunning, sharesLimit(other.job.kind, entry.job.kind), !fits(other.job.kind, load) else { return false }
+                if other.job.priority != entry.job.priority { return other.job.priority > entry.job.priority }
+                return (Self.kindOrder[other.job.kind] ?? 99) < rank
             }
         }
     }

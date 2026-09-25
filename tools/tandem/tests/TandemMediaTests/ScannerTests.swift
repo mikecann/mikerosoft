@@ -147,6 +147,29 @@ final class ScannerTests: TempFolderTestCase {
         XCTAssertEqual(report.missing.map(\.id), [b.id])
     }
 
+    func testAbsolutePathsInsideTheFolderMatchAndBecomeRelative() async throws {
+        try SyntheticMedia.writeAudioFile(to: file("music/a.wav"), segments: [(1, 0.5)])
+        var imported = try await MediaScanner.scan(folder, known: [])
+        imported[0].path = file("music/a.wav").path
+        let rescanned = try await MediaScanner.scan(folder, known: imported)
+        XCTAssertEqual(rescanned.map(\.id), imported.map(\.id))
+        XCTAssertEqual(rescanned.map(\.path), ["music/a.wav"])
+    }
+
+    func testKnownFilesOutsideTheFolderAreKeptWhileTheyExist() async throws {
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-outside-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try SyntheticMedia.writeAudioFile(to: outside, segments: [(1, 0.5)])
+        let item = try await MediaScanner.probe(outside, folder: folder)
+        XCTAssertTrue(item.path.hasPrefix("/"))
+        let found = try await MediaScanner.scanReport(folder, known: [item])
+        XCTAssertEqual(found.items, [item])
+        try FileManager.default.removeItem(at: outside)
+        let gone = try await MediaScanner.scanReport(folder, known: [item])
+        XCTAssertEqual(gone.items, [])
+        XCTAssertEqual(gone.missing, [item])
+    }
+
     func testChangedFileIsProbedAgainUnderTheSameID() async throws {
         try SyntheticMedia.writeAudioFile(to: file("music/a.wav"), segments: [(1, 0.5)])
         let first = try await MediaScanner.scan(folder, known: [])

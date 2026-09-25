@@ -38,8 +38,13 @@ public enum MediaScanner {
         let files = mediaFiles(in: folder)
         var report = ScanReport()
 
+        // Known items are matched by their path relative to the folder, so
+        // an absolute path to a file inside it (from an import) still matches.
         var knownByPath: [String: MediaItem] = [:]
-        for item in known where knownByPath[item.path] == nil { knownByPath[item.path] = item }
+        for item in known {
+            let path = folder.path(for: folder.url(for: item))
+            if knownByPath[path] == nil { knownByPath[path] = item }
+        }
 
         // Pair each file with the known item at the same path, if any.
         var work: [(url: URL, path: String, known: MediaItem?)] = []
@@ -51,7 +56,7 @@ public enum MediaScanner {
             work.append((url, path, match))
         }
         // Known files that live outside the folder are checked where they are.
-        for item in known where !claimed.contains(item.id) && isOutside(item.path) {
+        for item in known where !claimed.contains(item.id) && isOutside(folder.path(for: folder.url(for: item))) {
             let url = folder.url(for: item)
             if FileManager.default.fileExists(atPath: url.path) {
                 claimed.insert(item.id)
@@ -242,7 +247,9 @@ public enum MediaScanner {
     static func examine(_ url: URL, path: String, known: MediaItem?, folder: ProjectFolder) async -> FileOutcome {
         // Unchanged known files keep everything they had.
         if let known, let stamp = known.fingerprint.flatMap(Fingerprint.init), stamp.matchesStat(of: url), known.hasProbeData {
-            return .unchanged(ProbedFile(item: known, fingerprint: stamp, creationDate: nil, known: known))
+            var item = known
+            item.path = path
+            return .unchanged(ProbedFile(item: item, fingerprint: stamp, creationDate: nil, known: known))
         }
         do {
             let fingerprint = try Fingerprint.compute(for: url)
@@ -250,6 +257,7 @@ public enum MediaScanner {
             var item: MediaItem
             if let known {
                 item = known
+                item.path = path
                 probe.apply(to: &item)
             } else {
                 item = MediaItem(path: path, kind: probe.kind, role: .other)

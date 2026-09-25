@@ -333,6 +333,63 @@ final class RealMediaTests: XCTestCase {
         return Double(usage.ru_maxrss)
     }
 
+    // MARK: - Everything, through the scheduler
+
+    /// A real 43 s record-it take (camera and screen) with every default
+    /// analysis, queued at background priority like new footage in the app.
+    func testEverythingForAShortTakeThroughTheScheduler() async throws {
+        let folder = ProjectFolder(root: try output("project"))
+        let camera = try await MediaScanner.probe(Self.project.appendingPathComponent("source/2026-09-24_105238-camera.mov"), folder: folder)
+        let screen = try await MediaScanner.probe(Self.project.appendingPathComponent("source/2026-09-24_105238-screen.mov"), folder: folder)
+        let analysis = MediaAnalysis(folder: folder, encoderLock: EncoderLock())
+
+        final class Timeline: @unchecked Sendable {
+            let lock = NSLock()
+            var started: [String: Date] = [:]
+            var ended: [String: Date] = [:]
+            var labels: [String: String] = [:]
+        }
+        let timeline = Timeline()
+        let token = analysis.observe { jobs in
+            timeline.lock.withLock {
+                for job in jobs {
+                    timeline.labels[job.id] = "\(job.kind.rawValue) \(job.mediaID == camera.id ? "camera" : "screen")"
+                    if job.state == .running, timeline.started[job.id] == nil { timeline.started[job.id] = Date() }
+                    if [.done, .failed, .cancelled].contains(job.state), timeline.ended[job.id] == nil { timeline.ended[job.id] = Date() }
+                }
+            }
+        }
+        let start = Date()
+        analysis.requestDefaults(for: [camera, screen], usedOnTimeline: [])
+        var ids: [String] = []
+        for item in [camera, screen] {
+            for kind in MediaAnalysis.defaultKinds(for: item) {
+                ids.append(MediaAnalysis.jobID(kind, key: try XCTUnwrap(analysis.cacheKey(kind, for: item))))
+            }
+        }
+        for id in ids { _ = await analysis.scheduler.wait(for: id) }
+        let total = Date().timeIntervalSince(start)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        analysis.removeObserver(token)
+
+        report(String(format: "all defaults for a %.0f s take (camera and screen), background priority: %.1f s", camera.duration!.seconds, total))
+        timeline.lock.withLock {
+            for (id, label) in timeline.labels.sorted(by: { (timeline.started[$0.key] ?? .distantFuture) < (timeline.started[$1.key] ?? .distantFuture) }) {
+                let from = timeline.started[id].map { $0.timeIntervalSince(start) } ?? -1
+                let to = timeline.ended[id].map { $0.timeIntervalSince(start) } ?? -1
+                report(String(format: "  %@: %.1f s to %.1f s", label, from, to))
+            }
+        }
+        for item in [camera, screen] {
+            for kind in MediaAnalysis.defaultKinds(for: item) {
+                XCTAssertEqual(analysis.state(kind, for: item), .ready, "\(kind) for \(item.path)")
+            }
+        }
+        XCTAssertNotNil(analysis.transcript(for: camera)?.words.first)
+        XCTAssertNotNil(analysis.proxyURL(for: screen))
+        report(String(format: "  cache: %.1f MB", Double(analysis.cache.totalSize) / 1e6))
+    }
+
     // MARK: - Isolated voice
 
     func testIsolatedVoiceOfAMinuteLinesUp() async throws {
