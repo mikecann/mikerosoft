@@ -142,6 +142,14 @@ struct CLI {
                 label: args.options["label"], expectedRevision: try args.integer("expect")
             )
             return show(try await client().call(request), json: json)
+        case "captions":
+            try args.expectPositionals(atMost: 0, command: name)
+            let request = CaptionsRequest(
+                from: try time(args, "from"), to: try time(args, "to"), words: try args.integer("max-words"),
+                y: try args.number("y"), track: args.options["track"], apply: args.has("apply"),
+                label: args.options["label"], expectedRevision: try args.integer("expect")
+            )
+            return show(try await client().call(request), json: json)
         case "frame":
             try args.expectPositionals(atMost: 1, command: name)
             let at = try parseTime(try args.positional(0, "a time, like tandem frame 01:23.500", command: name))

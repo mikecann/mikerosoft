@@ -177,3 +177,33 @@ final class TranscriptToolsTests: XCTestCase {
         assertServiceError(.badRequest) { _ = try h.service.tighten(TightenRequest(min: 0.5, keep: 0.5), context: h.context) }
     }
 }
+
+final class CaptionPlanningTests: XCTestCase {
+    func word(_ text: String, _ start: Double, _ end: Double) -> TranscriptTools.SpokenWord {
+        TranscriptTools.SpokenWord(text: text, start: Time(seconds: start), end: Time(seconds: end), clipID: "clip_v", mediaID: "med_c", confidence: nil)
+    }
+
+    func testGroupsBreakAtWordCountSentencesAndPauses() {
+        let words = [
+            word("So", 0.00, 0.20), word("this", 0.22, 0.40), word("is", 0.42, 0.50), word("Convex.", 0.52, 1.00),
+            word("It", 1.02, 1.10), word("syncs.", 1.12, 1.50),
+            word("Later", 3.00, 3.40)
+        ]
+        let captions = TranscriptTools.captions(words, maxWords: 3, frameRate: .fps30)
+        XCTAssertEqual(captions.map { $0.words.map(\.text).joined(separator: " ") }, ["So this is", "Convex.", "It syncs.", "Later"])
+        for (a, b) in zip(captions, captions.dropFirst()) {
+            XCTAssertLessThanOrEqual(a.end, b.start, "captions overlap")
+        }
+        for caption in captions {
+            XCTAssertEqual(caption.start.roundedToFrame(.fps30), caption.start)
+            XCTAssertEqual(caption.end.roundedToFrame(.fps30), caption.end)
+        }
+        XCTAssertEqual(captions[3].end, Time(seconds: 3.6))
+    }
+
+    func testDuplicateVoiceTracksAreCaptionedOnce() {
+        let words = [word("Hello", 0, 0.5), word("Hello", 0, 0.5), word("there", 0.6, 0.9), word("there", 0.6, 0.9)]
+        let captions = TranscriptTools.captions(words, maxWords: 3, frameRate: .fps30)
+        XCTAssertEqual(captions.map { $0.words.count }, [2])
+    }
+}

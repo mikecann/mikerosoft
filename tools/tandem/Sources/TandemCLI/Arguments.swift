@@ -19,7 +19,7 @@ struct Arguments {
     static let valueOptions: Set<String> = [
         "project", "author", "from", "to", "min", "keep", "limit", "label", "key", "expect",
         "output", "preset", "width", "height", "port", "timeout", "name", "format",
-        "out", "search", "rewrite", "recipe",
+        "out", "search", "rewrite", "recipe", "max-words", "y", "track",
         "kind", "provider", "at", "duration", "variations"
     ]
     /// Options that are on or off.

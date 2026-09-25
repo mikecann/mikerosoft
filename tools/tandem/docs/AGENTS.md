@@ -44,6 +44,7 @@ tandem transcript [<clip or media id>] [--from T] [--to T]
 tandem search "<phrase>"           where a phrase is said
 tandem pauses [--min 0.6]          silences between words
 tandem tighten [--min 0.6] [--keep 0.15] [--apply]
+tandem captions [--from T] [--to T] [--max-words 3] [--y 0.42] [--apply]
 tandem apply <batch.json | ->      [--dry-run] [--expect N] [--label L] [--key K]
 tandem undo [--expect N]    tandem redo    tandem history    tandem validate
 tandem frame <time> [-o out.png]   tandem clip <start> <end> [-o out.mp4]
@@ -776,6 +777,23 @@ current timeline's times); `--json` prints it if you'd rather adjust it and
 MCP: `tighten {"min": 0.6, "keep": 0.15}`, then again with `"apply": true,
 "expectedRevision": <the plan's revision>`.
 
+### Caption a short
+
+```bash
+tandem captions --from 0:00 --to 1:30                 # the plan, nothing changes
+tandem captions --from 0:00 --to 1:30 --apply
+tandem frame 0:12 -o /tmp/caption.png --format portrait
+```
+
+Captions come from the transcripts: up to three words at a time (`--max-words`),
+breaking at sentence ends and pauses, with the word being spoken highlighted
+(the `caption` title preset, Tilt Warp with a black outline, which is what
+Mike's shorts use). They go on a "Captions" video track that follows ripple
+edits, so tightening pauses afterwards keeps them in sync. `--y` moves them:
+the default 0.42 sits between the screen and the camera in a 9:16 short;
+use about 0.85 for landscape. Run it again over the same range to redo them
+(it overwrites what's on the track there).
+
 ### Cut a phrase
 
 ```bash
@@ -971,6 +989,7 @@ publishing" first. `--optional` adds courtesy credits nobody requires
 | search | `tandem search "<phrase>"` | `POST /v1/search {"phrase"}` | `search` |
 | pauses | `tandem pauses [--min]` | `POST /v1/pauses {"min"}` | `pauses` |
 | tighten | `tandem tighten [--min] [--keep] [--apply]` | `POST /v1/tighten {"min", "keep", "apply"}` | `tighten` |
+| captions | `tandem captions [--from] [--to] [--max-words] [--y] [--apply]` | `POST /v1/captions {"from", "to", "words", "y", "apply"}` | `captions` |
 | apply | `tandem apply <file or ->` | `POST /v1/apply <batch>` | `apply` |
 | undo, redo | `tandem undo`, `tandem redo` | `POST /v1/undo`, `/v1/redo` | `undo`, `redo` |
 | history | `tandem history` | `POST /v1/history` | `history` |
