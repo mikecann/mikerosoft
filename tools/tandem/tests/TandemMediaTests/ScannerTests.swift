@@ -170,6 +170,21 @@ final class ScannerTests: TempFolderTestCase {
         XCTAssertEqual(gone.missing, [item])
     }
 
+    func testKnownFilesInSkippedFoldersStay() async throws {
+        try SyntheticMedia.writeAudioFile(to: file("exports/final.wav"), segments: [(1, 0.5)])
+        let render = try await MediaScanner.probe(file("exports/final.wav"), folder: folder)
+        XCTAssertEqual(render.path, "exports/final.wav")
+        let report = try await MediaScanner.scanReport(folder, known: [render])
+        XCTAssertEqual(report.items, [render])
+        XCTAssertEqual(report.missing, [])
+        // A copy elsewhere doesn't steal its ID.
+        try FileManager.default.copyItem(at: file("exports/final.wav"), to: file("music/final copy.wav"))
+        let again = try await MediaScanner.scanReport(folder, known: [render])
+        XCTAssertEqual(again.items.count, 2)
+        XCTAssertEqual(again.items.first { $0.path == "exports/final.wav" }?.id, render.id)
+        XCTAssertNotEqual(again.items.first { $0.path == "music/final copy.wav" }?.id, render.id)
+    }
+
     func testChangedFileIsProbedAgainUnderTheSameID() async throws {
         try SyntheticMedia.writeAudioFile(to: file("music/a.wav"), segments: [(1, 0.5)])
         let first = try await MediaScanner.scan(folder, known: [])

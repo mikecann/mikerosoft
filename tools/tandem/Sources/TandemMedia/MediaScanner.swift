@@ -20,8 +20,9 @@ public enum MediaScanner {
     /// files get new items. record-it takes (`<base>-camera.mov` and
     /// `<base>-screen.mov`) share a take ID and carry take offsets.
     ///
-    /// Returns every media file found (plus known files outside the folder
-    /// that still exist). Known files that are gone are left out; use
+    /// Returns every media file found (plus known files the walk skips,
+    /// outside the folder or in `exports/`, that still exist). Known files
+    /// that are gone are left out; use
     /// `scanReport` to get them, along with files that couldn't be read yet
     /// and anything worth telling Mike.
     public static func scan(_ folder: ProjectFolder, known: [MediaItem]) async throws -> [MediaItem] {
@@ -49,19 +50,24 @@ public enum MediaScanner {
         // Pair each file with the known item at the same path, if any.
         var work: [(url: URL, path: String, known: MediaItem?)] = []
         var claimed = Set<String>()
+        var paths = Set<String>()
         for url in files {
             let path = folder.path(for: url)
             let match = knownByPath[path]
             if let match { claimed.insert(match.id) }
             work.append((url, path, match))
+            paths.insert(path)
         }
-        // Known files that live outside the folder are checked where they are.
-        for item in known where !claimed.contains(item.id) && isOutside(folder.path(for: folder.url(for: item))) {
+        // Known files the walk doesn't reach (outside the folder, or inside a
+        // skipped one such as exports/) are checked where they are, so an
+        // imported render doesn't drop out of the project on every scan.
+        for item in known where !claimed.contains(item.id) {
             let url = folder.url(for: item)
-            if FileManager.default.fileExists(atPath: url.path) {
-                claimed.insert(item.id)
-                work.append((url, item.path, item))
-            }
+            let path = folder.path(for: url)
+            guard !paths.contains(path), FileManager.default.fileExists(atPath: url.path) else { continue }
+            claimed.insert(item.id)
+            paths.insert(path)
+            work.append((url, path, item))
         }
         var unclaimed = known.filter { !claimed.contains($0.id) }
 
@@ -292,10 +298,6 @@ public enum MediaScanner {
         item.variableFrameRate = file.item.variableFrameRate
         item.fingerprint = file.item.fingerprint
         return item
-    }
-
-    static func isOutside(_ path: String) -> Bool {
-        path.hasPrefix("/") || path.hasPrefix("~/")
     }
 
     // MARK: - Probing
