@@ -144,11 +144,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
                 return NSLog("Tandem: no folder at %@", folder)
             }
             documents.createProject(inFolder: URL(fileURLWithPath: folder, isDirectory: true))
-        case .assets(let section, let search, let online):
+        case .assets(let section, let search, let scope, let online):
             let host = AssetLibraryHost.shared
             if section.isAudio { host.audioSection = section } else { host.graphicsSection = section }
             front?.model.libraryTab = section.isAudio ? .audio : .graphics
             if let search { host.update(section) { $0.text = search } }
+            if let scope { host.update(section) { $0.scope = scope } }
             if online { host.searchOnline(section) }
         case .saveVersion(let out):
             // Links never replace a file; Save As in the app asks first.

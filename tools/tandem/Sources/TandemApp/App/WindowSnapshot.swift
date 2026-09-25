@@ -123,7 +123,7 @@ enum AppURLCommand: Equatable {
     case saveVersion(out: String)
     /// Shows an asset library section, with search text, and optionally
     /// asks the online sources.
-    case assets(section: AssetSection, search: String?, online: Bool)
+    case assets(section: AssetSection, search: String?, scope: AssetScope?, online: Bool)
 
     static func parse(_ url: URL) -> AppURLCommand? {
         guard url.scheme?.lowercased() == "tandem", let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
@@ -171,7 +171,7 @@ enum AppURLCommand: Equatable {
             return .newProject(folder: folder)
         case "assets":
             guard let section = query["section"].flatMap(AssetSection.init(rawValue:)) else { return nil }
-            return .assets(section: section, search: query["search"], online: query["online"] == "1")
+            return .assets(section: section, search: query["search"], scope: query["scope"].flatMap(AssetScope.init(rawValue:)), online: query["online"] == "1")
         case "version", "saveas":
             guard let out = path(query["out"], extension: ProjectFile.fileExtension) else { return nil }
             return .saveVersion(out: out)
