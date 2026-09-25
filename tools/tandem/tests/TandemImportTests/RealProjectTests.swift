@@ -39,6 +39,22 @@ final class RealProjectTests: XCTestCase {
         try check(result, name: "decision-models-edl")
         XCTAssertEqual(result.report.count(.missingMedia), 0, result.report.text)
         XCTAssertEqual(result.project.markers.filter { $0.kind == .section }.count, 10)
+
+        // How close the rebuild gets to the Filmora cut Mike exported.
+        let v14 = try await FilmoraImporter().importProject(at: Self.videos.appendingPathComponent("decision-models/Decision Models v14.wfp"))
+        var anchors: [(name: String, file: String, time: Double)] = []
+        for section in recipe.sections ?? [] {
+            guard let at = section.at, let take = recipe.takes.last(where: { $0.start <= at + 0.001 }) else { continue }
+            anchors.append((section.name, recipe.resolve(take.camera), at - take.start))
+        }
+        let comparison = CutComparison.compare(result.project, named: "EDL rebuild", v14.project, named: "Filmora v14", anchors: anchors)
+        let folder = Self.output.appendingPathComponent("decision-models-edl")
+        try Data((comparison.text + "\n").utf8).write(to: folder.appendingPathComponent("comparison-with-v14.txt"))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(comparison).write(to: folder.appendingPathComponent("comparison-with-v14.json"))
+        print("\n=== EDL rebuild against v14\n\(comparison.text)\n")
+        XCTAssertGreaterThan(comparison.matchedVoice, 100, "most of v14's voice clips come from the EDL")
     }
 
     /// Imports a Filmora project, linking library files with misleading
