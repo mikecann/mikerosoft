@@ -33,6 +33,7 @@ enum Help {
         CommandHelp(name: "pauses", usage: "tandem pauses [--min 0.6] [--from <time>] [--to <time>]", summary: "Silences between words, in timeline time.", options: ["min", "from", "to"]),
         CommandHelp(name: "tighten", usage: "tandem tighten [--min 0.6] [--keep 0.15] [--from <time>] [--to <time>] [--apply]", summary: "Shorten pauses over --min down to --keep (a dry run without --apply).", options: ["min", "keep", "from", "to", "apply", "label", "expect"]),
         CommandHelp(name: "frame", usage: "tandem frame <time> [-o out.png] [--width <px>]", summary: "Render one frame of the timeline to a PNG.", options: ["output", "width", "height", "format"]),
+        CommandHelp(name: "screenshot", usage: "tandem screenshot [-o out.png]", summary: "Save a picture of the app window (needs the app to have the project open).", options: ["output"]),
         CommandHelp(name: "clip", usage: "tandem clip <start> <end> [-o out.mp4] [--preset review]", summary: "Render part of the timeline to a review MP4.", options: ["output", "preset"]),
         CommandHelp(name: "export", usage: "tandem export [--preset youtube4k] [-o out.mp4] [--from <time>] [--to <time>]", summary: "Export the video (presets: youtube4k, youtube1080, review, short).", options: ["output", "preset", "from", "to", "format"]),
         CommandHelp(name: "loudness", usage: "tandem loudness [<media id>]", summary: "Measured loudness per file and the levelling each clip gets.", options: []),

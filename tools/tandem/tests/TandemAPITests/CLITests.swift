@@ -397,3 +397,16 @@ final class AssetsCLITests: XCTestCase {
         XCTAssertTrue(wrongOption.stderr.contains("`tandem assets search` doesn't take --at"), wrongOption.stderr)
     }
 }
+
+/// `tandem screenshot` needs the app, so headless it explains that.
+final class ScreenshotCLITests: XCTestCase {
+    func testScreenshotWithoutTheAppExplainsWhy() throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        let folder = TempFolder()
+        _ = try APIFixture.write(to: folder.url)
+        let result = try CLITests().tandem("screenshot", "-o", "shot.png", in: folder.url)
+        XCTAssertEqual(result.status, 1)
+        XCTAssertFalse(result.stderr.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.file("shot.png").path))
+    }
+}

@@ -148,6 +148,10 @@ struct CLI {
             let output = absolute(args.options["output"] ?? "frame-\(TimeText.fileSafe(at)).png")
             let request = FrameRequest(time: at, maxWidth: try args.integer("width"), maxHeight: try args.integer("height"), output: output, format: args.options["format"])
             return show(try await client().call(request), json: json)
+        case "screenshot":
+            try args.expectPositionals(atMost: 0, command: name)
+            let output = absolute(args.options["output"] ?? "tandem-window.png")
+            return show(try await client().call(ScreenshotRequest(output: output)), json: json)
         case "clip":
             try args.expectPositionals(atMost: 2, command: name)
             let start = try parseTime(try args.positional(0, "a start and an end, like tandem clip 1:00 1:20", command: name))
