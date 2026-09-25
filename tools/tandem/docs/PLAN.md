@@ -70,7 +70,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Export sheet and job status bar [app]
 - [x] Activity feed: agent edits with labels, undo per batch [app]
 - [x] Hosts the API while a project is open [app]
-- [ ] Keyframe editing in the timeline, drops from Finder [app]
+- [x] Keyframe editing in the timeline, drops from Finder, save failures shown and retried [app]
 - [x] Exact paused frames from original files, including remuxed open-GOP files without a keyframe table [render]
 
 ## Milestone 6: real projects
@@ -85,7 +85,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Asset library: catalogue (SQLite FTS5), providers (import folders, ElevenLabs, Noto, Iconify, SVGL, Fontsource, Pexels, Pixabay, Freesound), normalising (alpha stickers to HEVC, Lottie, SVG, audio loudness), project use and credits [assets]
 - [x] Asset commands in the CLI and MCP (`tandem assets ...`, five MCP tools) [api]
 - [x] Asset browser in the app: search, sources, favourites, hover previews, drag or double-click to place, credits [app]
-- [ ] ElevenLabs generation and the big Space preview in the browser; dropping an asset onto a clip [app]
+- [x] ElevenLabs Generate, the big Space preview, looks and fonts dropped onto clips [app]
 - [x] Sources as providers; paid libraries through watched import folders. ElevenLabs sound effects need the key's `sound_generation` permission (music works)
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
 - [ ] Stickers: Lottie and HEVC with alpha
