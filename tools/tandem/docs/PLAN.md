@@ -19,7 +19,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Validator and random-edit invariant tests [core]
 - [x] Journal with seeded IDs, atomic saves, backups, crash recovery [core]
 - [x] Project session: lock, autosave, recovery [api]
-- [ ] Layout presets (Full, Corner, Split, Short) and zoom-to-rectangle as commands [core]
+- [x] Layout presets (full, PiP right, PiP left, split) and zoom-to-region as commands [core]
 - [ ] JSON schema for commands, generated for MCP and docs [api]
 
 ## Milestone 2: media

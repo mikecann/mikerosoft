@@ -99,6 +99,14 @@ public enum EditCommand: Codable, Equatable, Sendable {
     case updateClip(clipID: String, patch: JSONValue)
     case link(clipIDs: [String])
     case unlink(clipIDs: [String])
+    /// Sets a one-key layout (full, PiP right, PiP left, split) on video
+    /// clips. Audio clips in the list are skipped.
+    case applyLayout(clipIDs: [String], preset: LayoutPreset)
+    /// Zooms a video clip into a rectangle of its source (0...1 from the top
+    /// left). Without `at` the zoom is static. With `at` (timeline time) it
+    /// animates there over `duration` (default 0.5 s) with an ease; zoom back
+    /// out later with the rectangle `{x: 0, y: 0, width: 1, height: 1}`.
+    case zoomToRegion(clipID: String, rect: Rect, at: Time? = nil, duration: Time? = nil)
 
     // MARK: Transitions
 

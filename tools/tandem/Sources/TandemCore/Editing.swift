@@ -62,6 +62,10 @@ public enum Editing {
             try link(&project, clipIDs, &context)
         case .unlink(let clipIDs):
             try unlink(&project, clipIDs)
+        case .applyLayout(let clipIDs, let preset):
+            try applyLayout(&project, clipIDs, preset, &context)
+        case .zoomToRegion(let clipID, let rect, let at, let duration):
+            try zoomToRegion(&project, clipID, rect: rect, at: at, duration: duration)
         case .addTransition(let trackID, let transition):
             try addTransition(&project, trackID: trackID, transition, &context)
         case .updateTransition(let transitionID, let patch):
@@ -910,6 +914,76 @@ public enum Editing {
             let (location, index) = try requireClip(p, id)
             p[location].clips[index].linkGroup = nil
         }
+    }
+
+    // MARK: - Layout
+
+    static func applyLayout(_ p: inout Project, _ clipIDs: [String], _ preset: LayoutPreset, _ context: inout EditContext) throws {
+        var changed = 0
+        for id in clipIDs {
+            let (location, index) = try requireClip(p, id)
+            guard p[location].kind == .video else { continue }
+            try requireUnlocked(p[location])
+            var clip = p[location].clips[index]
+            let role = clip.mediaID.flatMap { p.media($0)?.role }
+            clip.video = preset.apply(to: clip.video, role: role, shadowID: context.makeID("fx"))
+            for key in ["video.transform.position", "video.transform.scale", "video.transform.rotation"] {
+                clip.keyframes.removeValue(forKey: key)
+            }
+            p[location].clips[index] = clip
+            changed += 1
+        }
+        if changed == 0 { throw EditError.invalid("none of those clips are on a video track") }
+    }
+
+    static func zoomToRegion(_ p: inout Project, _ clipID: String, rect: Rect, at: Time?, duration: Time?) throws {
+        let (location, index) = try requireClip(p, clipID)
+        try requireUnlocked(p[location])
+        guard p[location].kind == .video else { throw EditError.invalid("clip \(clipID) isn't on a video track") }
+        guard rect.width > 0, rect.height > 0, rect.x >= 0, rect.y >= 0, rect.x + rect.width <= 1.0001, rect.y + rect.height <= 1.0001 else {
+            throw EditError.invalid("the zoom rectangle must sit inside the frame (0...1)")
+        }
+        var clip = p[location].clips[index]
+        guard let mediaID = clip.mediaID, let item = p.media(mediaID), let width = item.width, let height = item.height else {
+            throw EditError.invalid("clip \(clipID) needs probed media (width and height) to zoom")
+        }
+        let target = Transform.showing(
+            rect, sourceWidth: Double(width), sourceHeight: Double(height),
+            canvasWidth: Double(p.settings.width), canvasHeight: Double(p.settings.height)
+        )
+        var video = clip.video ?? VideoProperties()
+        guard let at else {
+            video.transform.position = target.position
+            video.transform.scale = target.scale
+            video.layoutPreset = nil
+            clip.video = video
+            clip.keyframes.removeValue(forKey: "video.transform.position")
+            clip.keyframes.removeValue(forKey: "video.transform.scale")
+            p[location].clips[index] = clip
+            return
+        }
+        let length = duration ?? Time(seconds: 0.5)
+        let startTime = at - clip.start
+        let endTime = startTime + length
+        guard startTime >= .zero, endTime <= clip.duration else {
+            throw EditError.invalid("the zoom has to happen inside clip \(clipID) (\(clip.start) to \(clip.end))")
+        }
+        let from = clip.resolvedVideo(at: startTime).transform
+        func animate(_ key: String, _ a: ParamValue, _ b: ParamValue) {
+            var frames = (clip.keyframes[key] ?? []).filter { $0.time < startTime || $0.time > endTime }
+            if frames.isEmpty && startTime > .zero {
+                // Hold the current value until the zoom starts.
+                frames.append(Keyframe(time: .zero, value: a, interpolation: .hold))
+            }
+            frames.append(Keyframe(time: startTime, value: a, interpolation: .easeInOut))
+            frames.append(Keyframe(time: endTime, value: b, interpolation: .easeInOut))
+            clip.keyframes[key] = frames.sorted { $0.time < $1.time }
+        }
+        animate("video.transform.scale", .number(from.scale), .number(target.scale))
+        animate("video.transform.position", .point(from.position), .point(target.position))
+        video.layoutPreset = nil
+        clip.video = video
+        p[location].clips[index] = clip
     }
 
     // MARK: - Transitions
