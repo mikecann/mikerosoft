@@ -80,6 +80,7 @@ final class PlaybackController {
     /// The playhead time the still on screen shows, nil when hidden.
     @ObservationIgnored private var stillTime: Time?
     @ObservationIgnored private var stillImage: CGImage?
+    @ObservationIgnored private var loadStarted: TimeInterval = 0
     @ObservationIgnored private var lastFrame: CGImage?
     @ObservationIgnored private var lastFrameTime: CMTime?
     @ObservationIgnored private lazy var imageContext = CIContext()
@@ -221,6 +222,7 @@ final class PlaybackController {
         player.replaceCurrentItem(with: item)
         outputs[slot] = output
         readyObservation = nil
+        loadStarted = ProcessInfo.processInfo.systemUptime
         player.seek(to: time.cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.whenReady(slot: slot, generation: generation) }
@@ -256,6 +258,7 @@ final class PlaybackController {
 
     private func show(slot: Int) {
         readyObservation = nil
+        DrawTiming.record("new cut on screen", ProcessInfo.processInfo.systemUptime - loadStarted)
         let old = front
         let wasShowing = hasComposition
         front = slot

@@ -35,6 +35,17 @@ enum WindowSnapshot {
               ) else { return nil }
         context.scaleBy(x: scale, y: scale)
         layer.render(in: context)
+        // Popovers (tighten pauses, pickers) live in child windows; draw
+        // them where they sit over this one.
+        for child in window.childWindows ?? [] where child.isVisible {
+            guard let childView = child.contentView?.superview ?? child.contentView, let childLayer = childView.layer else { continue }
+            childView.layoutSubtreeIfNeeded()
+            childView.displayIfNeeded()
+            context.saveGState()
+            context.translateBy(x: child.frame.minX - window.frame.minX, y: child.frame.minY - window.frame.minY)
+            childLayer.render(in: context)
+            context.restoreGState()
+        }
         return context.makeImage()
     }
 
