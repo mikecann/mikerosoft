@@ -161,10 +161,35 @@ public final class PixabayProvider: AssetProvider, @unchecked Sendable {
     }
 
     public func fetchOriginal(_ asset: Asset, into folder: URL) async throws -> FetchedOriginal {
-        guard let link = asset.remote["download"], let url = URL(string: link) else { throw AssetError.notFound("download link for \(asset.id)") }
+        var current = asset
+        // Pixabay's links stop working after a day; look the item up again
+        // by ID for a fresh one.
+        if Date().timeIntervalSince(asset.updatedAt) > 23 * 3600, let fresh = try await lookUp(asset) {
+            current.remote.merge(fresh.remote) { _, new in new }
+            current.previewURL = fresh.previewURL ?? current.previewURL
+        }
+        guard let link = current.remote["download"], let url = URL(string: link) else { throw AssetError.notFound("download link for \(asset.id)") }
         let file = ProviderFiles.original(in: folder, ext: ProviderFiles.ext(of: url, fallback: asset.kind == .video ? "mp4" : "jpg"))
         try await http.download(url, to: file)
-        return FetchedOriginal(asset: asset, file: file)
+        return FetchedOriginal(asset: current, file: file)
+    }
+
+    /// The asset as Pixabay describes it now, found by its ID.
+    func lookUp(_ asset: Asset) async throws -> Asset? {
+        guard let key = secrets.secret(service: Self.keychainService) else {
+            throw AssetError.providerUnavailable(provider: displayName, reason: "no API key in the Keychain (service pixabay)")
+        }
+        let parts = asset.providerID.split(separator: "-", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+        let isVideo = parts[0] == "video"
+        let base = URL(string: isVideo ? "https://pixabay.com/api/videos/" : "https://pixabay.com/api/")!
+        let items = [URLQueryItem(name: "id", value: parts[1])]
+        let url = base.adding([URLQueryItem(name: "key", value: key)] + items)
+        let cacheKey = base.adding(items).absoluteString
+        if isVideo {
+            return try await http.getJSON(VideoSearch.self, url, cacheKey: cacheKey).hits.first.flatMap(asset(for:))
+        }
+        return try await http.getJSON(ImageSearch.self, url, cacheKey: cacheKey).hits.first.flatMap(asset(for:))
     }
 
     public func licence(for asset: Asset) async throws -> AssetLicence {

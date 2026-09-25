@@ -518,3 +518,36 @@ final class NotoEmojiSearchTests: XCTestCase {
         XCTAssertEqual(warning.map(\.providerID), ["26a0_fe0f"])
     }
 }
+
+final class PixabayRefreshTests: XCTestCase {
+    func testStaleLinksAreRefreshedByIDBeforeDownloading() async throws {
+        let transport = FixtureTransport()
+        try transport.on("image_type=photo", fixture: "pixabay_images.json")
+        // The lookup by ID returns the same item with a new link.
+        let fresh = String(decoding: try fixture("pixabay_images.json"), as: UTF8.self)
+            .replacingOccurrences(of: "ed6a99fd0a76647_1280.jpg", with: "fresh_1280.jpg")
+        transport.on("id=195893", data: Data(fresh.utf8))
+        transport.on("fresh_1280.jpg", data: Data("jpeg".utf8))
+        let provider = PixabayProvider(environment: makeEnvironment(transport, secrets: ["pixabay": "K"]))
+        let found = try await provider.search(ProviderQuery(text: "flower", kinds: [.image]))
+        var image = try XCTUnwrap(found.first)
+        image.updatedAt = Date(timeIntervalSinceNow: -2 * 24 * 3600)
+
+        let fetched = try await provider.fetchOriginal(image, into: tempFolder("pixabay"))
+
+        XCTAssertEqual(fetched.asset.remote["download"], "https://pixabay.com/get/fresh_1280.jpg")
+        XCTAssertEqual(transport.requests(matching: "fresh_1280.jpg").count, 1)
+        XCTAssertTrue(transport.requests(matching: "id=195893").first?.url?.absoluteString.contains("key=K") == true)
+    }
+
+    func testRecentLinksAreUsedAsTheyAre() async throws {
+        let transport = FixtureTransport()
+        try transport.on("image_type=photo", fixture: "pixabay_images.json")
+        transport.on("ed6a99fd0a76647_1280.jpg", data: Data("jpeg".utf8))
+        let provider = PixabayProvider(environment: makeEnvironment(transport, secrets: ["pixabay": "K"]))
+        let found = try await provider.search(ProviderQuery(text: "flower", kinds: [.image]))
+        let image = try XCTUnwrap(found.first)
+        _ = try await provider.fetchOriginal(image, into: tempFolder("pixabay"))
+        XCTAssertTrue(transport.requests(matching: "id=").isEmpty)
+    }
+}
