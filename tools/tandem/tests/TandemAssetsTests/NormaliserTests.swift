@@ -10,7 +10,7 @@ final class NormaliserTests: XCTestCase {
     func testSineWAVIsResampledTo48kWithLoudnessAndPeaks() async throws {
         let folder = tempFolder("audio")
         let input = folder.appendingPathComponent("original.wav")
-        try Generated.sineWAV(at: input, seconds: 2, sampleRate: 44_100, channels: 2, dbfs: -20)
+        try Generated.sineWAV(at: input, seconds: 1, sampleRate: 44_100, channels: 2, dbfs: -20)
 
         let result = try await normaliser.normalise(input, into: folder)
 
@@ -18,12 +18,12 @@ final class NormaliserTests: XCTestCase {
         XCTAssertEqual(result.file, "normalised.wav")
         XCTAssertEqual(result.mediaKind, .audio)
         XCTAssertTrue(result.hasAudio)
-        XCTAssertEqual(try XCTUnwrap(result.duration), 2, accuracy: 0.002)
+        XCTAssertEqual(try XCTUnwrap(result.duration), 1, accuracy: 0.002)
         let file = try AVAudioFile(forReading: folder.appendingPathComponent("normalised.wav"))
         XCTAssertEqual(file.fileFormat.sampleRate, 48_000)
         XCTAssertEqual(file.fileFormat.channelCount, 2)
         XCTAssertEqual(file.fileFormat.settings[AVLinearPCMBitDepthKey] as? Int, 24)
-        XCTAssertEqual(Double(file.length), 96_000, accuracy: 100)
+        XCTAssertEqual(Double(file.length), 48_000, accuracy: 100)
 
         // A stereo sine at -20 dBFS reads -20 LUFS (EBU Tech 3341 scaled).
         let loudness = try XCTUnwrap(result.loudness)
@@ -34,7 +34,7 @@ final class NormaliserTests: XCTestCase {
 
         XCTAssertEqual(result.peaks, "peaks.bin")
         let waveform = try AudioNormaliser.readPeaks(from: folder.appendingPathComponent("peaks.bin"))
-        XCTAssertEqual(waveform.peaks.count, 200, accuracy: 1)
+        XCTAssertEqual(waveform.peaks.count, 100, accuracy: 1)
         XCTAssertEqual(Double(waveform.peaks.max() ?? 0), 0.1, accuracy: 0.01)
 
         XCTAssertEqual(result.thumbnail, "thumbnail.jpg")

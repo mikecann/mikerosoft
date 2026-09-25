@@ -231,3 +231,42 @@ final class CatalogTests: XCTestCase {
         XCTAssertNil(Asset.parseID(":x"))
     }
 }
+
+final class CodableTests: XCTestCase {
+    func testAssetsQueriesAndCreditsRoundTripAsJSON() throws {
+        var asset = sampleAsset(provider: "noto", id: "1f680", kind: .sticker, name: "Rocket", tags: ["rocket", "🚀"], duration: 0.7, hasAlpha: true, licence: .creditNeeded, credit: "credit")
+        asset.remote = ["lottie": "https://example.com/l.json"]
+        asset.loudness = nil
+        asset.files = AssetFiles(folder: "noto/1f680", original: "original.json", normalised: "normalised.mov", thumbnail: "thumbnail.png")
+        let encoder = JSONEncoder.sorted
+        let decoder = JSONDecoder.iso
+        let decoded = try decoder.decode(Asset.self, from: encoder.encode(asset))
+        XCTAssertEqual(decoded.id, asset.id)
+        XCTAssertEqual(decoded.tags, asset.tags)
+        XCTAssertEqual(decoded.files, asset.files)
+        XCTAssertEqual(decoded.remote, asset.remote)
+        XCTAssertEqual(decoded.addedAt.timeIntervalSince1970, asset.addedAt.timeIntervalSince1970, accuracy: 1)
+
+        let query = AssetQuery(text: "whoosh", kinds: [.sfx, .music], licenceClasses: [.noCredit], hasAlpha: false, maxDuration: 3, favouritesOnly: true, sort: .name)
+        XCTAssertEqual(try JSONDecoder().decode(AssetQuery.self, from: JSONEncoder().encode(query)), query)
+
+        // An agent can send just the fields it cares about.
+        let minimal = try JSONDecoder().decode(Asset.self, from: Data(#"{"provider": "import", "providerID": "x.wav", "kind": "sfx"}"#.utf8))
+        XCTAssertEqual(minimal.id, "import:x.wav")
+        XCTAssertEqual(minimal.name, "x.wav")
+        XCTAssertEqual(minimal.state, .remote)
+        XCTAssertEqual(minimal.licenceClass, .unknown)
+
+        let request = try JSONDecoder().decode(GenerationRequest.self, from: Data(#"{"prompt": "whoosh"}"#.utf8))
+        XCTAssertEqual(request.kind, .sfx)
+        XCTAssertEqual(request.variations, 1)
+        XCTAssertTrue(request.instrumental)
+    }
+
+    func testAccentsDontMatter() throws {
+        let catalog = try makeCatalog()
+        try catalog.upsert(sampleAsset(id: "cafe", name: "Café ambience"))
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "cafe")).map(\.providerID), ["cafe"])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "CAFÉ")).map(\.providerID), ["cafe"])
+    }
+}

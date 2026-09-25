@@ -10,7 +10,7 @@ final class ProjectUseTests: XCTestCase {
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("sfx"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("music"), withIntermediateDirectories: true)
         try Generated.sineWAV(at: folder.appendingPathComponent("sfx/Whoosh_01.wav"), seconds: 0.5)
-        try Generated.sineWAV(at: folder.appendingPathComponent("music/Lounge Bed.wav"), seconds: 2)
+        try Generated.sineWAV(at: folder.appendingPathComponent("music/Lounge Bed.wav"), seconds: 0.6)
         return folder
     }
 
