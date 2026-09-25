@@ -137,6 +137,32 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(try ProjectFile.load(from: url).project.track(named: "Camera")?.clips.count, 3)
     }
 
+    func testIdempotencyKeysHoldBetweenTheAppAndTheCLI() throws {
+        let folder = TempFolder()
+        let url = try APIFixture.write(to: folder.url)
+        func hosted<R>(_ body: (TandemService) throws -> R) throws -> R {
+            let session = try ProjectSession.open(url, owner: .app)
+            let service = TandemService(session: session, mode: .hosted, analysis: FakeAnalysis(), renderer: FakeRenderer())
+            defer {
+                service.shutdown()
+                session.close()
+            }
+            return try body(service)
+        }
+        // Applied through the app, which quits before the agent hears back;
+        // the agent's retry reaches the CLI.
+        let cut = ApplyRequest(label: "Cut", commands: [.moveClips(clipIDs: ["clip_brl1"], delta: t(1), includeLinked: false)], idempotencyKey: "move-broll")
+        let first = try hosted { try $0.apply(cut, context: CallContext()) }
+        let retried = try headless(url) { try $0.apply(cut, context: CallContext()) }
+        XCTAssertTrue(retried.repeated)
+        XCTAssertEqual(retried.revision, first.revision)
+        // And the other way round.
+        let again = ApplyRequest(label: "Again", commands: [.moveClips(clipIDs: ["clip_brl1"], delta: t(1), includeLinked: false)], idempotencyKey: "move-broll-2")
+        _ = try headless(url) { try $0.apply(again, context: CallContext()) }
+        XCTAssertTrue(try hosted { try $0.apply(again, context: CallContext()) }.repeated)
+        XCTAssertEqual(try ProjectFile.load(from: url).project.clip("clip_brl1")?.start, t(22), "each move once")
+    }
+
     func testValidateReportsMissingFiles() throws {
         let h = try ServiceHarness()
         defer { h.close() }

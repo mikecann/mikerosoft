@@ -369,7 +369,11 @@ public final class TandemService: @unchecked Sendable {
         }
         editLock.lock()
         defer { editLock.unlock() }
-        if mode == .headless, let key = batch.idempotencyKey, var previous = history.result(forKey: key) {
+        // Keys are kept on disk as well as by the coordinator, so a retry
+        // gets the first result whichever process took the first call: the
+        // app may quit before the agent hears back, and the retry then
+        // reaches the CLI (or the other way round).
+        if let key = batch.idempotencyKey, var previous = history.result(forKey: key) {
             previous.repeated = true
             return previous
         }
@@ -388,8 +392,10 @@ public final class TandemService: @unchecked Sendable {
             createdIDs: commit.createdIDs, warnings: commit.warnings, dryRun: false, repeated: repeated,
             added: diff.added, removed: diff.removed, changed: diff.changed, duration: after.duration
         )
-        if mode == .headless && !repeated {
-            history.recordEdit(label: batch.label, author: batch.author, before: before, beforeRevision: beforeRevision, afterRevision: commit.revision)
+        if !repeated {
+            if mode == .headless {
+                history.recordEdit(label: batch.label, author: batch.author, before: before, beforeRevision: beforeRevision, afterRevision: commit.revision)
+            }
             if let key = batch.idempotencyKey { history.remember(key: key, result: result) }
         }
         return result
