@@ -143,6 +143,17 @@ final class HTTPTests: XCTestCase {
         XCTAssertNil(ProjectSession.readLock(for: h.url)?.port)
     }
 
+    func testTheAppDoesntGiveUpItsProject() async throws {
+        let served = try await Served()
+        defer { served.stop() }
+        do {
+            try await served.client().requestRelease()
+            XCTFail("a server without a release handler refuses")
+        } catch let error as ServiceError {
+            XCTAssertEqual(error.code, "unavailable")
+        }
+    }
+
     func testRequestParsing() {
         let raw = Data("POST /v1/apply?x=1 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nX-Tandem-Author: me\r\n\r\n{}".utf8)
         guard case .complete(let request) = HTTPRequest.parse(raw) else { return XCTFail("should parse") }

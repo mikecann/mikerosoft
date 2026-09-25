@@ -10,6 +10,7 @@ import TandemCore
 ///     GET  /v1/watch         server-sent events: change, jobs and export events
 ///     GET  /v1/schema        the EditBatch JSON schema
 ///     GET  /v1/health        no token needed; says a Tandem API is here
+///     POST /v1/release       asks `tandem serve` to save and let go of the project
 ///
 /// Errors come back as `{"error": {"code", "message"}}` with a matching
 /// status code. Edits are credited to the `X-Tandem-Author` header when a
@@ -26,6 +27,10 @@ public final class TandemHTTPServer: @unchecked Sendable {
     /// How often an idle event stream sends a comment to keep proxies and
     /// clients from timing out.
     var keepAliveInterval: TimeInterval = 15
+    /// Called for `POST /v1/release`, when another process (the app) wants
+    /// the project. `tandem serve` sets it to save and quit; the app leaves
+    /// it nil, so the request is refused.
+    public var onRelease: (@Sendable () -> Void)?
 
     public init(service: TandemService, token: String = TandemHTTPServer.makeToken()) {
         self.service = service
@@ -126,6 +131,15 @@ public final class TandemHTTPServer: @unchecked Sendable {
         let name = String(path.dropFirst("/v1/".count))
         if name == "schema" && request.method == "GET" {
             connection.send(json: CommandSchema.document)
+            return
+        }
+        if name == "release" && request.method == "POST" {
+            guard let onRelease else {
+                connection.send(error: ServiceError(.unavailable, "This Tandem keeps the project open; close it there instead."))
+                return
+            }
+            connection.send(json: .object(["ok": .bool(true)]))
+            onRelease()
             return
         }
         if name == "watch" && request.method == "GET" {

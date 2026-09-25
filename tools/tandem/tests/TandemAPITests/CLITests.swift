@@ -184,6 +184,30 @@ final class CLITests: XCTestCase {
         XCTAssertNil(ProjectSession.liveLock(for: url))
     }
 
+    func testServeLetsGoWhenTheAppAsks() async throws {
+        let folder = TempFolder()
+        let url = try APIFixture.write(to: folder.url)
+        let serve = Process()
+        serve.executableURL = Self.binary
+        serve.arguments = ["serve"]
+        serve.currentDirectoryURL = folder.url
+        serve.environment = Self.environment()
+        serve.standardOutput = Pipe()
+        serve.standardError = Pipe()
+        try serve.run()
+        defer { if serve.isRunning { serve.terminate() } }
+        let deadline = Date().addingTimeInterval(10)
+        while ProjectSession.liveLock(for: url)?.port == nil && Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertThrowsError(try ProjectSession.open(url, owner: .app), "serve has it")
+
+        let released = await TandemAPIHost.askOwnerToRelease(url)
+        XCTAssertTrue(released)
+        serve.waitUntilExit()
+        XCTAssertEqual(serve.terminationStatus, 0)
+        let session = try ProjectSession.open(url, owner: .app)
+        session.close()
+    }
+
     func testMCPOverStdio() async throws {
         let folder = TempFolder()
         _ = try APIFixture.write(to: folder.url)

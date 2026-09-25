@@ -214,7 +214,10 @@ struct CLI {
                 FileHandle.standardError.write(Data(line.utf8))
             }
         }
-        await Signals.wait(for: [SIGINT, SIGTERM])
+        // Stop on Ctrl-C or kill, or when the app asks for the project.
+        let release = Signals.Trigger()
+        host.server.onRelease = { release.fire() }
+        await Signals.wait(for: [SIGINT, SIGTERM], or: release)
         log.cancel()
         host.stop()
         session.close()
@@ -358,25 +361,51 @@ struct CLI {
 /// Waits for a signal instead of dying on it, so `serve` can save and let
 /// go of the project.
 enum Signals {
-    static func wait(for signals: [Int32]) async {
+    /// A way to end the wait from code, like a signal would.
+    final class Trigger: @unchecked Sendable {
+        private let lock = NSLock()
+        private var handler: (() -> Void)?
+        private var fired = false
+
+        func fire() {
+            let run = lock.withLock { () -> (() -> Void)? in
+                fired = true
+                return handler
+            }
+            run?()
+        }
+
+        func onFire(_ body: @escaping () -> Void) {
+            let already = lock.withLock { () -> Bool in
+                handler = body
+                return fired
+            }
+            if already { body() }
+        }
+    }
+
+    static func wait(for signals: [Int32], or trigger: Trigger? = nil) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let queue = DispatchQueue(label: "com.mikerosoft.tandem.signals")
             let once = SignalOnce()
-            var sources: [DispatchSourceSignal] = []
-            for number in signals {
+            // Ignore the default handling so the sources below see the signal.
+            let sources = signals.map { number -> DispatchSourceSignal in
                 signal(number, SIG_IGN)
-                let source = DispatchSource.makeSignalSource(signal: number, queue: queue)
-                source.setEventHandler {
-                    once.run {
-                        for source in sources { source.cancel() }
-                        continuation.resume()
-                    }
+                return DispatchSource.makeSignalSource(signal: number, queue: queue)
+            }
+            let finish = {
+                once.run {
+                    for source in sources { source.cancel() }
+                    continuation.resume()
                 }
+            }
+            for source in sources {
+                source.setEventHandler { finish() }
                 source.resume()
-                sources.append(source)
             }
             // Keep the sources alive until a signal arrives.
             once.keep(sources)
+            trigger?.onFire { queue.async { finish() } }
         }
     }
 }

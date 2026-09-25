@@ -64,6 +64,26 @@ public final class TandemAPIHost: @unchecked Sendable {
         return TandemAPIHost(session: session, service: service, server: server)
     }
 
+    /// For the app, when opening a project fails because `tandem serve`
+    /// (or a stuck CLI command) has it: asks a serving owner to save and
+    /// let go, and waits up to `timeout` seconds for the lock to clear.
+    /// Returns true when the project is free to open.
+    public static func askOwnerToRelease(_ projectURL: URL, timeout: TimeInterval = 5) async -> Bool {
+        guard let lock = ProjectSession.liveLock(for: projectURL) else { return true }
+        guard lock.owner == .cli, let port = lock.port, let token = lock.token else { return false }
+        do {
+            try await TandemHTTPClient(port: port, token: token).requestRelease()
+        } catch {
+            return false
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if ProjectSession.liveLock(for: projectURL) == nil { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return false
+    }
+
     /// Stops serving. The project stays open; close the session separately.
     public func stop() {
         try? session.stopAdvertising()

@@ -54,6 +54,12 @@ public final class TandemHTTPClient: @unchecked Sendable {
         return data
     }
 
+    /// Asks the owner to save and let go of the project (`tandem serve`
+    /// agrees; the app doesn't).
+    public func requestRelease() async throws {
+        _ = try await post("release", body: Data("{}".utf8), timeout: 10)
+    }
+
     /// True when a Tandem API answers on this port.
     public func isAlive() async -> Bool {
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/health"))
