@@ -403,3 +403,41 @@ final class EvictGeneratedTests: XCTestCase {
         XCTAssertEqual(try library.asset(asset.id)?.state, .normalised)
     }
 }
+
+final class LibraryExtrasTests: XCTestCase {
+    func testSimilarGoesThroughTheProviderAndIsRecorded() async throws {
+        let transport = FixtureTransport()
+        try transport.on("freesound.org/apiv2/search/", fixture: "freesound_search.json")
+        try transport.on("freesound.org/apiv2/sounds/60013/similar/", fixture: "freesound_search.json")
+        let library = try makeLibrary(transport, secrets: ["freesound": "t"], settings: AssetSettings(freesoundEnabled: true))
+        _ = await library.searchProviders(ProviderQuery(text: "whoosh"), providerIDs: ["freesound"])
+
+        let similar = try await library.similar(to: "freesound:60013", limit: 5)
+
+        XCTAssertEqual(similar.map(\.id), ["freesound:346373"])
+        XCTAssertNotNil(try library.asset("freesound:346373"))
+        do {
+            _ = try await library.similar(to: "noto:1f680")
+            XCTFail("expected an error")
+        } catch let error as AssetError {
+            XCTAssertEqual(error, .notFound("asset noto:1f680"))
+        }
+    }
+
+    func testFontsRegisterFromTheLibraryAndFromProjects() async throws {
+        guard let font = Generated.systemFont() else { throw XCTSkip("no system TTF found") }
+        let imports = tempFolder("fonts")
+        try FileManager.default.copyItem(at: font, to: imports.appendingPathComponent("Face.ttf"))
+        let library = try makeLibrary()
+        try await library.addImportFolder(imports, licence: FolderLicence(source: "Test", licence: "OFL", licenceClass: .noCredit))
+        let asset = try XCTUnwrap(library.search(AssetQuery(kinds: [.font])).first)
+        _ = try await library.fetch(asset.id)
+        let failures = try await library.registerFonts()
+        XCTAssertTrue(failures.isEmpty)
+
+        let project = ProjectFolder(root: tempFolder("project"))
+        _ = try await library.use(asset.id, in: project, projectID: "prj_fonts")
+        let projectFailures = await AssetLibrary.registerFonts(in: project)
+        XCTAssertTrue(projectFailures.isEmpty)
+    }
+}
