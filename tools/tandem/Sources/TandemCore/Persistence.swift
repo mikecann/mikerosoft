@@ -74,14 +74,21 @@ public enum ProjectFile {
         if !fm.fileExists(atPath: target.path) {
             try fm.copyItem(at: url, to: target)
         }
-        let existing = try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey])
-            .filter { isBackup($0.lastPathComponent, of: name) }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let existing = backups(of: url)
         if existing.count > keep {
             for old in existing.prefix(existing.count - keep) {
                 try? fm.removeItem(at: old)
             }
         }
+    }
+
+    /// The backups of the project at `url` in `.tandem/backups/`, oldest
+    /// first.
+    public static func backups(of url: URL) -> [URL] {
+        let folder = supportFolder(for: url).appendingPathComponent("backups", isDirectory: true)
+        let name = url.deletingPathExtension().lastPathComponent
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { isBackup($0.lastPathComponent, of: name) }.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     /// True for `<name> <stamp>.tandem`, a backup of `<name>.tandem`. A

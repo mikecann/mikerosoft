@@ -74,7 +74,7 @@ public final class ProjectSession: @unchecked Sendable {
         let url = url.standardizedFileURL
         let lock = try claimLock(for: url, owner: owner)
         do {
-            let (project, revision) = try ProjectFile.load(from: url)
+            let (project, revision) = try load(url)
             let journal = ProjectJournal.forProject(at: url)
             var recovered = false
             var start = (project, revision)
@@ -89,6 +89,21 @@ public final class ProjectSession: @unchecked Sendable {
         } catch {
             lock.release()
             throw error
+        }
+    }
+
+    /// Reads the project file. When it isn't a project Tandem can read (cut
+    /// short, or broken by a hand edit), says where the previous saves are.
+    static func load(_ url: URL) throws -> (project: Project, revision: Int) {
+        do {
+            return try ProjectFile.load(from: url)
+        } catch let error as DecodingError {
+            let reason = DecodingErrorText.describe(error)
+            var message = "\(url.lastPathComponent) couldn't be read: \(reason)\(reason.hasSuffix(".") ? "" : ".")"
+            if let newest = ProjectFile.backups(of: url).last {
+                message += " The previous saves are in .tandem/backups/ next to it; the newest is \"\(newest.lastPathComponent)\". Copy one over \(url.lastPathComponent) to go back to it."
+            }
+            throw ServiceError(.invalid, message)
         }
     }
 

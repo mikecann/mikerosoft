@@ -41,6 +41,23 @@ final class ProjectSessionTests: XCTestCase {
         reopened.close()
     }
 
+    func testAnUnreadableProjectPointsToItsBackups() throws {
+        let url = folder.appendingPathComponent("Video.tandem")
+        try ProjectFile.save(Project.standard(name: "Video"), revision: 1, to: url)
+        try ProjectFile.save(Project.standard(name: "Video"), revision: 2, to: url)
+        // Cut short by a crash, or broken by a hand edit.
+        try Data(#"{"project": {"name": "Vid"#.utf8).write(to: url)
+        XCTAssertThrowsError(try ProjectSession.open(url, owner: .app)) { error in
+            let message = "\(error)"
+            XCTAssertTrue(message.contains("Video.tandem"), message)
+            XCTAssertTrue(message.contains(".tandem/backups"), message)
+            let newest = ProjectFile.backups(of: url).last?.lastPathComponent
+            XCTAssertNotNil(newest)
+            XCTAssertTrue(message.contains(newest ?? "?"), message)
+        }
+        XCTAssertNil(ProjectSession.liveLock(for: url), "a failed open lets go of the lock")
+    }
+
     func testANewProjectDoesntInheritWhatAnOldOneLeftBehind() throws {
         // A project of this name crashed with unsaved edits and was then
         // deleted, and the CLI had kept undo history for it.
