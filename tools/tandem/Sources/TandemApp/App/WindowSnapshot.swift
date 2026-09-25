@@ -60,6 +60,8 @@ enum WindowSnapshot {
             lines.append("\(pad)[\(type(of: layer))] \(NSStringFromRect(layer.frame))\(layer.isHidden ? " hidden" : "")\(layer.contents != nil ? " contents" : "")\(layer.backgroundColor != nil ? " bg" : "")")
             for sublayer in layer.sublayers ?? [] { visitLayer(sublayer, depth: depth + 1) }
         }
+        lines.append("--- draw timing")
+        lines.append(DrawTiming.summary)
         lines.append("--- layers")
         if let layer = window.contentView?.layer { visitLayer(layer, depth: 0) }
         return lines.joined(separator: "\n")

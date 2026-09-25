@@ -48,7 +48,7 @@ struct TimelineHitTester {
             return .transcript(time: scale.time(atX: point.x, rate: rate))
         }
         for transition in track.transitions {
-            if let rect = TransitionGeometry.chipRect(transition, on: track, lane: lane, scale: scale), rect.contains(point) {
+            if let rect = TransitionGeometry.hitRect(transition, on: track, lane: lane, scale: scale), rect.contains(point) {
                 return .transition(transitionID: transition.id, trackID: trackID)
             }
         }
@@ -135,18 +135,26 @@ enum TransitionGeometry {
         return CGRect(x: minX, y: lane.y, width: scale.x(range.end) - minX, height: lane.height)
     }
 
-    /// The clickable chip, in lane coordinates.
+    /// The chip on a cut between two clips, in lane coordinates. It shrinks
+    /// with the clips beside it so a zoomed-out timeline isn't all chips,
+    /// and there's none for one-sided transitions (they draw as a ramp).
     static func chipRect(_ transition: Transition, on track: Track, lane: TimelineLane, scale: TimelineScale) -> CGRect? {
-        guard let band = bandRect(transition, on: track, lane: lane, scale: scale) else { return nil }
-        let size = min(chipSize, lane.height - 4)
-        guard size >= 8 else { return nil }
-        let centreX: CGFloat
-        let from = transition.fromClipID.flatMap { id in track.clips.first { $0.id == id } }
-        if transition.fromClipID != nil, transition.toClipID != nil, let from {
-            centreX = scale.x(from.end)
-        } else {
-            centreX = band.midX
-        }
+        guard let fromID = transition.fromClipID, let toID = transition.toClipID,
+              let from = track.clips.first(where: { $0.id == fromID }),
+              let to = track.clips.first(where: { $0.id == toID }) else { return nil }
+        let narrowest = min(scale.width(of: from.duration), scale.width(of: to.duration))
+        let size = min(chipSize, lane.height - 4, (narrowest * 0.6).rounded())
+        guard size >= 10 else { return nil }
+        let centreX = scale.x(from.end)
         return CGRect(x: centreX - size / 2, y: lane.midY - size / 2, width: size, height: size)
+    }
+
+    /// Where a click selects the transition: the chip, or the band for
+    /// one-sided transitions and chips too small to draw.
+    static func hitRect(_ transition: Transition, on track: Track, lane: TimelineLane, scale: TimelineScale) -> CGRect? {
+        if let chip = chipRect(transition, on: track, lane: lane, scale: scale) { return chip }
+        guard transition.fromClipID == nil || transition.toClipID == nil,
+              let band = bandRect(transition, on: track, lane: lane, scale: scale), band.width >= 6 else { return nil }
+        return band.insetBy(dx: 0, dy: lane.height * 0.25)
     }
 }

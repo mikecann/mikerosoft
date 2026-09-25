@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import TandemCore
 import TandemMedia
 
@@ -65,6 +66,8 @@ final class TimelineLanesView: TimelineChildView {
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
+        let started = CACurrentMediaTime()
+        defer { DrawTiming.record("lanes", CACurrentMediaTime() - started) }
         guard let model, let container, let context = NSGraphicsContext.current?.cgContext else { return }
         let project = container.displayedProject
         let layout = container.layoutCache
@@ -740,5 +743,29 @@ enum MediaDrag {
     static func ids(from text: String) -> [String] {
         guard text.hasPrefix(prefix) else { return [] }
         return text.dropFirst(prefix.count).split(separator: ",").map(String.init).filter { !$0.isEmpty }
+    }
+}
+
+/// Recent draw times per view, for checking the timeline stays smooth on
+/// big projects. `tandem://debug` writes them out.
+@MainActor
+enum DrawTiming {
+    private static var samples: [String: [Double]] = [:]
+
+    static func record(_ name: String, _ seconds: Double) {
+        var list = samples[name, default: []]
+        list.append(seconds)
+        if list.count > 240 { list.removeFirst(list.count - 240) }
+        samples[name] = list
+    }
+
+    static var summary: String {
+        samples.keys.sorted().map { name in
+            let list = samples[name] ?? []
+            let sorted = list.sorted()
+            let average = list.reduce(0, +) / Double(max(list.count, 1))
+            let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+            return String(format: "%@: %d draws, average %.2f ms, p95 %.2f ms, max %.2f ms", name, list.count, average * 1000, p95 * 1000, (sorted.last ?? 0) * 1000)
+        }.joined(separator: "\n")
     }
 }

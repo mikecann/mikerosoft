@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import TandemCore
 
 /// Time labels, ticks, markers and the in and out range. Click or drag to
@@ -12,6 +13,8 @@ final class TimelineRulerView: TimelineChildView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
+        let started = CACurrentMediaTime()
+        defer { DrawTiming.record("ruler", CACurrentMediaTime() - started) }
         guard let model, let context = NSGraphicsContext.current?.cgContext else { return }
         let scale = model.timeline.scale
         let rate = model.frameRate

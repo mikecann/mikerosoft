@@ -61,17 +61,26 @@ struct ClipRenderer {
         let rect = fullRect.insetBy(dx: 1, dy: 0).integral.insetBy(dx: 0, dy: 0)
         guard rect.width >= 1, rect.maxX >= visible.lowerBound - 2, rect.minX <= visible.upperBound + 2 else { return }
         let style = style(for: clip, lane: lane)
+        // Slivers on a zoomed-out timeline: a plain bar is all that shows,
+        // and skipping the paths keeps hundreds of them cheap to draw.
+        if rect.width < 6 && !state.selected && !state.previewed {
+            context.setFillColor((clip.enabled ? style.border : style.border.opacity(0.4)).cg)
+            context.fill(rect)
+            return
+        }
         let radius = min(Theme.Metrics.clipCornerRadius, rect.width / 2, rect.height / 2)
         let shape = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
         let muted = clip.audio?.muted == true && lane.kind == .audio
         context.saveGState()
         if !clip.enabled || muted { context.setAlpha(0.4) }
 
-        context.saveGState()
         context.addPath(shape)
-        context.clip()
         context.setFillColor(style.fill.cg)
-        context.fill(rect)
+        context.fillPath()
+        // Detail clips to the plain rectangle: a rounded clip path costs a
+        // mask per clip, which adds up to milliseconds on long timelines.
+        context.saveGState()
+        context.clip(to: rect.insetBy(dx: 1, dy: 1))
         switch lane.style {
         case .video, .broll:
             drawPictureDetail(clip, rect: rect, style: style, in: context)
@@ -311,7 +320,7 @@ struct ClipRenderer {
             return clip.name ?? "Adjustment"
         case .media(let id):
             if let name = clip.name, !name.isEmpty { return name }
-            return project.media(id).map { URL(fileURLWithPath: $0.path).deletingPathExtension().lastPathComponent } ?? "Missing media"
+            return project.media(id).map { TextMetrics.baseName($0.path) } ?? "Missing media"
         }
     }
 
@@ -331,7 +340,9 @@ struct ClipRenderer {
             let isTake = role == .camera || role == .screen
             let quiet = badgeText(for: clip) != nil || clip.keyframes["video.transform.scale"] != nil
             if !(isTake && quiet) {
-                drawText(name(of: clip), at: CGPoint(x: x, y: rect.minY + 4), maxX: rect.maxX - 4, font: Theme.Fonts.ui(9.5, .semibold), color: Theme.text, shadow: true)
+                // Names sit in a badge like the layout labels, which reads on
+                // any thumbnail without the cost of a text shadow.
+                drawBadge(name(of: clip), at: CGPoint(x: x, y: rect.minY + 4), color: Theme.textSecondary, in: rect, context: context)
             }
         case .text:
             drawText(name(of: clip), at: CGPoint(x: left + 6, y: rect.midY - 7), maxX: rect.maxX - 4, font: Theme.Fonts.ui(10.5), color: style.label)
@@ -351,7 +362,8 @@ struct ClipRenderer {
         case .sfx:
             let font = Theme.Fonts.ui(9.5)
             let text = name(of: clip)
-            let width = (text as NSString).size(withAttributes: [.font: font]).width
+            guard rect.width >= 20 else { return }
+            let width = TextMetrics.width(of: text, font: font)
             let x = rect.width > width + 8 ? rect.midX - width / 2 : left + 4
             drawText(text, at: CGPoint(x: x, y: rect.midY - 6), maxX: rect.maxX - 3, font: font, color: style.label)
         case .voice, .audio:
@@ -369,9 +381,11 @@ struct ClipRenderer {
     @discardableResult
     func drawBadge(_ text: String, at origin: CGPoint, color: Swatch, in clipRect: CGRect, context: CGContext) -> CGFloat {
         let font = Theme.Fonts.ui(9.5, .semibold)
-        let size = (text as NSString).size(withAttributes: [.font: font])
-        let badge = CGRect(x: origin.x, y: origin.y, width: min(size.width + 10, clipRect.maxX - origin.x - 3), height: 14)
-        guard badge.width > 12 else { return origin.x }
+        guard clipRect.maxX - origin.x > 30 else { return origin.x }
+        let size = CGSize(width: TextMetrics.width(of: text, font: font), height: 12)
+        // A badge that doesn't fit whole ("Pi") is noise; leave it out.
+        guard size.width + 10 <= clipRect.maxX - origin.x - 3 else { return origin.x }
+        let badge = CGRect(x: origin.x, y: origin.y, width: size.width + 10, height: 14)
         context.addPath(CGPath(roundedRect: badge, cornerWidth: 3, cornerHeight: 3, transform: nil))
         context.setFillColor(Theme.badge.cg)
         context.fillPath()
@@ -381,7 +395,9 @@ struct ClipRenderer {
 
     func drawText(_ text: String, at point: CGPoint, maxX: CGFloat, font: NSFont, color: Swatch, shadow: Bool = false) {
         let width = maxX - point.x
-        guard width > 6 else { return }
+        // Truncated to a letter or two ("m…") it only adds clutter.
+        guard width >= 20 else { return }
+        if width < 40, TextMetrics.width(of: text, font: font) > width { return }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color.ns, .paragraphStyle: paragraph]
@@ -407,12 +423,33 @@ struct ClipRenderer {
     func drawTransition(_ transition: Transition, on track: Track, lane: TimelineLane, selected: Bool, in context: CGContext) {
         guard let band = TransitionGeometry.bandRect(transition, on: track, lane: lane, scale: scale),
               band.maxX >= visible.lowerBound, band.minX <= visible.upperBound else { return }
+        let inset = band.insetBy(dx: 0, dy: 1)
+        if transition.fromClipID == nil || transition.toClipID == nil {
+            // A fade at a clip's head or tail: a ramp across its length.
+            let rising = transition.fromClipID == nil
+            let ramp = CGMutablePath()
+            ramp.move(to: CGPoint(x: inset.minX, y: rising ? inset.maxY : inset.minY))
+            ramp.addLine(to: CGPoint(x: inset.maxX, y: rising ? inset.minY : inset.maxY))
+            ramp.addLine(to: CGPoint(x: rising ? inset.maxX : inset.minX, y: inset.maxY))
+            ramp.closeSubpath()
+            context.addPath(ramp)
+            context.setFillColor((selected ? Theme.amber.opacity(0.35) : Theme.text.opacity(0.14)).cg)
+            context.fillPath()
+            context.move(to: CGPoint(x: inset.minX, y: rising ? inset.maxY : inset.minY))
+            context.addLine(to: CGPoint(x: inset.maxX, y: rising ? inset.minY : inset.maxY))
+            context.setStrokeColor((selected ? Theme.amber : Theme.text.opacity(0.55)).cg)
+            context.setLineWidth(1)
+            context.strokePath()
+            return
+        }
         context.setFillColor(Theme.text.opacity(0.1).cg)
-        context.fill(band.insetBy(dx: 0, dy: 1))
+        context.fill(inset)
         guard let chip = TransitionGeometry.chipRect(transition, on: track, lane: lane, scale: scale) else { return }
-        context.addPath(CGPath(roundedRect: chip, cornerWidth: 5, cornerHeight: 5, transform: nil))
+        let radius = min(5, chip.width / 4)
+        context.addPath(CGPath(roundedRect: chip, cornerWidth: radius, cornerHeight: radius, transform: nil))
         context.setFillColor((selected ? Theme.amber : Theme.transitionChip).cg)
         context.fillPath()
+        guard chip.width >= 14 else { return }
         // The bowtie from the design's transition icon.
         let icon = chip.insetBy(dx: chip.width * 0.22, dy: chip.height * 0.28)
         let path = CGMutablePath()
@@ -427,5 +464,30 @@ struct ClipRenderer {
         context.addPath(path)
         context.setFillColor(Theme.onAmber.cg)
         context.fillPath()
+    }
+}
+
+/// Cached text widths and file names, so drawing hundreds of clips doesn't
+/// lay out the same labels every frame.
+@MainActor
+enum TextMetrics {
+    private static var widths: [String: CGFloat] = [:]
+    private static var names: [String: String] = [:]
+
+    static func width(of text: String, font: NSFont) -> CGFloat {
+        let key = "\(font.pointSize)|\(font.fontName)|\(text)"
+        if let cached = widths[key] { return cached }
+        let width = (text as NSString).size(withAttributes: [.font: font]).width
+        if widths.count > 4_000 { widths.removeAll() }
+        widths[key] = width
+        return width
+    }
+
+    /// `broll/hf-decider.mp4` to `hf-decider`.
+    static func baseName(_ path: String) -> String {
+        if let cached = names[path] { return cached }
+        let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+        names[path] = name
+        return name
     }
 }

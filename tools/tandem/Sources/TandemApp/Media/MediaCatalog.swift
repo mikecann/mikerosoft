@@ -157,7 +157,11 @@ enum MediaCatalog {
     }
 
     private static func single(_ item: MediaItem) -> MediaEntry {
-        let name = baseName(item)
+        var name = baseName(item)
+        // An unpaired record-it file reads as "Camera · 10:54".
+        if item.role == .camera || item.role == .screen, let time = timeOfDay(fromFileName: fileName(item)) {
+            name = "\(item.role == .camera ? "Camera" : "Screen") · \(time)"
+        }
         let subtitle: String
         if let duration = item.duration, item.kind != .image {
             subtitle = Timecode.duration(duration.seconds)
@@ -169,7 +173,7 @@ enum MediaCatalog {
         return MediaEntry(
             id: item.id, title: name, subtitle: subtitle, mediaIDs: [item.id], primaryMediaID: item.id,
             secondaryMediaID: nil, duration: item.duration, group: group(for: item),
-            searchText: (name + " " + item.path).lowercased()
+            searchText: (name + " " + baseName(item) + " " + item.path).lowercased()
         )
     }
 }

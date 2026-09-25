@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import TandemCore
 
 /// Track names down the left, with lock, mute and hide toggles and a menu
@@ -73,6 +74,8 @@ final class TimelineHeaderView: TimelineChildView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        let started = CACurrentMediaTime()
+        defer { DrawTiming.record("headers", CACurrentMediaTime() - started) }
         guard let container, let context = NSGraphicsContext.current?.cgContext else { return }
         let project = container.displayedProject
         context.setFillColor(Theme.window.cg)
@@ -89,11 +92,14 @@ final class TimelineHeaderView: TimelineChildView {
             let showSubtitle = subtitle != nil && lane.height >= 34
             let nameY = showSubtitle ? rect.midY - 14 : rect.midY - 7
             let dimmed = track.hidden || (track.kind == .audio && track.muted)
-            draw(track.name, at: CGPoint(x: 14, y: nameY), font: nameFont, color: dimmed ? Theme.textFaint : Theme.textStrong, maxX: bounds.width - 44)
-            if showSubtitle, let subtitle {
-                draw(subtitle, at: CGPoint(x: 14, y: nameY + 16), font: Theme.Fonts.ui(10), color: Theme.textFaint, maxX: bounds.width - 44)
-            }
             let hovering = hoverTrackID == trackID
+            // Names use the full width unless the toggles are showing.
+            let togglesShown = hovering || track.locked || track.hidden || (track.kind == .audio && track.muted)
+            let nameMaxX = bounds.width - (togglesShown ? 44 : 6)
+            draw(track.name, at: CGPoint(x: 14, y: nameY), font: nameFont, color: dimmed ? Theme.textFaint : Theme.textStrong, maxX: nameMaxX)
+            if showSubtitle, let subtitle {
+                draw(subtitle, at: CGPoint(x: 14, y: nameY + 16), font: Theme.Fonts.ui(10), color: Theme.textFaint, maxX: nameMaxX)
+            }
             for (toggle, box) in toggleRects(lane) where lane.height >= 18 {
                 let active: Bool
                 switch toggle {
