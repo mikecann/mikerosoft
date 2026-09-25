@@ -249,7 +249,7 @@ final class JobScheduler: @unchecked Sendable {
                 } else if !entry.started {
                     entry.started = true
                     entry.status.state = .running
-                    let context = JobContext(id: entry.job.id, kind: entry.job.kind, scheduler: self)
+                    let context = JobContext(id: entry.job.id, kind: entry.job.kind, qos: entry.job.priority.qos.qosClass, scheduler: self)
                     entry.context = context
                     toStart.append(entry)
                 }
@@ -375,15 +375,18 @@ final class JobScheduler: @unchecked Sendable {
 final class JobContext: @unchecked Sendable {
     let id: String
     let kind: AnalysisKind
+    /// For the job's blocking work, from its priority.
+    let qos: DispatchQoS.QoSClass
     private weak var scheduler: JobScheduler?
     private let lock = NSLock()
     private var cancelled = false
     private var holdsEncoder = false
     private var lastEncoderCheck = Date.distantPast
 
-    init(id: String, kind: AnalysisKind, scheduler: JobScheduler?) {
+    init(id: String, kind: AnalysisKind, qos: DispatchQoS.QoSClass = .utility, scheduler: JobScheduler?) {
         self.id = id
         self.kind = kind
+        self.qos = qos
         self.scheduler = scheduler
     }
 
