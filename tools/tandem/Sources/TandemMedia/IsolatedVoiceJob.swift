@@ -94,6 +94,7 @@ enum IsolatedVoiceJob {
         var rendered = 0
         var written = 0
         var chunks = 0
+        var stalls = 0
         while true {
             // Once the input has run out its length is known: render until
             // the delayed output has caught up with it.
@@ -105,12 +106,18 @@ enum IsolatedVoiceJob {
             case .success:
                 break
             case .insufficientDataFromInputNode, .cannotDoInCurrentContext:
+                // The source node always has samples (or silence), so this
+                // shouldn't repeat; don't spin forever if it does.
+                stalls += 1
+                if stalls > 1000 { throw MediaError.failed("Voice isolation stalled") }
+                try context.checkCancellation()
                 continue
             case .error:
                 throw MediaError.failed("Voice isolation failed while rendering")
             @unknown default:
                 throw MediaError.failed("Voice isolation stopped unexpectedly")
             }
+            stalls = 0
             let frames = Int(buffer.frameLength)
             let skip = max(0, min(frames, latency - rendered))
             rendered += frames
