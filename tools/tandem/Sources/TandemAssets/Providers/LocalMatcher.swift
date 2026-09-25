@@ -34,9 +34,9 @@ struct LocalMatcher {
         let otherTokens = other.flatMap(Self.tokens)
         var total = 0
         for word in words {
-            let forms = SearchWords.variants(word)
+            let forms = SearchWords.forms(word)
             func found(in tokens: [String]) -> Bool {
-                tokens.contains { token in forms.contains { token.hasPrefix($0) } }
+                tokens.contains { token in token.hasPrefix(forms.prefix) || forms.whole.contains(token) }
             }
             if found(in: nameTokens) {
                 total += 2
@@ -71,33 +71,50 @@ struct LocalMatcher {
     }
 }
 
-/// The forms a search word matches. Every form matches as a prefix, and a
-/// plural or an -ing or -ed ending also matches its root, so "clicks" finds
-/// "click" and "typing" finds "type", while a half-typed word ("generat")
-/// still finds "generated". (A stemmer in the index would break that: it
-/// stores "gener", which "generat" isn't a prefix of.)
+/// The forms a search word matches. The word itself matches as a prefix,
+/// so a half-typed word ("generat") still finds "generated". Its other
+/// forms match only as whole words, so "clicks" finds "click" and
+/// "typing" finds "type" without "note" finding "nothing". (A stemmer in
+/// the index would break search as you type: it stores "gener", which
+/// "generat" isn't a prefix of.)
 enum SearchWords {
-    static func variants(_ word: String) -> [String] {
+    /// The typed word (a prefix) and its other forms (whole words).
+    static func forms(_ word: String) -> (prefix: String, whole: [String]) {
         let word = word.lowercased()
-        var forms = [word]
+        var whole: [String] = []
         func add(_ form: String) {
-            if form.count >= 2, !forms.contains(form) { forms.append(form) }
+            if form.count >= 2, form != word, !whole.contains(form) { whole.append(form) }
         }
-        /// "runn" also gives "run", "stopp" also gives "stop".
+        /// "runn" also gives "run"; "typ" also gives "type".
         func addRoot(_ root: String) {
             add(root)
             let letters = Array(root)
             if letters.count > 2, letters[letters.count - 1] == letters[letters.count - 2], !"aeiou".contains(letters[letters.count - 1]) {
                 add(String(letters.dropLast()))
+            } else {
+                add(root + "e")
             }
         }
         if word.hasSuffix("ies"), word.count > 4 { add(String(word.dropLast(3)) + "y") }
-        if word.hasSuffix("es"), word.count > 4 { add(String(word.dropLast(2))) }
+        // "boxes" and "whooshes" drop "es"; "notes" only drops the "s".
+        if word.hasSuffix("es"), word.count > 4, ["s", "x", "z", "ch", "sh"].contains(where: { word.dropLast(2).hasSuffix($0) }) {
+            add(String(word.dropLast(2)))
+        }
         if word.hasSuffix("s"), !word.hasSuffix("ss"), word.count > 3 { add(String(word.dropLast())) }
         if word.hasSuffix("ing"), word.count > 5 { addRoot(String(word.dropLast(3))) }
         if word.hasSuffix("ed"), word.count > 4 { addRoot(String(word.dropLast(2))) }
-        // "type" also gives "typ", which "typing" and "typed" start with.
-        if word.hasSuffix("e"), word.count > 3 { add(String(word.dropLast())) }
-        return forms
+        // "type" also finds "typing" and "typed".
+        if word.hasSuffix("e"), word.count > 3 {
+            let stem = String(word.dropLast())
+            add(stem + "ing")
+            add(stem + "ed")
+        }
+        return (word, whole)
+    }
+
+    /// Every form, the typed word first. For tests and logs.
+    static func variants(_ word: String) -> [String] {
+        let forms = forms(word)
+        return [forms.prefix] + forms.whole
     }
 }

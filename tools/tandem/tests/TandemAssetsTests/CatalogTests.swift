@@ -330,11 +330,32 @@ final class SearchAsYouTypeTests: XCTestCase {
 
     func testWordForms() {
         XCTAssertEqual(SearchWords.variants("clicks"), ["clicks", "click"])
-        XCTAssertTrue(SearchWords.variants("typing").contains("typ"))
+        XCTAssertTrue(SearchWords.variants("typing").contains("type"))
         XCTAssertTrue(SearchWords.variants("running").contains("run"))
         XCTAssertTrue(SearchWords.variants("batteries").contains("battery"))
+        XCTAssertTrue(SearchWords.variants("boxes").contains("box"))
+        XCTAssertFalse(SearchWords.variants("notes").contains("not"))
+        XCTAssertTrue(SearchWords.variants("type").contains("typing"))
         XCTAssertEqual(SearchWords.variants("glass"), ["glass"])
         XCTAssertEqual(SearchWords.variants("go"), ["go"])
+    }
+
+    func testDerivedFormsDontOverMatch() throws {
+        let catalog = try makeCatalog()
+        try catalog.upsert([
+            sampleAsset(id: "note", name: "Note pop"),
+            sampleAsset(id: "nothing", name: "Nothing here"),
+            sampleAsset(id: "notification", name: "Notification ding"),
+            sampleAsset(id: "street", name: "Street ambience"),
+            sampleAsset(id: "string", name: "String pluck"),
+            sampleAsset(id: "speaker", name: "Speaker hum"),
+            sampleAsset(id: "timpani", name: "Timpani roll"),
+            sampleAsset(id: "timing", name: "Timing beep")
+        ])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "note")).map(\.providerID), ["note"])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "string")).map(\.providerID), ["string"])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "speed")).map(\.providerID), [])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "time")).map(\.providerID), ["timing"])
     }
 }
 

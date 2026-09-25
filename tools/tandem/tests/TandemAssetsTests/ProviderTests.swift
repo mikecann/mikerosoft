@@ -617,8 +617,13 @@ final class IconifyPagingTests: XCTestCase {
         let provider = IconifyProvider(environment: makeEnvironment(transport))
         _ = try await provider.search(ProviderQuery(text: "home", page: 1, perPage: 16))
         _ = try await provider.search(ProviderQuery(text: "home", page: 2, perPage: 16))
+        _ = try await provider.search(ProviderQuery(text: "home", page: 3, perPage: 50))
         let urls = transport.requests.compactMap { $0.url?.absoluteString }
         XCTAssertTrue(urls[0].contains("limit=32") && urls[0].contains("start=0"), urls[0])
         XCTAssertTrue(urls[1].contains("limit=32") && urls[1].contains("start=32"), urls[1])
+        XCTAssertTrue(urls[2].contains("limit=50") && urls[2].contains("start=100"), urls[2])
+        // Every allowed icon in the window comes back, none held over.
+        let page = try await provider.search(ProviderQuery(text: "home", perPage: 1))
+        XCTAssertEqual(page.map(\.providerID), ["mdi:home", "tabler:home"])
     }
 }

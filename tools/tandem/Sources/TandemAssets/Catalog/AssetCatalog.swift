@@ -379,7 +379,9 @@ public final class AssetCatalog: @unchecked Sendable {
         guard !words.isEmpty else { return nil }
         // Parenthesised groups need an explicit AND between them.
         return words.map { word in
-            "(" + SearchWords.variants(word).map { "\"\($0)\"*" }.joined(separator: " OR ") + ")"
+            let forms = SearchWords.forms(word)
+            let terms = ["\"\(forms.prefix)\"*"] + forms.whole.map { "\"\($0)\"" }
+            return "(" + terms.joined(separator: " OR ") + ")"
         }.joined(separator: " AND ")
     }
 

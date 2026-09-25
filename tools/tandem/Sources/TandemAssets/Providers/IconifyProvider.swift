@@ -76,11 +76,10 @@ public final class IconifyProvider: AssetProvider, @unchecked Sendable {
 
     public func search(_ query: ProviderQuery) async throws -> [Asset] {
         guard query.wants(.icon), !query.text.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        let perPage = max(1, query.perPage)
-        // Ask for more than a page, since some results come from excluded
-        // sets, and page through Iconify's results a whole window at a time
-        // so pages never overlap.
-        let limit = min(999, max(32, perPage * 2))
+        // Each page is one window of Iconify's results (it won't send fewer
+        // than 32), and every allowed icon in it comes back, so pages never
+        // overlap or skip. Excluded sets can make a page shorter.
+        let limit = min(999, max(32, query.perPage))
         let url = URL(string: "\(Self.api)/search")!.adding([
             URLQueryItem(name: "query", value: query.text),
             URLQueryItem(name: "limit", value: String(limit)),
@@ -93,7 +92,7 @@ public final class IconifyProvider: AssetProvider, @unchecked Sendable {
             guard parts.count == 2, let set = sets[parts[0]], set.isAllowed else { return nil }
             return asset(prefix: parts[0], icon: parts[1], set: set)
         }
-        return Array(assets.prefix(perPage))
+        return assets
     }
 
     /// An icon as an asset in this provider's colour.
