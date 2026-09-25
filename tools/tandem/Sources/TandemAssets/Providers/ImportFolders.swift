@@ -149,6 +149,9 @@ public struct ImportScanReport: Codable, Equatable, Sendable {
     /// Assets deleted from the catalogue because their file went, so the
     /// library can delete what it made from them.
     public var removedIDs: [String] = []
+    /// Identifies the scan that made this report. Callers who shared a scan
+    /// get the same ID, so its changes are handled once.
+    public var scanID: String = UUID().uuidString
 
     public init(folderID: String) {
         self.folderID = folderID
@@ -299,7 +302,9 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
             }
             changes.append(asset)
         }
-        try catalog.upsert(changes)
+        guard try catalog.upsert(changes, ifImportFolderExists: record.id) else {
+            throw AssetError.notFound("import folder \(record.name) was removed during the scan")
+        }
         for (asset, stamp) in relicensed {
             // Skip rows changed meanwhile; the next scan catches them.
             guard try catalog.replace(asset, ifUpdatedAt: stamp) else { continue }
@@ -331,6 +336,17 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
         }
         try catalog.recordImportFolderScan(id: record.id, at: Date())
         return report
+    }
+
+    /// The asset with its folder's current licence note applied, if the
+    /// note changed since the asset was last scanned. A fetch uses this so
+    /// it never writes back licence details the scan has since corrected.
+    public func applyingCurrentNote(to asset: Asset) throws -> Asset {
+        guard let folderID = asset.remote["folder"],
+              let record = try catalog.importFolders().first(where: { $0.id == folderID }) else { return asset }
+        let note = FolderLicence.read(in: URL(fileURLWithPath: record.path, isDirectory: true))
+        let signature = FolderLicence.signature(note)
+        return asset.remote["note"] == signature ? asset : relicense(asset, note: note, signature: signature)
     }
 
     /// An unchanged file under a changed licence note.
@@ -475,6 +491,7 @@ final class ProblemList: @unchecked Sendable {
 public final class ImportFolderWatcher: @unchecked Sendable {
     private var stream: FSEventStreamRef?
     private let queue = DispatchQueue(label: "tandem.assets.import-watcher")
+    private static let queueKey = DispatchSpecificKey<Bool>()
 
     /// What the FSEvents callback reaches. The stream retains it, so a
     /// callback already running when the watcher goes away still has
@@ -501,6 +518,7 @@ public final class ImportFolderWatcher: @unchecked Sendable {
     /// Starts watching `paths`. `handler` gets the watched folders (as
     /// passed in) that saw changes, at most every `latency` seconds.
     public init(paths: [String], latency: TimeInterval = 1, handler: @escaping @Sendable ([String]) -> Void) {
+        queue.setSpecific(key: Self.queueKey, value: true)
         guard !paths.isEmpty else { return }
         let relay = Relay(roots: paths.map { (Self.realPath($0), $0) }, handler: handler)
         var context = FSEventStreamContext(
@@ -541,8 +559,18 @@ public final class ImportFolderWatcher: @unchecked Sendable {
         return String(cString: resolved)
     }
 
-    /// Stops watching. Also happens when the watcher is released.
+    /// Stops watching. Also happens when the watcher is released. Runs on
+    /// the watcher's queue, so no callback is part-way through when the
+    /// stream lets go of what it calls.
     public func stop() {
+        if DispatchQueue.getSpecific(key: Self.queueKey) == true {
+            stopOnQueue()
+        } else {
+            queue.sync { stopOnQueue() }
+        }
+    }
+
+    private func stopOnQueue() {
         guard let stream else { return }
         FSEventStreamStop(stream)
         FSEventStreamInvalidate(stream)

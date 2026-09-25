@@ -646,6 +646,39 @@ public final class AssetCatalog: @unchecked Sendable {
         try locked { try db.run("DELETE FROM import_folders WHERE id = ?", [.text(id)]) }
     }
 
+    /// Forgets an import folder and, in the same transaction, its assets,
+    /// except favourites and anything used in a project. A scan saving at
+    /// the same moment either lands first (and its rows go too) or finds
+    /// the folder gone and saves nothing. Returns the IDs removed.
+    public func removeImportFolderAndAssets(id: String) throws -> [String] {
+        try locked {
+            try db.transaction {
+                try db.run("DELETE FROM import_folders WHERE id = ?", [.text(id)])
+                let condition = """
+                WHERE provider = 'import' AND json_extract(remote, '$.folder') = ?
+                  AND id NOT IN (SELECT asset_id FROM favourites)
+                  AND id NOT IN (SELECT asset_id FROM usage)
+                """
+                let ids = try db.query("SELECT id FROM assets \(condition)", [.text(id)]).compactMap { $0.string("id") }
+                try db.run("DELETE FROM assets \(condition)", [.text(id)])
+                return ids
+            }
+        }
+    }
+
+    /// Saves a scan's rows only if their import folder is still registered,
+    /// in one transaction. Returns false (having saved nothing) when the
+    /// folder was removed during the scan.
+    public func upsert(_ assets: [Asset], ifImportFolderExists folderID: String) throws -> Bool {
+        try locked {
+            try db.transaction {
+                guard !(try db.query("SELECT 1 AS present FROM import_folders WHERE id = ?", [.text(folderID)])).isEmpty else { return false }
+                for asset in assets { try db.run(Self.upsertSQL, Self.bindings(for: asset)) }
+                return true
+            }
+        }
+    }
+
     // MARK: - Maintenance
 
     /// Deletes rows that only came from provider searches, weren't

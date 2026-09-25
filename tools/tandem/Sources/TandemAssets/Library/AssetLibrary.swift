@@ -153,7 +153,8 @@ public final class AssetLibrary: @unchecked Sendable {
     /// gone, so nothing is left on disk that nothing points to.
     func deleteFolders(of ids: [String]) {
         for id in ids {
-            guard let parts = Asset.parseID(id) else { continue }
+            // The file may have come back and been fetched again since.
+            guard let parts = Asset.parseID(id), (try? catalog.asset(id: id)) == nil else { continue }
             try? FileManager.default.removeItem(at: folder(provider: parts.provider, providerID: parts.providerID))
         }
     }
@@ -323,8 +324,17 @@ public final class AssetLibrary: @unchecked Sendable {
             }
             fetched = try await provider.fetchOriginal(stored, into: folder)
         }
-        if try catalog.licence(for: id) == nil {
-            try catalog.addLicence(try await provider.licence(for: fetched.asset), for: id)
+        if let importer = provider as? ImportFolderProvider {
+            // The folder's note may have changed since the last scan.
+            fetched.asset = try importer.applyingCurrentNote(to: fetched.asset)
+        }
+        // Snapshot the terms at download time, and again whenever they've
+        // changed since the last snapshot.
+        let current = try await provider.licence(for: fetched.asset)
+        if let latest = try catalog.licence(for: id), latest.hasSameTerms(as: current) {
+            // Already on record.
+        } else {
+            try catalog.addLicence(current, for: id)
         }
         return try await finish(fetched, id: id, provider: provider, folder: folder)
     }
@@ -502,15 +512,7 @@ public final class AssetLibrary: @unchecked Sendable {
     /// Stops watching a folder and forgets its assets, except any used in a
     /// project or favourited (their licence history stays either way).
     public func removeImportFolder(_ id: String) throws {
-        let pinned = try catalog.pinnedIDs()
-        var removed: [String] = []
-        for asset in try catalog.search(AssetQuery(providers: ["import"], limit: Int.max)) where asset.remote["folder"] == id {
-            guard !pinned.contains(asset.id) else { continue }
-            try catalog.delete(id: asset.id)
-            removed.append(asset.id)
-        }
-        try catalog.removeImportFolder(id: id)
-        deleteFolders(of: removed)
+        deleteFolders(of: try catalog.removeImportFolderAndAssets(id: id))
     }
 
     /// Rescans every import folder. A folder that fails (an unplugged
@@ -538,11 +540,14 @@ public final class AssetLibrary: @unchecked Sendable {
     public func watchImportFolders(onChange: @escaping @Sendable ([ImportScanReport]) -> Void) throws -> ImportFolderWatcher {
         let records = try catalog.importFolders()
         let provider = try importProvider()
+        // Change batches that arrive during a scan share the next one; only
+        // the first to get its report acts on it.
+        let handled = HandledScans()
         return ImportFolderWatcher(paths: records.map(\.path)) { roots in
             Task {
                 var reports: [ImportScanReport] = []
                 for record in records where roots.contains(record.path) {
-                    guard let report = try? await provider.scan(record) else { continue }
+                    guard let report = try? await provider.scan(record), handled.claim(report.scanID) else { continue }
                     self.deleteFolders(of: report.removedIDs)
                     reports.append(report)
                 }
@@ -692,5 +697,18 @@ extension AssetLibrary {
         }
         try? FileManager.default.removeItem(at: folder(for: asset))
         try catalog.delete(id: id)
+    }
+}
+
+/// Scan IDs already acted on, shared by a watcher's change handlers.
+final class HandledScans: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen = Set<String>()
+
+    /// True the first time a scan ID is claimed.
+    func claim(_ scanID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return seen.insert(scanID).inserted
     }
 }

@@ -567,3 +567,71 @@ final class ScanQueueTests: XCTestCase {
         XCTAssertEqual(report.folderID, "f")
     }
 }
+
+final class ImportFolderRaceTests: XCTestCase {
+    func testRemovingAFolderDuringItsScanLeavesNothingBehind() async throws {
+        let folder = tempFolder("race")
+        for index in 0..<400 { try Generated.sineWAV(at: folder.appendingPathComponent("s\(index).wav"), seconds: 0.01, sampleRate: 48_000, channels: 1) }
+        let library = try makeLibrary()
+        let record = AssetCatalog.ImportFolderRecord(id: ImportFolderProvider.folderID(for: folder), path: folder.standardizedFileURL.path, name: "race")
+        try library.catalog.saveImportFolder(record)
+        let provider = try XCTUnwrap(library.provider("import") as? ImportFolderProvider)
+
+        let scan = Task { try await provider.scan(record) }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        try library.removeImportFolder(record.id)
+        _ = await scan.result
+
+        // Whichever finished first, nothing of the folder is left.
+        XCTAssertEqual(try library.importFolders().count, 0)
+        XCTAssertEqual(try library.count(AssetQuery(providers: ["import"])), 0)
+    }
+
+    func testSavingARemovedFoldersScanWritesNothing() throws {
+        let catalog = try makeCatalog()
+        try catalog.saveImportFolder(AssetCatalog.ImportFolderRecord(id: "f1", path: "/x", name: "x"))
+        var kept = sampleAsset(id: "f1/kept.wav", name: "Kept")
+        kept.remote["folder"] = "f1"
+        var loose = sampleAsset(id: "f1/loose.wav", name: "Loose")
+        loose.remote["folder"] = "f1"
+        XCTAssertTrue(try catalog.upsert([kept, loose], ifImportFolderExists: "f1"))
+        try catalog.recordUsage(AssetUsage(assetID: kept.id, projectID: "prj"))
+
+        XCTAssertEqual(try catalog.removeImportFolderAndAssets(id: "f1"), [loose.id])
+        XCTAssertFalse(try catalog.upsert([loose], ifImportFolderExists: "f1"))
+        XCTAssertEqual(try catalog.search(AssetQuery()).map(\.id), [kept.id])
+    }
+
+    func testAFetchPicksUpANoteChangedSinceTheScan() async throws {
+        let folder = tempFolder("fresh-note")
+        try Generated.sineWAV(at: folder.appendingPathComponent("zap.wav"), seconds: 0.2)
+        let library = try makeLibrary()
+        try await library.addImportFolder(folder, licence: FolderLicence.presets["mixkit"])
+        let zap = try XCTUnwrap(library.search(AssetQuery(text: "zap")).first)
+        XCTAssertEqual(zap.licenceClass, .noCredit)
+
+        // The note changes and the asset is used before any rescan.
+        try FolderLicence.presets["envato"]!.write(in: folder)
+        let fetched = try await library.fetch(zap.id)
+
+        XCTAssertEqual(fetched.licenceClass, .subscription)
+        XCTAssertEqual(try library.licence(for: zap.id)?.name, "Envato Elements licence")
+        // The next scan finds nothing left to relicense.
+        let reports = try await library.rescanImportFolders()
+        XCTAssertEqual(reports.first?.relicensed, 0)
+        XCTAssertEqual(reports.first?.unchanged, 1)
+    }
+
+    func testEachScanIsHandledOnce() {
+        let handled = HandledScans()
+        XCTAssertTrue(handled.claim("a"))
+        XCTAssertFalse(handled.claim("a"))
+        XCTAssertTrue(handled.claim("b"))
+    }
+
+    func testStoppingTwiceIsFine() {
+        let watcher = ImportFolderWatcher(paths: [tempFolder("stop").path]) { _ in }
+        watcher.stop()
+        watcher.stop()
+    }
+}
