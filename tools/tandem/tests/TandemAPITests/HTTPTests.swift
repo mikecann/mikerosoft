@@ -143,6 +143,29 @@ final class HTTPTests: XCTestCase {
         XCTAssertNil(ProjectSession.readLock(for: h.url)?.port)
     }
 
+    func testParallelRequests() async throws {
+        let served = try await Served()
+        defer { served.stop() }
+        let client = served.client()
+        let revisions = try await withThrowingTaskGroup(of: Int?.self) { group in
+            for index in 0..<24 {
+                group.addTask {
+                    if index % 3 == 0 {
+                        let marker = Marker(id: "mk_p\(index)", time: t(Double(index)), name: "P\(index)")
+                        return try await client.call(ApplyRequest(commands: [.addMarker(marker: marker)])).revision
+                    }
+                    _ = try await client.call(TimelineRequest(from: t(0), to: t(10)))
+                    return nil
+                }
+            }
+            var found: [Int] = []
+            for try await revision in group { if let revision { found.append(revision) } }
+            return found
+        }
+        XCTAssertEqual(Set(revisions).count, 8, "every edit committed once")
+        XCTAssertEqual(served.harness.service.coordinator.project.markers.count, 9)
+    }
+
     func testTheAppDoesntGiveUpItsProject() async throws {
         let served = try await Served()
         defer { served.stop() }
