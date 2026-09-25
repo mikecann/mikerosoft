@@ -12,7 +12,11 @@ struct LibraryPanel: View {
     var body: some View {
         Group {
             switch model.libraryTab {
-            case .media: MediaBrowser(model: model, title: "Media", filter: nil)
+            case .media:
+                // Files and folders from Finder join the project folder and the media.
+                FileDropZone(onFiles: { model.importFiles($0, at: nil, trackID: nil) }) {
+                    MediaBrowser(model: model, title: "Media", filter: nil)
+                }
             case .graphics:
                 AssetBrowser(model: model, sections: AssetSection.graphics, section: Binding(get: { AssetLibraryHost.shared.graphicsSection }, set: { AssetLibraryHost.shared.graphicsSection = $0 }))
             case .audio:

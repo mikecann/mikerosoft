@@ -35,6 +35,10 @@ final class TimelineLanesView: TimelineChildView {
     /// An asset library item on its way: placed at `time` once it's
     /// downloaded and copied into the project.
     private var assetDrop: (id: String, time: Time)?
+    /// Media files dragged in from Finder, found once per drag, and where
+    /// they'd go.
+    private var fileDrop: (files: [URL], time: Time, trackID: String?)?
+    private var draggedFiles: [URL]?
     /// A keyframe being dragged: its clip as it was, the diamond, the rect
     /// the clip had (for reading levels off the volume line), and the edit
     /// so far.
@@ -46,7 +50,7 @@ final class TimelineLanesView: TimelineChildView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        registerForDraggedTypes([.tandemMedia, .string])
+        registerForDraggedTypes([.tandemMedia, .string, .fileURL])
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -771,12 +775,22 @@ final class TimelineLanesView: TimelineChildView {
         let pasteboard = info.draggingPasteboard
         let text = pasteboard.string(forType: .tandemMedia) ?? pasteboard.string(forType: .string) ?? ""
         if let drag = LibraryDrag.parse(text) { return drag }
+        // Finder's drags carry files, never a browser drag's media.
+        if pasteboard.types?.contains(.fileURL) == true { return nil }
         if let ids = model?.draggedMediaIDs, !ids.isEmpty { return .media(ids) }
         return nil
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        updateDrop(sender)
+        draggedFiles = nil
+        return updateDrop(sender)
+    }
+
+    /// File URLs on the pasteboard, when the drag came from Finder.
+    private func fileURLs(from info: NSDraggingInfo) -> [URL] {
+        let pasteboard = info.draggingPasteboard
+        guard pasteboard.types?.contains(.fileURL) == true else { return [] }
+        return pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -792,6 +806,12 @@ final class TimelineLanesView: TimelineChildView {
         guard let model else {
             clearDrop()
             return false
+        }
+        if let files = fileDrop {
+            clearDrop()
+            model.importFiles(files.files, at: files.time, trackID: files.trackID)
+            window?.makeKeyAndOrderFront(nil)
+            return true
         }
         if let pending = assetDrop {
             clearDrop()
@@ -826,8 +846,31 @@ final class TimelineLanesView: TimelineChildView {
     }
 
     private func updateDrop(_ info: NSDraggingInfo) -> NSDragOperation {
-        guard let model, let container, let dragged = libraryDrag(from: info) else { return [] }
+        guard let model, let container else { return [] }
         let local = convert(info.draggingLocation, from: nil)
+        if libraryDrag(from: info) == nil {
+            // Files from Finder: they join the project when dropped.
+            if draggedFiles == nil { draggedFiles = FileImport.mediaFiles(in: fileURLs(from: info)) }
+            guard let files = draggedFiles, !files.isEmpty else { return [] }
+            let point = CGPoint(x: local.x, y: local.y + offset)
+            var time = model.timeline.scale.time(atX: point.x, rate: model.frameRate)
+            snapLine = nil
+            if model.snapping {
+                let targets = SnapTargets.collect(in: model.project, playhead: model.playback.time, inPoint: model.inPoint, outPoint: model.outPoint)
+                if let snapped = targets.nearest(to: time, within: model.timeline.scale.duration(forPixels: Theme.Metrics.snapDistance)) { time = snapped }
+            }
+            let lane = container.layoutCache.lane(atY: point.y)
+            fileDrop = (files, time, lane?.trackID)
+            drop = nil
+            previewProject = nil
+            snapLine = time
+            let what = files.count == 1 ? files[0].lastPathComponent : "\(files.count) files"
+            dragLabel = ("Add \(what) at \(Timecode.string(time, rate: model.frameRate))", point)
+            container.relayoutLanes()
+            container.setAllNeedsDisplay()
+            return .copy
+        }
+        guard let dragged = libraryDrag(from: info) else { return [] }
         let point = CGPoint(x: local.x, y: local.y + offset)
         var time = model.timeline.scale.time(atX: point.x, rate: model.frameRate)
         snapLine = nil
@@ -893,6 +936,7 @@ final class TimelineLanesView: TimelineChildView {
     private func clearDrop() {
         drop = nil
         assetDrop = nil
+        fileDrop = nil
         previewProject = nil
         snapLine = nil
         dragLabel = nil

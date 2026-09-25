@@ -27,6 +27,8 @@ enum InputSimulator {
             case menu(out: String)
             case scroll(dx: CGFloat, dy: CGFloat)
             case drop(payload: String)
+            /// Files dropped as if from Finder.
+            case dropFiles([String])
             /// Moves the pointer to the point and leaves it there, for
             /// hover previews.
             case hover
@@ -80,6 +82,10 @@ enum InputSimulator {
         if let payload = query["drop"], at.count == 2, LibraryDrag.parse(payload) != nil {
             return Gesture(kind: .drop(payload: payload), at: CGPoint(x: at[0], y: at[1]), modifiers: flags)
         }
+        if let files = query["files"], at.count == 2 {
+            let paths = files.split(separator: ",").map { NSString(string: String($0)).expandingTildeInPath }.filter { $0.hasPrefix("/") }
+            if !paths.isEmpty { return Gesture(kind: .dropFiles(paths), at: CGPoint(x: at[0], y: at[1]), modifiers: flags) }
+        }
         return nil
     }
 
@@ -131,16 +137,20 @@ enum InputSimulator {
                 if current is NSHostingViewMarker { break }
                 view = current.superview
             }
-        case .drop(let payload):
+        case .drop, .dropFiles:
             // The nearest view up the chain that takes drops.
             var view: NSView? = target
             while let candidate = view, candidate.registeredDraggedTypes.isEmpty { view = candidate.superview }
             guard let destination = view else { return }
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.mikerosoft.tandem.simulated-drop"))
             pasteboard.clearContents()
-            pasteboard.setString(payload, forType: .string)
+            if case .drop(let payload) = gesture.kind {
+                pasteboard.setString(payload, forType: .string)
+            } else if case .dropFiles(let paths) = gesture.kind {
+                pasteboard.writeObjects(paths.map { NSURL(fileURLWithPath: $0) })
+            }
             let info = SimulatedDrop(window: window, location: start, pasteboard: pasteboard)
-            if destination.draggingEntered(info) != [], destination.performDragOperation(info) {
+            if destination.draggingEntered(info) != [], destination.draggingUpdated(info) != [], destination.prepareForDragOperation(info), destination.performDragOperation(info) {
                 destination.concludeDragOperation(info)
             } else {
                 destination.draggingExited(info)
@@ -193,11 +203,20 @@ private final class SimulatedDrop: NSObject, @preconcurrency NSDraggingInfo {
 
     func slideDraggedImage(to screenPoint: NSPoint) {}
     func resetSpringLoading() {}
+    /// SwiftUI's drop targets read the dragged items this way.
     func enumerateDraggingItems(
         options enumOpts: NSDraggingItemEnumerationOptions = [],
         for view: NSView?,
         classes classArray: [AnyClass],
         searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:],
         using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
-    ) {}
+    ) {
+        let objects = draggingPasteboard.readObjects(forClasses: classArray, options: searchOptions) ?? []
+        var stop: ObjCBool = false
+        for (index, object) in objects.enumerated() {
+            guard let writer = object as? NSPasteboardWriting else { continue }
+            block(NSDraggingItem(pasteboardWriter: writer), index, &stop)
+            if stop.boolValue { break }
+        }
+    }
 }
