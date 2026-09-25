@@ -87,6 +87,9 @@ final class FilmoraImporterTests: XCTestCase {
         XCTAssertEqual(shadow?.params["blur"], .number(5))
         XCTAssertEqual(shadow?.params["opacity"], .number(60))
         XCTAssertNil(p.clips(on: "Main")[0].video?.cutout, "the full-frame camera has no cutout")
+        XCTAssertEqual(pip.video?.layoutPreset, "pipRight")
+        XCTAssertEqual(p.clips(on: "Main")[0].video?.layoutPreset, "full")
+        XCTAssertNil(p.clips(on: "Main")[1].video?.layoutPreset, "only camera clips get a layout name")
 
         let graphics = p.clips(on: "Graphics")
         XCTAssertEqual(graphics[0].video?.opacity ?? 0, 0.8, accuracy: 1e-9)

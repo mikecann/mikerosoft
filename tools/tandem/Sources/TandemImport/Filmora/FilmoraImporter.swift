@@ -364,7 +364,10 @@ final class FilmoraRun {
             // Keyframes are keyed to where the clip starts in its media,
             // Filmora's virtual 3600 s included for stills.
             let keyframeStart = speedInfo.sourceStart + Double(begin - clip.begin) / WfpProject.ticksPerSecond * (item.kind == .image ? 1 : speed)
-            let (video, keyframes, colour) = videoProperties(clip, clipSeconds: duration.seconds, sourceStart: keyframeStart, speed: speed, at: start)
+            var (video, keyframes, colour) = videoProperties(clip, clipSeconds: duration.seconds, sourceStart: keyframeStart, speed: speed, at: start)
+            if item.role == .camera {
+                video.layoutPreset = Self.layoutPreset(of: video)
+            }
             planned.clip.video = video
             planned.clip.keyframes = keyframes
             planned.colour = colour
@@ -372,6 +375,19 @@ final class FilmoraRun {
             planned.clip.audio = audioProperties(clip, duration: duration, at: start)
         }
         return planned
+    }
+
+    /// The name TandemCore's LayoutPreset gives a camera clip's layout, so
+    /// the app shows full frame or PiP for imported clips too.
+    static func layoutPreset(of video: VideoProperties) -> String? {
+        let t = video.transform
+        if abs(t.scale - 1) < 0.01, abs(t.position.x - 0.5) < 0.01, abs(t.position.y - 0.5) < 0.01, video.cutout == nil {
+            return "full"
+        }
+        if abs(t.scale - 0.5) < 0.05, t.position.y > 0.5, video.cutout?.enabled == true {
+            return t.position.x > 0.5 ? "pipRight" : "pipLeft"
+        }
+        return nil
     }
 
     func category(for item: MediaItem, on kind: TrackKind) -> Category {

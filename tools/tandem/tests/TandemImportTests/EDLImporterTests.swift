@@ -88,7 +88,7 @@ final class EDLImporterTests: XCTestCase {
                 XCTAssertEqual(video.transform.scale, 0.5, "segment \(index)")
                 XCTAssertEqual(video.transform.position, Point(x: 0.89, y: 0.8), "segment \(index)")
                 XCTAssertEqual(video.cutout?.enabled, true, "segment \(index)")
-                XCTAssertEqual(video.layoutPreset, "corner")
+                XCTAssertEqual(video.layoutPreset, "pipRight")
             } else {
                 XCTAssertEqual(video.transform, Transform(), "segment \(index)")
                 XCTAssertNil(video.cutout, "segment \(index)")

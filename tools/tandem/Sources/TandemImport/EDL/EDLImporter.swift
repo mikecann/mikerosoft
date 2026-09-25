@@ -387,7 +387,8 @@ private final class EDLRun {
                     "scale": .number(pip.scale),
                     "rotation": .number(0)
                 ]),
-                "layoutPreset": .string("corner")
+                // The name TandemCore's LayoutPreset gives this layout.
+                "layoutPreset": .string("pipRight")
             ]
             if pip.cutout ?? true {
                 video["cutout"] = .object(["enabled": .bool(true)])
