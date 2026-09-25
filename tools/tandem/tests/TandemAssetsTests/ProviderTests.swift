@@ -496,3 +496,13 @@ final class ElevenLabsLoopTests: XCTestCase {
         XCTAssertEqual(body["loop"] as? Bool, true)
     }
 }
+
+final class SVGLDuplicateTests: XCTestCase {
+    func testOneFileForBothThemesAppearsOnce() async throws {
+        let transport = FixtureTransport()
+        transport.on("api.svgl.app", data: Data(#"[{"id":1,"title":"Same","category":"Software","route":{"light":"https://svgl.app/library/same.svg","dark":"https://svgl.app/library/same.svg"},"url":"https://example.com"}]"#.utf8))
+        let provider = SVGLProvider(environment: makeEnvironment(transport))
+        let all = try await provider.all()
+        XCTAssertEqual(all.map(\.providerID), ["same"])
+    }
+}

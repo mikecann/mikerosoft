@@ -66,10 +66,12 @@ public final class SVGLProvider: AssetProvider, @unchecked Sendable {
         var brandUrl: String?
     }
 
-    /// Every logo variant, in SVGL's order.
+    /// Every logo variant, in SVGL's order. A file listed twice (some
+    /// brands use one logo for both themes) appears once.
     public func all() async throws -> [Asset] {
         let logos = try await http.getJSON([Logo].self, Self.listURL)
-        return logos.flatMap(assets(for:))
+        var seen = Set<String>()
+        return logos.flatMap(assets(for:)).filter { seen.insert($0.providerID).inserted }
     }
 
     func assets(for logo: Logo) -> [Asset] {
