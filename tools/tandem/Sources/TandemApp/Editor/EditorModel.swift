@@ -69,6 +69,9 @@ final class EditorModel {
     private(set) var project: Project
     private(set) var revision: Int
     private(set) var isDirty = false
+    /// Why the project couldn't be saved, until a save works. Autosave
+    /// keeps trying; the status bar says so while it fails.
+    private(set) var saveProblem: String?
     private(set) var activity = ActivityLog()
     private(set) var jobs: [JobStatus] = []
     /// Goes up when thumbnails, waveforms or transcripts land, so views
@@ -159,6 +162,7 @@ final class EditorModel {
                 guard let self else { return }
                 let dirty = self.session.isDirty
                 if dirty != self.isDirty { self.isDirty = dirty }
+                self.noteSaveProblem(self.session.saveProblem)
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -249,9 +253,25 @@ final class EditorModel {
         do {
             try session.save()
             isDirty = session.isDirty
+            noteSaveProblem(nil)
             show(.info, "Saved \(fileName).")
         } catch {
-            show(.error, "Couldn't save: \(error.localizedDescription)")
+            noteSaveProblem(session.saveProblem ?? Self.describe(error), announce: false)
+            show(.error, SaveProblem.message(file: fileName, reason: saveProblem ?? Self.describe(error)))
+        }
+    }
+
+    /// Keeps `saveProblem` in step with the session, and says so in the
+    /// status bar when saving starts failing or works again.
+    func noteSaveProblem(_ problem: String?, announce: Bool = true) {
+        guard problem != saveProblem else { return }
+        let wasFailing = saveProblem != nil
+        saveProblem = problem
+        guard announce else { return }
+        if let problem {
+            show(.error, SaveProblem.message(file: fileName, reason: problem))
+        } else if wasFailing {
+            show(.info, "Saved \(fileName) again.")
         }
     }
 

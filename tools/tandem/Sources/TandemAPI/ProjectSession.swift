@@ -48,7 +48,11 @@ public final class ProjectSession: @unchecked Sendable {
     private var observerToken: UUID?
     private var closed = false
     private var watcher: FolderWatcher?
+    private var _saveProblem: String?
     public var autosaveDelay: TimeInterval = 1
+    /// How soon an autosave that failed tries again, so fixing the cause (a
+    /// full disk, a folder back where it was) is enough.
+    public var autosaveRetryDelay: TimeInterval = 5
 
     private init(fileURL: URL, project: Project, revision: Int, owner: Owner, recovered: Bool, journal: ProjectJournal, lock: LockHandle) {
         self.projectFolder = FolderAnchor(fileURL.deletingLastPathComponent())
@@ -124,33 +128,54 @@ public final class ProjectSession: @unchecked Sendable {
 
     public var isDirty: Bool { coordinator.revision != savedRevision }
 
+    /// Why the last save failed, until a save works. Autosave failures are
+    /// otherwise silent, so the app shows this.
+    public var saveProblem: String? { queue.sync { _saveProblem } }
+
     /// Writes the project atomically and clears the journal up to what
     /// was written. Edits keep committing while the file is written, and
     /// their journal entries stay until the save that includes them.
     public func save() throws {
         try queue.sync {
             let (project, revision) = coordinator.snapshot()
-            guard revision != savedRevision else { return }
-            try ProjectFile.save(project, revision: revision, to: fileURL)
+            guard revision != savedRevision else {
+                _saveProblem = nil
+                return
+            }
+            do {
+                try ProjectFile.save(project, revision: revision, to: fileURL)
+            } catch {
+                _saveProblem = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                throw error
+            }
             journal.truncate(through: revision)
             savedRevision = revision
+            _saveProblem = nil
         }
     }
 
     /// Saves pending edits, stops autosave and releases the lock. Safe to
-    /// call more than once.
-    public func close() {
+    /// call more than once. Returns why the last save failed, if it did;
+    /// the edits it missed stay in the journal for the next open.
+    @discardableResult
+    public func close() -> Error? {
         let first: Bool = queue.sync {
             defer { closed = true }
             return !closed
         }
-        guard first else { return }
+        guard first else { return nil }
         stopWatching()
         if let token = observerToken { coordinator.removeObserver(token) }
         queue.sync { autosaveWork?.cancel() }
-        try? save()
+        var failure: Error?
+        do {
+            try save()
+        } catch {
+            failure = error
+        }
         analysis.cancelAll()
         lockHandle.release()
+        return failure
     }
 
     /// For long-lived sessions (the app and `tandem serve`, not one-shot CLI
@@ -270,13 +295,21 @@ public final class ProjectSession: @unchecked Sendable {
         }
     }
 
-    private func scheduleAutosave() {
+    private func scheduleAutosave(after delay: TimeInterval? = nil) {
         queue.async { [weak self] in
             guard let self, !self.closed else { return }
             self.autosaveWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in try? self?.save() }
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                do {
+                    try self.save()
+                } catch {
+                    // Recorded in saveProblem; try again until it works.
+                    self.scheduleAutosave(after: self.autosaveRetryDelay)
+                }
+            }
             self.autosaveWork = work
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + self.autosaveDelay, execute: work)
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + (delay ?? self.autosaveDelay), execute: work)
         }
     }
 

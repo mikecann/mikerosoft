@@ -56,18 +56,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Edits that won't save get a say first, except when a signal asked
+        // (an alert would hang `kill`; the journal keeps what it can).
+        if !quittingOnSignal, !ProjectDocuments.confirmUnsaved(documents.windows, quitting: true) {
+            return .terminateCancel
+        }
         documents.isTerminating = true
         documents.closeAll()
         return .terminateNow
     }
+
+    /// Set when SIGTERM asked Tandem to quit.
+    private var quittingOnSignal = false
 
     /// `kill` (and `kill.sh`) quits like Cmd-Q: projects save, the API
     /// stops and locks are released, instead of the process just ending.
     private func quitCleanlyOnSIGTERM() {
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        source.setEventHandler {
-            MainActor.assumeIsolated { NSApp.terminate(nil) }
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                self?.quittingOnSignal = true
+                NSApp.terminate(nil)
+            }
         }
         source.resume()
         terminationSignal = source

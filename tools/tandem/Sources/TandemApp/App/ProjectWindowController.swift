@@ -126,6 +126,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     // MARK: - Window
 
+    /// Closing saves first; edits that won't save get a say.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        ProjectDocuments.confirmUnsaved([self], quitting: false)
+    }
+
     func windowWillClose(_ notification: Notification) {
         router.uninstall()
         model.tearDown()

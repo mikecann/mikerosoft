@@ -253,6 +253,30 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         for controller in windows { controller.close() }
     }
 
+    /// Saves each window's edits, and when any won't save, asks whether to
+    /// go ahead anyway (closing or quitting loses them). True to go ahead.
+    static func confirmUnsaved(_ controllers: [ProjectWindowController], quitting: Bool) -> Bool {
+        var failed: [(file: String, reason: String)] = []
+        for controller in controllers where controller.model.session.isDirty {
+            do {
+                try controller.model.session.save()
+            } catch {
+                let reason = controller.model.session.saveProblem ?? EditorModel.describe(error)
+                controller.model.noteSaveProblem(reason)
+                failed.append((controller.model.fileName, reason))
+            }
+        }
+        guard let first = failed.first else { return true }
+        let text = SaveProblem.closeAlert(files: failed.map(\.file), reason: first.reason, quitting: quitting)
+        let alert = NSAlert()
+        alert.messageText = text.title
+        alert.informativeText = text.detail
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Keep it open")
+        alert.addButton(withTitle: quitting ? "Quit anyway" : "Close anyway")
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
     var frontmost: ProjectWindowController? {
         windows.first { $0.window?.isKeyWindow == true } ?? windows.first { $0.window?.isMainWindow == true } ?? windows.last
     }

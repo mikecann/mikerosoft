@@ -106,7 +106,7 @@ struct TopBar: View {
                         .font(.ui(13, .bold))
                         .foregroundStyle(Theme.text.color)
                         .lineLimit(1)
-                    Text("\(model.folderName) / \(model.fileName) · \(model.isDirty ? "edited" : "saved")")
+                    Text("\(model.folderName) / \(model.fileName) · \(model.saveProblem != nil ? "not saved" : model.isDirty ? "edited" : "saved")")
                         .font(.ui(10.5))
                         .foregroundStyle(Theme.textFaint.color)
                         .lineLimit(1)
@@ -298,6 +298,17 @@ struct StatusBar: View {
                     .help(model.playback.warnings.map { PreviewWarnings.short($0, media: model.project.media) }.joined(separator: "\n"))
             }
             Spacer(minLength: 8)
+            // Stays while saving fails, whatever else the bar says.
+            if let problem = model.saveProblem {
+                HStack(spacing: 6) {
+                    Circle().fill(Theme.red.color).frame(width: 6, height: 6)
+                    Text(SaveProblem.short)
+                        .font(.ui(11, .semibold))
+                        .foregroundStyle(Theme.red.color)
+                        .lineLimit(1)
+                }
+                .help(SaveProblem.message(file: model.fileName, reason: problem))
+            }
             // The last agent edit stays here once its status message has
             // gone, so the bar never says the same thing twice.
             if let entry = model.activity.lastAgentEntry {
