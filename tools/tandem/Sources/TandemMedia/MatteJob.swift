@@ -166,9 +166,11 @@ final class MattePipeline: @unchecked Sendable {
             while results.count >= workerCount * 4, job.index > next, !stopped { condition.wait() }
             if let matte {
                 results[job.index] = (matte, job.time)
-            } else {
+            } else if let stand = lastGood ?? blankFrame() {
                 failures += 1
-                results[job.index] = (lastGood ?? blankFrame(), job.time)
+                results[job.index] = (stand, job.time)
+            } else {
+                readError = MediaError.failed("Out of memory for matte frames")
             }
             condition.broadcast()
             condition.unlock()
@@ -203,11 +205,18 @@ final class MattePipeline: @unchecked Sendable {
         return true
     }
 
-    private func blankFrame() -> CVPixelBuffer {
+    /// An empty matte for a frame Vision failed on before any succeeded.
+    /// Falls back to a one-off buffer if the pool is exhausted.
+    private func blankFrame() -> CVPixelBuffer? {
         var output: CVPixelBuffer?
         CVPixelBufferPoolCreatePixelBuffer(nil, pool, &output)
-        MatteBlender.fill(output!, luma: 0)
-        return output!
+        if output == nil {
+            CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                                [kCVPixelBufferIOSurfacePropertiesKey: [String: Any]()] as CFDictionary, &output)
+        }
+        guard let output else { return nil }
+        MatteBlender.fill(output, luma: 0)
+        return output
     }
 }
 
