@@ -298,39 +298,61 @@ extension LoudnessResult: ReadableResult {
                 lines.append("  \(item.mediaID)  \(item.path)  not measured yet\(state)")
             }
         }
-        // Clips are grouped by how they're set, since a take has hundreds
-        // of pieces that all share the same levelling. The JSON lists each.
-        struct Setting: Hashable {
+        // A take has hundreds of pieces, so clips are summed up per track:
+        // how many, the spread of their gains and the most common one. The
+        // JSON lists every clip.
+        struct Group {
             var track: String
-            var mediaID: String
             var normalizeTo: Double?
-            var normalizeGainDB: Double?
-            var gainDB: Double
+            var gains: [Double] = []
+            var normalizeGains: [Double] = []
         }
-        var groups: [Setting: [String]] = [:]
-        var order: [Setting] = []
+        var groups: [Group] = []
         for clip in clips where clip.normalizeTo != nil || clip.gainDB != 0 {
-            let key = Setting(track: clip.track, mediaID: clip.mediaID, normalizeTo: clip.normalizeTo, normalizeGainDB: clip.normalizeGainDB, gainDB: clip.gainDB)
-            if groups[key] == nil { order.append(key) }
-            groups[key, default: []].append(clip.clipID)
+            if let index = groups.firstIndex(where: { $0.track == clip.track && $0.normalizeTo == clip.normalizeTo }) {
+                groups[index].gains.append(clip.gainDB)
+                if let gain = clip.normalizeGainDB { groups[index].normalizeGains.append(gain) }
+            } else {
+                var group = Group(track: clip.track, normalizeTo: clip.normalizeTo)
+                group.gains.append(clip.gainDB)
+                if let gain = clip.normalizeGainDB { group.normalizeGains.append(gain) }
+                groups.append(group)
+            }
         }
-        if !order.isEmpty {
-            lines.append("Clip levels:")
-            for key in order {
-                let ids = groups[key] ?? []
-                var parts = ["  \(key.track)", ids.count == 1 ? ids[0] : "\(ids.count) clips of \(key.mediaID)"]
-                if let target = key.normalizeTo {
-                    if let gain = key.normalizeGainDB {
-                        parts.append(String(format: "levelled to %.1f LUFS (%+.1f dB)", target, gain))
+        if !groups.isEmpty {
+            lines.append("Clip levels by track:")
+            let width = groups.map(\.track.count).max() ?? 0
+            for group in groups {
+                let count = group.gains.count
+                var parts = ["  " + group.track.padding(toLength: width, withPad: " ", startingAt: 0), count == 1 ? "1 clip" : "\(count) clips"]
+                if let target = group.normalizeTo {
+                    if group.normalizeGains.isEmpty {
+                        parts.append(String(format: "levelled to %.1f LUFS once measured", target))
                     } else {
-                        parts.append(String(format: "levelled to %.1f LUFS once the file is measured", target))
+                        parts.append(String(format: "levelled to %.1f LUFS (%@)", target, Self.spread(group.normalizeGains)))
                     }
                 }
-                if key.gainDB != 0 { parts.append(String(format: "gain %+.1f dB", key.gainDB)) }
+                if group.gains.contains(where: { $0 != 0 }) { parts.append("gain " + Self.spread(group.gains)) }
                 lines.append(parts.joined(separator: "  "))
             }
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+extension LoudnessResult {
+    /// "+3.9 dB", or "+0.4 to +5.8 dB (99 at +0.4 dB)" for a spread.
+    static func spread(_ values: [Double]) -> String {
+        let rounded = values.map { ($0 * 10).rounded() / 10 }
+        guard let low = rounded.min(), let high = rounded.max() else { return "" }
+        if low == high { return String(format: "%+.1f dB", low) }
+        var text = String(format: "%+.1f to %+.1f dB", low, high)
+        var counts: [Double: Int] = [:]
+        for value in rounded { counts[value, default: 0] += 1 }
+        if let (common, count) = counts.max(by: { $0.value < $1.value }), count * 2 >= rounded.count {
+            text += String(format: " (%d at %+.1f dB)", count, common)
+        }
+        return text
     }
 }
 
