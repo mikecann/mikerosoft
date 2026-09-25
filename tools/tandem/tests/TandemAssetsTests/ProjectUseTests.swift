@@ -52,6 +52,34 @@ final class ProjectUseTests: XCTestCase {
         XCTAssertEqual(files.count, 1)
     }
 
+    func testUsingAnAssetAgainNeverReplacesADifferentFile() async throws {
+        let library = try makeLibrary()
+        try await library.addImportFolder(try makeImportFolder(), licence: FolderLicence.presets["mixkit"])
+        let project = ProjectFolder(root: tempFolder("project"))
+        let sfx = try XCTUnwrap(library.search(AssetQuery(text: "whoosh")).first)
+        let first = try await library.use(sfx.id, in: project, projectID: "prj_test")
+        let path = try XCTUnwrap(first.mediaItem?.path)
+        // Mike reworks the project's copy (or the library's file changes,
+        // and the timeline still plays the copy it had).
+        let copy = project.url(forPath: path)
+        var edited = try Data(contentsOf: copy)
+        edited.append(Data(repeating: 0, count: 4_800))
+        try edited.write(to: copy)
+
+        let again = try await library.use(sfx.id, in: project, projectID: "prj_test")
+
+        XCTAssertEqual(try Data(contentsOf: copy), edited, "the project's copy is left as it was")
+        let fresh = try XCTUnwrap(again.mediaItem?.path)
+        XCTAssertNotEqual(fresh, path)
+        XCTAssertEqual(again.files, [fresh])
+        XCTAssertNotEqual(try Data(contentsOf: project.url(forPath: fresh)), edited)
+        // A third use finds that fresh copy instead of making another.
+        let third = try await library.use(sfx.id, in: project, projectID: "prj_test")
+        XCTAssertEqual(third.mediaItem?.path, fresh)
+        let files = try FileManager.default.contentsOfDirectory(atPath: project.assetsFolder.appendingPathComponent("sfx").path)
+        XCTAssertEqual(files.count, 2)
+    }
+
     func testMusicGetsTheBedDefaults() async throws {
         let library = try makeLibrary()
         try await library.addImportFolder(try makeImportFolder(), licence: FolderLicence.presets["envato"])
