@@ -191,8 +191,8 @@ Real footage, release build (`report.txt` has the latest numbers):
 | Job | Measured |
 | --- | --- |
 | Scan decision-models (295 files) | 0.43 s, rescan 0.01 s |
-| Loudness, 24 min camera | 1.0 s; -32.11 LUFS, LRA 11.75, TP -5.30 (ffmpeg: -32.1, 11.8, -5.3) |
-| Waveform, 24 min camera | 1.0 to 2.5 s |
+| Loudness, 24 min camera | 1.0 s on a quiet machine (up to 5.7 s while other builds ran); -32.11 LUFS, LRA 11.75, TP -5.30 (ffmpeg: -32.1, 11.8, -5.3) |
+| Waveform, 24 min camera | 1.0 s quiet, up to 4.3 s under load |
 | Thumbnails, 24 min camera | 724 JPEGs in 3.4 to 4.2 s |
 | Proxy | 489 fps for 4K camera and VFR screen (about 1.5 min for a 24 min take), 5 Mbps camera, 7.4 Mbps screen |
 | Transcript | 65x realtime for a minute, whole take in 11 s (132x) |
