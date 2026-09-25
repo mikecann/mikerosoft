@@ -6,7 +6,8 @@ import TandemCore
 ///
 /// - Sound effects: `POST /v1/sound-generation` with the
 ///   `eleven_text_to_sound_v2` model, 0.5 to 30 s, optional loop and prompt
-///   influence. Returned as bare 48 kHz PCM, wrapped into WAV here.
+///   influence. Returned as bare 48 kHz PCM, wrapped into WAV here; looping
+///   effects only come as MP3.
 /// - Music: `POST /v1/music` with `music_v2_5`, instrumental by default,
 ///   as 192 kbps MP3 at 48 kHz (what Mike's music scripts use).
 ///
@@ -147,14 +148,21 @@ public final class ElevenLabsProvider: AssetProvider, @unchecked Sendable {
 
     private func soundEffect(_ request: GenerationRequest, prompt: String, key: String, into folder: URL) async throws -> FetchedOriginal {
         let body = try Self.soundBody(request, prompt: prompt)
-        let url = URL(string: "\(Self.api)/sound-generation")!.adding([URLQueryItem(name: "output_format", value: "pcm_48000")])
+        // WAV (bare PCM) is only offered for effects that don't loop.
+        let format = request.loop ? "mp3_44100_128" : "pcm_48000"
+        let url = URL(string: "\(Self.api)/sound-generation")!.adding([URLQueryItem(name: "output_format", value: format)])
         let (data, response) = try await call(url, body: body, key: key, permission: "sound_generation")
+        var remote = remoteDetails(request, prompt: prompt, model: request.model ?? Self.soundModel, format: format)
+        if let cost = response.value(forHTTPHeaderField: "character-cost") { remote["characterCost"] = cost }
+        if request.loop {
+            let file = ProviderFiles.original(in: folder, ext: "mp3")
+            try data.write(to: file, options: .atomic)
+            return FetchedOriginal(asset: generatedAsset(kind: .sfx, prompt: prompt, remote: remote, duration: request.duration), file: file)
+        }
         let channels = WAVFile.guessChannels(byteCount: data.count, sampleRate: 48_000, expectedSeconds: request.duration)
         let file = ProviderFiles.original(in: folder, ext: "wav")
         try WAVFile.wrap(pcm16: data, sampleRate: 48_000, channels: channels).write(to: file, options: .atomic)
-        var remote = remoteDetails(request, prompt: prompt, model: request.model ?? Self.soundModel, format: "pcm_48000")
         remote["channels"] = String(channels)
-        if let cost = response.value(forHTTPHeaderField: "character-cost") { remote["characterCost"] = cost }
         return FetchedOriginal(asset: generatedAsset(kind: .sfx, prompt: prompt, remote: remote, duration: Double(data.count) / Double(48_000 * 2 * channels)), file: file)
     }
 

@@ -481,3 +481,18 @@ final class HTTPTests: XCTestCase {
         XCTAssertNil(KeychainSecretStore().secret(service: "tandem-test-no-such-service-\(UUID().uuidString)"))
     }
 }
+
+final class ElevenLabsLoopTests: XCTestCase {
+    func testLoopingEffectsComeAsMP3() async throws {
+        let transport = FixtureTransport()
+        transport.on("api.elevenlabs.io/v1/sound-generation", data: Data("ID3".utf8) + Data(count: 64))
+        let provider = ElevenLabsProvider(environment: makeEnvironment(transport, secrets: ["elevenlabs": "k"]))
+        let takes = try await provider.generate(GenerationRequest(kind: .sfx, prompt: "Rain loop", duration: 10, loop: true), into: tempFolder("loop"))
+        XCTAssertEqual(takes[0].file.lastPathComponent, "original.mp3")
+        XCTAssertEqual(takes[0].asset.remote["outputFormat"], "mp3_44100_128")
+        XCTAssertEqual(takes[0].asset.remote["loop"], "1")
+        XCTAssertTrue(transport.requests[0].url!.absoluteString.contains("output_format=mp3_44100_128"))
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(transport.requests[0].httpBody)) as? [String: Any])
+        XCTAssertEqual(body["loop"] as? Bool, true)
+    }
+}
