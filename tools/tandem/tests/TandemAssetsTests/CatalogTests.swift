@@ -294,3 +294,18 @@ final class EmojiSearchTests: XCTestCase {
         XCTAssertEqual(AssetCatalog.emoji(in: "plain words 123"), [])
     }
 }
+
+final class VacuumTests: XCTestCase {
+    func testSearchSurvivesVacuum() throws {
+        let url = tempFolder("vacuum").appendingPathComponent("catalog.sqlite")
+        let catalog = try AssetCatalog(url: url)
+        try catalog.upsert((0..<20).map { sampleAsset(id: "a\($0)", name: "Asset number \($0)") })
+        for index in 0..<10 { try catalog.delete(id: "import:a\(index)") }
+        try catalog.upsert(sampleAsset(id: "zz", name: "Zebra crossing"))
+        let db = try SQLiteConnection(path: url.path)
+        try db.execute("VACUUM")
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "zebra")).map(\.providerID), ["zz"])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "number 15")).map(\.providerID), ["a15"])
+        XCTAssertEqual(try catalog.count(AssetQuery(text: "asset")), 10)
+    }
+}

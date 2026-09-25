@@ -43,7 +43,10 @@ public final class AssetCatalog: @unchecked Sendable {
 
     private static let schemaV1 = """
     CREATE TABLE IF NOT EXISTS assets (
-        id TEXT PRIMARY KEY NOT NULL,
+        -- An explicit rowid: the FTS index points at it, and SQLite only
+        -- promises to keep rowids through VACUUM when they're declared.
+        key INTEGER PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
         provider TEXT NOT NULL,
         provider_id TEXT NOT NULL,
         kind TEXT NOT NULL,
@@ -82,22 +85,22 @@ public final class AssetCatalog: @unchecked Sendable {
 
     CREATE VIRTUAL TABLE IF NOT EXISTS assets_fts USING fts5(
         name, tags, summary, provider, provider_id, kind,
-        content = 'assets', content_rowid = 'rowid',
+        content = 'assets', content_rowid = 'key',
         tokenize = 'porter unicode61 remove_diacritics 2'
     );
     CREATE TRIGGER IF NOT EXISTS assets_fts_insert AFTER INSERT ON assets BEGIN
         INSERT INTO assets_fts(rowid, name, tags, summary, provider, provider_id, kind)
-        VALUES (new.rowid, new.name, new.tags, new.summary, new.provider, new.provider_id, new.kind);
+        VALUES (new.key, new.name, new.tags, new.summary, new.provider, new.provider_id, new.kind);
     END;
     CREATE TRIGGER IF NOT EXISTS assets_fts_delete AFTER DELETE ON assets BEGIN
         INSERT INTO assets_fts(assets_fts, rowid, name, tags, summary, provider, provider_id, kind)
-        VALUES ('delete', old.rowid, old.name, old.tags, old.summary, old.provider, old.provider_id, old.kind);
+        VALUES ('delete', old.key, old.name, old.tags, old.summary, old.provider, old.provider_id, old.kind);
     END;
     CREATE TRIGGER IF NOT EXISTS assets_fts_update AFTER UPDATE ON assets BEGIN
         INSERT INTO assets_fts(assets_fts, rowid, name, tags, summary, provider, provider_id, kind)
-        VALUES ('delete', old.rowid, old.name, old.tags, old.summary, old.provider, old.provider_id, old.kind);
+        VALUES ('delete', old.key, old.name, old.tags, old.summary, old.provider, old.provider_id, old.kind);
         INSERT INTO assets_fts(rowid, name, tags, summary, provider, provider_id, kind)
-        VALUES (new.rowid, new.name, new.tags, new.summary, new.provider, new.provider_id, new.kind);
+        VALUES (new.key, new.name, new.tags, new.summary, new.provider, new.provider_id, new.kind);
     END;
 
     CREATE TABLE IF NOT EXISTS licences (
@@ -382,7 +385,7 @@ public final class AssetCatalog: @unchecked Sendable {
         }
         var conditions: [String] = []
         if let fts {
-            sql += " JOIN assets_fts ON assets_fts.rowid = a.rowid"
+            sql += " JOIN assets_fts ON assets_fts.rowid = a.key"
             conditions.append("assets_fts MATCH ?")
             bindings.append(.text(fts))
         }
