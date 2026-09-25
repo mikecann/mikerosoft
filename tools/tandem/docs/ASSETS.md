@@ -133,9 +133,9 @@ results are Codable so the CLI and MCP can return them as JSON.
 | Search the sources | `searchProviders(ProviderQuery, providerIDs:)`, `similar(to:)` |
 | Hover previews and tiles | `previewFile(for:)`, `waveform(for:)`, `url(for:.thumbnail)` |
 | Download and normalise | `fetch(id)` (licence snapshot, normalise, thumbnail) |
-| Generate | `generate(GenerationRequest)`, `remove(id)` for takes not kept |
+| Generate | `generate(GenerationRequest)` (keeps every paid take, lists failures), `remove(id)` for takes not kept |
 | Use in a project | `use(id, in:projectID:)` gives an `AssetPlacement`; `editCommands(at:in:)` adds and places it |
-| Description credits | `credits(for: project).text()`, plus `warnings` |
+| Description credits | `credits(for: project, in: folder).text()`, plus `warnings`; `licenceHistory(id)` for disputes |
 | Import folders | `addImportFolder(url, licence: FolderLicence.presets["envato"])`, `rescanImportFolders()`, `watchImportFolders` |
 | Fonts | `registerFonts()` at launch, `AssetLibrary.registerFonts(in: project)` on open |
 | Housekeeping | `prune()`, `evictUnpinnedFiles()`, `rebuildCatalogFromDisk()` |
@@ -145,7 +145,10 @@ An import folder's licence note is `tandem-licence.json` in the folder
 `kind`, `notes`); presets exist for Envato, Mixkit, Pixabay, Sonniss, the
 YouTube Audio Library, Epidemic, Artlist, Motion Array and Storyblocks.
 Files in a folder without a note get the `unknown` licence class, and the
-credits builder warns about them.
+credits builder warns about them. Adding or correcting a note later
+relicenses the folder's files on the next scan (the watcher sees the note
+change), with a new snapshot for anything already used. A folder that
+can't be read keeps its index rather than looking empty.
 
 Choices made while building it:
 
