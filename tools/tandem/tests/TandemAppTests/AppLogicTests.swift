@@ -134,6 +134,28 @@ final class MediaCatalogTests: XCTestCase {
         XCTAssertEqual(JobText.describe(JobStatus(id: "j3", kind: .waveform, mediaID: "m6", state: .running, progress: 0.5), in: project), "Waveform c3b · 50%")
     }
 
+    func testFilesFromTheAssetLibraryReadByTheirName() {
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "assets/sticker/rocket-x3iqg3mw.mov"), "rocket")
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "assets/music/c3b-pv9cnei3.mp3"), "c3b")
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "/Users/mike/videos/talk/assets/sfx/big-whoosh-abcdefgh.wav"), "big-whoosh")
+        // Only the library's own copies lose their code.
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "broll/servers-x3iqg3mw.mp4"), "servers-x3iqg3mw")
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "assets/sticker/x3iqg3mw.mov"), "x3iqg3mw", "nothing left but the code")
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "music/c1a.mp3"), "c1a")
+    }
+
+    @MainActor
+    func testClipsFromTheLibraryShowTheAssetsName() {
+        var project = Project.standard(name: "Names")
+        project.media = [MediaItem(id: "med_r", path: "assets/sticker/rocket-x3iqg3mw.mov", kind: .video, role: .sticker, duration: t(1), hasVideo: true)]
+        let renderer = ClipRenderer(project: project, scale: TimelineScale(pixelsPerSecond: 10), artwork: nil, visible: 0...0)
+        // placeMedia names a clip after its file.
+        var clip = Clip(name: "rocket-x3iqg3mw", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        XCTAssertEqual(renderer.name(of: clip), "rocket")
+        clip.name = "Launch"
+        XCTAssertEqual(renderer.name(of: clip), "Launch", "a name someone chose stays")
+    }
+
     func testTimeOfDayFromRecordItNames() {
         XCTAssertEqual(MediaCatalog.timeOfDay(fromFileName: "2026-09-24_102826-camera.mov"), "10:28")
         XCTAssertNil(MediaCatalog.timeOfDay(fromFileName: "main-camera.mov"))

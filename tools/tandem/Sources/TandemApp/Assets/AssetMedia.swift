@@ -48,6 +48,9 @@ final class AssetMedia {
                 return NSImage(contentsOf: local)
             }
             guard let remote = asset.thumbnailURL, let file = try? await library.previews.fetch(remote) else { return nil }
+            if file.pathExtension.lowercased() == "svg", let text = try? String(contentsOf: file, encoding: .utf8) {
+                return NSImage(data: Data(SVGSizing.readableColours(SVGSizing.sized(text)).utf8))
+            }
             return NSImage(contentsOf: file)
         }
         loading[key] = task

@@ -122,6 +122,11 @@ struct AssetBrowser: View {
                     Text("Searching \(onlineSourceNames)…").font(.ui(11.5)).foregroundStyle(Theme.textMuted.color)
                 }
             }
+            if let online, !online.searching, results.isEmpty, AssetBrowsing.onlineGroups(online.results, excluding: results).isEmpty {
+                QuietNote(text: online.results.isEmpty
+                          ? "No online source can search these yet. Pexels and Pixabay need a free key in the Keychain."
+                          : "Nothing found online either.")
+            }
             if let online, !online.searching {
                 ForEach(AssetBrowsing.onlineGroups(online.results, excluding: results), id: \.provider) { group in
                     VStack(alignment: .leading, spacing: 8) {
@@ -482,7 +487,8 @@ private struct AssetTile: View {
         let host = AssetLibraryHost.shared
         VStack(alignment: .leading, spacing: 4) {
             ZStack(alignment: .topTrailing) {
-                RoundedRectangle(cornerRadius: 6).fill(Theme.thumbnailWell.color)
+                // Logos drawn for light backgrounds sit on a light well.
+                RoundedRectangle(cornerRadius: 6).fill(forLightBackground ? Theme.text.color : Theme.thumbnailWell.color)
                 picture
                     .padding(asset.kind == .video ? 0 : 12)
                     .frame(width: 82, height: height)
@@ -534,6 +540,10 @@ private struct AssetTile: View {
                 .font(.system(size: 16))
                 .foregroundStyle(Theme.tick.color)
         }
+    }
+
+    private var forLightBackground: Bool {
+        asset.kind == .logo && asset.tags.contains { $0.lowercased() == "light" }
     }
 
     private var symbol: String {

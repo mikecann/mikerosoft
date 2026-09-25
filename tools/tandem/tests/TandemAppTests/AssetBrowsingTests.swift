@@ -186,3 +186,26 @@ final class AssetBrowsingTests: XCTestCase {
         AssetPlacement(asset: asset, mediaItem: item, files: item.map { [$0.path] } ?? [], role: item?.role ?? .other, trackName: nil, audio: nil)
     }
 }
+
+final class SVGSizingTests: XCTestCase {
+    func testRelativeSizesTakeTheViewBoxs() {
+        let anthropic = ##"<svg fill="#000" viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg"><path d="M0 0h24v24z"/></svg>"##
+        XCTAssertEqual(SVGSizing.sized(anthropic), ##"<svg fill="#000" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path d="M0 0h24v24z"/></svg>"##)
+        // Absolute sizes are left alone, and so is anything without a viewBox.
+        let fixed = ##"<svg width="256" height="128" viewBox="0 0 512 256"><g/></svg>"##
+        XCTAssertEqual(SVGSizing.sized(fixed), fixed)
+        let bare = ##"<svg width="100%"><g/></svg>"##
+        XCTAssertEqual(SVGSizing.sized(bare), bare)
+        // Only the root element changes.
+        let nested = ##"<svg viewBox="0 0 10 5" height="1em"><svg width="1em"/></svg>"##
+        XCTAssertEqual(SVGSizing.sized(nested), ##"<svg viewBox="0 0 10 5" width="10" height="5"><svg width="1em"/></svg>"##)
+    }
+
+    /// AppKit doesn't read four and eight digit hex colours (SVGL's white
+    /// logos are `#ffff`), so they lose their alpha digits.
+    func testColoursAppKitCanRead() {
+        XCTAssertEqual(SVGSizing.readableColours(##"<path fill="#ffff"/><path stroke="#12345678"/>"##), ##"<path fill="#ffffff"/><path stroke="#123456"/>"##)
+        let fine = ##"<path fill="#fff" stroke="#0a0b0c"/>"##
+        XCTAssertEqual(SVGSizing.readableColours(fine), fine)
+    }
+}
