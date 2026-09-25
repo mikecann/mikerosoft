@@ -193,6 +193,13 @@ enum FilmoraText {
         return Mapped(content: content, position: position, rotation: layout["Angle"].double ?? 0, notes: notes)
     }
 
+    /// Filmora's default text for a new title. A title still saying this
+    /// was probably left in by mistake.
+    static func isPlaceholder(_ text: String) -> Bool {
+        let placeholders = ["text here", "title here", "enter text here", "your text here", "enter title here", "subtitle here"]
+        return placeholders.contains(text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
+
     /// Filmora stores colours as 0xRRGGBB integers, -1 for "not set".
     static func color(_ value: Int?, alpha: Double = 1) -> RGBA? {
         guard let value, value >= 0 else { return nil }

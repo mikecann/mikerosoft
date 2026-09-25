@@ -663,6 +663,9 @@ final class FilmoraRun {
         for note in mapped.notes {
             report.add(.approximated, "title", note, at: start)
         }
+        if FilmoraText.isPlaceholder(mapped.content.text) {
+            report.add(.note, "title", "A title still says \"\(mapped.content.text)\", Filmora's placeholder text.", at: start)
+        }
         for effect in clip.effects where effect.isOn && !effect.params.isEmpty
             && !["video/effect/transform", "video/effect/crop-pan-zoom"].contains(effect.id) {
             report.add(.unsupported, "title", "Title effect \"\(effect.display)\" isn't supported.", at: start)

@@ -317,6 +317,8 @@ final class FilmoraMappingTests: XCTestCase {
         XCTAssertEqual(FilmoraText.animationName("Typewriter Appears", entering: true), "typewriter")
         XCTAssertEqual(FilmoraText.animationName("Up Dir Insert", entering: true), "slideUp")
         XCTAssertNil(FilmoraText.animationName("Wavy Appearance", entering: true))
+        XCTAssertTrue(FilmoraText.isPlaceholder("Text Here"))
+        XCTAssertFalse(FilmoraText.isPlaceholder("v1.46.0"))
     }
 
     func testKeyframeListsInTicksOrSeconds() {
