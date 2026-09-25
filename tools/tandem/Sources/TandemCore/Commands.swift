@@ -1,0 +1,202 @@
+import Foundation
+
+/// Every change to a project is one of these commands. The app, the CLI and
+/// agents (over MCP) all submit the same commands to `ProjectCoordinator`,
+/// so anything you can do by hand an agent can do too, and vice versa.
+///
+/// JSON form uses the case name as the key and leaves out anything optional,
+/// for example `{"blade": {"at": 12.5}}` or
+/// `{"updateClip": {"clipID": "clip_k3f9x2", "patch": {"video": {"opacity": 0.5}}}}`.
+/// Times are seconds.
+public enum EditCommand: Codable, Equatable, Sendable {
+    // MARK: Project and tracks
+
+    /// Merge patch on `name` and `metadata`.
+    case updateProject(patch: JSONValue)
+    case updateSettings(patch: JSONValue)
+    case addTrack(kind: TrackKind, name: String? = nil, index: Int? = nil, id: String? = nil)
+    /// Removes the track and everything on it.
+    case removeTrack(trackID: String)
+    case moveTrack(trackID: String, index: Int)
+    /// JSON merge patch (RFC 7396) on the track, for example
+    /// `{"muted": true}`. `id`, `kind`, `clips` and `transitions` can't change.
+    case updateTrack(trackID: String, patch: JSONValue)
+
+    // MARK: Media
+
+    case addMedia(item: MediaItem)
+    case updateMedia(mediaID: String, patch: JSONValue)
+    /// Fails if any clip still uses the media.
+    case removeMedia(mediaID: String)
+
+    // MARK: Placing and removing clips
+
+    /// Puts media on the timeline the way the app does when you drag it in.
+    /// Each file goes to the track for its role (camera to "Camera", screen
+    /// to "Screen", music to "Music"...) and a camera file's sound goes to
+    /// "Voice" as a linked clip. Files from one take are placed in sync and
+    /// linked. `sourceStart` is measured from the start of the take (or the
+    /// file), and `duration` defaults to all the media that's left.
+    case placeMedia(
+        mediaIDs: [String],
+        at: Time,
+        sourceStart: Time? = nil,
+        duration: Time? = nil,
+        mode: InsertMode? = nil,
+        videoTrackID: String? = nil,
+        audioTrackID: String? = nil,
+        includeAudio: Bool? = nil
+    )
+    /// `.place` (the default) fails if the range is occupied, `.overwrite`
+    /// replaces what's there, `.insert` pushes later clips right.
+    case insertClip(trackID: String, clip: Clip, mode: InsertMode? = nil)
+    /// Without `ripple` the clips are lifted and leave a gap. With `ripple`
+    /// the gap closes, like Shift-Delete. `includeLinked` defaults to true.
+    case removeClips(clipIDs: [String], ripple: Bool? = nil, includeLinked: Bool? = nil)
+    /// Removes a stretch of time and closes it up. This is how pauses get
+    /// tightened. With no `trackIDs` every `.cut` track is cut and `.follow`
+    /// tracks follow; named tracks are always cut.
+    case rippleDeleteRange(range: TimeRange, trackIDs: [String]? = nil)
+    /// Closes the gap on `trackID` that contains `at`. Fails if another
+    /// `.cut` track has something in that gap.
+    case closeGap(trackID: String, at: Time)
+    /// Opens up empty time at `at`, pushing everything later to the right.
+    case insertTime(at: Time, duration: Time, trackIDs: [String]? = nil)
+
+    // MARK: Cutting and trimming
+
+    /// Splits clips at a time. With `clipIDs` only those clips (and their
+    /// linked partners) are cut. Otherwise every clip under `at` on the given
+    /// tracks, or on all targeted unlocked tracks.
+    case blade(at: Time, trackIDs: [String]? = nil, clipIDs: [String]? = nil)
+    /// Moves a clip edge to `to` (a timeline time). With `ripple` the clip
+    /// keeps its place and everything after it moves instead.
+    case trim(clipID: String, edge: ClipEdge, to: Time, ripple: Bool? = nil, includeLinked: Bool? = nil)
+    /// Moves the cut between two adjacent clips, trimming both.
+    case roll(leftClipID: String, rightClipID: String, delta: Time)
+    /// Changes which part of the media a clip shows without moving it.
+    /// `delta` is in media time.
+    case slip(clipID: String, delta: Time, includeLinked: Bool? = nil)
+    /// Moves a clip between its neighbours, trimming them to compensate.
+    case slide(clipID: String, delta: Time)
+    /// Changes speed but keeps the same media, so the clip gets shorter or
+    /// longer. Linked clips change with it.
+    case setSpeed(clipID: String, speed: Double, ripple: Bool? = nil, includeLinked: Bool? = nil)
+
+    // MARK: Moving and editing clips
+
+    /// Moves clips in time and optionally to another track. `mode` defaults
+    /// to `.place`, which fails if the destination is occupied.
+    case moveClips(
+        clipIDs: [String],
+        delta: Time? = nil,
+        toTrackID: String? = nil,
+        includeLinked: Bool? = nil,
+        mode: MoveMode? = nil
+    )
+    /// JSON merge patch on the clip, for example
+    /// `{"video": {"transform": {"scale": 0.5}}}` or `{"audio": {"gainDB": -3}}`.
+    case updateClip(clipID: String, patch: JSONValue)
+    case link(clipIDs: [String])
+    case unlink(clipIDs: [String])
+
+    // MARK: Transitions
+
+    case addTransition(trackID: String, transition: Transition)
+    case updateTransition(transitionID: String, patch: JSONValue)
+    case removeTransition(transitionID: String)
+
+    // MARK: Effects and animation
+
+    /// Adds to the clip's video or audio effects, depending on the effect.
+    case addEffect(clipID: String, effect: Effect, index: Int? = nil)
+    case updateEffect(clipID: String, effectID: String, patch: JSONValue)
+    case removeEffect(clipID: String, effectID: String)
+    case moveEffect(clipID: String, effectID: String, index: Int)
+    /// Replaces the keyframes of one parameter, for example
+    /// `video.transform.scale`. An empty list removes the animation.
+    case setKeyframes(clipID: String, parameter: String, keyframes: [Keyframe])
+
+    // MARK: Markers
+
+    case addMarker(marker: Marker)
+    case updateMarker(markerID: String, patch: JSONValue)
+    case removeMarker(markerID: String)
+}
+
+public enum InsertMode: String, Codable, Sendable {
+    case place, overwrite, insert
+}
+
+public enum MoveMode: String, Codable, Sendable {
+    /// Fails if the destination is occupied.
+    case place
+    /// Replaces whatever is at the destination.
+    case overwrite
+}
+
+public enum ClipEdge: String, Codable, Sendable {
+    case start, end
+}
+
+/// A group of commands applied atomically as one undo step.
+public struct EditBatch: Codable, Equatable, Sendable {
+    /// Shown in the undo menu and activity feed, for example
+    /// "Claude: tightened 14 pauses in section 4".
+    public var label: String
+    /// `"user"` for edits made in the app, otherwise the agent name.
+    public var author: String
+    public var commands: [EditCommand]
+    /// When set, the batch is rejected if the project has moved on since the
+    /// caller last looked, so an agent never edits a stale timeline.
+    public var expectedRevision: Int?
+    /// Retrying a batch with the same key returns the first result instead of
+    /// applying it twice.
+    public var idempotencyKey: String?
+
+    public init(
+        label: String,
+        author: String = "user",
+        commands: [EditCommand],
+        expectedRevision: Int? = nil,
+        idempotencyKey: String? = nil
+    ) {
+        self.label = label
+        self.author = author
+        self.commands = commands
+        self.expectedRevision = expectedRevision
+        self.idempotencyKey = idempotencyKey
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = try c.decode(.label, or: "Edit")
+        author = try c.decode(.author, or: "user")
+        commands = try c.decode([EditCommand].self, forKey: .commands)
+        expectedRevision = try c.decodeIfPresent(Int.self, forKey: .expectedRevision)
+        idempotencyKey = try c.decodeIfPresent(String.self, forKey: .idempotencyKey)
+    }
+}
+
+public enum EditError: Error, Equatable, CustomStringConvertible, LocalizedError, Sendable {
+    case notFound(String)
+    case overlap(String)
+    case locked(String)
+    case invalid(String)
+    case staleRevision(expected: Int, actual: Int)
+    case notImplemented(String)
+
+    public var description: String {
+        switch self {
+        case .notFound(let what): return "Not found: \(what)"
+        case .overlap(let what): return "Overlap: \(what)"
+        case .locked(let what): return "Locked: \(what)"
+        case .invalid(let what): return "Invalid edit: \(what)"
+        case .staleRevision(let expected, let actual):
+            return "The project changed (expected revision \(expected), now \(actual)). Re-read it and try again."
+        case .notImplemented(let op): return "Not implemented yet: \(op)"
+        }
+    }
+
+    public var errorDescription: String? { description }
+}

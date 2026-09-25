@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>tandem-app</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.mikerosoft.tandem</string>
+    <key>CFBundleName</key>
+    <string>Tandem</string>
+    <key>CFBundleDisplayName</key>
+    <string>Tandem</string>
+    <key>CFBundleIconFile</key>
+    <string>tandem</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.video</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Tandem transcribes your recordings on this Mac so you can edit by words.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Tandem records voiceovers from the selected microphone.</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Tandem Project</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>tandem</string>
+            </array>
+        </dict>
+    </array>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.mikerosoft.tandem</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>tandem</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
