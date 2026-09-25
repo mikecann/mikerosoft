@@ -313,7 +313,7 @@ struct ColourInspector: View {
 
     private func lookSection(_ item: MediaItem) -> some View {
         let colourTypes = EffectRegistry.standard.sorted.filter { $0.domain == .video && $0.category == "Colour" }
-        let users = model.project.allTracks.flatMap(\.clips).filter { $0.mediaID == item.id }.count
+        let users = model.project.videoTracks.flatMap(\.clips).filter { $0.mediaID == item.id }.count
         return InspectorSection(title: "Look", accessory: {
             Menu {
                 ForEach(colourTypes, id: \.type) { definition in
@@ -331,7 +331,7 @@ struct ColourInspector: View {
             .menuIndicator(.hidden)
             .fixedSize()
         }) {
-            Text("Applies to every clip from \(MediaCatalog.fileName(item)) (\(users) on the timeline).")
+            Text(verbatim: "Applies to every clip from \(MediaCatalog.fileName(item)) (\(users) on the timeline).")
                 .font(.ui(11.5))
                 .foregroundStyle(Theme.textMuted.color)
                 .fixedSize(horizontal: false, vertical: true)

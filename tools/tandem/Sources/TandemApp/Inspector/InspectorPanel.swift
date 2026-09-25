@@ -356,7 +356,7 @@ struct NumberField: View {
                     .onSubmit(finish)
                     .onChange(of: focused) { _, now in if !now { finish() } }
             } else {
-                Text("\(Int(value.rounded()))")
+                Text(verbatim: String(Int(value.rounded())))
                     .font(.ui(12).monospacedDigit())
                     .foregroundStyle(Theme.text.color)
                     .onTapGesture {

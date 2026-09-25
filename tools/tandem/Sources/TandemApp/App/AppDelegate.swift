@@ -98,9 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             front?.model.playback.seek(to: time)
         case .select(let ids):
             front?.model.selection = Set(ids)
-        case .panels(let library, let inspector):
+        case .panels(let library, let inspector, let sheet):
             if let library { front?.model.libraryTab = library }
             if let inspector { front?.model.inspectorTab = inspector }
+            if let sheet { front?.model.showExportSheet = sheet }
         case .zoom(let pps, let scroll):
             guard let timeline = front?.model.timeline else { return }
             timeline.fitPending = false

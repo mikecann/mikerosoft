@@ -98,13 +98,19 @@ final class KeyboardRouter {
             return false
         }
         guard let chord = KeyChord(event: event) else { return false }
-        if event.type == .keyUp {
+        return route(chord, keyUp: event.type == .keyUp, isRepeat: event.isARepeat)
+    }
+
+    /// The routing itself, separate from `NSEvent` so it can be tested.
+    /// Returns true when the key was used.
+    func route(_ chord: KeyChord, keyUp: Bool, isRepeat: Bool) -> Bool {
+        if keyUp {
             if chord.key == "k" { holdingK = false }
             if Self.holdKeys.contains(chord.key) { holdChanged(chord.key, false) }
             return false
         }
         if chord.modifiers.isEmpty, Self.holdKeys.contains(chord.key), keymap.command(for: chord) == nil {
-            if !event.isARepeat { holdChanged(chord.key, true) }
+            if !isRepeat { holdChanged(chord.key, true) }
             return true
         }
         if chord.key == "k" && chord.modifiers.isEmpty {
@@ -114,7 +120,7 @@ final class KeyboardRouter {
             return true
         }
         guard let command = keymap.command(for: chord) else { return false }
-        if event.isARepeat && !Self.repeatable.contains(command) { return true }
+        if isRepeat && !Self.repeatable.contains(command) { return true }
         if !perform(command) { NSSound.beep() }
         return true
     }

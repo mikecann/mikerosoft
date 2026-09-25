@@ -41,12 +41,18 @@ final class TimelineRulerView: TimelineChildView {
         let markerFont = Theme.Fonts.ui(10.5, .semibold)
         var occupied: [CGRect] = []
         var markerDrawings: [(CGRect, Marker, Time)] = []
-        for marker in model.project.markers {
-            let time = marker.id == draggingMarker?.id ? (markerPreview ?? marker.time) : marker.time
+        let placed = model.project.markers.map { marker -> (Marker, Time) in
+            (marker, marker.id == draggingMarker?.id ? (markerPreview ?? marker.time) : marker.time)
+        }.sorted { $0.1 < $1.1 }
+        for (index, (marker, time)) in placed.enumerated() {
             let x = scale.x(time)
             guard x > -300, x < bounds.width + 10 else { continue }
-            let width = (marker.name as NSString).size(withAttributes: [.font: markerFont]).width
-            let rect = CGRect(x: x - 4, y: 3, width: width + 16, height: 15)
+            var width = (marker.name as NSString).size(withAttributes: [.font: markerFont]).width + 16
+            // Labels stop short of the next marker rather than overlapping it.
+            if index + 1 < placed.count {
+                width = min(width, scale.x(placed[index + 1].1) - x - 4)
+            }
+            let rect = CGRect(x: x - 4, y: 3, width: max(width, 10), height: 15)
             occupied.append(rect)
             markerDrawings.append((rect, marker, time))
         }
@@ -88,7 +94,16 @@ final class TimelineRulerView: TimelineChildView {
             context.addPath(diamond)
             context.setFillColor(colour.cg)
             context.fillPath()
-            (marker.name as NSString).draw(at: CGPoint(x: rect.minX + 11, y: 4), withAttributes: [.font: markerFont, .foregroundColor: Theme.textStrong.ns])
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byTruncatingTail
+            let labelWidth = rect.width - 12
+            if labelWidth > 8 {
+                (marker.name as NSString).draw(
+                    with: CGRect(x: rect.minX + 11, y: 4, width: labelWidth, height: 14),
+                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                    attributes: [.font: markerFont, .foregroundColor: Theme.textStrong.ns, .paragraphStyle: paragraph]
+                )
+            }
         }
 
         context.setFillColor(Theme.rulerLine.cg)

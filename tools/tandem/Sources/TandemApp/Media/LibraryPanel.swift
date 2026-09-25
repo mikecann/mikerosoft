@@ -532,7 +532,7 @@ struct EffectLibrary: View {
         let categories = Array(Set(definitions.map(\.category))).sorted()
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                PanelHeader(title: "Effects", detail: "adds to the selected clips") { Text("\(definitions.count)").font(.ui(11.5)).foregroundStyle(Theme.textFaint.color) }
+                PanelHeader(title: "Effects", detail: "adds to the selected clips") { Text(verbatim: String(definitions.count)).font(.ui(11.5)).foregroundStyle(Theme.textFaint.color) }
                 ForEach(categories, id: \.self) { category in
                     Text(category)
                         .font(.ui(11.5, .semibold))

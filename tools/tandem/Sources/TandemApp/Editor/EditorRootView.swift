@@ -8,13 +8,14 @@ import TandemMedia
 struct EditorRootView: View {
     let model: EditorModel
     let actions: EditorActions
-    @State private var workspaceHeight: CGFloat = Theme.Metrics.workspaceHeight
+    /// Set once the split is dragged; until then it follows the window.
+    @State private var workspaceHeight: CGFloat?
     @State private var dragStartHeight: CGFloat?
 
     var body: some View {
         GeometryReader { geometry in
             let available = geometry.size.height - Theme.Metrics.topBarHeight - Theme.Metrics.statusBarHeight
-            let workspace = clampedWorkspace(workspaceHeight, available: available)
+            let workspace = clampedWorkspace(workspaceHeight ?? defaultWorkspace(available: available), available: available)
             VStack(spacing: 0) {
                 TopBar(model: model, actions: actions)
                 HStack(spacing: 0) {
@@ -52,6 +53,14 @@ struct EditorRootView: View {
         .background(Theme.window.color)
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
+    }
+
+    /// The design's 524 pt workspace, shrunk so every track fits under it
+    /// when the window is short.
+    private func defaultWorkspace(available: CGFloat) -> CGFloat {
+        let tracks = TimelineLayout.make(project: model.project, showTranscript: model.showTranscript).contentHeight
+        let timeline = Theme.Metrics.timelineToolbarHeight + Theme.Metrics.rulerHeight + tracks + 4
+        return max(Theme.Metrics.minimumWorkspaceHeight, min(Theme.Metrics.workspaceHeight, available - 1 - timeline))
     }
 
     private func clampedWorkspace(_ value: CGFloat, available: CGFloat) -> CGFloat {

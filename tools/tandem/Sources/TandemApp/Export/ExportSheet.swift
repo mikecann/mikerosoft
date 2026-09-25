@@ -99,10 +99,10 @@ struct ExportSheetOverlay: View {
         let size = Self.size(of: preset, settings: model.project.settings)
         return VStack(alignment: .leading, spacing: 0) {
             SheetRow(label: "Video") {
-                Text("\(preset.codec == .hevc ? "HEVC" : "H.264") on the hardware encoder, \(preset.videoBitrate / 1_000_000) Mbps")
+                Text(verbatim: "\(preset.codec == .hevc ? "HEVC" : "H.264") on the hardware encoder, \(preset.videoBitrate / 1_000_000) Mbps")
             }
             SheetRow(label: "Size") {
-                Text("\(size.width) × \(size.height), \(Self.fps(model.project.settings.frameRate)) fps, same as the timeline")
+                Text(verbatim: "\(size.width) × \(size.height), \(Self.fps(model.project.settings.frameRate)) fps, same as the timeline")
             }
             SheetRow(label: "Loudness") {
                 VStack(alignment: .leading, spacing: 3) {

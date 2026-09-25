@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import TandemApp
 
@@ -86,5 +87,50 @@ final class KeymapTests: XCTestCase {
         XCTAssertEqual(keymap.menuChord(for: .bladeAtPlayhead), KeyChord("cmd+b"))
         XCTAssertEqual(keymap.menuChord(for: .addMarker), KeyChord("m"))
         XCTAssertEqual(keymap.chords(for: .lift).first, KeyChord("delete"))
+    }
+}
+
+@MainActor
+final class KeyboardRouterTests: XCTestCase {
+    func event(_ characters: String, keyCode: UInt16, flags: NSEvent.ModifierFlags = [], type: NSEvent.EventType = .keyDown) -> NSEvent {
+        NSEvent.keyEvent(
+            with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+            characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode
+        )!
+    }
+
+    func testChordsFromKeyEvents() {
+        XCTAssertEqual(KeyChord(event: event(" ", keyCode: 49)), KeyChord("space"))
+        XCTAssertEqual(KeyChord(event: event("\u{7F}", keyCode: 51, flags: [.shift])), KeyChord("shift+delete"))
+        XCTAssertEqual(KeyChord(event: event("\u{F702}", keyCode: 123, flags: [.option, .numericPad, .function])), KeyChord("option+left"))
+        XCTAssertEqual(KeyChord(event: event("b", keyCode: 11, flags: [.command])), KeyChord("cmd+b"))
+    }
+
+    func testRoutesCommandsAndSteppingWithKHeld() throws {
+        let router = KeyboardRouter(keymap: try Keymap.load(KeymapTests.bundledKeymapData()))
+        var performed: [EditorCommand] = []
+        var steps: [Int64] = []
+        var held: [(String, Bool)] = []
+        router.perform = { performed.append($0); return true }
+        router.step = { steps.append($0) }
+        router.holdChanged = { held.append(($0, $1)) }
+
+        XCTAssertTrue(router.route(KeyChord("l")!, keyUp: false, isRepeat: false))
+        XCTAssertTrue(router.route(KeyChord("k")!, keyUp: false, isRepeat: false))
+        XCTAssertTrue(router.route(KeyChord("l")!, keyUp: false, isRepeat: false), "K held: L steps a frame")
+        XCTAssertTrue(router.route(KeyChord("j")!, keyUp: false, isRepeat: false))
+        _ = router.route(KeyChord("k")!, keyUp: true, isRepeat: false)
+        XCTAssertTrue(router.route(KeyChord("j")!, keyUp: false, isRepeat: false))
+        XCTAssertEqual(performed, [.shuttleForward, .shuttleStop, .shuttleReverse])
+        XCTAssertEqual(steps, [1, -1])
+
+        XCTAssertTrue(router.route(KeyChord(",")!, keyUp: false, isRepeat: true), "nudges repeat")
+        XCTAssertTrue(router.route(KeyChord("m")!, keyUp: false, isRepeat: true), "held M doesn't add a marker per repeat")
+        XCTAssertEqual(performed.suffix(1), [.nudgeLeft])
+        XCTAssertFalse(router.route(KeyChord("cmd+ctrl+9")!, keyUp: false, isRepeat: false), "unbound keys pass through")
+
+        XCTAssertTrue(router.route(KeyChord("z")!, keyUp: false, isRepeat: false))
+        _ = router.route(KeyChord("z")!, keyUp: true, isRepeat: false)
+        XCTAssertEqual(held.map(\.1), [true, false])
     }
 }

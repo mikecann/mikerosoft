@@ -90,7 +90,7 @@ enum AppURLCommand: Equatable {
     case command(EditorCommand)
     case seek(Time)
     case select(clipIDs: [String])
-    case panels(library: LibraryTab?, inspector: InspectorTab?)
+    case panels(library: LibraryTab?, inspector: InspectorTab?, exportSheet: Bool?)
     case zoom(pixelsPerSecond: Double?, scrollSeconds: Double?)
     case tool(TimelineTool)
     case inOut(start: Time?, end: Time?)
@@ -121,8 +121,9 @@ enum AppURLCommand: Equatable {
         case "panel", "panels", "tab":
             let library = query["library"].flatMap(LibraryTab.init(rawValue:))
             let inspector = query["inspector"].flatMap { InspectorTab(rawValue: $0 == "color" ? "colour" : $0) }
-            guard library != nil || inspector != nil else { return nil }
-            return .panels(library: library, inspector: inspector)
+            let sheet = query["sheet"].map { $0 == "export" }
+            guard library != nil || inspector != nil || sheet != nil else { return nil }
+            return .panels(library: library, inspector: inspector, exportSheet: sheet)
         case "zoom":
             let pps = query["pps"].flatMap(Double.init)
             let scroll = query["scroll"].flatMap(Double.init)
