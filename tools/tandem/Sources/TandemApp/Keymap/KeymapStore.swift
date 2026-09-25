@@ -22,9 +22,17 @@ enum KeymapStore {
         if let executable = Bundle.main.executableURL {
             candidates.append(executable.deletingLastPathComponent().appendingPathComponent(bundleName))
         }
-        return candidates.map { $0.appendingPathComponent(defaultFile) }.first {
-            FileManager.default.fileExists(atPath: $0.path)
+        for candidate in candidates {
+            // Debug builds make a flat bundle; release builds make a real
+            // one with Contents/Resources. Bundle finds the file in either.
+            if let bundle = Bundle(url: candidate),
+               let url = bundle.url(forResource: "premiere", withExtension: "json", subdirectory: "Keymaps") {
+                return url
+            }
+            let flat = candidate.appendingPathComponent(defaultFile)
+            if FileManager.default.fileExists(atPath: flat.path) { return flat }
         }
+        return nil
     }
 
     /// Loads the keymap, reporting (not throwing) problems so a typo in the

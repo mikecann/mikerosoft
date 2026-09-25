@@ -621,6 +621,16 @@ extension CommandSchema {
             example: #"{"zoomToRegion": {"clipID": "clip_scr1", "rect": {"x": 0.5, "y": 0.25, "width": 0.5, "height": 0.5}, "at": 42, "duration": 0.5}}"#
         ),
         Entry(
+            command: .setFormatLayout,
+            summary: "Places video clips in an alternate output format (settings.alternateFormats), such as the 9:16 short: top or bottom half, or the full frame, filled edge to edge. cutout turns the cutout on or off in that format only. The main layout is untouched.",
+            arguments: S.object([
+                "clipIDs": S.ids("Video clips."), "format": S.string("Format ID, like portrait."),
+                "slot": S.enumeration(PortraitSlot.allCases.map(\.rawValue)),
+                "cutout": S.boolean("Cutout on or off in this format. Leave out to keep the clip's setting.")
+            ], required: ["clipIDs", "format", "slot"]),
+            example: #"{"setFormatLayout": {"clipIDs": ["clip_cam1"], "format": "portrait", "slot": "bottom", "cutout": false}}"#
+        ),
+        Entry(
             command: .addTransition,
             summary: "Adds a transition between two touching clips (needs spare media on both sides) or at one clip's head or tail.",
             arguments: S.object(["trackID": S.string(), "transition": S.ref("Transition")], required: ["trackID", "transition"]),

@@ -36,7 +36,10 @@ cp "$BIN_DIR/tandem" "$CLI_BIN"
 cp "$SCRIPT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 # SwiftPM resource bundles (keymaps, packs) sit next to the binaries.
 for bundle in "$BIN_DIR"/*.bundle; do
-  [[ -e "$bundle" ]] && cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+  [[ -e "$bundle" ]] || continue
+  # Test fixtures are bundles too; they don't belong in the app.
+  [[ "$(basename "$bundle")" == *Tests.bundle ]] && continue
+  cp -R "$bundle" "$APP_DIR/Contents/Resources/"
 done
 chmod +x "$APP_BIN" "$CLI_BIN"
 

@@ -10,7 +10,7 @@ public enum CommandCase: String, CaseIterable, Codable, Sendable {
     case addMedia, updateMedia, removeMedia
     case placeMedia, insertClip, removeClips, rippleDeleteRange, closeGap, insertTime, insertTemplate
     case blade, trim, roll, slip, slide, setSpeed
-    case moveClips, updateClip, link, unlink, applyLayout, zoomToRegion
+    case moveClips, updateClip, link, unlink, applyLayout, zoomToRegion, setFormatLayout
     case addTransition, updateTransition, removeTransition
     case addEffect, updateEffect, removeEffect, moveEffect, setKeyframes
     case addMarker, updateMarker, removeMarker
@@ -47,6 +47,7 @@ extension EditCommand {
         case .unlink: return .unlink
         case .applyLayout: return .applyLayout
         case .zoomToRegion: return .zoomToRegion
+        case .setFormatLayout: return .setFormatLayout
         case .addTransition: return .addTransition
         case .updateTransition: return .updateTransition
         case .removeTransition: return .removeTransition
@@ -98,6 +99,7 @@ public enum CommandText {
         case .unlink: return "Unlink clips"
         case .applyLayout(_, let preset): return "Layout \(preset.name)"
         case .zoomToRegion(_, _, let at, _): return at.map { "Zoom at \($0)" } ?? "Zoom"
+        case .setFormatLayout(let ids, let format, let slot, _): return "Place \(count(ids.count, "clip")) in the \(slot.rawValue) of \(format)"
         case .addTransition(_, let transition): return "Add \(transition.type.rawValue)"
         case .updateTransition: return "Update transition"
         case .removeTransition: return "Remove transition"

@@ -142,12 +142,28 @@ struct CLI {
                 label: args.options["label"], expectedRevision: try args.integer("expect")
             )
             return show(try await client().call(request), json: json)
+        case "short":
+            try args.expectPositionals(atMost: 0, command: name)
+            let request = ShortRequest(apply: args.has("apply"), label: args.options["label"], expectedRevision: try args.integer("expect"))
+            return show(try await client().call(request), json: json)
+        case "captions":
+            try args.expectPositionals(atMost: 0, command: name)
+            let request = CaptionsRequest(
+                from: try time(args, "from"), to: try time(args, "to"), words: try args.integer("max-words"),
+                y: try args.number("y"), track: args.options["track"], apply: args.has("apply"),
+                label: args.options["label"], expectedRevision: try args.integer("expect")
+            )
+            return show(try await client().call(request), json: json)
         case "frame":
             try args.expectPositionals(atMost: 1, command: name)
             let at = try parseTime(try args.positional(0, "a time, like tandem frame 01:23.500", command: name))
             let output = absolute(args.options["output"] ?? "frame-\(TimeText.fileSafe(at)).png")
             let request = FrameRequest(time: at, maxWidth: try args.integer("width"), maxHeight: try args.integer("height"), output: output, format: args.options["format"])
             return show(try await client().call(request), json: json)
+        case "screenshot":
+            try args.expectPositionals(atMost: 0, command: name)
+            let output = absolute(args.options["output"] ?? "tandem-window.png")
+            return show(try await client().call(ScreenshotRequest(output: output)), json: json)
         case "clip":
             try args.expectPositionals(atMost: 2, command: name)
             let start = try parseTime(try args.positional(0, "a start and an end, like tandem clip 1:00 1:20", command: name))

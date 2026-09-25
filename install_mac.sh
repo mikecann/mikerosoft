@@ -91,6 +91,7 @@ if [[ -L "$TARGET_DIR/video-misc" ]]; then
 fi
 link_tool video-hq tools/video-hq/video-hq
 link_tool telemprompit tools/telemprompit/telemprompit
+link_tool tandem tools/tandem/tandem
 link_tool taskbar tools/taskbar/taskbar
 link_tool last-window-quits tools/last-window-quits/last-window-quits
 link_tool record-it tools/record-it/record-it
