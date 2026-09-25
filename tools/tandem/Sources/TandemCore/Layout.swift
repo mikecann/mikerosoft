@@ -89,3 +89,34 @@ extension Transform {
         return Transform(position: Point(x: x, y: y), scale: scale)
     }
 }
+
+/// Where a clip goes in a 9:16 short made from the landscape edit: Mike's
+/// shorts put the screen in the top half and the camera in the bottom half,
+/// with captions between, and full-frame camera moments fill the frame.
+public enum PortraitSlot: String, Codable, CaseIterable, Sendable {
+    case top, bottom, full
+
+    /// The part of the canvas the slot covers: y from and to, 0 top to 1
+    /// bottom, full width.
+    var band: (top: Double, bottom: Double) {
+        switch self {
+        case .top: return (0, 0.5)
+        case .bottom: return (0.5, 1)
+        case .full: return (0, 1)
+        }
+    }
+}
+
+extension Transform {
+    /// The transform that fills a full-width band of the canvas with the
+    /// source, cropping its sides (cover, not fit).
+    public static func filling(_ slot: PortraitSlot, sourceWidth: Double, sourceHeight: Double, canvasWidth: Double, canvasHeight: Double) -> Transform {
+        let fit = min(canvasWidth / sourceWidth, canvasHeight / sourceHeight)
+        let fittedWidth = sourceWidth * fit
+        let fittedHeight = sourceHeight * fit
+        let band = slot.band
+        let bandHeight = (band.bottom - band.top) * canvasHeight
+        let scale = max(canvasWidth / fittedWidth, bandHeight / fittedHeight)
+        return Transform(position: Point(x: 0.5, y: (band.top + band.bottom) / 2), scale: scale)
+    }
+}

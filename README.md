@@ -46,6 +46,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/record-meeting/docs/header.webp" width="220"><br>[record-meeting](tools/record-meeting/README.md) | Mac - GUI | Always-on-top meeting recorder with system audio + microphone capture, live waveform, synchronized transcript review, MP3 export, speaker-labelled transcription, and Notion publishing |
 | [meeting-archive](tools/meeting-archive/README.md) | Mac - GUI (preview) | Camera-triggered meeting archive with a validated Zoom capture-to-Notion path; wider app coverage remains in validation |
 | <img src="tools/video-hq/docs/header.jpg" width="220"><br>[video-hq](tools/video-hq/README.md) | Mac - GUI | Native video-production command center with project and render discovery, Notion script import, transcription, and YouTube descriptions |
+| <img src="tools/tandem/docs/header.jpg" width="220"><br>[tandem](tools/tandem/README.md) | Mac - GUI + CLI | Native video editor that replaces Filmora for the Convex videos: record-it takes, cutout PiP, ripple editing, titles, music and SFX, a -14 LUFS export, and a CLI and MCP server so agents can edit the same project |
 | <img src="tools/telemprompit/docs/header.png" width="220"><br>[telemprompit](tools/telemprompit/README.md) | Mac - GUI | Teleprompter for the Elgato Prompter: paste notes or Notion bullets, click through them line by line or auto-scroll, with clicker keys that work from any app |
 | <img src="tools/voice-type/docs/header.webp" width="220"><br>[voice-type](tools/voice-type/README.md) | Taskbar + macOS daemon | Push-to-talk local voice transcription on Windows and macOS. On Apple Silicon it uses MLX for faster final transcription |
 | <img src="tools/video-titles/docs/header.webp" width="220"><br>[video-titles](tools/video-titles/README.md) | Context menu | Chat with an AI agent to ideate YouTube titles using the Compelling Title Matrix; right-click any video in Explorer (requires `OPENROUTER_API_KEY` in `.env`) |
@@ -108,6 +109,8 @@ For macOS, set tools up individually where mac support exists:
   `bash tools/video-hq/setup_mac.sh`
 - `telemprompit`:
   `bash tools/telemprompit/setup_mac.sh`
+- `tandem`:
+  `bash tools/tandem/setup_mac.sh`
 
 At the moment that is the right shape for the repo. A fake "universal" root
 installer would mostly be a wrapper around platform checks and per-tool scripts,
@@ -129,6 +132,7 @@ while still not covering the Windows-only integrations.
 | `meeting-archive` | Preview | `bash tools/meeting-archive/setup_mac.sh` | `meeting-archive` | Zoom capture, Bruce processing, and Notion publication validated. Chrome automatic capture is blocked pending the capture-mode decision; Teams and Slack remain live-unverified |
 | `video-hq` | Supported | `bash tools/video-hq/setup_mac.sh` | Launch `Video HQ` from Spotlight or run `video-hq` | Project-first command center with Notion script import, rendered-video preview, transcription, and OpenRouter-powered descriptions |
 | `telemprompit` | Supported | `bash tools/telemprompit/setup_mac.sh` | Launch `Telemprompit` from Spotlight, or `telemprompit` after `bash install_mac.sh` | Opens on the Elgato Prompter when it is connected, otherwise the main screen. Page Up/Down work from any app for clickers |
+| `tandem` | Supported | `bash tools/tandem/setup_mac.sh` | `tandem app` to open the editor, `tandem help` for the agent CLI after `bash install_mac.sh` | Swift video editor. Projects are `.tandem` files in the video folder; `tandem mcp` serves agents |
 | Everything else | Windows-only for now | Use `install.ps1` on Windows | Varies by tool | Most other tools still depend on Windows-specific shell integration, taskbar shortcuts, or Explorer context menus |
 
 ### Codex worktrees

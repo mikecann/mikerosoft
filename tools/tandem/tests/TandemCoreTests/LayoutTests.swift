@@ -58,3 +58,29 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(c.project.clip(screen)!.resolvedVideo(at: t(21)).transform.scale, 1, accuracy: 1e-9)
     }
 }
+
+final class PortraitLayoutTests: XCTestCase {
+    func testFillingTheBottomHalfOfAShort() {
+        // A 16:9 camera on 1080x1920: fitted it's 1080x607.5, so filling a
+        // 960 px tall half needs 960 / 607.5.
+        let t = Transform.filling(.bottom, sourceWidth: 3840, sourceHeight: 2160, canvasWidth: 1080, canvasHeight: 1920)
+        XCTAssertEqual(t.scale, 960 / 607.5, accuracy: 1e-9)
+        XCTAssertEqual(t.position, Point(x: 0.5, y: 0.75))
+        let full = Transform.filling(.full, sourceWidth: 3840, sourceHeight: 2160, canvasWidth: 1080, canvasHeight: 1920)
+        XCTAssertEqual(full.scale, 1920 / 607.5, accuracy: 1e-9)
+    }
+
+    func testSetFormatLayoutNeedsTheFormatAndKeepsTheMainLayout() throws {
+        let (f, c) = try Fixture.edited()
+        let camera = f.clips("Camera")[0].id
+        XCTAssertThrowsError(try c.run("Short", .setFormatLayout(clipIDs: [camera], format: "portrait", slot: .bottom)))
+        try c.run("Format", .updateSettings(patch: .object(["alternateFormats": .array([try JSONValue.from(OutputFormat.portrait)])])))
+        try c.run("PiP", .applyLayout(clipIDs: [camera], preset: .pipRight))
+        try c.run("Short", .setFormatLayout(clipIDs: [camera], format: "portrait", slot: .bottom, cutout: false))
+        let video = try XCTUnwrap(c.project.clip(camera)?.video)
+        XCTAssertEqual(video.transform.scale, 0.5, "the landscape layout is untouched")
+        let override = try XCTUnwrap(video.formatOverrides["portrait"])
+        XCTAssertEqual(override.transform?.position, Point(x: 0.5, y: 0.75))
+        XCTAssertEqual(override.cutout, false)
+    }
+}
