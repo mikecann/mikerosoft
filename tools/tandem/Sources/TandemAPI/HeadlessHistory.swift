@@ -46,8 +46,7 @@ final class HeadlessHistory: @unchecked Sendable {
     private let maxKeys = 100
 
     init(projectURL: URL) {
-        let name = projectURL.deletingPathExtension().lastPathComponent
-        url = ProjectFile.supportFolder(for: projectURL).appendingPathComponent("\(name).undo.json")
+        url = ProjectFile.undoHistoryURL(for: projectURL)
     }
 
     private func load() -> State? {

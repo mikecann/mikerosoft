@@ -43,6 +43,27 @@ public enum ProjectFile {
         projectURL.deletingLastPathComponent().appendingPathComponent(".tandem", isDirectory: true)
     }
 
+    /// `.tandem/<name>.journal.jsonl`: edits since the last save.
+    public static func journalURL(for projectURL: URL) -> URL {
+        supportFolder(for: projectURL).appendingPathComponent("\(projectURL.deletingPathExtension().lastPathComponent).journal.jsonl")
+    }
+
+    /// `.tandem/<name>.undo.json`: undo history for edits made while no app
+    /// had the project open.
+    public static func undoHistoryURL(for projectURL: URL) -> URL {
+        supportFolder(for: projectURL).appendingPathComponent("\(projectURL.deletingPathExtension().lastPathComponent).undo.json")
+    }
+
+    /// Clears the journal and undo history an earlier file of this name
+    /// left behind, for a file that takes its place (a new project, a
+    /// version saved over another, a fresh import). Both describe the old
+    /// file's timeline: replayed or undone onto the new one, they'd bring
+    /// the old one back.
+    public static func forgetHistory(of projectURL: URL) {
+        ProjectJournal.forProject(at: projectURL).truncate()
+        try? FileManager.default.removeItem(at: undoHistoryURL(for: projectURL))
+    }
+
     private static func backup(_ url: URL, keep: Int) throws {
         let fm = FileManager.default
         let folder = supportFolder(for: url).appendingPathComponent("backups", isDirectory: true)
@@ -111,8 +132,7 @@ public final class ProjectJournal: @unchecked Sendable {
     public static func forProject(at projectURL: URL) -> ProjectJournal {
         let folder = ProjectFile.supportFolder(for: projectURL)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let name = projectURL.deletingPathExtension().lastPathComponent
-        return ProjectJournal(url: folder.appendingPathComponent("\(name).journal.jsonl"))
+        return ProjectJournal(url: ProjectFile.journalURL(for: projectURL))
     }
 
     public func append(batch: EditBatch, revision: Int, seed: UInt64) {

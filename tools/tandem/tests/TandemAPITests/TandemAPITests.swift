@@ -41,6 +41,25 @@ final class ProjectSessionTests: XCTestCase {
         reopened.close()
     }
 
+    func testANewProjectDoesntInheritWhatAnOldOneLeftBehind() throws {
+        // A project of this name crashed with unsaved edits and was then
+        // deleted, and the CLI had kept undo history for it.
+        let url = folder.appendingPathComponent("Video.tandem")
+        var old = Project.standard(name: "Old")
+        old.markers = [Marker(id: "mk_old", time: t(1), name: "Old")]
+        ProjectJournal.forProject(at: url).appendSnapshot(project: old, revision: 3, reason: "undo")
+        try FileManager.default.createDirectory(at: ProjectFile.supportFolder(for: url), withIntermediateDirectories: true)
+        let stale = #"{"revision": 1, "undo": [], "redo": [], "idempotent": []}"#
+        try Data(stale.utf8).write(to: ProjectFile.undoHistoryURL(for: url))
+
+        let session = try ProjectSession.create(at: url, name: "New", owner: .cli)
+        defer { session.close() }
+        XCTAssertFalse(session.recoveredEdits)
+        XCTAssertEqual(session.coordinator.project.name, "New")
+        XCTAssertEqual(session.coordinator.project.markers, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectFile.undoHistoryURL(for: url).path))
+    }
+
     func testAnEditThatLandsDuringASaveIsStillJournaled() throws {
         let url = folder.appendingPathComponent("Race.tandem")
         let session = try ProjectSession.create(at: url, owner: .app)

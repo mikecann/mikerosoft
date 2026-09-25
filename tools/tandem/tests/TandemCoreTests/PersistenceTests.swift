@@ -69,6 +69,17 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(recovered.project.markers.map(\.id), ["mk_b", "mk_old"], "mk_a was replaced by the reload")
     }
 
+    func testForgettingHistoryClearsTheJournalAndUndoHistory() throws {
+        let url = folder.appendingPathComponent("Video.tandem")
+        journal().append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)
+        try Data("{}".utf8).write(to: ProjectFile.undoHistoryURL(for: url))
+        ProjectFile.forgetHistory(of: url)
+        XCTAssertEqual(journal().entries(after: 0).count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectFile.undoHistoryURL(for: url).path))
+        XCTAssertEqual(ProjectFile.undoHistoryURL(for: url).lastPathComponent, "Video.undo.json")
+        XCTAssertEqual(ProjectFile.journalURL(for: url).lastPathComponent, "Video.journal.jsonl")
+    }
+
     func testTruncatingForASaveKeepsTheEditsItMissed() throws {
         let journal = journal()
         journal.append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)

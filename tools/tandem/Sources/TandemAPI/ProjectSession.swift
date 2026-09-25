@@ -93,6 +93,9 @@ public final class ProjectSession: @unchecked Sendable {
         }
         let project = Project.standard(name: name ?? url.deletingPathExtension().lastPathComponent)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // A deleted project of this name may have left a journal or undo
+        // history; opening would replay it over the new project.
+        ProjectFile.forgetHistory(of: url)
         try ProjectFile.save(project, revision: 0, to: url)
         return try open(url, owner: owner)
     }
