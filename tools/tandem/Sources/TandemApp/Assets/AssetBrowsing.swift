@@ -3,10 +3,12 @@ import Foundation
 import TandemAssets
 import TandemCore
 
-/// The sections of the Audio and Graphics tabs, each a part of the asset
-/// library's left rail (`BrowserSection`).
+/// The sections of the asset browser, each a part of the asset library's
+/// left rail (`BrowserSection`): music and sound effects in the Audio tab,
+/// pictures in the Graphics tab, looks in the Effects tab and fonts in the
+/// Text tab.
 enum AssetSection: String, CaseIterable, Identifiable {
-    case music, sfx, stickers, icons, broll
+    case music, sfx, stickers, icons, broll, looks, fonts
 
     var id: String { rawValue }
 
@@ -21,6 +23,8 @@ enum AssetSection: String, CaseIterable, Identifiable {
         case .stickers: return "Stickers"
         case .icons: return "Icons"
         case .broll: return "B-roll"
+        case .looks: return "Looks"
+        case .fonts: return "Fonts"
         }
     }
 
@@ -31,11 +35,25 @@ enum AssetSection: String, CaseIterable, Identifiable {
         case .stickers: return .stickers
         case .icons: return .iconsAndLogos
         case .broll: return .overlaysAndBroll
+        case .looks: return .luts
+        case .fonts: return .fonts
+        }
+    }
+
+    /// The library tab the section is in.
+    var libraryTab: LibraryTab {
+        switch self {
+        case .music, .sfx: return .audio
+        case .stickers, .icons, .broll: return .graphics
+        case .looks: return .effects
+        case .fonts: return .text
         }
     }
 
     var kinds: Set<AssetKind> { browserSection.kinds }
     var isAudio: Bool { self == .music || self == .sfx }
+    /// Pictures that can be transparent: stickers, icons, B-roll.
+    var hasPictures: Bool { libraryTab == .graphics }
 
     var searchPrompt: String {
         switch self {
@@ -44,13 +62,17 @@ enum AssetSection: String, CaseIterable, Identifiable {
         case .stickers: return "Search stickers"
         case .icons: return "Search icons and logos"
         case .broll: return "Search B-roll and overlays"
+        case .looks: return "Search looks"
+        case .fonts: return "Search fonts"
         }
     }
 
-    /// Width over height of a tile; audio lists rows instead.
+    /// Width over height of a tile; audio and fonts list rows instead.
     var tileAspect: CGFloat {
         switch self {
         case .broll: return 82.0 / 48.0
+        // A look's tile is its before and after card.
+        case .looks: return 2
         default: return 1
         }
     }
@@ -161,7 +183,7 @@ enum AssetBrowsing {
             query.minBPM = filters.tempo.range.min
             query.maxBPM = filters.tempo.range.max
         }
-        if !section.isAudio, filters.transparentOnly { query.hasAlpha = true }
+        if section.hasPictures, filters.transparentOnly { query.hasAlpha = true }
         return query
     }
 

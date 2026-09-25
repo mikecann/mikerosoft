@@ -36,7 +36,8 @@ final class EditorActions {
         case .undo: return model.undoLabel != nil
         case .redo: return model.redoLabel != nil
         case .lift, .rippleDelete: return !model.selection.isEmpty || model.selectedTransitionID != nil || model.selectedKeyframe != nil
-        case .nudgeLeft, .nudgeRight, .nudgeLeftFive, .nudgeRightFive, .link, .deselectAll: return !model.selection.isEmpty
+        case .nudgeLeft, .nudgeRight, .nudgeLeftFive, .nudgeRightFive, .link: return !model.selection.isEmpty
+        case .deselectAll: return !model.selection.isEmpty || AssetLibraryHost.shared.previewing != nil
         case .liftInOut, .extractInOut: return model.inOutRange != nil
         default: return true
         }
@@ -47,7 +48,14 @@ final class EditorActions {
     func perform(_ command: EditorCommand) -> Bool {
         switch command {
         // Transport
-        case .playPause: playback.togglePlay()
+        case .playPause:
+            // Over the asset browser, Space opens and closes a big preview.
+            let host = AssetLibraryHost.shared
+            switch SpaceKey.action(previewing: host.previewing?.id, hovered: host.hovered?.id) {
+            case .open: host.previewing = host.hovered
+            case .close: host.previewing = nil
+            case .playPause: playback.togglePlay()
+            }
         case .shuttleReverse: playback.shuttleReverse()
         case .shuttleStop: playback.pause()
         case .shuttleForward: playback.shuttleForward()
@@ -132,6 +140,11 @@ final class EditorActions {
         // Selection
         case .selectAll: model.selection = Set(project.allTracks.flatMap(\.clips).map(\.id))
         case .deselectAll:
+            // Escape closes the asset preview first.
+            if AssetLibraryHost.shared.previewing != nil {
+                AssetLibraryHost.shared.previewing = nil
+                return true
+            }
             model.selection = []
             model.selectedTransitionID = nil
         case .selectForward: model.selection = SelectionRules.forward(from: playhead, in: project)

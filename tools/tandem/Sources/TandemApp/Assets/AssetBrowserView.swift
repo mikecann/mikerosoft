@@ -4,13 +4,17 @@ import TandemAssets
 import TandemCore
 
 /// The Audio and Graphics tabs: the asset library's music, sound effects,
-/// stickers, icons, logos and B-roll. Search the catalogue as you type,
-/// press Return to ask the online sources too, hover to preview, and
-/// double-click or drag to put an asset on the timeline.
+/// stickers, icons, logos and B-roll (and looks and fonts, inside the
+/// Effects and Text tabs). Search the catalogue as you type, press Return
+/// to ask the online sources too, hover to preview, Space for a big
+/// preview, and double-click or drag to put an asset on the timeline, or
+/// a look or font on a clip.
 struct AssetBrowser: View {
     let model: EditorModel
     let sections: [AssetSection]
     @Binding var section: AssetSection
+    /// Replaces the section tabs, for a browser inside another tab.
+    var tabs: AnyView?
 
     @State private var results: [Asset] = []
     @State private var loaded = false
@@ -51,13 +55,28 @@ struct AssetBrowser: View {
         .task(id: LoadKey(section: section, state: state, revision: host.revision, ready: host.state == .ready, projectID: model.project.id)) {
             await load(state)
         }
-        .onChange(of: section) { _, _ in host.media.stopAudition() }
-        .onDisappear { host.media.stopAudition() }
+        .onChange(of: section) { _, _ in
+            host.media.stopAudition()
+            host.hovered = nil
+        }
+        .onDisappear {
+            host.media.stopAudition()
+            host.hovered = nil
+        }
     }
 
     // MARK: - Header
 
+    @ViewBuilder
     private var header: some View {
+        if let tabs {
+            tabs
+        } else {
+            sectionTabs
+        }
+    }
+
+    private var sectionTabs: some View {
         HStack(spacing: 16) {
             ForEach(sections) { item in
                 Button {
@@ -70,6 +89,9 @@ struct AssetBrowser: View {
                 .buttonStyle(.plain)
             }
             Spacer(minLength: 4)
+            if section.isAudio {
+                GenerateButton(model: model, kind: section == .music ? .music : .sfx)
+            }
             Button("Credits") { showCredits = true }
                 .buttonStyle(.plain)
                 .font(.ui(11.5))
@@ -305,7 +327,7 @@ private struct FilterMenu: View {
                     ForEach(AssetFilters.Tempo.allCases) { Text($0.title).tag($0) }
                 }
             }
-            if !section.isAudio {
+            if section.hasPictures {
                 Toggle("Transparent only", isOn: $filters.transparentOnly)
             }
             if filters.isActive {
@@ -356,8 +378,8 @@ private struct EmptyAssets: View {
                     .buttonStyle(.plain)
                     .font(.ui(11.5, .semibold))
                     .foregroundStyle(Theme.amber.color)
-            } else if state.scope == .all && section.isAudio {
-                Button("Add a folder of \(section == .music ? "music" : "sound effects")…") { addFolder(nil) }
+            } else if state.scope == .all && (section.isAudio || section == .looks) {
+                Button("Add a folder of \(section == .music ? "music" : section == .sfx ? "sound effects" : "looks")…") { addFolder(nil) }
                     .buttonStyle(.plain)
                     .font(.ui(11.5, .semibold))
                     .foregroundStyle(Theme.amber.color)
@@ -375,10 +397,12 @@ private struct EmptyAssets: View {
         case .inProject: return "This project doesn't use any of these yet."
         case .all:
             switch section {
-            case .music: return "No music in the library yet. Add a folder of tracks you've licensed (Epidemic, Artlist, Envato), or generate a cue with ElevenLabs from the tandem CLI."
-            case .sfx: return "No sound effects yet. Add a folder of effects you've licensed, or search online."
+            case .music: return "No music in the library yet. Add a folder of tracks you've licensed (Epidemic, Artlist, Envato), or generate a cue with ElevenLabs."
+            case .sfx: return "No sound effects yet. Add a folder of effects you've licensed, search online, or generate one with ElevenLabs."
             case .broll: return "No B-roll yet. Pexels and Pixabay need a free API key in the Keychain, or add a folder of clips."
             case .stickers, .icons: return "Nothing here yet. Search online to find more."
+            case .looks: return "No looks yet. Add a folder of .cube LUTs you've downloaded, with the licence they came under."
+            case .fonts: return "No fonts downloaded yet. Type a name and press Return to search Google Fonts."
             }
         }
     }
@@ -386,7 +410,7 @@ private struct EmptyAssets: View {
 
 // MARK: - Lists
 
-/// Rows for audio, a grid of tiles for everything else.
+/// Rows for audio and fonts, a grid of tiles for everything else.
 private struct AssetList: View {
     let model: EditorModel
     let section: AssetSection
@@ -397,6 +421,12 @@ private struct AssetList: View {
             LazyVStack(alignment: .leading, spacing: 4) {
                 ForEach(assets) { asset in
                     AssetAudioRow(model: model, asset: asset)
+                }
+            }
+        } else if section == .fonts {
+            LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(assets) { asset in
+                    AssetFontRow(model: model, asset: asset)
                 }
             }
         } else {
@@ -428,7 +458,8 @@ private struct LicenceLine: View {
     }
 }
 
-/// Favourite, download, place and copy, for tiles and rows.
+/// Favourite, download, place and copy, for tiles and rows, and the
+/// hovered asset for Space.
 private struct AssetActions: ViewModifier {
     let model: EditorModel
     let asset: Asset
@@ -436,13 +467,22 @@ private struct AssetActions: ViewModifier {
     func body(content: Content) -> some View {
         let host = AssetLibraryHost.shared
         content
-            .onTapGesture(count: 2) { host.place(asset, at: model.playback.time, in: model) }
+            .onHover { inside in
+                if inside {
+                    host.hovered = asset
+                } else if host.hovered?.id == asset.id {
+                    host.hovered = nil
+                }
+            }
+            .onDisappear { if host.hovered?.id == asset.id { host.hovered = nil } }
+            .onTapGesture(count: 2) { host.use(asset, in: model) }
             .onDrag {
                 host.dragged = asset
                 return NSItemProvider(object: LibraryDrag.asset(asset.id).payload as NSString)
             }
             .contextMenu {
-                Button("Add at the playhead") { host.place(asset, at: model.playback.time, in: model) }
+                Button(useTitle) { host.use(asset, in: model) }
+                Button("Preview") { host.previewing = asset }
                 Button(asset.isFavourite ? "Remove from favourites" : "Add to favourites") { host.setFavourite(asset, !asset.isFavourite) }
                 if asset.state < .original {
                     Button("Download") { host.download(asset) { model.show(.info, $0) } }
@@ -468,8 +508,21 @@ private struct AssetActions: ViewModifier {
         let details = AssetBrowsing.details(asset)
         if !details.isEmpty { lines.append(details) }
         lines.append(asset.state >= .original ? "Downloaded" : "Downloads when you use it")
-        lines.append("Double-click to add at the playhead, or drag to the timeline")
+        switch asset.kind {
+        case .lut: lines.append("Double-click to grade the selected clips, or drag onto a clip")
+        case .font: lines.append("Double-click to set the selected titles in it, or drag onto a title")
+        default: lines.append("Double-click to add at the playhead, or drag to the timeline")
+        }
+        lines.append("Space for a big preview")
         return lines.joined(separator: "\n")
+    }
+
+    private var useTitle: String {
+        switch asset.kind {
+        case .lut: return "Grade the selected clips"
+        case .font: return "Use for the selected titles"
+        default: return "Add at the playhead"
+        }
     }
 }
 
@@ -490,7 +543,7 @@ private struct AssetTile: View {
                 // Logos drawn for light backgrounds sit on a light well.
                 RoundedRectangle(cornerRadius: 6).fill(forLightBackground ? Theme.text.color : Theme.thumbnailWell.color)
                 picture
-                    .padding(asset.kind == .video ? 0 : 12)
+                    .padding(fills ? 0 : 12)
                     .frame(width: 82, height: height)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 if hovering || asset.isFavourite {
@@ -529,12 +582,15 @@ private struct AssetTile: View {
         }
     }
 
+    /// Clips and looks fill the tile; everything else sits inside it.
+    private var fills: Bool { asset.kind == .video || asset.kind == .lut }
+
     @ViewBuilder
     private var picture: some View {
         if let frame {
-            Image(decorative: frame, scale: 1).resizable().aspectRatio(contentMode: asset.kind == .video ? .fill : .fit)
+            Image(decorative: frame, scale: 1).resizable().aspectRatio(contentMode: fills ? .fill : .fit)
         } else if let image {
-            Image(nsImage: image).resizable().aspectRatio(contentMode: asset.kind == .video ? .fill : .fit)
+            Image(nsImage: image).resizable().aspectRatio(contentMode: fills ? .fill : .fit)
         } else {
             Image(systemName: symbol)
                 .font(.system(size: 16))
@@ -552,6 +608,7 @@ private struct AssetTile: View {
         case .icon: return "star"
         case .logo: return "seal"
         case .video, .overlay: return "film"
+        case .lut: return "camera.filters"
         default: return "photo"
         }
     }
@@ -567,7 +624,7 @@ private struct AssetTile: View {
 
 /// A music track or sound effect: name, length, licence and a waveform
 /// strip that plays from wherever the pointer is.
-private struct AssetAudioRow: View {
+struct AssetAudioRow: View {
     let model: EditorModel
     let asset: Asset
     @State private var peaks: [Float]?
@@ -636,6 +693,52 @@ private struct AssetAudioRow: View {
     }
 }
 
+/// A font: its name in its own letters once downloaded, what it has and
+/// its licence.
+private struct AssetFontRow: View {
+    let model: EditorModel
+    let asset: Asset
+    @State private var face: String?
+    @State private var hovering = false
+
+    var body: some View {
+        let host = AssetLibraryHost.shared
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(asset.name)
+                    .font(face.map { Font.custom($0, size: 17) } ?? .ui(14, .semibold))
+                    .foregroundStyle(Theme.text.color)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(detail)
+                    .font(.ui(10.5))
+                    .foregroundStyle(Theme.textFaint.color)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 4)
+            if let busy = host.busy[asset.id] {
+                Text(busy).font(.ui(10.5)).foregroundStyle(Theme.amber.color)
+            }
+            FavouriteStar(on: asset.isFavourite) { host.setFavourite(asset, !asset.isFavourite) }
+                .opacity(hovering || asset.isFavourite ? 1 : 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 7).fill(hovering ? Theme.rowSelected.color : Theme.raised.color))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .modifier(AssetActions(model: model, asset: asset))
+        .task(id: asset.id + asset.state.rawValue) { face = await host.fontFace(for: asset) }
+    }
+
+    /// "sans-serif, 9 weights, OFL-1.1", and whether it's downloaded.
+    private var detail: String {
+        let what = asset.summary ?? asset.licenceClass.label
+        return asset.state >= .original ? what : "\(what) · downloads when used"
+    }
+}
+
 /// Peaks as bars, with the hovered point and the playhead of the audition.
 private struct WaveformStripView: View {
     let asset: Asset
@@ -669,7 +772,7 @@ private struct WaveformStripView: View {
     }
 }
 
-private struct FavouriteStar: View {
+struct FavouriteStar: View {
     let on: Bool
     let action: () -> Void
 

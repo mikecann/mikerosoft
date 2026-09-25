@@ -45,6 +45,28 @@ final class AssetLibraryHost {
     var graphicsSection: AssetSection = .stickers
     /// The asset being dragged, so the timeline can name it before the drop.
     var dragged: Asset?
+    /// The tile or row under the pointer, for Space. Nothing draws from it.
+    @ObservationIgnored var hovered: Asset?
+    /// The asset in the big preview Space opens.
+    var previewing: Asset?
+    /// The Effects tab shows looks (LUTs), and the Text tab fonts, instead
+    /// of their built-in items.
+    var looksShown = false
+    var fontsShown = false
+    /// ElevenLabs permissions the key was refused (`sound_generation`,
+    /// `music_generation`), remembered by the provider.
+    private(set) var refused: Set<String> = []
+
+    /// A generation in progress or done, per kind (music, sfx).
+    struct Generation: Equatable {
+        var running = false
+        var takes: [Asset] = []
+        var failures: [String] = []
+        var error: String?
+    }
+    private(set) var generations: [AssetKind: Generation] = [:]
+    /// The Generate form per kind, kept while the popover is closed.
+    var forms: [AssetKind: GenerationForm] = [:]
 
     /// What the online sources said for a section's search.
     struct OnlineSearch: Equatable {
@@ -89,18 +111,37 @@ final class AssetLibraryHost {
                     try library.installStarterContent()
                 }
                 let providers = await library.providerInfo()
+                let refused = Self.refusals(in: library)
+                // Downloaded fonts, so the Fonts list shows each in its face.
+                _ = try? await library.registerFonts()
                 await MainActor.run {
                     let host = AssetLibraryHost.shared
                     host.library = library
                     host.providers = providers
+                    host.refused = refused
                     host.media.library = library
                     host.state = .ready
                     host.revision += 1
+                    host.watchImportFolders()
                 }
+                // Files added to the import folders while Tandem was closed.
+                _ = try? await library.rescanImportFolders()
+                await MainActor.run { AssetLibraryHost.shared.revision += 1 }
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
                 await MainActor.run { AssetLibraryHost.shared.state = .failed(message) }
             }
+        }
+    }
+
+    @ObservationIgnored private var watcher: ImportFolderWatcher?
+
+    /// Rescans an import folder when its files change, so downloads saved
+    /// into it show up without adding it again.
+    private func watchImportFolders() {
+        guard let library else { return }
+        watcher = try? library.watchImportFolders { _ in
+            Task { @MainActor in AssetLibraryHost.shared.revision += 1 }
         }
     }
 
@@ -110,7 +151,24 @@ final class AssetLibraryHost {
         Task {
             let providers = await library.providerInfo()
             self.providers = providers
+            self.refused = Self.refusals(in: library)
         }
+    }
+
+    nonisolated private static func refusals(in library: AssetLibrary) -> Set<String> {
+        (library.provider("elevenlabs") as? ElevenLabsProvider).map { Set($0.refusals().keys) } ?? []
+    }
+
+    /// Shows a section in its library tab.
+    func show(_ section: AssetSection, in model: EditorModel) {
+        switch section.libraryTab {
+        case .audio: audioSection = section
+        case .graphics: graphicsSection = section
+        default: break
+        }
+        looksShown = section == .looks
+        fontsShown = section == .fonts
+        model.libraryTab = section.libraryTab
     }
 
     // MARK: - Browsing
@@ -214,6 +272,108 @@ final class AssetLibraryHost {
         }
     }
 
+    /// Double-click: a look or font changes the selected clips it suits;
+    /// anything else goes in at the playhead.
+    func use(_ asset: Asset, in model: EditorModel) {
+        guard AssetApplying.appliesToClips(asset.kind) else {
+            return place(asset, at: model.playback.time, in: model)
+        }
+        let targets = AssetApplying.targets(for: asset, among: TimelineEdits.ordered(model.selection, in: model.project), in: model.project)
+        guard !targets.isEmpty else { return model.show(.info, AssetApplying.selectHint(for: asset)) }
+        apply(asset, to: targets, in: model)
+    }
+
+    /// Fetches a look or font if needed, copies it into the project and
+    /// changes the clips it suits, as one undoable edit.
+    func apply(_ asset: Asset, to clipIDs: [String], in model: EditorModel) {
+        guard let library else { return }
+        guard busy[asset.id] == nil else {
+            model.show(.info, "\(asset.name) is on its way.")
+            return
+        }
+        busy[asset.id] = asset.state >= .original ? "Applying" : "Downloading"
+        if asset.state < .original { model.show(.info, "Downloading \(asset.name)…") }
+        Task {
+            defer { self.busy[asset.id] = nil }
+            do {
+                let placement = try await library.use(asset.id, in: model.folder, projectID: model.project.id, projectFile: model.fileURL)
+                self.revision += 1
+                // The family as the font file names it, which is what the
+                // renderer looks up.
+                let family = asset.kind == .font
+                    ? placement.files.lazy.compactMap { FontInstaller.faces(in: model.folder.url(forPath: $0)).first?.family }.first { !$0.isEmpty }
+                    : nil
+                let project = model.project
+                let targets = AssetApplying.targets(for: asset, among: clipIDs, in: project)
+                let commands = targets.compactMap { project.clip($0) }.flatMap { AssetApplying.commands(for: placement, on: $0, family: family) }
+                guard !commands.isEmpty else {
+                    model.show(.info, AssetApplying.selectHint(for: asset))
+                    return
+                }
+                if model.apply(EditBatch(label: AssetApplying.label(for: asset, count: targets.count), commands: commands)) != nil {
+                    model.selection = Set(targets)
+                    model.inspectorTab = asset.kind == .lut ? .colour : .video
+                    model.show(.info, asset.kind == .font ? "Set in \(family ?? asset.name)." : "Graded with \(asset.name).")
+                }
+            } catch {
+                model.show(.error, "Couldn't use \(asset.name): \(Self.describe(error))")
+            }
+        }
+    }
+
+    // MARK: - Fonts
+
+    @ObservationIgnored private var faces: [String: String] = [:]
+
+    /// The PostScript name to draw a downloaded font's name in, once its
+    /// files are registered. Nil for fonts that aren't downloaded.
+    func fontFace(for asset: Asset) async -> String? {
+        guard asset.kind == .font, asset.state >= .original, let library else { return nil }
+        if let known = faces[asset.id] { return known }
+        let face = await Task.detached(priority: .utility) { () -> String? in
+            guard let original = library.url(for: asset, .original) else { return nil }
+            let folder = library.folder(for: asset)
+            let extras = (asset.remote["extraFiles"] ?? "").split(separator: "\n").map { folder.appendingPathComponent(String($0)) }
+            let files = ([original] + extras).filter { FileManager.default.fileExists(atPath: $0.path) }
+            await FontInstaller.register(files)
+            let all = files.flatMap(FontInstaller.faces(in:))
+            // The regular face if there is one.
+            return (all.first { $0.style.lowercased() == "regular" } ?? all.first)?.postScriptName
+        }.value
+        if let face { faces[asset.id] = face }
+        return face
+    }
+
+    // MARK: - Generating
+
+    /// ElevenLabs as the library last saw it.
+    var elevenLabs: ProviderInfo? {
+        providers.first { $0.id == "elevenlabs" }
+    }
+
+    /// Makes new music or sound effects with ElevenLabs. They join the
+    /// library (and the list) as they're saved, whatever happens to the
+    /// popover.
+    func generate(_ form: GenerationForm) {
+        guard let library, generations[form.kind]?.running != true, form.problem == nil else { return }
+        let request = form.request
+        generations[form.kind] = Generation(running: true)
+        Task {
+            var outcome = Generation()
+            do {
+                let result = try await library.generate(request)
+                outcome.takes = result.assets
+                outcome.failures = result.failures
+            } catch {
+                outcome.error = Self.describe(error)
+            }
+            self.generations[form.kind] = outcome
+            self.revision += 1
+            // A refused permission is remembered by the provider.
+            self.refreshProviders()
+        }
+    }
+
     /// The description credits for everything the project uses.
     func credits(for model: EditorModel) -> Result<ProjectCredits, Error> {
         guard let library else { return .failure(AssetError.invalid("the asset library isn't open")) }
@@ -230,6 +390,8 @@ final class AssetLibraryHost {
                 let scan = try await library.addImportFolder(url, licence: licence)
                 self.revision += 1
                 self.refreshProviders()
+                // A watcher covers the folders it was made with.
+                self.watchImportFolders()
                 let note = scan.missingLicence ? " It has no licence note, so its files show as No licence until one is added." : ""
                 report("Added \(url.lastPathComponent): \(scan.added) \(scan.added == 1 ? "file" : "files").\(note)")
             } catch {

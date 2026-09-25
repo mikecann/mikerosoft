@@ -6,9 +6,10 @@ import TandemCore
 import TandemMedia
 
 /// The Effects and Transitions tabs, one panel with two halves as in the
-/// design. Effect tiles show the effect on a frame of the selected clip
-/// (or the clip under the playhead); transition tiles play the move
-/// between the clips either side of the nearest cut as you hover.
+/// design, and looks (LUTs from the asset library) beside them. Effect
+/// tiles show the effect on a frame of the selected clip (or the clip
+/// under the playhead); transition tiles play the move between the clips
+/// either side of the nearest cut as you hover.
 struct EffectsLibrary: View {
     let model: EditorModel
     @Binding var showTransitions: Bool
@@ -16,17 +17,39 @@ struct EffectsLibrary: View {
     @State private var selected: String?
 
     var body: some View {
+        if AssetLibraryHost.shared.looksShown {
+            AssetBrowser(model: model, sections: [.looks], section: .constant(.looks), tabs: AnyView(tabs(count: nil)))
+        } else {
+            builtIn
+        }
+    }
+
+    private func tabs(count: Int?) -> some View {
+        let host = AssetLibraryHost.shared
+        return HStack(spacing: 16) {
+            SubTab(title: "Effects", selected: !host.looksShown && !showTransitions) {
+                host.looksShown = false
+                showTransitions = false
+            }
+            SubTab(title: "Transitions", selected: !host.looksShown && showTransitions) {
+                host.looksShown = false
+                showTransitions = true
+            }
+            SubTab(title: "Looks", selected: host.looksShown) { host.looksShown = true }
+            Spacer(minLength: 4)
+            if let count {
+                Text(verbatim: String(count))
+                    .font(.ui(11.5))
+                    .foregroundStyle(Theme.textFaint.color)
+            }
+        }
+    }
+
+    private var builtIn: some View {
         let frames = PreviewFrames(model: model)
-        VStack(alignment: .leading, spacing: 0) {
+        return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 16) {
-                    SubTab(title: "Effects", selected: !showTransitions) { showTransitions = false }
-                    SubTab(title: "Transitions", selected: showTransitions) { showTransitions = true }
-                    Spacer(minLength: 4)
-                    Text(verbatim: String(showTransitions ? TransitionType.allCases.count : effects.count))
-                        .font(.ui(11.5))
-                        .foregroundStyle(Theme.textFaint.color)
-                }
+                tabs(count: showTransitions ? TransitionType.allCases.count : effects.count)
                 SearchField(text: $search, prompt: showTransitions ? "Search transitions" : "Search effects")
             }
             .padding(.horizontal, 14)

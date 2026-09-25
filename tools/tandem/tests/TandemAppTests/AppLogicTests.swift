@@ -178,7 +178,9 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt")!), .debug(out: "/tmp/tree.txt"))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=icons&search=rocket&online=1")!), .assets(section: .icons, search: "rocket", scope: nil, online: true))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=sfx&scope=recent")!), .assets(section: .sfx, search: nil, scope: .recent, online: false))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://assets?section=fonts")!))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=looks")!), .assets(section: .looks, search: nil, scope: nil, online: false))
+        XCTAssertEqual(AssetSection.fonts.libraryTab, .text, "fonts are in the Text tab")
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://assets?section=trumpets")!))
     }
 
     func testRejectsNonsense() {

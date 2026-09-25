@@ -3,25 +3,48 @@ import SwiftUI
 import TandemCore
 import TandemRender
 
-/// The Text tab: title styles from the render module's presets, and
-/// templates (a section card, calls to action). Double-click to add at the
-/// playhead, or drag to the timeline.
+/// The Text tab: title styles from the render module's presets,
+/// templates (a section card, calls to action) and fonts from the asset
+/// library. Double-click to add at the playhead, or drag to the timeline;
+/// a font goes on the selected titles, or the title it's dropped on.
 struct TitleLibrary: View {
     let model: EditorModel
     @State private var showTemplates = false
     @State private var selected: String?
 
     var body: some View {
+        if AssetLibraryHost.shared.fontsShown {
+            AssetBrowser(model: model, sections: [.fonts], section: .constant(.fonts), tabs: AnyView(tabs(count: nil)))
+        } else {
+            builtIn
+        }
+    }
+
+    private func tabs(count: Int?) -> some View {
+        let host = AssetLibraryHost.shared
+        return HStack(spacing: 16) {
+            SubTab(title: "Titles", selected: !host.fontsShown && !showTemplates) {
+                host.fontsShown = false
+                showTemplates = false
+            }
+            SubTab(title: "Templates", selected: !host.fontsShown && showTemplates) {
+                host.fontsShown = false
+                showTemplates = true
+            }
+            SubTab(title: "Fonts", selected: host.fontsShown) { host.fontsShown = true }
+            Spacer(minLength: 4)
+            if let count {
+                Text(verbatim: String(count))
+                    .font(.ui(11.5))
+                    .foregroundStyle(Theme.textFaint.color)
+            }
+        }
+    }
+
+    private var builtIn: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 16) {
-                    SubTab(title: "Titles", selected: !showTemplates) { showTemplates = false }
-                    SubTab(title: "Templates", selected: showTemplates) { showTemplates = true }
-                    Spacer(minLength: 4)
-                    Text(verbatim: String(showTemplates ? BuiltInTemplates.all.count : TitlePresets.builtIn.count))
-                        .font(.ui(11.5))
-                        .foregroundStyle(Theme.textFaint.color)
-                }
+                tabs(count: showTemplates ? BuiltInTemplates.all.count : TitlePresets.builtIn.count)
                 Text(showTemplates
                      ? "A group of clips that go in together, linked. Edit the words in the inspector."
                      : "Styles from Mike's Filmora titles. Double-click to add at the playhead, or drag to the timeline.")

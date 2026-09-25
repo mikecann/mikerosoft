@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import TandemAssets
 import TandemCore
 import TandemMedia
 import TandemRender
@@ -35,6 +36,8 @@ final class TimelineLanesView: TimelineChildView {
     /// An asset library item on its way: placed at `time` once it's
     /// downloaded and copied into the project.
     private var assetDrop: (id: String, time: Time)?
+    /// A look or font on its way to the clip under the pointer.
+    private var assetApply: (asset: Asset, clipID: String)?
     /// Media files dragged in from Finder, found once per drag, and where
     /// they'd go.
     private var fileDrop: (files: [URL], time: Time, trackID: String?)?
@@ -813,6 +816,13 @@ final class TimelineLanesView: TimelineChildView {
             window?.makeKeyAndOrderFront(nil)
             return true
         }
+        if let pending = assetApply {
+            clearDrop()
+            AssetLibraryHost.shared.dragged = nil
+            AssetLibraryHost.shared.apply(pending.asset, to: [pending.clipID], in: model)
+            window?.makeKeyAndOrderFront(nil)
+            return true
+        }
         if let pending = assetDrop {
             clearDrop()
             let host = AssetLibraryHost.shared
@@ -886,14 +896,36 @@ final class TimelineLanesView: TimelineChildView {
         let batch: EditBatch?
         var label: String
         assetDrop = nil
+        assetApply = nil
         switch dragged {
         case .media(let ids):
             let insert = NSEvent.modifierFlags.contains(.command)
             batch = TimelineEdits.placeMedia(model.project, mediaIDs: ids, at: time, trackID: lane?.trackID, insert: insert)
             label = (insert ? "Insert at " : "Place at ") + at
         case .asset(let id):
+            let host = AssetLibraryHost.shared
+            // Drags from the browser say what they carry; anything else is
+            // looked up once.
+            if host.dragged?.id != id, let known = (try? host.library?.asset(id)) ?? nil { host.dragged = known }
+            if let asset = host.dragged?.id == id ? host.dragged : nil, AssetApplying.appliesToClips(asset.kind) {
+                // A look or font changes the clip it's dropped on.
+                drop = nil
+                previewProject = nil
+                snapLine = nil
+                let clip = tester(for: model.project)?.hit(point).clipID.flatMap { model.project.clip($0) }
+                if let clip, !AssetApplying.targets(for: asset, among: [clip.id], in: model.project).isEmpty {
+                    assetApply = (asset, clip.id)
+                    let name = ClipRenderer(project: model.project, scale: model.timeline.scale, artwork: nil, visible: 0...0).name(of: clip)
+                    dragLabel = (AssetApplying.dropLabel(for: asset, clipName: name), point)
+                } else {
+                    dragLabel = (AssetApplying.dropHint(for: asset), point)
+                }
+                container.relayoutLanes()
+                container.setAllNeedsDisplay()
+                return assetApply == nil ? [] : .copy
+            }
             // Placed once it's downloaded; the line shows where.
-            let name = AssetLibraryHost.shared.dragged.map { $0.id == id ? $0.name : "asset" } ?? "asset"
+            let name = host.dragged.map { $0.id == id ? $0.name : "asset" } ?? "asset"
             assetDrop = (id, time)
             drop = nil
             previewProject = nil
@@ -936,6 +968,7 @@ final class TimelineLanesView: TimelineChildView {
     private func clearDrop() {
         drop = nil
         assetDrop = nil
+        assetApply = nil
         fileDrop = nil
         previewProject = nil
         snapLine = nil

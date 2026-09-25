@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import TandemAPI
+import TandemAssets
 import TandemCore
 
 /// One project window: the Graphite layout around an `EditorModel`.
@@ -49,6 +50,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             if key == "z" { self?.model.zoomKeyHeld = down }
         }
         window.layoutTrafficLights()
+        // Fonts the project carries in assets/font, so its titles look the
+        // same here as on the Mac that made them.
+        let folder = model.folder
+        Task.detached(priority: .utility) { await AssetLibrary.registerFonts(in: folder) }
     }
 
     @available(*, unavailable)

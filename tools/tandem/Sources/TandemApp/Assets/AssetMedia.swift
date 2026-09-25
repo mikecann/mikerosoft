@@ -47,6 +47,12 @@ final class AssetMedia {
             if let local = library.url(for: asset, .thumbnail), FileManager.default.fileExists(atPath: local.path) {
                 return NSImage(contentsOf: local)
             }
+            // A look in an import folder is a local file: reading it makes
+            // its before and after card, with nothing to download.
+            if asset.kind == .lut, asset.provider == "import", let read = try? await library.fetch(asset.id),
+               let local = library.url(for: read, .thumbnail), FileManager.default.fileExists(atPath: local.path) {
+                return NSImage(contentsOf: local)
+            }
             guard let remote = asset.thumbnailURL, let file = try? await library.previews.fetch(remote) else { return nil }
             if file.pathExtension.lowercased() == "svg", let text = try? String(contentsOf: file, encoding: .utf8) {
                 return NSImage(data: Data(SVGSizing.readableColours(SVGSizing.sized(text)).utf8))

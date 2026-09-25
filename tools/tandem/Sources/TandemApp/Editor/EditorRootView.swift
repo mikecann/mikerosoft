@@ -27,6 +27,8 @@ struct EditorRootView: View {
                     Rectangle().fill(Theme.border.color).frame(width: 1)
                     ViewerPanel(model: model, actions: actions)
                         .frame(maxWidth: .infinity)
+                        // Space over the asset browser previews here.
+                        .overlay { AssetPreviewLayer(model: model) }
                     Rectangle().fill(Theme.border.color).frame(width: 1)
                     InspectorPanel(model: model, actions: actions)
                         .frame(width: Theme.Metrics.inspectorWidth - 1)
@@ -130,6 +132,9 @@ struct TopBar: View {
                 ForEach(LibraryTab.allCases) { tab in
                     LibraryTabButton(tab: tab, selected: model.libraryTab == tab) {
                         model.libraryTab = tab
+                        // A tab opens on its own items, not looks or fonts.
+                        AssetLibraryHost.shared.looksShown = false
+                        AssetLibraryHost.shared.fontsShown = false
                     }
                 }
             }
