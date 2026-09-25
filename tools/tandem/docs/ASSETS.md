@@ -118,3 +118,53 @@ self-contained.
   Freesound off.
 - Optional: Envato Core at $16.50/mo is the cheapest broad library whose
   licence covers client work (import folder, no API).
+
+## Implementation (TandemAssets)
+
+Built on the `tandem-assets` branch as the `TandemAssets` library (depends
+on Core, Media and `lottie-ios`). Everything goes through `AssetLibrary`;
+results are Codable so the CLI and MCP can return them as JSON.
+
+| Need | Call |
+| --- | --- |
+| Open the library | `AssetLibrary()` (default root), `installStarterContent()` once |
+| Source chips and status | `providerInfo()` |
+| Browse and filter | `search(AssetQuery)`, `.favourites()`, `.recentlyUsed()`, `.inProject(id)`, `.downloaded()` |
+| Search the sources | `searchProviders(ProviderQuery, providerIDs:)`, `similar(to:)` |
+| Hover previews and tiles | `previewFile(for:)`, `waveform(for:)`, `url(for:.thumbnail)` |
+| Download and normalise | `fetch(id)` (licence snapshot, normalise, thumbnail) |
+| Generate | `generate(GenerationRequest)`, `remove(id)` for takes not kept |
+| Use in a project | `use(id, in:projectID:)` gives an `AssetPlacement`; `editCommands(at:in:)` adds and places it |
+| Description credits | `credits(for: project).text()`, plus `warnings` |
+| Import folders | `addImportFolder(url, licence: FolderLicence.presets["envato"])`, `rescanImportFolders()`, `watchImportFolders` |
+| Fonts | `registerFonts()` at launch, `AssetLibrary.registerFonts(in: project)` on open |
+| Housekeeping | `prune()`, `evictUnpinnedFiles()`, `rebuildCatalogFromDisk()` |
+
+Choices made while building it:
+
+- GIF, WebP and Lottie frames go straight into HEVC with alpha through
+  `AVAssetWriter` (`.hevcWithAlpha`, premultiplied), which decodes with its
+  alpha intact and skips the ProRes step. WebM still goes ffmpeg
+  (`libvpx-vp9`) to ProRes 4444 to the HEVC-with-alpha export preset.
+- 48 kHz PCM audio and anything over 20 minutes is measured (loudness,
+  peaks) but used as it is, so a long stock bed doesn't become a 2 GB WAV.
+- SVGs rasterise to 2048 px on the long side, Lottie to 1024 px. Iconify
+  icons come in white for dark screens (`AssetSettings.iconColour`).
+- Thumbnails with transparency are `thumbnail.png`, the rest
+  `thumbnail.jpg`.
+- ElevenLabs music uses `music_v2_5` and `mp3_48000_192`, as Mike's music
+  scripts do. Sound effects ask for `pcm_48000` and wrap it in WAV.
+- Keys are read with the `security` tool, never `SecItemCopyMatching`, so
+  a headless run can't stall on a Keychain dialog.
+- `SVGRasteriser` imports AppKit (NSImage is the only SVG renderer); it
+  draws into its own bitmap, off the main thread.
+
+Live check on 2026-09-25: Noto, Iconify, SVGL and Fontsource work end to
+end. ElevenLabs music works; sound effects are refused with
+`missing_permissions` (the key lacks `sound_generation`), which the
+provider remembers and shows in its status. Pexels, Pixabay and Freesound
+have no keys on this Mac and are tested against fixtures.
+
+Tests: `swift test --package-path tools/tandem --filter TandemAssetsTests`.
+`TANDEM_LIVE_ASSETS=1` adds the free live tests; `TANDEM_LIVE_ELEVENLABS=1`
+makes one paid sound effect and one paid music cue.
