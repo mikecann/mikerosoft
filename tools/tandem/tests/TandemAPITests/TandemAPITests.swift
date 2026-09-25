@@ -175,6 +175,23 @@ final class MediaRefreshTests: XCTestCase {
     }
 }
 
+extension MediaRefreshTests {
+    func testRefreshesAtTheSameTimeAddAFileOnce() async throws {
+        // Opening a project in the app starts two scans at once (the
+        // window's and the folder watcher's first look), and a take
+        // recorded while Tandem was closed is new to both.
+        let folder = TempFolder()
+        let session = try ProjectSession.create(at: folder.file("Video.tandem"), owner: .cli)
+        defer { session.close() }
+        try FileManager.default.createDirectory(at: folder.file("sfx"), withIntermediateDirectories: true)
+        for name in ["a", "b", "c"] { try Self.wav(samples: 4_800).write(to: folder.file("sfx/\(name).wav")) }
+        async let first = session.refreshMedia()
+        async let second = session.refreshMedia()
+        _ = try await (first, second)
+        XCTAssertEqual(session.coordinator.project.media.map(\.path).sorted(), ["sfx/a.wav", "sfx/b.wav", "sfx/c.wav"])
+    }
+}
+
 final class SessionWatchingTests: XCTestCase {
     func testNewFilesJoinAWatchedProject() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-watch-\(UUID().uuidString)")

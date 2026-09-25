@@ -177,31 +177,57 @@ public final class ProjectSession: @unchecked Sendable {
 
     /// Adds files that appeared in the folder since the last scan, as one
     /// edit by "system". Returns the new media IDs.
+    ///
+    /// The project can change while the folder is scanned: another scan
+    /// can add the same new files first (opening a project in the app
+    /// starts two), or Mike can edit. So the edit is worked out against the
+    /// project as it is when it's applied, and worked out again if it
+    /// changes in between.
     @discardableResult
     public func refreshMedia() async throws -> [String] {
         let project = coordinator.project
         let scanned = try await MediaScanner.scan(folder, known: project.media)
+        var attempt = 0
+        while true {
+            attempt += 1
+            let (current, revision) = coordinator.snapshot()
+            let (commands, added) = Self.refreshCommands(scanned, scannedFrom: project, into: current, folder: folder)
+            guard !commands.isEmpty else { return [] }
+            do {
+                try coordinator.apply(EditBatch(label: "Found new media", author: "system", commands: commands, expectedRevision: revision))
+            } catch EditError.staleRevision where attempt < 20 {
+                continue
+            }
+            let used = Set(coordinator.project.allTracks.flatMap(\.clips).compactMap(\.mediaID))
+            analysis.requestDefaults(for: coordinator.project.media, usedOnTimeline: used)
+            return added
+        }
+    }
+
+    /// The edit that brings a scan's results into `current`, and the IDs of
+    /// the media it adds. `scannedFrom` is the project the scan started
+    /// from.
+    static func refreshCommands(_ scanned: [MediaItem], scannedFrom project: Project, into current: Project, folder: ProjectFolder) -> (commands: [EditCommand], added: [String]) {
         let known = Set(project.media.map(\.id))
+        let paths = Set(current.media.map { folder.path(for: folder.url(for: $0)) })
         var commands: [EditCommand] = []
+        var added: [String] = []
         for item in scanned {
             if known.contains(item.id) {
                 // Only what the scan changed, so an edit made while it ran
                 // (a new look, a role) stays, and never the ID, which
-                // updateMedia refuses.
-                if let old = project.media(item.id), old != item,
+                // updateMedia refuses. Media removed meanwhile stays removed.
+                if current.media(item.id) != nil, let old = project.media(item.id), old != item,
                    let before = try? JSONValue.from(old), let after = try? JSONValue.from(item),
                    let patch = JSONValue.mergePatch(from: before, to: after) {
                     commands.append(.updateMedia(mediaID: item.id, patch: patch))
                 }
-            } else {
+            } else if !paths.contains(folder.path(for: folder.url(for: item))) {
                 commands.append(.addMedia(item: item))
+                added.append(item.id)
             }
         }
-        guard !commands.isEmpty else { return [] }
-        try coordinator.apply(EditBatch(label: "Found new media", author: "system", commands: commands))
-        let used = Set(coordinator.project.allTracks.flatMap(\.clips).compactMap(\.mediaID))
-        analysis.requestDefaults(for: coordinator.project.media, usedOnTimeline: used)
-        return scanned.map(\.id).filter { !known.contains($0) }
+        return (commands, added)
     }
 
     /// Records the API endpoint in the lock so the CLI can find the app.
