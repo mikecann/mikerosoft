@@ -54,13 +54,25 @@ public enum ProjectFile {
             try fm.copyItem(at: url, to: target)
         }
         let existing = try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey])
-            .filter { $0.lastPathComponent.hasPrefix(name + " ") }
+            .filter { isBackup($0.lastPathComponent, of: name) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         if existing.count > keep {
             for old in existing.prefix(existing.count - keep) {
                 try? fm.removeItem(at: old)
             }
         }
+    }
+
+    /// True for `<name> <stamp>.tandem`, a backup of `<name>.tandem`. A
+    /// version saved beside it (`<name> v2.tandem`) has backups that start
+    /// the same way, `<name> v2 <stamp>.tandem`, and they aren't this
+    /// project's to prune.
+    static func isBackup(_ fileName: String, of name: String) -> Bool {
+        let prefix = name + " "
+        let suffix = "." + fileExtension
+        guard fileName.hasPrefix(prefix), fileName.hasSuffix(suffix), fileName.count > prefix.count + suffix.count else { return false }
+        let stamp = fileName.dropFirst(prefix.count).dropLast(suffix.count)
+        return stamp.range(of: #"^\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}$"#, options: .regularExpression) != nil
     }
 
     /// Upgrades older schema versions. Version 1 is the first.
