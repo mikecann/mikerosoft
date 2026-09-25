@@ -56,6 +56,7 @@ public struct NormalisedAsset: Codable, Equatable, Sendable {
 /// - Lottie: rendered offscreen with alpha into HEVC with alpha.
 /// - SVG: PNG at twice the size it's likely to be shown.
 /// - Fonts: registered with Core Text.
+/// - LUTs: checked and given a before and after preview.
 /// - MOV, MP4, PNG, JPEG and HEIC are used as they are.
 ///
 /// Every asset gets a thumbnail.
@@ -125,7 +126,9 @@ public struct AssetNormaliser: Sendable {
         case .ttf, .otf, .ttc, .woff, .woff2:
             return try await font(original, format: format, into: folder)
         case .cube:
-            return NormalisedAsset(format: format)
+            // Kept as it is; reading it checks it's a usable 3D LUT.
+            let table = try CubeLUT.read(original)
+            return NormalisedAsset(format: format, thumbnail: try? Thumbnailer.lut(table, into: folder))
         case .unknown:
             throw AssetError.unsupported("Tandem doesn't know what \(original.lastPathComponent) is")
         }

@@ -308,3 +308,51 @@ final class AudioShortcutTests: XCTestCase {
         XCTAssertFalse(AudioNormaliser.canUseAsIs(input, format: .wav))
     }
 }
+
+final class LUTTests: XCTestCase {
+    /// A 2-point .cube that swaps red and blue.
+    func writeSwapLUT(to url: URL) throws {
+        var lines = ["TITLE \"Swap\"", "LUT_3D_SIZE 2", "DOMAIN_MIN 0 0 0", "DOMAIN_MAX 1 1 1"]
+        for b in 0..<2 { for g in 0..<2 { for r in 0..<2 { lines.append("\(b) \(g) \(r)") } } }
+        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    func testLUTsAreCheckedAndPreviewed() async throws {
+        let folder = tempFolder("lut")
+        let input = folder.appendingPathComponent("original.cube")
+        try writeSwapLUT(to: input)
+
+        let result = try await AssetNormaliser().normalise(input, into: folder)
+
+        XCTAssertEqual(result.format, .cube)
+        XCTAssertNil(result.file)
+        XCTAssertNil(result.mediaKind)
+        XCTAssertEqual(result.thumbnail, "thumbnail.jpg")
+        let table = try CubeLUT.read(input)
+        XCTAssertEqual(table.size, 2)
+        XCTAssertEqual(table.data.count, 8 * 4 * 4)
+        // The preview's right half went through the LUT: a pure red pixel
+        // in the card's top-left corner comes out blue.
+        let preview = try XCTUnwrap(CubeLUT.preview(table))
+        XCTAssertEqual(preview.width, 512)
+        let context = CGContext(data: nil, width: 512, height: 256, bitsPerComponent: 8, bytesPerRow: 512 * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        context.draw(preview, in: CGRect(x: 0, y: 0, width: 512, height: 256))
+        let pixels = context.data!.bindMemory(to: UInt8.self, capacity: 512 * 256 * 4)
+        let left = Array(UnsafeBufferPointer(start: pixels + 2 * 4, count: 3))
+        let right = Array(UnsafeBufferPointer(start: pixels + (256 + 2) * 4, count: 3))
+        XCTAssertGreaterThan(left[0], 200)
+        XCTAssertLessThan(left[2], 60)
+        XCTAssertLessThan(right[0], 60)
+        XCTAssertGreaterThan(right[2], 200)
+    }
+
+    func testBrokenLUTsAreRefused() throws {
+        let folder = tempFolder("badlut")
+        let short = folder.appendingPathComponent("short.cube")
+        try "LUT_3D_SIZE 4\n0 0 0\n1 1 1\n".write(to: short, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try CubeLUT.read(short))
+        let oneD = folder.appendingPathComponent("oned.cube")
+        try "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n".write(to: oneD, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try CubeLUT.read(oneD))
+    }
+}

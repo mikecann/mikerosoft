@@ -87,6 +87,17 @@ enum Thumbnailer {
         return try write(image, into: folder)
     }
 
+    /// A LUT's before and after test card, as an opaque JPEG.
+    static func lut(_ table: CubeLUT.Table, into folder: URL) throws -> String {
+        guard let preview = CubeLUT.preview(table),
+              let context = CGContext(data: nil, width: preview.width, height: preview.height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
+            throw AssetError.normaliseFailed("drawing the LUT preview")
+        }
+        context.draw(preview, in: CGRect(x: 0, y: 0, width: preview.width, height: preview.height))
+        guard let opaque = context.makeImage() else { throw AssetError.normaliseFailed("drawing the LUT preview") }
+        return try write(opaque, into: folder)
+    }
+
     /// "Aa" and the family name, set in the font itself.
     static func font(_ url: URL, into folder: URL, width: Int = 512, height: Int = 256) throws -> String {
         guard let descriptor = (CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor])?.first else {
