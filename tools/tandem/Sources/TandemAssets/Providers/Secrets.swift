@@ -54,13 +54,21 @@ public final class KeychainSecretStore: SecretStore, @unchecked Sendable {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
         do {
             try process.run()
         } catch {
             return nil
         }
+        // If the Keychain ever asks for permission instead of answering,
+        // give up rather than hang a headless run.
+        if finished.wait(timeout: .now() + 10) == .timedOut {
+            process.terminate()
+            return nil
+        }
         let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
         guard process.terminationStatus == 0 else { return nil }
         let value = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return value.isEmpty ? nil : value
