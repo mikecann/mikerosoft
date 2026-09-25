@@ -317,6 +317,7 @@ public final class AssetCatalog: @unchecked Sendable {
         try db.query("\(Self.selectAssets) WHERE a.id = ?", [.text(id)]).first.map(Self.asset(from:))
     }
 
+    /// One asset by ID, with its favourite flag and last use filled in.
     public func asset(id: String) throws -> Asset? {
         try locked { try assetUnlocked(id: id) }
     }
@@ -489,6 +490,7 @@ public final class AssetCatalog: @unchecked Sendable {
 
     // MARK: - Usage
 
+    /// Records that an asset was used in a project.
     public func recordUsage(_ usage: AssetUsage) throws {
         try locked {
             try db.run(
@@ -521,6 +523,7 @@ public final class AssetCatalog: @unchecked Sendable {
 
     // MARK: - Favourites
 
+    /// Marks or unmarks a favourite. Favourites keep their files on disk.
     public func setFavourite(_ assetID: String, _ favourite: Bool) throws {
         try locked {
             if favourite {
@@ -531,6 +534,7 @@ public final class AssetCatalog: @unchecked Sendable {
         }
     }
 
+    /// Whether an asset is a favourite.
     public func isFavourite(_ assetID: String) throws -> Bool {
         try locked { try !db.query("SELECT 1 FROM favourites WHERE asset_id = ?", [.text(assetID)]).isEmpty }
     }
@@ -563,6 +567,7 @@ public final class AssetCatalog: @unchecked Sendable {
         }
     }
 
+    /// Every import folder, by name.
     public func importFolders() throws -> [ImportFolderRecord] {
         try locked {
             try db.query("SELECT * FROM import_folders ORDER BY name COLLATE NOCASE").map {
@@ -571,6 +576,7 @@ public final class AssetCatalog: @unchecked Sendable {
         }
     }
 
+    /// Adds an import folder or updates its name, path and last scan.
     public func saveImportFolder(_ folder: ImportFolderRecord) throws {
         try locked {
             try db.run("""
@@ -580,6 +586,7 @@ public final class AssetCatalog: @unchecked Sendable {
         }
     }
 
+    /// Forgets an import folder. Its assets are left to the caller.
     public func removeImportFolder(id: String) throws {
         try locked { try db.run("DELETE FROM import_folders WHERE id = ?", [.text(id)]) }
     }

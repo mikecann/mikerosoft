@@ -203,7 +203,8 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
         report.missingLicence = note == nil
 
         let existing = try catalog.search(AssetQuery(providers: [id], limit: Int.max)).filter { $0.remote["folder"] == record.id }
-        var known = Dictionary(existing.map { ($0.providerID, $0) }, uniquingKeysWith: { first, _ in first })
+        let before = Dictionary(existing.map { ($0.providerID, $0) }, uniquingKeysWith: { first, _ in first })
+        var known = before
         let pinned = try catalog.pinnedIDs()
 
         let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey, .isHiddenKey]
@@ -228,17 +229,18 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 report.unchanged += 1
                 continue
             }
-            let isNew = !existing.contains { $0.providerID == providerID }
             var asset = await describe(file: file, relative: relative, format: isLottie ? .lottie : format, folderID: record.id, note: note)
             asset.size = size
             asset.remote["signature"] = signature
-            if let old = existing.first(where: { $0.providerID == providerID }) {
-                // Keep what the library made from the old file only if the
-                // file is the same; a changed file needs normalising again.
+            if let old = before[providerID] {
+                // A changed file starts over (it needs normalising again)
+                // but keeps the date it first arrived.
                 asset.addedAt = old.addedAt
+                report.updated += 1
+            } else {
+                report.added += 1
             }
             changes.append(asset)
-            if isNew { report.added += 1 } else { report.updated += 1 }
         }
         try catalog.upsert(changes)
 
@@ -293,7 +295,7 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 asset.hasAlpha = info.hasAlpha
             }
             asset.kind = note?.kind ?? (asset.hasAlpha || lowerPath.contains("overlay") ? .overlay : .video)
-        } else if format == .webm || format == .lottie || format == .gif {
+        } else if format == .webm || format == .lottie {
             asset.kind = note?.kind ?? (lowerPath.contains("overlay") ? .overlay : .sticker)
             asset.hasAlpha = true
         } else if format == .svg {
@@ -307,8 +309,9 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
             if let info = MediaProbe.image(file) {
                 asset.width = info.width
                 asset.height = info.height
-                asset.hasAlpha = info.hasAlpha
-                if info.frames > 1 { asset.kind = note?.kind ?? .sticker }
+                asset.hasAlpha = info.hasAlpha || format == .gif
+                // Animated GIF, WebP and APNG are stickers.
+                if info.frames > 1 { asset.kind = note?.kind ?? (lowerPath.contains("overlay") ? .overlay : .sticker) }
             }
             if asset.kind == .image {
                 asset.kind = note?.kind ?? (lowerPath.contains("overlay") ? .overlay : .image)
@@ -375,6 +378,7 @@ public final class ImportFolderWatcher: @unchecked Sendable {
         handler(touched)
     }
 
+    /// Stops watching. Also happens when the watcher is released.
     public func stop() {
         guard let stream else { return }
         FSEventStreamStop(stream)

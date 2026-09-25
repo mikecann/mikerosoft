@@ -55,6 +55,7 @@ public final class ElevenLabsProvider: AssetProvider, @unchecked Sendable {
         public var at: Date
     }
 
+    /// Permissions the key has been refused, by permission name.
     public func refusals() -> [String: Refusal] {
         guard let data = try? Data(contentsOf: stateFile) else { return [:] }
         return (try? JSONDecoder.iso.decode([String: Refusal].self, from: data)) ?? [:]

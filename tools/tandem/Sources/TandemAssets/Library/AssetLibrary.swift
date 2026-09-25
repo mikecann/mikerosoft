@@ -101,12 +101,14 @@ public final class AssetLibrary: @unchecked Sendable {
         registry[provider.id] = provider
     }
 
+    /// The provider with this ID (`noto`, `elevenlabs`...), if registered.
     public func provider(_ id: String) -> AssetProvider? {
         lock.lock()
         defer { lock.unlock() }
         return registry[id]
     }
 
+    /// Every registered provider, in registration order.
     public var providers: [AssetProvider] {
         lock.lock()
         defer { lock.unlock() }
@@ -182,10 +184,12 @@ public final class AssetLibrary: @unchecked Sendable {
         try catalog.search(query)
     }
 
+    /// How many catalogue assets match, ignoring limit and offset.
     public func count(_ query: AssetQuery) throws -> Int {
         try catalog.count(query)
     }
 
+    /// One asset from the catalogue.
     public func asset(_ id: String) throws -> Asset? {
         try catalog.asset(id: id)
     }
@@ -245,6 +249,7 @@ public final class AssetLibrary: @unchecked Sendable {
 
     // MARK: - Favourites and licences
 
+    /// Marks or unmarks a favourite. Favourites keep their files on disk.
     public func setFavourite(_ id: String, _ favourite: Bool) throws {
         guard try catalog.asset(id: id) != nil else { throw AssetError.notFound("asset \(id)") }
         try catalog.setFavourite(id, favourite)
@@ -418,6 +423,7 @@ public final class AssetLibrary: @unchecked Sendable {
 
     // MARK: - Import folders
 
+    /// The watched import folders.
     public func importFolders() throws -> [AssetCatalog.ImportFolderRecord] {
         try catalog.importFolders()
     }
@@ -459,7 +465,8 @@ public final class AssetLibrary: @unchecked Sendable {
     }
 
     /// Watches the import folders and rescans the ones that change. Keep
-    /// the returned watcher; dropping it stops watching.
+    /// the returned watcher; dropping it stops watching. It covers the
+    /// folders registered now, so make a new one after adding a folder.
     public func watchImportFolders(onChange: @escaping @Sendable ([ImportScanReport]) -> Void) throws -> ImportFolderWatcher {
         let records = try catalog.importFolders()
         let provider = try importProvider()

@@ -24,6 +24,7 @@ public struct AssetSettings: Codable, Equatable, Sendable {
         return (try? JSONDecoder().decode(AssetSettings.self, from: data)) ?? AssetSettings()
     }
 
+    /// Writes the settings into `root`.
     public func save(to root: URL) throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try JSONEncoder.sorted.encode(self).write(to: root.appendingPathComponent(Self.fileName), options: .atomic)

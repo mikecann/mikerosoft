@@ -27,6 +27,7 @@ public enum AssetFormat: String, Codable, Sendable {
     }
 }
 
+/// Recognising files by their first bytes.
 public enum FormatSniffer {
     /// Works out a file's format from its contents, falling back to the
     /// extension.
