@@ -65,7 +65,9 @@ need to care which is happening; `tandem status` tells you.
 
 `tandem serve` opens the project and serves the API headless until you stop
 it with Ctrl-C (it saves on the way out). Use it for a long session with the
-app closed, or to watch changes live.
+app closed, or to watch changes live. If Mike opens the project in the app
+meanwhile, the app asks `tandem serve` to save and quit, and your next
+command goes through the app instead.
 
 ### MCP
 
@@ -124,7 +126,8 @@ curl -s -N -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/v1/watch"
   `reload`, `jobs`, `export`). Send `Last-Event-ID` to catch up after a
   reconnect.
 - `GET /v1/schema` returns the edit batch JSON schema. `GET /v1/health`
-  needs no token.
+  needs no token. `POST /v1/release` asks `tandem serve` to save and quit
+  (the app refuses it).
 - Errors are `{"error": {"code": "...", "message": "..."}}` with a matching
   status: 400 bad request, 401 token, 404 not found, 409 conflict (stale
   revision, overlap, locked, nothing to undo), 501 not built yet.
