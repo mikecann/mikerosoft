@@ -168,19 +168,23 @@ final class FakeAnalysis: AnalysisSource, @unchecked Sendable {
     }
 }
 
-/// A renderer that makes a 1x1 PNG and a small "movie" file.
+/// A renderer that makes a 1x1 PNG and a small "movie" file, and says
+/// whatever `warnings` holds, as the real one does about the whole project.
 struct FakeRenderer: RenderBackend {
     static let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")!
 
-    func pngData(context: RenderContext, at time: Time, maxSize: CGSize?) async throws -> Data {
-        Self.png
+    var warnings: [String] = []
+
+    func frame(context: RenderContext, at time: Time, maxSize: CGSize?) async throws -> RenderedFrame {
+        RenderedFrame(png: Self.png, warnings: warnings)
     }
 
-    func export(context: RenderContext, preset: ExportPreset, output: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> ExportResult {
+    func export(context: RenderContext, preset: ExportPreset, output: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> RenderedExport {
         for step in 1...4 { progress(Double(step) / 4) }
         try Data("fake movie \(preset.name)".utf8).write(to: output)
         let duration = preset.range?.duration ?? context.project.duration
-        return ExportResult(path: output.path, duration: duration, integratedLUFS: -14.1, truePeakDBTP: -1.2, elapsed: 0.01)
+        let result = ExportResult(path: output.path, duration: duration, integratedLUFS: -14.1, truePeakDBTP: -1.2, elapsed: 0.01)
+        return RenderedExport(result: result, warnings: warnings)
     }
 }
 
@@ -192,11 +196,11 @@ final class ServiceHarness {
     let service: TandemService
     let analysis = FakeAnalysis()
 
-    init(mode: TandemService.Mode = .hosted, project: Project = APIFixture.project()) throws {
+    init(mode: TandemService.Mode = .hosted, project: Project = APIFixture.project(), renderer: FakeRenderer = FakeRenderer()) throws {
         url = try APIFixture.write(to: folder.url, project: project)
         session = try ProjectSession.open(url, owner: .cli)
         session.autosaveDelay = 3600
-        service = TandemService(session: session, mode: mode, analysis: analysis, renderer: FakeRenderer())
+        service = TandemService(session: session, mode: mode, analysis: analysis, renderer: renderer)
     }
 
     func close() {

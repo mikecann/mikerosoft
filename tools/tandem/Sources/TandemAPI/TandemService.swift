@@ -516,14 +516,17 @@ public final class TandemService: @unchecked Sendable {
         let output = request.output.map(outputURL)
         let renderer = self.renderer
         let time = request.time
+        let frame = TimeRange(start: time, duration: project.settings.frameRate.frameDuration)
         return { [maxSize] in
-            let data: Data
+            let rendered: RenderedFrame
             do {
-                data = try await renderer.pngData(context: context, at: time, maxSize: maxSize)
+                rendered = try await renderer.frame(context: context, at: time, maxSize: maxSize)
             } catch {
                 throw ServiceError.wrap(error)
             }
-            return try Self.deliver(data, to: output, time: time)
+            var result = try Self.deliver(rendered.png, to: output, time: time)
+            result.warnings = RenderWarnings.relevant(rendered.warnings, in: project, range: frame)
+            return result
         }
     }
 
@@ -609,11 +612,13 @@ public final class TandemService: @unchecked Sendable {
                 self?.track(ExportJob(id: id, output: path, preset: preset.name, progress: progress))
             }
             do {
-                let result = try await renderer.export(context: context, preset: preset, output: output) { reporter.report($0) }
+                let rendered = try await renderer.export(context: context, preset: preset, output: output) { reporter.report($0) }
                 self?.finish(ExportJob(id: id, output: path, preset: preset.name, progress: 1, state: .done))
+                let result = rendered.result
                 return ExportOutcome(
                     path: result.path, preset: preset.name, duration: result.duration,
-                    integratedLUFS: result.integratedLUFS, truePeakDBTP: result.truePeakDBTP, elapsed: result.elapsed
+                    integratedLUFS: result.integratedLUFS, truePeakDBTP: result.truePeakDBTP, elapsed: result.elapsed,
+                    warnings: RenderWarnings.relevant(rendered.warnings, in: project, range: preset.range)
                 )
             } catch {
                 let wrapped = ServiceError.wrap(error)

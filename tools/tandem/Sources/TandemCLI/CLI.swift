@@ -81,6 +81,8 @@ struct CLI {
             return await mcp(args)
         case "import":
             return try await ImportCommand(directory: directory).run(args)
+        case "assets":
+            return try await AssetsCommand(directory: directory, environment: environment).run(args, author: author(args)) { try project(args) }
         default:
             break
         }

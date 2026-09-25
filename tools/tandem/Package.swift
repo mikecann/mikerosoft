@@ -31,19 +31,20 @@ let package = Package(
         // Composition building, the Core Image compositor, audio mix,
         // frame grabs and export.
         .target(name: "TandemRender", dependencies: ["TandemCore", "TandemMedia"], path: "Sources/TandemRender"),
-        // Commands shared by the local server, the CLI and MCP.
-        .target(name: "TandemAPI", dependencies: ["TandemCore", "TandemMedia", "TandemRender"], path: "Sources/TandemAPI"),
+        // Commands shared by the local server, the CLI and MCP, including
+        // the asset library for agents.
+        .target(name: "TandemAPI", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAssets"], path: "Sources/TandemAPI"),
         // Importers: Filmora .wfp projects and the JSON EDLs agents cut with.
         // They build through the coordinator, so imports always validate.
         .target(name: "TandemImport", dependencies: ["TandemCore", "TandemMedia"], path: "Sources/TandemImport"),
         .executableTarget(name: "TandemApp", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI"], path: "Sources/TandemApp"),
-        .executableTarget(name: "TandemCLI", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI", "TandemImport"], path: "Sources/TandemCLI"),
+        .executableTarget(name: "TandemCLI", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAPI", "TandemImport", "TandemAssets"], path: "Sources/TandemCLI"),
         .testTarget(name: "TandemCoreTests", dependencies: ["TandemCore"], path: "tests/TandemCoreTests"),
         .testTarget(name: "TandemMediaTests", dependencies: ["TandemMedia"], path: "tests/TandemMediaTests"),
         .testTarget(name: "TandemRenderTests", dependencies: ["TandemRender"], path: "tests/TandemRenderTests"),
         // Depends on the CLI so `swift test` builds the `tandem` binary that the
         // end-to-end tests run.
-        .testTarget(name: "TandemAPITests", dependencies: ["TandemAPI", "TandemCLI"], path: "tests/TandemAPITests"),
+        .testTarget(name: "TandemAPITests", dependencies: ["TandemAPI", "TandemCLI", "TandemAssets"], path: "tests/TandemAPITests"),
         .testTarget(
             name: "TandemImportTests",
             dependencies: ["TandemImport"],

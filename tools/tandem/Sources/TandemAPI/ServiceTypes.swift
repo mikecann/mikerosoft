@@ -601,6 +601,26 @@ public struct ImageResult: Codable, Sendable {
     /// The PNG as base64, when no output path was given.
     public var png: String?
     public var bytes: Int
+    /// What the picture shows differently from the project, like a camera
+    /// without its cutout because the matte isn't made yet.
+    public var warnings: [String]
+
+    public init(time: Time?, path: String?, png: String?, bytes: Int, warnings: [String] = []) {
+        self.time = time
+        self.path = path
+        self.png = png
+        self.bytes = bytes
+        self.warnings = warnings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        time = try c.decodeIfPresent(Time.self, forKey: .time)
+        path = try c.decodeIfPresent(String.self, forKey: .path)
+        png = try c.decodeIfPresent(String.self, forKey: .png)
+        bytes = try c.decode(Int.self, forKey: .bytes)
+        warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
+    }
 }
 
 public struct ClipRequest: ServiceCall {
@@ -677,6 +697,29 @@ public struct ExportOutcome: Codable, Sendable {
     public var truePeakDBTP: Double?
     /// Seconds the render took.
     public var elapsed: Double
+    /// What the render shows or plays differently from the project.
+    public var warnings: [String]
+
+    public init(path: String, preset: String, duration: Time, integratedLUFS: Double?, truePeakDBTP: Double?, elapsed: Double, warnings: [String] = []) {
+        self.path = path
+        self.preset = preset
+        self.duration = duration
+        self.integratedLUFS = integratedLUFS
+        self.truePeakDBTP = truePeakDBTP
+        self.elapsed = elapsed
+        self.warnings = warnings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        preset = try c.decode(String.self, forKey: .preset)
+        duration = try c.decode(Time.self, forKey: .duration)
+        integratedLUFS = try c.decodeIfPresent(Double.self, forKey: .integratedLUFS)
+        truePeakDBTP = try c.decodeIfPresent(Double.self, forKey: .truePeakDBTP)
+        elapsed = try c.decode(Double.self, forKey: .elapsed)
+        warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
+    }
 }
 
 // MARK: - loudness, watch, effects

@@ -45,6 +45,19 @@ enum Help {
                     Filmora media that moved is looked for in the project's folder and every --search folder; --rewrite from=to fixes paths saved on another Mac.
                     Built-in EDL recipes: decision-models. Exit code 1 if anything failed to import.
                     """),
+        CommandHelp(name: "assets", usage: "tandem assets providers | search \"<text>\" [--kind sfx|music|sticker|...] [--provider <id>] [--online] [--limit <n>] | fetch <id> | use <id> [--at <time>] [--duration <time>] | credits [--optional] | generate sfx|music \"<prompt>\" [--duration <s>] [--variations <n>] | install-starter",
+                    summary: "The asset library: find, fetch, generate and use music, sound effects, stickers, icons and logos, and build the description credits.",
+                    options: ["kind", "provider", "online", "limit", "at", "duration", "label", "optional", "variations"],
+                    details: """
+                    providers        which sources work now, and what to fix (a key, a permission)
+                    search           the library's catalogue; --online asks the providers too
+                    fetch <id>       download and normalise an asset
+                    use <id>         copy it into the project and add it to the media; --at places it on its track
+                    credits          the credits block for the video description, and anything to sort out first
+                    generate         make a sound effect or music cue with ElevenLabs (paid, one request per take)
+                    install-starter  add the starter emoji, icons and logos to the catalogue
+                    The library is per user, at ~/Library/Application Support/Tandem/Assets.
+                    """),
         CommandHelp(name: "serve", usage: "tandem serve [--port <n>]", summary: "Open the project and serve the API until stopped (for agents, with the app closed).", options: ["port"]),
         CommandHelp(name: "mcp", usage: "tandem mcp", summary: "Run the MCP server on stdin and stdout.", options: [],
                     details: "Add it to Claude Code with: claude mcp add tandem -- ~/Applications/Tandem.app/Contents/MacOS/tandem mcp"),

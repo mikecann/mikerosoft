@@ -204,6 +204,39 @@ final class MCPTests: XCTestCase {
         await mcp.close()
     }
 
+    func testAssetTools() async throws {
+        let mcp = try MCPHarness()
+        let assets = try await AssetHarness()
+        mcp.server.assetService = assets.service
+        let whoosh = try assets.whoosh()
+
+        let list = try await mcp.call(1, "tools/list")
+        let tools = try XCTUnwrap(list[json: "result"]?[json: "tools"]?.testArray)
+        func tool(_ name: String) -> JSONValue? { tools.first { $0[json: "name"] == .string(name) } }
+        for name in ["assets_search", "assets_use", "assets_credits", "assets_generate", "assets_providers"] {
+            XCTAssertNotNil(tool(name), name)
+        }
+        XCTAssertNil(tool("assets_search")?[json: "inputSchema"]?[json: "properties"]?[json: "project"], "searching needs no project")
+        XCTAssertNotNil(tool("assets_use")?[json: "inputSchema"]?[json: "properties"]?[json: "project"])
+        XCTAssertEqual(tool("assets_generate")?[json: "annotations"]?[json: "openWorldHint"], .bool(true))
+
+        let found = try await mcp.tool(2, "assets_search", #"{"text": "whoosh", "kind": "sfx"}"#)
+        XCTAssertTrue(found[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString?.contains(whoosh.id) ?? false, "\(found)")
+
+        let used = try await mcp.tool(3, "assets_use", #"{"id": "\#(whoosh.id)", "at": "0:02"}"#)
+        let usedText = try XCTUnwrap(used[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString)
+        XCTAssertTrue(usedText.hasPrefix("Placed Whoosh 01 (sfx) at 00:02.000 on SFX at -15 dB as revision 2."), usedText)
+        XCTAssertEqual(try ProjectFile.load(from: mcp.projectURL).project.track(named: "SFX")?.clips.count, 1)
+
+        let credits = try await mcp.tool(4, "assets_credits")
+        XCTAssertTrue(credits[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString?.hasPrefix("Nothing in this project needs a credit.") ?? false, "\(credits)")
+
+        let generate = try await mcp.tool(5, "assets_generate", #"{"kind": "sfx", "prompt": "soft whoosh"}"#)
+        XCTAssertEqual(generate[json: "result"]?[json: "isError"], .bool(true), "no ElevenLabs key here")
+        XCTAssertTrue(generate[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString?.contains("ElevenLabs is unavailable") ?? false, "\(generate)")
+        await mcp.close()
+    }
+
     func testAuthorNames() {
         XCTAssertEqual(MCPServer.author(fromClient: "claude-code"), "claude")
         XCTAssertEqual(MCPServer.author(fromClient: "Codex CLI"), "codex")

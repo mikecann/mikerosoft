@@ -1,4 +1,5 @@
 import Foundation
+import TandemAssets
 import TandemCore
 
 /// An error any client can show as it is. `message` is written for people
@@ -73,6 +74,14 @@ public struct ServiceError: Error, Codable, Equatable, CustomStringConvertible, 
             }
         case let error as DecodingError:
             return ServiceError(.badRequest, DecodingErrorText.describe(error))
+        case let error as AssetError:
+            let message = error.errorDescription ?? "\(error)"
+            switch error {
+            case .notFound: return ServiceError(.notFound, message)
+            case .invalid, .unsupported: return ServiceError(.invalid, message)
+            case .providerUnavailable, .permission, .rateLimited, .http, .network: return ServiceError(.unavailable, message)
+            case .normaliseFailed, .database: return ServiceError(.internalError, message)
+            }
         case let error as CancellationError:
             return ServiceError(.unavailable, "Cancelled. \(error.localizedDescription)")
         default:

@@ -194,6 +194,37 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: h.folder.file("frames/f.png")), FakeRenderer.png)
     }
 
+    func testRenderWarningsAreTheOnesThatMatterHere() async throws {
+        // The renderer warns about the whole project; a frame keeps the lines
+        // about what plays at its time, once each.
+        let warnings = [
+            "No cutout matte for source/take1-camera.mov yet, showing the full frame.",
+            "No loudness measurement for music/bed.m4a yet, so it isn't normalised.",
+            "No cutout matte for source/take1-camera.mov yet, showing the full frame.",
+            "Couldn't place servers.mp4 for clip clip_brl1: gone",
+            "Graphic clips aren't rendered yet (remotion:BarChart)."
+        ]
+        let h = try ServiceHarness(renderer: FakeRenderer(warnings: warnings))
+        defer { h.close() }
+        let early = try await FrameRequest(time: t(2)).run(on: h.service, context: h.context)
+        XCTAssertEqual(early.warnings, [
+            "No cutout matte for source/take1-camera.mov yet, showing the full frame.",
+            "No loudness measurement for music/bed.m4a yet, so it isn't normalised.",
+            "Graphic clips aren't rendered yet (remotion:BarChart)."
+        ], "the B-roll clip at 20 s doesn't play at 2 s")
+        let broll = try await FrameRequest(time: t(21)).run(on: h.service, context: h.context)
+        XCTAssertTrue(broll.warnings.contains("Couldn't place servers.mp4 for clip clip_brl1: gone"))
+        XCTAssertTrue(broll.readableText.contains("\nWarning: No cutout matte for source/take1-camera.mov yet, showing the full frame."), broll.readableText)
+        let clip = try await ClipRequest(start: t(0), end: t(10)).run(on: h.service, context: h.context)
+        XCTAssertEqual(clip.warnings.count, 3)
+        let whole = try await ExportRequest(preset: "review").run(on: h.service, context: h.context)
+        XCTAssertEqual(whole.warnings.count, 4, "no range: every line, once")
+        XCTAssertTrue(whole.readableText.contains("Warning: Couldn't place servers.mp4"), whole.readableText)
+        // Old results without warnings still decode.
+        let old = try ServiceJSON.decoder().decode(ImageResult.self, from: Data(#"{"bytes": 3, "path": "/x.png"}"#.utf8))
+        XCTAssertEqual(old.warnings, [])
+    }
+
     func testExportReportsProgressAndResult() async throws {
         let h = try ServiceHarness()
         defer { h.close() }

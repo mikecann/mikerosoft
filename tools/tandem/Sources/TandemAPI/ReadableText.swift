@@ -269,8 +269,8 @@ extension ValidateResult: ReadableResult {
 extension ImageResult: ReadableResult {
     public var readableText: String {
         let at = time.map { " at \($0)" } ?? ""
-        if let path { return "Wrote \(path) (\(bytes) bytes)\(at)." }
-        return "PNG\(at), \(bytes) bytes (base64 in the JSON result)."
+        let head = path.map { "Wrote \($0) (\(bytes) bytes)\(at)." } ?? "PNG\(at), \(bytes) bytes (base64 in the JSON result)."
+        return ([head] + warnings.map { "Warning: \($0)" }).joined(separator: "\n")
     }
 }
 
@@ -280,7 +280,7 @@ extension ExportOutcome: ReadableResult {
         if let lufs = integratedLUFS, let peak = truePeakDBTP {
             text += String(format: " Loudness %.1f LUFS, true peak %.1f dBTP.", lufs, peak)
         }
-        return text
+        return ([text] + warnings.map { "Warning: \($0)" }).joined(separator: "\n")
     }
 }
 

@@ -41,6 +41,7 @@ public final class MCPServer: @unchecked Sendable {
     private let writeLock = NSLock()
     private let stateLock = NSLock()
     private var legacyClientName: String?
+    private var assets: AssetService?
     private var tasks: [String: Task<Void, Never>] = [:]
     private var cancelled: Set<String> = []
 
@@ -280,12 +281,47 @@ public final class MCPServer: @unchecked Sendable {
         let author = options.author ?? options.environment["TANDEM_AUTHOR"] ?? clientName.map(Self.author(fromClient:)) ?? "agent"
         do {
             let body = try JSONEncoder().encode(JSONValue.object(tool.defaults.merging(arguments) { _, given in given }))
-            let content = try await run(tool.operation, body: body, projectPath: projectPath, author: author, asJSON: asJSON)
+            let content: [JSONValue]
+            if let asset = tool.asset {
+                content = try await runAsset(asset, body: body, projectPath: projectPath, author: author, asJSON: asJSON)
+            } else if let operation = tool.operation {
+                content = try await run(operation, body: body, projectPath: projectPath, author: author, asJSON: asJSON)
+            } else {
+                throw MCPProtocolError(code: -32603, message: "Tool \(name) has nothing to run.")
+            }
             return .object(["content": .array(content), "isError": .bool(false)])
+        } catch let error as MCPProtocolError {
+            throw error
         } catch {
             let message = ServiceError.wrap(error).message
             return .object(["content": .array([.object(["type": .string("text"), "text": .string(message)])]), "isError": .bool(true)])
         }
+    }
+
+    /// The asset library, opened on first use: the per-user one, or
+    /// `$TANDEM_ASSETS_ROOT`. Tests set it.
+    var assetService: AssetService? {
+        get { stateLock.withLock { assets } }
+        set { stateLock.withLock { assets = newValue } }
+    }
+
+    private func openAssets() throws -> AssetService {
+        try stateLock.withLock {
+            if let assets { return assets }
+            let opened = try AssetService.standard(environment: options.environment)
+            assets = opened
+            return opened
+        }
+    }
+
+    private func runAsset(_ operation: AssetOperation, body: Data, projectPath: String?, author: String, asJSON: Bool) async throws -> [JSONValue] {
+        let assets = try openAssets()
+        let result = try await assets.handle(operation, body: body) {
+            let url = try ProjectLocator.find(projectPath ?? self.options.project, in: self.options.directory, environment: self.options.environment)
+            return self.makeClient(url, author)
+        }
+        let text = asJSON ? String(decoding: try ServiceJSON.encoder(pretty: true).encode(result), as: UTF8.self) : result.readableText
+        return [.object(["type": .string("text"), "text": .string(text)])]
     }
 
     private func run(_ operation: ServiceOperation, body: Data, projectPath: String?, author: String, asJSON: Bool) async throws -> [JSONValue] {
@@ -307,7 +343,11 @@ public final class MCPServer: @unchecked Sendable {
             content.append(.object(["type": .string("image"), "data": .string(png), "mimeType": .string("image/png")]))
         }
         let text: String
-        if asJSON {
+        if asJSON, var image = result as? ImageResult, image.png != nil {
+            // The picture is already the image content; don't send it twice.
+            image.png = nil
+            text = String(decoding: try ServiceJSON.encoder(pretty: true).encode(image), as: UTF8.self)
+        } else if asJSON {
             text = String(decoding: try ServiceJSON.encoder(pretty: true).encode(result), as: UTF8.self)
         } else {
             text = result.readableText
@@ -390,17 +430,29 @@ enum MCPTools {
         var name: String
         var title: String
         var description: String
-        var operation: ServiceOperation
+        /// A project operation, run through `ProjectClient`...
+        var operation: ServiceOperation?
+        /// ...or an asset library operation.
+        var asset: AssetOperation? = nil
         var properties: [String: JSONValue]
         var required: [String] = []
         var readOnly: Bool
         var idempotent = false
+        /// Reaches outside the Mac (asset providers).
+        var openWorld = false
         /// Arguments filled in when the caller leaves them out.
         var defaults: [String: JSONValue] = [:]
 
+        /// Asset tools other than use and credits don't touch a project.
+        var usesProject: Bool {
+            asset.map { $0.callType.needsProject } ?? true
+        }
+
         var definition: JSONValue {
             var properties = self.properties
-            properties["project"] = S.string("Path to the .tandem file (or its folder). Defaults to the one the server was started with, or the one in its folder.")
+            if usesProject {
+                properties["project"] = S.string("Path to the .tandem file (or its folder). Defaults to the one the server was started with, or the one in its folder.")
+            }
             properties["json"] = S.boolean("Return the raw JSON result instead of readable text.")
             var schema: [String: JSONValue] = [
                 "type": .string("object"),
@@ -420,7 +472,7 @@ enum MCPTools {
                     "readOnlyHint": .bool(readOnly),
                     "destructiveHint": .bool(false),
                     "idempotentHint": .bool(idempotent),
-                    "openWorldHint": .bool(false)
+                    "openWorldHint": .bool(openWorld)
                 ])
             ])
         }
@@ -574,6 +626,59 @@ enum MCPTools {
             operation: .watch,
             properties: ["revision": S.integer("Wait for a revision after this one."), "timeout": S.number("Seconds to wait. Default 30, at most 600.")],
             readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "assets_search", title: "Find assets",
+            description: "Searches Mike's asset library (music, sound effects, stickers, icons, logos, fonts, stock) by words, kind and source. online: true asks the providers too (Noto emoji, Iconify, SVGL, Fontsource, Pexels, Pixabay); what they find joins the library, so its ID works with assets_use right away.",
+            asset: .search,
+            properties: [
+                "text": S.string("Words to match, like whoosh or rocket."),
+                "kind": S.string("Kinds, comma separated: music, sfx, sticker, overlay, video, image, font, icon, logo, lut, title, transition."),
+                "provider": S.string("Only these sources, comma separated, like noto or import."),
+                "online": S.boolean("Ask the providers too, not just the library."),
+                "limit": S.integer("At most this many results. Default 20."),
+                "maxDuration": time("Only sounds and clips up to this long.")
+            ],
+            readOnly: true, openWorld: true
+        ),
+        Tool(
+            name: "assets_use", title: "Use an asset",
+            description: "Downloads and normalises an asset if needed, copies it into the project's assets folder, records the use for the credits and adds it to the project's media. With at it's also placed on the track for its kind (sound effects on SFX at -15 dB, music on Music at -31 dB with a fade out, stickers and logos on Graphics). One undo step, credited to you.",
+            asset: .use,
+            properties: [
+                "id": S.string("An asset ID from assets_search, like noto:1f680 or import:..."),
+                "at": time("Place it here on the timeline. Leave out to only add it to the media."),
+                "duration": time("How long the clip lasts. Default: all of it (5 s for a still)."),
+                "mode": S.enumeration(["place", "overwrite", "insert"], "place (default) fails if its track is taken there."),
+                "label": S.string("Undo label.")
+            ],
+            required: ["id"], readOnly: false, openWorld: true
+        ),
+        Tool(
+            name: "assets_credits", title: "Description credits",
+            description: "The credits block for the video description, built from the assets the project uses and their recorded licences, plus anything to sort out before publishing (unknown licences, subscriptions to keep).",
+            asset: .credits,
+            properties: ["includeOptional": S.boolean("Also list courtesy credits nobody requires.")],
+            readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "assets_generate", title: "Generate a sound or music",
+            description: "Makes a sound effect (0.5 to 30 s) or a music cue (3 to 600 s, instrumental) with ElevenLabs and adds it to the library. Each take is a paid request, so make one unless asked for more. Check assets_providers first if it fails.",
+            asset: .generate,
+            properties: [
+                "kind": S.enumeration(["sfx", "music"]),
+                "prompt": S.string("What it should sound like, like \"short airy whoosh, left to right\"."),
+                "duration": time("Length."),
+                "variations": S.integer("Takes to make, each paid. Default 1, at most 4."),
+                "loop": S.boolean("Sound effects: loop seamlessly."),
+                "vocals": S.boolean("Music: allow vocals (instrumental by default).")
+            ],
+            required: ["kind", "prompt"], readOnly: false, openWorld: true
+        ),
+        Tool(
+            name: "assets_providers", title: "Asset sources",
+            description: "Every asset source and whether it works now, with what to fix: a missing key, an ElevenLabs key without the sound_generation permission, a source that's off until its licence is agreed.",
+            asset: .providers, properties: [:], readOnly: true, idempotent: true
         ),
         Tool(
             name: "effects", title: "Effects and layouts",

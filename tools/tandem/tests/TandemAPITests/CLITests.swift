@@ -1,5 +1,6 @@
 import XCTest
 @testable import TandemAPI
+import TandemAssets
 @testable import TandemCore
 
 /// Runs the built `tandem` binary, the way Mike and agents do.
@@ -327,5 +328,72 @@ final class ExitSignal: @unchecked Sendable {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         return lock.withLock { exited }
+    }
+}
+
+/// `tandem assets`, against a library in a temp folder with the network
+/// and the Keychain switched off.
+final class AssetsCLITests: XCTestCase {
+    let cli = CLITests()
+
+    override func setUpWithError() throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+    }
+
+    func testAssetsEndToEnd() async throws {
+        let folder = TempFolder("tandem-assets-cli")
+        let root = folder.url.appendingPathComponent("library", isDirectory: true)
+        do {
+            // An import folder whose licence asks for a credit.
+            let library = try AssetLibrary(root: root, previewFolder: root.appendingPathComponent("previews"), transport: OfflineTransport(), secrets: StaticSecretStore())
+            let imports = folder.url.appendingPathComponent("imports", isDirectory: true)
+            try AssetFixtures.wav(at: imports.appendingPathComponent("sfx/Swoosh_Air.wav"))
+            try await library.addImportFolder(imports, licence: FolderLicence(source: "Test Sounds", licence: "CC BY 4.0", licenceClass: .creditNeeded, credit: "Swoosh Air by Test Sounds (CC BY 4.0)"))
+        }
+        let env = ["TANDEM_ASSETS_ROOT": root.path, "TANDEM_ASSETS_OFFLINE": "1"]
+        let video = folder.url.appendingPathComponent("video", isDirectory: true)
+        try FileManager.default.createDirectory(at: video, withIntermediateDirectories: true)
+        let projectURL = try APIFixture.write(to: video)
+
+        let providers = try cli.tandem("assets", "providers", in: video, env: env)
+        XCTAssertEqual(providers.status, 0, providers.stderr)
+        XCTAssertTrue(providers.stdout.contains("elevenlabs  ElevenLabs"), providers.stdout)
+        XCTAssertTrue(providers.stdout.contains("needs a key"), providers.stdout)
+
+        let search = try cli.tandem("assets", "search", "swoosh", "--kind", "sfx", "--json", in: video, env: env)
+        XCTAssertEqual(search.status, 0, search.stderr)
+        let found = try ServiceJSON.decoder().decode(AssetSearchResult.self, from: Data(search.stdout.utf8))
+        let id = try XCTUnwrap(found.local.first?.id)
+
+        let use = try cli.tandem("assets", "use", id, "--at", "0:02", "--author", "claude", in: video, env: env)
+        XCTAssertEqual(use.status, 0, use.stderr)
+        XCTAssertTrue(use.stdout.hasPrefix("Placed Swoosh Air (sfx) at 00:02.000 on SFX at -15 dB as revision 2."), use.stdout)
+        XCTAssertTrue(use.stdout.contains("needs a credit"), use.stdout)
+        let project = try ProjectFile.load(from: projectURL).project
+        XCTAssertEqual(project.track(named: "SFX")?.clips.first?.start, t(2))
+        let history = try cli.tandem("history", in: video)
+        XCTAssertTrue(history.stdout.contains("Add Swoosh Air at 00:02.000  (claude)"), history.stdout)
+
+        let credits = try cli.tandem("assets", "credits", in: video, env: env)
+        XCTAssertEqual(credits.status, 0, credits.stderr)
+        XCTAssertTrue(credits.stdout.contains("Credits\nSwoosh Air by Test Sounds (CC BY 4.0)"), credits.stdout)
+
+        let online = try cli.tandem("assets", "search", "rocket", "--online", "--provider", "noto", in: video, env: env)
+        XCTAssertEqual(online.status, 0, online.stderr)
+        XCTAssertTrue(online.stdout.contains("noto: couldn't search."), online.stdout)
+
+        let generate = try cli.tandem("assets", "generate", "sfx", "soft whoosh", in: video, env: env)
+        XCTAssertEqual(generate.status, 1)
+        XCTAssertTrue(generate.stderr.contains("ElevenLabs is unavailable"), generate.stderr)
+
+        let starter = try cli.tandem("assets", "install-starter", in: video, env: env)
+        XCTAssertTrue(starter.stdout.hasPrefix("The starter set is in the library:"), starter.stdout)
+
+        let noID = try cli.tandem("assets", "use", in: video, env: env)
+        XCTAssertEqual(noID.status, 2)
+        XCTAssertTrue(noID.stderr.contains("needs an asset ID"), noID.stderr)
+        let wrongOption = try cli.tandem("assets", "search", "x", "--at", "3", in: video, env: env)
+        XCTAssertEqual(wrongOption.status, 2)
+        XCTAssertTrue(wrongOption.stderr.contains("`tandem assets search` doesn't take --at"), wrongOption.stderr)
     }
 }

@@ -47,24 +47,52 @@ public final class MediaAnalysisSource: AnalysisSource, @unchecked Sendable {
     }
 }
 
+/// A rendered frame and what the renderer couldn't do as the project asks.
+public struct RenderedFrame: Sendable {
+    public var png: Data
+    /// For example "No cutout matte for source/take-camera.mov yet, showing
+    /// the full frame."
+    public var warnings: [String]
+
+    public init(png: Data, warnings: [String] = []) {
+        self.png = png
+        self.warnings = warnings
+    }
+}
+
+/// A finished export and the renderer's warnings for what it rendered.
+public struct RenderedExport: Sendable {
+    public var result: ExportResult
+    public var warnings: [String]
+
+    public init(result: ExportResult, warnings: [String] = []) {
+        self.result = result
+        self.warnings = warnings
+    }
+}
+
 /// Frame grabs and exports. The default goes through `FrameRenderer` and
 /// `Exporter`; tests inject a fake so the API plumbing (files, base64, MCP
-/// image content, progress events) is tested without the render module.
+/// image content, progress events, warnings) is tested without rendering.
 public protocol RenderBackend: Sendable {
-    func pngData(context: RenderContext, at time: Time, maxSize: CGSize?) async throws -> Data
+    func frame(context: RenderContext, at time: Time, maxSize: CGSize?) async throws -> RenderedFrame
     func export(
         context: RenderContext,
         preset: ExportPreset,
         output: URL,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ExportResult
+    ) async throws -> RenderedExport
 }
 
 public struct DefaultRenderBackend: RenderBackend {
     public init() {}
 
-    public func pngData(context: RenderContext, at time: Time, maxSize: CGSize?) async throws -> Data {
-        try await FrameRenderer(context: context).pngData(at: time, maxSize: maxSize)
+    public func frame(context: RenderContext, at time: Time, maxSize: CGSize?) async throws -> RenderedFrame {
+        let renderer = FrameRenderer(context: context)
+        let png = try await renderer.pngData(at: time, maxSize: maxSize)
+        // The composition is built by now, so this costs nothing.
+        let warnings = (try? await renderer.warnings()) ?? []
+        return RenderedFrame(png: png, warnings: warnings)
     }
 
     public func export(
@@ -72,8 +100,36 @@ public struct DefaultRenderBackend: RenderBackend {
         preset: ExportPreset,
         output: URL,
         progress: @escaping @Sendable (Double) -> Void
-    ) async throws -> ExportResult {
-        try await Exporter(context: context, preset: preset, output: output).run(progress: progress)
+    ) async throws -> RenderedExport {
+        // The exporter builds its own composition and keeps its warnings to
+        // itself, so build one alongside it just to read them.
+        async let warnings = (try? await CompositionBuilder.build(context).warnings) ?? []
+        let result = try await Exporter(context: context, preset: preset, output: output).run(progress: progress)
+        return RenderedExport(result: result, warnings: await warnings)
+    }
+}
+
+/// Picks the render warnings that matter for part of the timeline. The
+/// renderer warns about the whole project (every file still missing its
+/// cutout matte, say), so a frame at 2:00 only keeps the lines about media
+/// and clips that play around then. Lines that name no media or clip are
+/// always kept. Repeats are dropped.
+public enum RenderWarnings {
+    public static func relevant(_ warnings: [String], in project: Project, range: TimeRange?) -> [String] {
+        var seen = Set<String>()
+        let unique = warnings.filter { seen.insert($0).inserted }
+        guard let range else { return unique }
+        let clips = project.allTracks.flatMap(\.clips)
+        let playing = clips.filter { $0.range.overlaps(range) }
+        let playingIDs = Set(playing.map(\.id))
+        let playingMedia = Set(playing.compactMap(\.mediaID))
+        let paths = project.media.map { ($0.id, $0.path) }
+        return unique.filter { line in
+            let mentionedClips = clips.map(\.id).filter { line.contains($0) }
+            let mentionedMedia = paths.filter { line.contains($0.1) }.map(\.0)
+            if mentionedClips.isEmpty && mentionedMedia.isEmpty { return true }
+            return mentionedClips.contains(where: playingIDs.contains) || mentionedMedia.contains(where: playingMedia.contains)
+        }
     }
 }
 
