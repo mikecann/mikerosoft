@@ -171,6 +171,8 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://version?out=/tmp/Video.json")!))
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://version?out=Video%20v2.tandem")!))
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://new?folder=videos")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://simulate?menu=10,10&out=/Users/mike/.zshrc")!))
+        XCTAssertNotNil(AppURLCommand.parse(URL(string: "tandem://simulate?menu=10,10&out=/tmp/menu.txt")!))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/tmp/Shot.PNG")!), .screenshot(out: "/tmp/Shot.PNG"))
     }
 }

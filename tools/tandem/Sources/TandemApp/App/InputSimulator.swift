@@ -49,8 +49,11 @@ enum InputSimulator {
             return Gesture(kind: .click(count: Int(query["count"] ?? "") ?? 1), at: CGPoint(x: click[0], y: click[1]), modifiers: flags)
         }
         let menu = numbers(query["menu"])
-        if menu.count == 2, let out = query["out"] {
-            return Gesture(kind: .menu(out: NSString(string: out).expandingTildeInPath), at: CGPoint(x: menu[0], y: menu[1]), modifiers: flags)
+        // The menu's items go to a text file, and only a text file: links
+        // can come from anywhere.
+        if menu.count == 2, let out = query["out"].map({ NSString(string: $0).expandingTildeInPath }),
+           out.hasPrefix("/"), URL(fileURLWithPath: out).pathExtension.lowercased() == "txt" {
+            return Gesture(kind: .menu(out: out), at: CGPoint(x: menu[0], y: menu[1]), modifiers: flags)
         }
         let scroll = numbers(query["scroll"])
         if scroll.count == 4 {
