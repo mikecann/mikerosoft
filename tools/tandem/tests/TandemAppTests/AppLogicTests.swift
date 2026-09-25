@@ -66,6 +66,25 @@ final class RecentProjectsTests: XCTestCase {
         XCTAssertEqual(VersionNaming.exportName(projectFile: "Video.tandem", preset: "Short 9:16", existing: ["Video (Short 9:16).mp4"]), "Video (Short 9:16) 2.mp4")
     }
 
+    func testVersionsSavedElsewhereStillFindTheirMedia() {
+        var project = Project.standard(name: "Video")
+        project.media = [
+            MediaItem(id: "m1", path: "source/take-camera.mov", kind: .video, role: .camera, hasVideo: true, hasAudio: true),
+            MediaItem(id: "m2", path: "/Volumes/Footage/broll.mp4", kind: .video, role: .broll, hasVideo: true)
+        ]
+        let folder = URL(fileURLWithPath: "/videos/static-hosting")
+
+        let beside = VersionNaming.relocated(project, from: folder, to: folder)
+        XCTAssertEqual(beside.media.map(\.path), ["source/take-camera.mov", "/Volumes/Footage/broll.mp4"])
+
+        let inside = VersionNaming.relocated(project, from: folder, to: folder.appendingPathComponent("versions"))
+        XCTAssertEqual(inside.media.map(\.path), ["/videos/static-hosting/source/take-camera.mov", "/Volumes/Footage/broll.mp4"])
+
+        let above = VersionNaming.relocated(project, from: folder, to: URL(fileURLWithPath: "/videos"))
+        XCTAssertEqual(above.media.map(\.path), ["static-hosting/source/take-camera.mov", "/Volumes/Footage/broll.mp4"])
+        XCTAssertEqual(above.media.map(\.id), ["m1", "m2"])
+    }
+
     func testProjectNamesFromFolders() {
         XCTAssertEqual(ProjectDocuments.projectName(forFolder: "decision-models"), "Decision models")
         XCTAssertEqual(ProjectDocuments.projectName(forFolder: "static_hosting"), "Static hosting")
@@ -125,12 +144,27 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://zoom?pps=40")!), .zoom(pixelsPerSecond: 40, scrollSeconds: nil))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://tool?name=slip")!), .tool(.slip))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://inout?in=2&out=5")!), .inOut(start: t(2), end: t(5)))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://new?folder=/videos/static-hosting")!), .newProject(folder: "/videos/static-hosting"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://version?out=/videos/a/Video%20v2.tandem")!), .saveVersion(out: "/videos/a/Video v2.tandem"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt")!), .debug(out: "/tmp/tree.txt"))
     }
 
     func testRejectsNonsense() {
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://command?name=launchRockets")!))
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://screenshot")!))
         XCTAssertNil(AppURLCommand.parse(URL(string: "https://example.com/screenshot?out=/tmp/a.png")!))
+    }
+
+    /// Any app or web page can open a tandem:// link, so commands that write
+    /// files only write the kind of file they're for, at an absolute path.
+    func testFileWritesStayInTheirLane() {
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/Users/mike/.zshrc")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://screenshot?out=shot.png")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.png")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://version?out=/tmp/Video.json")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://version?out=Video%20v2.tandem")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://new?folder=videos")!))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/tmp/Shot.PNG")!), .screenshot(out: "/tmp/Shot.PNG"))
     }
 }
 

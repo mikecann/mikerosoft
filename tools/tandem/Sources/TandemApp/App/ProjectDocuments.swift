@@ -83,19 +83,27 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         panel.prompt = "Create project"
         panel.message = "Choose the video's folder. The project is saved inside it."
         guard panel.runModal() == .OK, let folder = panel.url else { return }
+        createProject(inFolder: folder)
+    }
+
+    /// Makes `<folder>/<folder name>.tandem` and opens it, or opens the
+    /// project that's already there.
+    @discardableResult
+    func createProject(inFolder folder: URL) -> ProjectWindowController? {
         let name = folder.lastPathComponent
         let url = folder.appendingPathComponent("\(name).\(ProjectFile.fileExtension)")
         if FileManager.default.fileExists(atPath: url.path) {
-            open(url)
-            return
+            return open(url)
         }
         do {
             let session = try ProjectSession.create(at: url, name: Self.projectName(forFolder: name), owner: .app)
             let controller = present(EditorModel(session: session), frame: nil)
             noteRecent(url)
             controller.model.rescanMedia(ifOlderThan: 0)
+            return controller
         } catch {
             alert("Couldn't create the project", EditorModel.describe(error))
+            return nil
         }
     }
 
@@ -117,21 +125,39 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         panel.nameFieldStringValue = VersionNaming.nextName(after: model.fileName, existing: existing)
         panel.message = "Save a new version. You keep editing the new file; the old one stays as it is now."
         guard panel.runModal() == .OK, let target = panel.url else { return }
-        guard target.standardizedFileURL != model.fileURL.standardizedFileURL else { return }
+        saveVersion(of: model, to: target)
+    }
+
+    /// Writes the project to `target` and swaps the window over to it. The
+    /// old file is saved as it stands and closed.
+    @discardableResult
+    func saveVersion(of model: EditorModel, to target: URL) -> ProjectWindowController? {
+        let target = target.standardizedFileURL
+        guard target != model.fileURL.standardizedFileURL else { return nil }
+        if windows.contains(where: { $0.model.fileURL.standardizedFileURL == target }) {
+            alert("Couldn't save the version", "\(target.lastPathComponent) is open in another window.")
+            return nil
+        }
         do {
             try model.session.save()
             let (project, revision) = model.session.coordinator.snapshot()
-            try ProjectFile.save(project, revision: revision, to: target)
+            let moved = VersionNaming.relocated(project, from: model.fileURL.deletingLastPathComponent(), to: target.deletingLastPathComponent())
+            // A file being replaced may have left a journal behind; replaying
+            // it over the new version would bring back its old edits.
+            ProjectJournal.forProject(at: target).truncate()
+            try ProjectFile.save(moved, revision: revision, to: target)
         } catch {
             alert("Couldn't save the version", EditorModel.describe(error))
-            return
+            return nil
         }
+        // Open the new file before closing the old one, so the welcome
+        // window doesn't flash up in between, and a failed open leaves the
+        // old window where it was.
         let old = windows.first { $0.model === model }
-        let frame = old?.window?.frame
+        guard let controller = open(target, frame: old?.window?.frame) else { return nil }
         old?.close()
-        if let controller = open(target, frame: frame) {
-            controller.model.show(.info, "Now editing \(target.lastPathComponent).")
-        }
+        controller.model.show(.info, "Now editing \(target.lastPathComponent).")
+        return controller
     }
 
     // MARK: - Recent projects

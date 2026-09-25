@@ -1,4 +1,6 @@
 import Foundation
+import TandemCore
+import TandemMedia
 
 /// Recently opened projects, newest first, kept in user defaults.
 struct RecentProjects: Equatable {
@@ -54,6 +56,21 @@ enum VersionNaming {
         var candidate = version + 1
         while taken.contains("\(base) v\(candidate).\(ext)".lowercased()) { candidate += 1 }
         return "\(base) v\(candidate).\(ext)"
+    }
+
+    /// The project to write when a version is saved in another folder.
+    /// Media paths are relative to the project's folder, so each one is
+    /// rewritten to reach the same file from the new folder: relative when
+    /// the file is inside it, absolute otherwise.
+    static func relocated(_ project: Project, from oldFolder: URL, to newFolder: URL) -> Project {
+        let old = ProjectFolder(root: oldFolder)
+        let new = ProjectFolder(root: newFolder)
+        guard old != new else { return project }
+        var copy = project
+        for index in copy.media.indices {
+            copy.media[index].path = new.path(for: old.url(for: copy.media[index]))
+        }
+        return copy
     }
 
     /// The next free export file name: `Video v3 (YouTube 4K).mp4`, then

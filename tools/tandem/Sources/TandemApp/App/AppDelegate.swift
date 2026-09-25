@@ -121,6 +121,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         case .debug(let out):
             guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
             try? WindowSnapshot.describe(window).write(toFile: out, atomically: true, encoding: .utf8)
+        case .newProject(let folder):
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: folder, isDirectory: &isFolder), isFolder.boolValue else {
+                return NSLog("Tandem: no folder at %@", folder)
+            }
+            documents.createProject(inFolder: URL(fileURLWithPath: folder, isDirectory: true))
+        case .saveVersion(let out):
+            // Links never replace a file; Save As in the app asks first.
+            guard let front, !FileManager.default.fileExists(atPath: out) else {
+                return NSLog("Tandem: not saving a version to %@", out)
+            }
+            documents.saveVersion(of: front.model, to: URL(fileURLWithPath: out))
         }
     }
 

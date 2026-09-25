@@ -100,6 +100,10 @@ enum AppURLCommand: Equatable {
     case debug(out: String)
     /// Replays a mouse gesture; see `InputSimulator`.
     case simulate(InputSimulator.Gesture)
+    /// Makes a project in a folder, or opens the one already there.
+    case newProject(folder: String)
+    /// Saves the front project as a new file and carries on editing that.
+    case saveVersion(out: String)
 
     static func parse(_ url: URL) -> AppURLCommand? {
         guard url.scheme?.lowercased() == "tandem", let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
@@ -108,8 +112,8 @@ enum AppURLCommand: Equatable {
         for item in components.queryItems ?? [] { query[item.name.lowercased()] = item.value ?? "" }
         switch action {
         case "screenshot":
-            guard let out = query["out"], !out.isEmpty else { return nil }
-            return .screenshot(out: NSString(string: out).expandingTildeInPath)
+            guard let out = path(query["out"], extension: "png") else { return nil }
+            return .screenshot(out: out)
         case "open":
             guard let path = query["path"], !path.isEmpty else { return nil }
             return .open(path: NSString(string: path).expandingTildeInPath)
@@ -140,8 +144,14 @@ enum AppURLCommand: Equatable {
             guard let gesture = InputSimulator.parse(query) else { return nil }
             return .simulate(gesture)
         case "debug":
-            guard let out = query["out"], !out.isEmpty else { return nil }
-            return .debug(out: NSString(string: out).expandingTildeInPath)
+            guard let out = path(query["out"], extension: "txt") else { return nil }
+            return .debug(out: out)
+        case "new":
+            guard let folder = path(query["folder"]) else { return nil }
+            return .newProject(folder: folder)
+        case "version", "saveas":
+            guard let out = path(query["out"], extension: ProjectFile.fileExtension) else { return nil }
+            return .saveVersion(out: out)
         case "inout":
             let start = query["in"].flatMap(Double.init).map { Time(seconds: $0) }
             let end = query["out"].flatMap(Double.init).map { Time(seconds: $0) }
@@ -149,5 +159,16 @@ enum AppURLCommand: Equatable {
         default:
             return nil
         }
+    }
+
+    /// An absolute path, after `~` expansion, with the extension the command
+    /// writes. Any app or web page can open a tandem:// link, so a
+    /// screenshot mustn't be able to overwrite, say, a shell profile.
+    private static func path(_ raw: String?, extension required: String? = nil) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let path = NSString(string: raw).expandingTildeInPath
+        guard path.hasPrefix("/") else { return nil }
+        if let required, URL(fileURLWithPath: path).pathExtension.lowercased() != required { return nil }
+        return path
     }
 }
