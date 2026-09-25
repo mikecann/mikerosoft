@@ -22,8 +22,8 @@ enum PitchShift {
     nonisolated(unsafe) static var cacheFolder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Tandem/pitch", isDirectory: true)
 
-    /// The clip's first enabled pitch shift that actually moves the pitch
-    /// somewhere, as its effect ID.
+    /// The clip's first enabled pitch shift that moves the pitch (a
+    /// non-zero value or any keyframes), or nil.
     static func effect(of clip: Clip, registry: EffectRegistry) -> Effect? {
         guard let effects = clip.audio?.effects else { return nil }
         for effect in effects where effect.type == "pitchShift" && effect.enabled {
