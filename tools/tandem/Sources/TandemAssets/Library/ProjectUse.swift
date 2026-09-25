@@ -257,7 +257,8 @@ extension AssetLibrary {
             warnings.append("No licence on record for \(Self.list(unknown)). Add a \(FolderLicence.fileName) to their import folder, or replace them.")
         }
         if !missingLines.isEmpty {
-            warnings.append("\(Self.list(missingLines)) need a credit but have no credit line. Check their licence and write one.")
+            let one = missingLines.count == 1
+            warnings.append("\(Self.list(missingLines)) \(one ? "needs" : "need") a credit but \(one ? "has" : "have") no credit line. Check the licence and write one.")
         }
         for source in subscriptionOrder {
             guard let entry = subscriptions[source] else { continue }
