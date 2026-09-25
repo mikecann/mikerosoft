@@ -200,14 +200,16 @@ public final class AssetLibrary: @unchecked Sendable {
 
     /// Searches providers at once and records what they return in the
     /// catalogue (as `remote`), so a later `fetch` or `use` can find the
-    /// asset by ID, even from another process. `providerIDs` limits which
-    /// providers are asked; otherwise every usable one that offers the
-    /// requested kinds is.
+    /// asset by ID, even from another process. `providerIDs` names the
+    /// providers to ask, and each gets an entry, with the reason when it
+    /// can't answer. Without it, every usable provider that offers the
+    /// requested kinds is asked.
     public func searchProviders(_ query: ProviderQuery, providerIDs: [String]? = nil) async -> [ProviderResults] {
         var candidates: [AssetProvider] = []
         for provider in providers where provider.capabilities.search {
             if let providerIDs, !providerIDs.contains(provider.id) { continue }
             if !query.kinds.isEmpty && query.kinds.isDisjoint(with: provider.kinds) { continue }
+            if providerIDs == nil, await !provider.status().isUsable { continue }
             candidates.append(provider)
         }
         return await withTaskGroup(of: (Int, ProviderResults).self) { group in
@@ -464,7 +466,7 @@ public final class AssetLibrary: @unchecked Sendable {
         return ImportFolderWatcher(paths: records.map(\.path)) { roots in
             Task {
                 var reports: [ImportScanReport] = []
-                for record in records where roots.contains(URL(fileURLWithPath: record.path).standardizedFileURL.path) {
+                for record in records where roots.contains(record.path) {
                     if let report = try? await provider.scan(record) { reports.append(report) }
                 }
                 if !reports.isEmpty { onChange(reports) }

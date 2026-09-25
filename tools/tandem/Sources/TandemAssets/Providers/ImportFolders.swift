@@ -333,32 +333,44 @@ public final class ImportFolderWatcher: @unchecked Sendable {
     private var stream: FSEventStreamRef?
     private let queue = DispatchQueue(label: "tandem.assets.import-watcher")
     private let handler: @Sendable ([String]) -> Void
+    /// Watched folders as given, keyed by their real path. FSEvents reports
+    /// real paths (`/private/var/...` for `/var/...`), so matching needs both.
+    private var roots: [(real: String, given: String)] = []
 
-    /// Starts watching `paths`. `handler` gets the watched roots that saw
-    /// changes, at most every `latency` seconds.
-    public init(paths: [String], latency: TimeInterval = 2, handler: @escaping @Sendable ([String]) -> Void) {
+    /// Starts watching `paths`. `handler` gets the watched folders (as
+    /// passed in) that saw changes, at most every `latency` seconds.
+    public init(paths: [String], latency: TimeInterval = 1, handler: @escaping @Sendable ([String]) -> Void) {
         self.handler = handler
         guard !paths.isEmpty else { return }
+        roots = paths.map { (Self.realPath($0), $0) }
         var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
         let callback: FSEventStreamCallback = { _, info, count, eventPaths, _, _ in
             guard let info else { return }
             let watcher = Unmanaged<ImportFolderWatcher>.fromOpaque(info).takeUnretainedValue()
             let changed = (unsafeBitCast(eventPaths, to: NSArray.self) as? [String]) ?? []
-            watcher.deliver(changed.prefix(count).map { $0 })
+            watcher.deliver(Array(changed.prefix(count)))
         }
-        let flags = UInt32(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer)
-        stream = FSEventStreamCreate(nil, callback, &context, paths as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency, flags)
-        self.roots = paths.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        let flags = UInt32(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents)
+        let watched = roots.map(\.real) as CFArray
+        stream = FSEventStreamCreate(nil, callback, &context, watched, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency, flags)
         if let stream {
             FSEventStreamSetDispatchQueue(stream, queue)
             FSEventStreamStart(stream)
         }
     }
 
-    private var roots: [String] = []
+    /// The path with every symlink resolved. Foundation's
+    /// `resolvingSymlinksInPath` strips `/private`, which is the opposite of
+    /// what FSEvents reports.
+    static func realPath(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
 
     private func deliver(_ paths: [String]) {
-        let touched = roots.filter { root in paths.contains { $0.hasPrefix(root) } }
+        // The licence note changing matters too, so every file counts.
+        let touched = roots.filter { root in paths.contains { $0 == root.real || $0.hasPrefix(root.real + "/") } }.map(\.given)
         guard !touched.isEmpty else { return }
         handler(touched)
     }
