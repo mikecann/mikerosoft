@@ -14,7 +14,8 @@ let package = Package(
         .library(name: "TandemCore", targets: ["TandemCore"]),
         .library(name: "TandemMedia", targets: ["TandemMedia"]),
         .library(name: "TandemRender", targets: ["TandemRender"]),
-        .library(name: "TandemAPI", targets: ["TandemAPI"])
+        .library(name: "TandemAPI", targets: ["TandemAPI"]),
+        .library(name: "TandemAssets", targets: ["TandemAssets"])
     ],
     targets: [
         // Timeline model, time maths, edit commands, undo, persistence and the
@@ -33,7 +34,21 @@ let package = Package(
         .testTarget(name: "TandemCoreTests", dependencies: ["TandemCore"], path: "tests/TandemCoreTests"),
         .testTarget(name: "TandemMediaTests", dependencies: ["TandemMedia"], path: "tests/TandemMediaTests"),
         .testTarget(name: "TandemRenderTests", dependencies: ["TandemRender"], path: "tests/TandemRenderTests"),
-        .testTarget(name: "TandemAPITests", dependencies: ["TandemAPI"], path: "tests/TandemAPITests")
+        .testTarget(name: "TandemAPITests", dependencies: ["TandemAPI"], path: "tests/TandemAPITests"),
+        // The asset library: catalogue (system SQLite with FTS5), providers,
+        // normalising on import and copying assets into projects.
+        .target(
+            name: "TandemAssets",
+            dependencies: ["TandemCore", "TandemMedia"],
+            path: "Sources/TandemAssets",
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
+        .testTarget(
+            name: "TandemAssetsTests",
+            dependencies: ["TandemAssets"],
+            path: "tests/TandemAssetsTests",
+            resources: [.copy("Fixtures")]
+        )
     ],
     swiftLanguageModes: [.v5]
 )
