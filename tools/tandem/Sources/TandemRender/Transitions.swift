@@ -22,7 +22,7 @@ enum TransitionRenderer {
         let p = min(max(p, 0), 1)
         switch type {
         case .dissolve, .fadeToBlack, .fadeFromBlack: return p
-        case .cutSlide: return p < 0.5 ? 16 * pow(p, 5) : 1 - pow(-2 * p + 2, 5) / 2
+        case .cutSlide: return p < 0.5 ? 8 * pow(p, 4) : 1 - pow(-2 * p + 2, 4) / 2
         default: return Easing.apply(.easeInOut, p)
         }
     }
@@ -96,15 +96,26 @@ enum TransitionRenderer {
             return wipe(a, b, progress: eased(type, p), direction: ref.transition.direction, canvas: canvas)
 
         case .zoom:
-            // Fly into the outgoing shot while the incoming one grows into
-            // place, crossfading on the way.
+            // A cross zoom: fly into the outgoing shot (1x to 2x) and out of
+            // the incoming one (2x to 1x), swapping quickly in the middle,
+            // with a zoom blur as fast as the move.
             let e = eased(type, p)
             let centre = CGAffineTransform(translationX: -canvas.width / 2, y: -canvas.height / 2)
             func zoomed(_ image: CIImage, _ s: CGFloat) -> CIImage {
                 image.transformed(by: centre.concatenating(CGAffineTransform(scaleX: s, y: s))
                     .concatenating(CGAffineTransform(translationX: canvas.width / 2, y: canvas.height / 2)))
             }
-            return dissolve(zoomed(a, 1 + CGFloat(e)), zoomed(b, 0.5 + 0.5 * CGFloat(e)), e, rect)
+            let swap = e < 0.35 ? 0 : e > 0.65 ? 1 : Easing.apply(.easeInOut, (e - 0.35) / 0.3)
+            var mixed = dissolve(zoomed(a, 1 + CGFloat(e)), zoomed(b, 2 - CGFloat(e)), swap, rect)
+            let speed = 1 - abs(2 * e - 1)
+            let amount = min(canvas.width, canvas.height) * 0.02 * CGFloat(speed)
+            if amount > 1 {
+                mixed = mixed.clampedToExtent().applyingFilter("CIZoomBlur", parameters: [
+                    kCIInputCenterKey: CIVector(x: canvas.width / 2, y: canvas.height / 2),
+                    "inputAmount": amount
+                ]).cropped(to: rect)
+            }
+            return mixed
         }
     }
 
@@ -143,8 +154,8 @@ enum TransitionRenderer {
         ]).cropped(to: rect)
     }
 
-    /// Blur along the motion, as long as the move covers in half a frame (a
-    /// 180 degree shutter), toned down to a hint.
+    /// Blur along the motion, a third as long as the move covers in half a
+    /// frame (a 180 degree shutter): a hint of speed, not a smear.
     static func motionBlurred(_ image: CIImage, ref: TransitionRef, progress p: Double, canvas: CGSize, frameDuration: Time) -> CIImage {
         let window = ref.window.duration.seconds
         guard window > 0 else { return image }
@@ -152,10 +163,10 @@ enum TransitionRenderer {
         let v = vector(ref.transition.direction)
         let travel = abs(eased(.cutSlide, p + halfFrame / 2) - eased(.cutSlide, p - halfFrame / 2))
         let extent = v.dx != 0 ? canvas.width : canvas.height
-        let length = CGFloat(travel) * extent * 0.6
+        let length = CGFloat(travel) * extent / 3
         guard length > 1 else { return image }
         return image.clampedToExtent().applyingFilter("CIMotionBlur", parameters: [
-            kCIInputRadiusKey: min(length / 2, extent * 0.04),
+            kCIInputRadiusKey: min(length / 2, extent * 0.02),
             kCIInputAngleKey: v.dx != 0 ? 0 : Double.pi / 2
         ]).cropped(to: CGRect(origin: .zero, size: canvas))
     }

@@ -101,6 +101,26 @@ final class TextTests: XCTestCase {
         XCTAssertGreaterThan(two.extent.height, one.extent.height * 1.4)
     }
 
+    func testAlignmentAndLineSpacing() {
+        func firstInkColumn(_ image: CIImage, row fraction: CGFloat) -> Int {
+            let bitmap = Bitmap(image, size: image.extent.size)
+            let y = Int(CGFloat(bitmap.height) * fraction)
+            return (0..<bitmap.width).first { bitmap[$0, y][3] > 128 } ?? -1
+        }
+        var left = request("WIDE LINE\nI")
+        left.alignment = "left"
+        var right = left
+        right.alignment = "right"
+        let l = TextRenderer.shared.image(left)!, r = TextRenderer.shared.image(right)!
+        // The short second line starts at the left edge only when left aligned.
+        XCTAssertLessThan(firstInkColumn(l, row: 0.7), firstInkColumn(r, row: 0.7) - 100)
+
+        var spaced = request("ONE\nTWO")
+        spaced.lineSpacing = 1
+        let tight = TextRenderer.shared.image(request("ONE\nTWO"))!
+        XCTAssertEqual(TextRenderer.shared.image(spaced)!.extent.height - tight.extent.height, 64, accuracy: 2)
+    }
+
     func testLongTextWraps() {
         var r = request(String(repeating: "word ", count: 40))
         r.maxWidth = 600

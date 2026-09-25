@@ -75,6 +75,19 @@ final class CompositorTests: XCTestCase {
         assertColor(h.render(at: t(3))[160, 90], blue)
     }
 
+    func testKeyframedPositionMovesTheLayer() {
+        var h = screenAndCamera(VideoProperties(transform: Transform(scale: 0.25)))
+        h.project.videoTracks[1].clips[0].keyframes["video.transform.position"] = [
+            Keyframe(time: t(0), value: .point(Point(x: 0.25, y: 0.5)), interpolation: .linear),
+            Keyframe(time: t(2), value: .point(Point(x: 0.75, y: 0.5)))
+        ]
+        assertColor(h.render(at: t(0))[80, 90], blue)
+        assertColor(h.render(at: t(0))[240, 90], red)
+        assertColor(h.render(at: t(1))[160, 90], blue)
+        assertColor(h.render(at: t(2))[240, 90], blue)
+        assertColor(h.render(at: t(2))[80, 90], red)
+    }
+
     func testHiddenTrackAndGapShowBlack() {
         var h = screenAndCamera(nil)
         h.project.videoTracks[1].hidden = true

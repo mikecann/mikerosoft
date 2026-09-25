@@ -154,6 +154,38 @@ final class PipelineTests: XCTestCase {
         assertColor(frame[20, 90], [0, 0, 0], tolerance: 4)
     }
 
+    func testGrabsScaleDownToAMaximumSize() async throws {
+        let media = try TestMedia()
+        try await media.movie("red.mov", seconds: 1, draw: { TestMedia.fill($1, 1, 0, 0) })
+        let clip = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_r", "red.mov", seconds: 1)])
+        let renderer = FrameRenderer(context: RenderContext(project: project, folder: media.projectFolder))
+        let small = try await renderer.image(at: t(0.5), maxSize: CGSize(width: 160, height: 160))
+        XCTAssertEqual(small.width, 160)
+        XCTAssertEqual(small.height, 90)
+        assertColor(Bitmap(small)[80, 45], [255, 0, 0], tolerance: 8)
+        let png = try await renderer.pngData(at: t(0.5))
+        XCTAssertEqual(Array(png.prefix(4)), [0x89, 0x50, 0x4E, 0x47])
+    }
+
+    func testVideoCompositionPassesAVFoundationValidation() async throws {
+        let media = try TestMedia()
+        try await media.movie("red.mov", seconds: 4, draw: { TestMedia.fill($1, 1, 0, 0) }, sound: { _ in 0.05 })
+        let a = Clip(id: "clip_a", content: .media(mediaID: "med_r"), start: .zero, duration: t(2), sourceStart: t(1))
+        let b = Clip(id: "clip_b", content: .media(mediaID: "med_r"), start: t(2), duration: t(1), sourceStart: t(2))
+        let title = Clip(id: "clip_t", content: .text(TextContent(text: "Hi")), start: t(0.5), duration: t(3))
+        let project = smallProject(
+            video: [Track(kind: .video, name: "V1", clips: [a, b], transitions: [Transition(type: .push, duration: t(0.6), fromClipID: "clip_a", toClipID: "clip_b")]),
+                    Track(kind: .video, name: "Text", clips: [title])],
+            audio: [Track(kind: .audio, name: "A1", clips: [Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(3))])],
+            media: [media.item("med_r", "red.mov", seconds: 4, audio: true)]
+        )
+        let built = try await CompositionBuilder.build(RenderContext(project: project, folder: media.projectFolder))
+        let tracks = try await built.composition.load(.tracks)
+        let valid = try await built.videoComposition.isValid(for: tracks, assetDuration: built.composition.duration, timeRange: CMTimeRange(start: .zero, duration: built.composition.duration), validationDelegate: nil)
+        XCTAssertTrue(valid)
+    }
+
     func testTitlesOnlyTimeline() async throws {
         let media = try TestMedia()
         let title = Clip(id: "clip_t", content: .text(TextContent(text: "v1.46.0", preset: "version")), start: .zero, duration: t(2))

@@ -193,6 +193,20 @@ final class ExportTests: XCTestCase {
         XCTAssertNil(result.integratedLUFS)
     }
 
+    func testPresetSizeOverridesTheCanvas() async throws {
+        let media = try TestMedia()
+        try await media.movie("red.mov", seconds: 1, draw: { TestMedia.fill($1, 1, 0, 0) })
+        let clip = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_r", "red.mov", seconds: 1)])
+        let out = media.folder.appendingPathComponent("small.mp4")
+        var small = preset(loudness: nil)
+        small.width = 160
+        small.height = 90
+        _ = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: small, output: out).run()
+        let size = try await AVURLAsset(url: out).loadTracks(withMediaType: .video)[0].load(.naturalSize)
+        XCTAssertEqual(size, CGSize(width: 160, height: 90))
+    }
+
     func testCancellingStopsAndRemovesTheFile() async throws {
         let media = try TestMedia()
         try await media.movie("long.mov", seconds: 6, draw: { TestMedia.drawIndex($0, $1) })
