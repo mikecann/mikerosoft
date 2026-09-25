@@ -138,9 +138,12 @@ final class RealMediaTests: XCTestCase {
         let context = try v14()
         let out = scratch.appendingPathComponent("v14-minute-120s.mp4")
         let preset = ExportPreset(name: "YouTube 4K range", codec: .hevc, videoBitrate: 80_000_000, range: TimeRange(start: Time(seconds: 120), duration: Time(seconds: 60)))
-        let result = try await Exporter(context: context, preset: preset, output: out).run()
+        let job = ExportJob(context: context, preset: preset, output: out, progress: { _ in })
+        let result = try await job.run()
         print(String(format: "REAL v14 60 s range export: %.1f s = %.2fx real time, %.2f LUFS, %.2f dBTP",
                      result.elapsed, 60 / result.elapsed, result.integratedLUFS ?? -99, result.truePeakDBTP ?? -99))
+        print("REAL phases: " + job.timings.map { String(format: "%@ %.1f s", $0.phase, $0.seconds) }.joined(separator: ", "))
+        print("REAL loudness passes: " + job.loudnessPasses.map { String(format: "%+.2f dB%@ -> %.2f LUFS", $0.gainDB, $0.limited ? " limited" : "", $0.lufs) }.joined(separator: ", "))
         let length = try await AVURLAsset(url: out).load(.duration).seconds
         XCTAssertEqual(length, 60, accuracy: 0.1)
     }

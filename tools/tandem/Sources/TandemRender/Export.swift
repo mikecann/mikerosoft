@@ -24,6 +24,18 @@ final class ExportJob: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
     private var readers: [AVAssetReader] = []
+    /// Seconds spent in each phase, for diagnostics and benchmarks.
+    private(set) var timings: [(phase: String, seconds: Double)] = []
+    /// Each loudness measurement: the gain it was made at and the result.
+    private(set) var loudnessPasses: [(gainDB: Double, limited: Bool, lufs: Double)] = []
+
+    private func timed<T>(_ phase: String, _ work: () async throws -> T) async rethrows -> T {
+        let started = Date()
+        let result = try await work()
+        let seconds = Date().timeIntervalSince(started)
+        lock.withLock { timings.append((phase, seconds)) }
+        return result
+    }
 
     init(context: RenderContext, preset: ExportPreset, output: URL, progress: @escaping @Sendable (Double) -> Void) {
         self.context = context
@@ -58,7 +70,7 @@ final class ExportJob: @unchecked Sendable {
         if let width = preset.width, let height = preset.height {
             renderContext.sizeOverride = CGSize(width: width, height: height)
         }
-        let built = try await CompositionAssembler.build(renderContext)
+        let built = try await timed("build") { try await CompositionAssembler.build(renderContext) }
         let range = exportRange(built.duration)
         guard range.duration > .zero else { throw RenderError.export("the export range is empty") }
         let audioTracks = try await built.composition.loadTracks(withMediaType: .audio)
@@ -69,21 +81,22 @@ final class ExportJob: @unchecked Sendable {
         var gainDB = 0.0
         let ceiling = preset.truePeakCeiling
         if let target = preset.loudnessTarget, !audioTracks.isEmpty {
-            let first = try await measure(built, tracks: audioTracks, range: range, gainDB: 0, ceiling: nil) { self.report(0.04 * $0) }
+            let first = try await timed("loudness") {
+                try await measure(built, tracks: audioTracks, range: range, gains: [0], ceiling: nil) { self.report(0.04 * $0) }[0]
+            }
             if first.integratedLUFS.isFinite {
                 gainDB = min(max(target - first.integratedLUFS, -40), 30)
                 if let ceiling, first.truePeakDBTP + gainDB > ceiling {
-                    // The limiter will take some level off with the peaks:
-                    // measure through it and make up the difference, a few
-                    // times if it's working hard.
-                    for pass in 0..<3 {
-                        let limited = try await measure(built, tracks: audioTracks, range: range, gainDB: gainDB, ceiling: ceiling) {
-                            self.report(0.04 + 0.02 * (Double(pass) + $0))
-                        }
-                        guard limited.integratedLUFS.isFinite else { break }
-                        let error = target - limited.integratedLUFS
-                        if abs(error) < 0.1 { break }
-                        gainDB = min(gainDB + min(max(error, -6), 6), 30)
+                    // The limiter takes some level off with the peaks, so the
+                    // gain has to be a little higher. Measure a few candidate
+                    // gains through it in one pass and interpolate.
+                    let candidates = [0, 0.75, 1.5, 2.5].map { min(gainDB + $0, 30) }
+                    let limited = try await timed("loudness through the limiter") {
+                        try await measure(built, tracks: audioTracks, range: range, gains: candidates, ceiling: ceiling) { self.report(0.04 + 0.05 * $0) }
+                    }
+                    let points = zip(candidates, limited).map { (gain: $0, lufs: $1.integratedLUFS) }
+                    if let best = Self.gainForTarget(target, points: points) {
+                        gainDB = min(max(best, -40), 30)
                     }
                 }
             }
@@ -93,7 +106,9 @@ final class ExportJob: @unchecked Sendable {
         await EncoderLock.shared.acquire(priority: .export)
         let loudness: Loudness
         do {
-            loudness = try await encode(built, video: videoTracks, audio: audioTracks, range: range, gainDB: gainDB, ceiling: ceiling, fps: fps)
+            loudness = try await timed("encode") {
+                try await encode(built, video: videoTracks, audio: audioTracks, range: range, gainDB: gainDB, ceiling: ceiling, fps: fps)
+            }
             await EncoderLock.shared.release()
         } catch {
             await EncoderLock.shared.release()
@@ -133,16 +148,17 @@ final class ExportJob: @unchecked Sendable {
 
     // MARK: - Loudness
 
-    /// Integrated loudness and true peak of the mix over `range`, after
-    /// `gainDB` and (with a ceiling) the limiter.
+    /// Integrated loudness and true peak of the mix over `range`, after each
+    /// of `gains` (dB) and, with a ceiling, the limiter. The mix is decoded
+    /// once and every gain runs as its own chain, side by side.
     private func measure(
         _ built: BuiltComposition,
         tracks: [AVAssetTrack],
         range: TimeRange,
-        gainDB: Double,
+        gains: [Double],
         ceiling: Double?,
         progress: (Double) -> Void
-    ) async throws -> Loudness {
+    ) async throws -> [Loudness] {
         let reader = try AVAssetReader(asset: built.composition)
         try track(reader)
         reader.timeRange = range.cmTimeRange
@@ -152,26 +168,74 @@ final class ExportJob: @unchecked Sendable {
         output.alwaysCopiesSampleData = false
         reader.add(output)
         guard reader.startReading() else { throw reader.error ?? RenderError.export("couldn't read the mix") }
-        var meter = LoudnessMeter(sampleRate: Double(AudioBuffers.sampleRate), channels: AudioBuffers.channels)
-        var limiter = ceiling.map { TruePeakLimiter(channels: AudioBuffers.channels, ceilingDBTP: $0) }
-        let gain = Float(AudioEnvelope.gain(dB: gainDB))
+
+        final class Chain: @unchecked Sendable {
+            let gain: Float
+            var limiter: TruePeakLimiter?
+            var meter = LoudnessMeter(sampleRate: Double(AudioBuffers.sampleRate), channels: AudioBuffers.channels)
+
+            init(gainDB: Double, ceiling: Double?) {
+                gain = Float(AudioEnvelope.gain(dB: gainDB))
+                limiter = ceiling.map { TruePeakLimiter(channels: AudioBuffers.channels, ceilingDBTP: $0) }
+            }
+
+            func process(_ input: [Float]) {
+                var samples = input
+                if gain != 1 { for i in samples.indices { samples[i] *= gain } }
+                limiter?.process(&samples)
+                meter.process(interleaved: samples)
+            }
+
+            func finish() -> Loudness {
+                if var limiter {
+                    meter.process(interleaved: limiter.flush())
+                    self.limiter = limiter
+                }
+                return meter.result()
+            }
+        }
+        let chains = gains.map { Chain(gainDB: $0, ceiling: ceiling) }
         let total = Double(range.duration.seconds * Double(AudioBuffers.sampleRate))
         var frames = 0
         while let buffer = output.copyNextSampleBuffer() {
-            var samples = AudioBuffers.samples(in: buffer)
-            if gain != 1 { for i in samples.indices { samples[i] *= gain } }
-            limiter?.process(&samples)
-            meter.process(interleaved: samples)
+            let samples = AudioBuffers.samples(in: buffer)
+            if chains.count == 1 {
+                chains[0].process(samples)
+            } else {
+                DispatchQueue.concurrentPerform(iterations: chains.count) { chains[$0].process(samples) }
+            }
             frames += samples.count / AudioBuffers.channels
             progress(Double(frames) / max(total, 1))
             if isCancelled { break }
         }
         if isCancelled { throw RenderError.cancelled }
         if reader.status == .failed { throw reader.error ?? RenderError.export("couldn't read the mix") }
-        if var limiter {
-            meter.process(interleaved: limiter.flush())
+        let results = chains.map { $0.finish() }
+        lock.withLock {
+            for (gain, result) in zip(gains, results) {
+                loudnessPasses.append((gain, ceiling != nil, result.integratedLUFS))
+            }
         }
-        return meter.result()
+        return results
+    }
+
+    /// The gain that brings the limited mix to `target`, from measurements
+    /// at several gains. Loudness rises with gain, but less than a dB per dB
+    /// once the limiter works, so this interpolates between the two
+    /// measurements either side of the target.
+    static func gainForTarget(_ target: Double, points: [(gain: Double, lufs: Double)]) -> Double? {
+        let usable = points.filter { $0.lufs.isFinite }.sorted { $0.gain < $1.gain }
+        guard let first = usable.first, let last = usable.last else { return nil }
+        if usable.count == 1 { return first.gain + (target - first.lufs) }
+        for (a, b) in zip(usable, usable.dropFirst()) where target >= a.lufs && target <= b.lufs {
+            let span = b.lufs - a.lufs
+            return span > 1e-9 ? a.gain + (b.gain - a.gain) * (target - a.lufs) / span : a.gain
+        }
+        // Outside the measured range: carry on along the nearest slope.
+        let (a, b) = target < first.lufs ? (usable[0], usable[1]) : (usable[usable.count - 2], last)
+        let slope = min(max((b.lufs - a.lufs) / max(b.gain - a.gain, 1e-9), 0.3), 1.2)
+        let anchor = target < first.lufs ? first : last
+        return anchor.gain + (target - anchor.lufs) / slope
     }
 
     // MARK: - Encode and mux
@@ -235,6 +299,26 @@ final class ExportJob: @unchecked Sendable {
             throw encoder.error ?? reader.error ?? RenderError.export("the encoder produced nothing")
         }
 
+        // From here the feed thread is running: stop it on any failure.
+        do {
+            return try await mux(reader: reader, encoder: encoder, hint: hint, mix: mix, range: range, gainDB: gainDB, ceiling: ceiling, progressBase: base)
+        } catch {
+            reader.cancelReading()
+            throw error
+        }
+    }
+
+    /// Writes the encoded frames and the mastered mix into the file.
+    private func mux(
+        reader: AVAssetReader,
+        encoder: VideoEncoder,
+        hint: CMFormatDescription,
+        mix: AVAssetReaderAudioMixOutput?,
+        range: TimeRange,
+        gainDB: Double,
+        ceiling: Double?,
+        progressBase base: Double
+    ) async throws -> Loudness {
         let fileType: AVFileType
         switch output.pathExtension.lowercased() {
         case "mov": fileType = .mov
