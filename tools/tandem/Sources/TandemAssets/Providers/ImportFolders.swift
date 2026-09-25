@@ -100,6 +100,13 @@ public struct FolderLicence: Codable, Equatable, Sendable {
         return try? JSONDecoder().decode(FolderLicence.self, from: data)
     }
 
+    /// A short fingerprint of a note (or of having none), stored on each
+    /// asset so a changed note can be noticed.
+    static func signature(_ note: FolderLicence?) -> String {
+        guard let note, let data = try? JSONEncoder.sorted.encode(note) else { return "none" }
+        return SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Writes the note into `folder`.
     public func write(in folder: URL) throws {
         try JSONEncoder.sorted.encode(self).write(to: folder.appendingPathComponent(Self.fileName), options: .atomic)
@@ -127,10 +134,22 @@ public struct ImportScanReport: Codable, Equatable, Sendable {
     public var updated: Int = 0
     public var removed: Int = 0
     public var unchanged: Int = 0
+    /// Unchanged files whose licence changed because the folder's note did.
+    public var relicensed: Int = 0
     /// Files that aren't media, relative to the folder.
     public var skipped: [String] = []
     /// True when the folder has no `tandem-licence.json`.
     public var missingLicence: Bool = false
+    /// Parts of the folder that couldn't be read. When there are any,
+    /// nothing is removed from the index, since missing isn't the same as
+    /// deleted.
+    public var unreadable: [String] = []
+    /// Why the whole scan failed, when it did (from `rescanImportFolders`).
+    public var error: String?
+
+    public init(folderID: String) {
+        self.folderID = folderID
+    }
 }
 
 /// Watched folders of assets downloaded by hand: Envato, Mixkit, Pixabay
@@ -192,14 +211,32 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
 
     /// Indexes the files in one import folder: new files are added, changed
     /// ones refreshed, and missing ones removed (or, if a project used
-    /// them, kept and marked missing so their credits survive).
+    /// them, kept and marked missing so their credits survive). A changed
+    /// licence note relicenses every file. Scans of one folder never
+    /// overlap: a scan asked for while one runs waits and runs once after
+    /// it, however many asked.
     public func scan(_ record: AssetCatalog.ImportFolderRecord) async throws -> ImportScanReport {
+        try await scans.run(record.id) { try await self.performScan(record.id) }
+    }
+
+    private let scans = ScanQueue()
+
+    private func performScan(_ folderID: String) async throws -> ImportScanReport {
+        // Read the record again: a watcher may outlive the folder's removal.
+        guard let record = try catalog.importFolders().first(where: { $0.id == folderID }) else {
+            throw AssetError.notFound("import folder \(folderID) is no longer registered")
+        }
         let root = URL(fileURLWithPath: record.path, isDirectory: true).standardizedFileURL
         var report = ImportScanReport(folderID: record.id)
-        guard FileManager.default.fileExists(atPath: root.path) else {
-            throw AssetError.notFound("import folder \(record.path)")
+        // A folder that can't be listed (an unplugged drive, privacy
+        // settings) must not look empty, or its whole index would go.
+        do {
+            _ = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        } catch {
+            throw AssetError.notFound("can't read import folder \(record.path): \(error.localizedDescription)")
         }
         let note = FolderLicence.read(in: root)
+        let noteSignature = FolderLicence.signature(note)
         report.missingLicence = note == nil
 
         let existing = try catalog.search(AssetQuery(providers: [id], limit: Int.max)).filter { $0.remote["folder"] == record.id }
@@ -208,16 +245,21 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
         let pinned = try catalog.pinnedIDs()
 
         let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey, .isHiddenKey]
-        let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        let problems = ProblemList()
+        let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles, .skipsPackageDescendants]) { url, error in
+            problems.add("\(url.path): \(error.localizedDescription)")
+            return true
+        }
         var changes: [Asset] = []
+        var relicensed: [(Asset, Date)] = []
         while let file = enumerator?.nextObject() as? URL {
             let values = try? file.resourceValues(forKeys: Set(keys))
             guard values?.isRegularFile == true else { continue }
             guard let relative = Paths.relative(file, to: root) else { continue }
             if file.lastPathComponent == FolderLicence.fileName { continue }
-            let format = FormatSniffer.fromExtension(file.pathExtension)
-            let isLottie = file.pathExtension.lowercased() == "json" && FormatSniffer.isLottie(file)
-            guard format != .unknown || isLottie else {
+            let ext = file.pathExtension.lowercased()
+            let format = FormatSniffer.fromExtension(ext)
+            guard format != .unknown || ext == "json" else {
                 report.skipped.append(relative)
                 continue
             }
@@ -225,13 +267,25 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
             let size = Int64(values?.fileSize ?? 0)
             let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
             let signature = "\(size)-\(Int(modified))"
+            // Checked before anything expensive (probing, parsing JSON).
             if let old = known.removeValue(forKey: providerID), old.remote["signature"] == signature, old.remote["missing"] == nil {
-                report.unchanged += 1
+                if old.remote["note"] == noteSignature {
+                    report.unchanged += 1
+                } else {
+                    relicensed.append((relicense(old, note: note, signature: noteSignature), old.updatedAt))
+                    report.relicensed += 1
+                }
+                continue
+            }
+            let isLottie = ext == "json" && FormatSniffer.isLottie(file)
+            guard format != .unknown || isLottie else {
+                report.skipped.append(relative)
                 continue
             }
             var asset = await describe(file: file, relative: relative, format: isLottie ? .lottie : format, folderID: record.id, note: note)
             asset.size = size
             asset.remote["signature"] = signature
+            asset.remote["note"] = noteSignature
             if let old = before[providerID] {
                 // A changed file starts over (it needs normalising again)
                 // but keeps the date it first arrived.
@@ -243,24 +297,56 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
             changes.append(asset)
         }
         try catalog.upsert(changes)
-
-        // Whatever is left in `known` has gone from the folder.
-        for (_, gone) in known {
-            if pinned.contains(gone.id) {
-                var kept = gone
-                kept.state = .remote
-                kept.remote["missing"] = "1"
-                kept.updatedAt = Date()
-                try catalog.replace(kept, ifUpdatedAt: gone.updatedAt)
-            } else {
-                try catalog.delete(id: gone.id)
+        for (asset, stamp) in relicensed {
+            // Skip rows changed meanwhile; the next scan catches them.
+            guard try catalog.replace(asset, ifUpdatedAt: stamp) else { continue }
+            // Assets already used or fetched get a new snapshot, so the
+            // credits follow the corrected note.
+            if try catalog.licence(for: asset.id) != nil {
+                try catalog.addLicence(try await licence(for: asset), for: asset.id)
             }
-            report.removed += 1
         }
-        var updated = record
-        updated.lastScan = Date()
-        try catalog.saveImportFolder(updated)
+
+        report.unreadable = problems.all
+        if report.unreadable.isEmpty {
+            // Whatever is left in `known` has gone from the folder.
+            for (_, gone) in known {
+                if pinned.contains(gone.id) {
+                    var kept = gone
+                    kept.state = .remote
+                    kept.remote["missing"] = "1"
+                    kept.updatedAt = Date()
+                    try catalog.replace(kept, ifUpdatedAt: gone.updatedAt)
+                } else {
+                    try catalog.delete(id: gone.id)
+                }
+                report.removed += 1
+            }
+        }
+        try catalog.recordImportFolderScan(id: record.id, at: Date())
         return report
+    }
+
+    /// An unchanged file under a changed licence note.
+    func relicense(_ asset: Asset, note: FolderLicence?, signature: String) -> Asset {
+        var updated = asset
+        updated.licenceClass = note?.licenceClass ?? .unknown
+        updated.creditLine = note?.credit
+        updated.summary = note.map { "From \($0.source)" }
+        if let kind = Self.noteKind(note, forFileKind: asset.kind) { updated.kind = kind }
+        updated.remote["note"] = signature
+        updated.updatedAt = Date()
+        return updated
+    }
+
+    /// The note's kind, when it suits a file of `kind`: an audio kind for
+    /// audio, a picture kind for pictures. A Sonniss note saying "sfx"
+    /// shouldn't turn a stray PNG into a sound effect.
+    static func noteKind(_ note: FolderLicence?, forFileKind kind: AssetKind) -> AssetKind? {
+        guard let wanted = note?.kind else { return nil }
+        if wanted.isAudio && kind.isAudio { return wanted }
+        if wanted.isVisual && kind.isVisual { return wanted }
+        return nil
     }
 
     /// An asset for a file, with its kind guessed from the folder note, its
@@ -287,7 +373,7 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
             if let audio = try? AVAudioFile(forReading: file) {
                 asset.duration = Double(audio.length) / audio.fileFormat.sampleRate
             }
-            asset.kind = note?.kind ?? Self.audioKind(path: lowerPath, duration: asset.duration)
+            asset.kind = Self.noteKind(note, forFileKind: .sfx) ?? Self.audioKind(path: lowerPath, duration: asset.duration)
         } else if format == .mov || format == .mp4 {
             if let info = try? await MediaProbe.video(file) {
                 asset.duration = info.duration
@@ -295,12 +381,12 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 asset.height = info.height
                 asset.hasAlpha = info.hasAlpha
             }
-            asset.kind = note?.kind ?? (asset.hasAlpha || lowerPath.contains("overlay") ? .overlay : .video)
+            asset.kind = Self.noteKind(note, forFileKind: .video) ?? (asset.hasAlpha || lowerPath.contains("overlay") ? .overlay : .video)
         } else if format == .webm || format == .lottie {
-            asset.kind = note?.kind ?? (lowerPath.contains("overlay") ? .overlay : .sticker)
+            asset.kind = Self.noteKind(note, forFileKind: .sticker) ?? (lowerPath.contains("overlay") ? .overlay : .sticker)
             asset.hasAlpha = true
         } else if format == .svg {
-            asset.kind = note?.kind ?? (lowerPath.contains("logo") ? .logo : .icon)
+            asset.kind = Self.noteKind(note, forFileKind: .icon) ?? (lowerPath.contains("logo") ? .logo : .icon)
             asset.hasAlpha = true
         } else if format.isFont {
             asset.kind = .font
@@ -312,10 +398,10 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 asset.height = info.height
                 asset.hasAlpha = info.hasAlpha || format == .gif
                 // Animated GIF, WebP and APNG are stickers.
-                if info.frames > 1 { asset.kind = note?.kind ?? (lowerPath.contains("overlay") ? .overlay : .sticker) }
+                if info.frames > 1 { asset.kind = Self.noteKind(note, forFileKind: .sticker) ?? (lowerPath.contains("overlay") ? .overlay : .sticker) }
             }
             if asset.kind == .image {
-                asset.kind = note?.kind ?? (lowerPath.contains("overlay") ? .overlay : .image)
+                asset.kind = Self.noteKind(note, forFileKind: .image) ?? (lowerPath.contains("overlay") ? .overlay : .image)
             }
         }
         return asset
@@ -328,6 +414,53 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
         if !words.isDisjoint(with: ["music", "song", "songs", "track", "tracks", "bed", "beds", "score"]) { return .music }
         if !words.isDisjoint(with: ["sfx", "fx", "foley", "effects", "effect", "whoosh", "whooshes", "ui", "click", "clicks"]) { return .sfx }
         return (duration ?? 0) > 45 ? .music : .sfx
+    }
+}
+
+/// Runs one scan per folder at a time. A scan asked for while one runs
+/// waits for it and then runs once, shared by everyone who asked meanwhile.
+actor ScanQueue {
+    private var running: [String: Task<ImportScanReport, Error>] = [:]
+    private var queued: [String: Task<ImportScanReport, Error>] = [:]
+
+    func run(_ id: String, _ work: @escaping @Sendable () async throws -> ImportScanReport) async throws -> ImportScanReport {
+        if let next = queued[id] { return try await next.value }
+        if let current = running[id] {
+            let next = Task<ImportScanReport, Error> {
+                _ = await current.result
+                return try await self.execute(id, work)
+            }
+            queued[id] = next
+            return try await next.value
+        }
+        return try await execute(id, work)
+    }
+
+    private func execute(_ id: String, _ work: @escaping @Sendable () async throws -> ImportScanReport) async throws -> ImportScanReport {
+        queued[id] = nil
+        let task = Task { try await work() }
+        running[id] = task
+        let result = await task.result
+        if running[id] == task { running[id] = nil }
+        return try result.get()
+    }
+}
+
+/// Errors collected from the file enumerator's callback.
+final class ProblemList: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [String] = []
+
+    func add(_ problem: String) {
+        lock.lock()
+        items.append(problem)
+        lock.unlock()
+    }
+
+    var all: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return items
     }
 }
 

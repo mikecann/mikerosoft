@@ -265,9 +265,15 @@ public final class AssetLibrary: @unchecked Sendable {
         try catalog.setFavourite(id, favourite)
     }
 
-    /// The licence snapshot taken when the asset was downloaded.
+    /// The latest licence snapshot for an asset.
     public func licence(for id: String) throws -> AssetLicence? {
         try catalog.licence(for: id)
+    }
+
+    /// Every licence snapshot for an asset, oldest first: what was agreed
+    /// when, for a Content ID dispute.
+    public func licenceHistory(_ id: String) throws -> [AssetLicence] {
+        try catalog.licenceHistory(for: id)
     }
 
     // MARK: - Fetching
@@ -462,12 +468,19 @@ public final class AssetLibrary: @unchecked Sendable {
         try catalog.removeImportFolder(id: id)
     }
 
-    /// Rescans every import folder.
+    /// Rescans every import folder. A folder that fails (an unplugged
+    /// drive) reports its error and the rest still scan.
     public func rescanImportFolders() async throws -> [ImportScanReport] {
         let provider = try importProvider()
         var reports: [ImportScanReport] = []
         for record in try catalog.importFolders() {
-            reports.append(try await provider.scan(record))
+            do {
+                reports.append(try await provider.scan(record))
+            } catch {
+                var failed = ImportScanReport(folderID: record.id)
+                failed.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                reports.append(failed)
+            }
         }
         return reports
     }

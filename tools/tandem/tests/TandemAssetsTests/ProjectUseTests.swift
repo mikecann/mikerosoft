@@ -388,3 +388,131 @@ final class JSONOutputTests: XCTestCase {
         XCTAssertEqual(placement.asset.loudness?.integratedLUFS, -144)
     }
 }
+
+final class ImportFolderRobustnessTests: XCTestCase {
+    func testALicenceNoteAddedLaterRelicensesEverything() async throws {
+        let folder = tempFolder("late-note")
+        try Generated.sineWAV(at: folder.appendingPathComponent("hit.wav"), seconds: 0.2)
+        try Generated.sineWAV(at: folder.appendingPathComponent("spare.wav"), seconds: 0.2)
+        let library = try makeLibrary()
+        try await library.addImportFolder(folder)
+        let hit = try XCTUnwrap(library.search(AssetQuery(text: "hit")).first)
+        let project = ProjectFolder(root: tempFolder("project"))
+        _ = try await library.use(hit.id, in: project, projectID: "prj_note")
+        XCTAssertEqual(try library.credits(assetIDs: [hit.id]).warnings.count, 1)
+
+        try FolderLicence.presets["mixkit"]!.write(in: folder)
+        let reports = try await library.rescanImportFolders()
+
+        XCTAssertEqual(reports.first?.relicensed, 2)
+        XCTAssertEqual(reports.first?.unchanged, 0)
+        XCTAssertEqual(try library.asset(hit.id)?.licenceClass, .noCredit)
+        XCTAssertEqual(try library.search(AssetQuery(text: "spare")).first?.licenceClass, .noCredit)
+        XCTAssertEqual(try library.licence(for: hit.id)?.name, "Mixkit Free License")
+        XCTAssertEqual(try library.licenceHistory(hit.id).count, 2)
+        XCTAssertTrue(try library.credits(assetIDs: [hit.id]).warnings.isEmpty)
+        // Nothing changes on the next scan.
+        let again = try await library.rescanImportFolders()
+        XCTAssertEqual(again.first?.unchanged, 2)
+        XCTAssertEqual(again.first?.relicensed, 0)
+    }
+
+    func testACorrectedNoteShowsTheSubscriptionWarning() async throws {
+        let folder = tempFolder("corrected")
+        try Generated.sineWAV(at: folder.appendingPathComponent("riser.wav"), seconds: 0.2)
+        let library = try makeLibrary()
+        try await library.addImportFolder(folder, licence: FolderLicence.presets["mixkit"])
+        let riser = try XCTUnwrap(library.search(AssetQuery(text: "riser")).first)
+        _ = try await library.fetch(riser.id)
+
+        try FolderLicence.presets["envato"]!.write(in: folder)
+        _ = try await library.rescanImportFolders()
+
+        let credits = try library.credits(assetIDs: [riser.id])
+        XCTAssertEqual(credits.assets.first?.licenceClass, .subscription)
+        XCTAssertEqual(credits.warnings.count, 1)
+        XCTAssertTrue(credits.warnings[0].hasPrefix("1 asset from Envato Elements."))
+    }
+
+    func testAFolderThatCantBeListedKeepsItsIndex() async throws {
+        let folder = tempFolder("locked")
+        try Generated.sineWAV(at: folder.appendingPathComponent("a.wav"), seconds: 0.2)
+        try Generated.sineWAV(at: folder.appendingPathComponent("b.wav"), seconds: 0.2)
+        let library = try makeLibrary()
+        try await library.addImportFolder(folder)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: folder.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
+
+        let reports = try await library.rescanImportFolders()
+
+        XCTAssertNotNil(reports.first?.error)
+        XCTAssertEqual(try library.search(AssetQuery(providers: ["import"])).count, 2)
+    }
+
+    func testAnUnreadableSubfolderRemovesNothing() async throws {
+        let folder = tempFolder("partly-locked")
+        let sub = folder.appendingPathComponent("pack")
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        try Generated.sineWAV(at: sub.appendingPathComponent("inside.wav"), seconds: 0.2)
+        try Generated.sineWAV(at: folder.appendingPathComponent("outside.wav"), seconds: 0.2)
+        let library = try makeLibrary()
+        try await library.addImportFolder(folder)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: sub.path)
+        addTeardownBlock { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sub.path) }
+
+        let reports = try await library.rescanImportFolders()
+        let report = try XCTUnwrap(reports.first)
+
+        XCTAssertFalse(report.unreadable.isEmpty)
+        XCTAssertEqual(report.removed, 0)
+        XCTAssertEqual(try library.search(AssetQuery(providers: ["import"])).count, 2)
+    }
+
+    func testARemovedFolderStaysRemoved() async throws {
+        let folder = tempFolder("removed")
+        try Generated.sineWAV(at: folder.appendingPathComponent("a.wav"), seconds: 0.2)
+        let library = try makeLibrary()
+        try await library.addImportFolder(folder)
+        let record = try XCTUnwrap(library.importFolders().first)
+        try library.removeImportFolder(record.id)
+
+        // A watcher that started earlier still holds the old record.
+        do {
+            _ = try await library.provider("import").flatMap { $0 as? ImportFolderProvider }!.scan(record)
+            XCTFail("expected the scan to refuse")
+        } catch let error as AssetError {
+            guard case .notFound = error else { return XCTFail("wrong error \(error)") }
+        }
+        XCTAssertEqual(try library.importFolders().count, 0)
+        XCTAssertEqual(try library.search(AssetQuery(providers: ["import"])).count, 0)
+    }
+
+    func testScansOfOneFolderDontOverlap() async throws {
+        let folder = tempFolder("busy")
+        for index in 0..<5 { try Generated.sineWAV(at: folder.appendingPathComponent("s\(index).wav"), seconds: 0.1) }
+        let library = try makeLibrary()
+        try library.catalog.saveImportFolder(AssetCatalog.ImportFolderRecord(id: ImportFolderProvider.folderID(for: folder), path: folder.path, name: "busy"))
+        let record = try XCTUnwrap(library.importFolders().first)
+        let provider = try XCTUnwrap(library.provider("import") as? ImportFolderProvider)
+
+        let reports = try await withThrowingTaskGroup(of: ImportScanReport.self) { group in
+            for _ in 0..<6 { group.addTask { try await provider.scan(record) } }
+            var all: [ImportScanReport] = []
+            for try await report in group { all.append(report) }
+            return all
+        }
+
+        XCTAssertEqual(reports.map(\.added).reduce(0, +), 5, "each file is added exactly once")
+        XCTAssertEqual(try library.search(AssetQuery(providers: ["import"])).count, 5)
+    }
+
+    func testANoteKindOnlyAppliesToFilesItSuits() async throws {
+        let folder = tempFolder("sonniss")
+        try Generated.sineWAV(at: folder.appendingPathComponent("boom.wav"), seconds: 0.2)
+        try Generated.svg(at: folder.appendingPathComponent("cover.svg"))
+        let library = try makeLibrary()
+        try await library.addImportFolder(folder, licence: FolderLicence.presets["sonniss"])
+        XCTAssertEqual(try library.search(AssetQuery(text: "boom")).first?.kind, .sfx)
+        XCTAssertEqual(try library.search(AssetQuery(text: "cover")).first?.kind, .icon)
+    }
+}

@@ -633,6 +633,12 @@ public final class AssetCatalog: @unchecked Sendable {
         }
     }
 
+    /// Notes when a folder was last scanned. Does nothing if the folder has
+    /// been removed meanwhile.
+    public func recordImportFolderScan(id: String, at date: Date) throws {
+        try locked { try db.run("UPDATE import_folders SET last_scan = ? WHERE id = ?", [SQLValue(date), .text(id)]) }
+    }
+
     /// Forgets an import folder. Its assets are left to the caller.
     public func removeImportFolder(id: String) throws {
         try locked { try db.run("DELETE FROM import_folders WHERE id = ?", [.text(id)]) }
