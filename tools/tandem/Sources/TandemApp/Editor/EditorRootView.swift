@@ -222,7 +222,7 @@ private struct AgentChip: View {
         // Ticks over every few seconds, so "is editing" settles into
         // "connected" and then "edited" without any new events.
         SwiftUI.TimelineView(.periodic(from: .now, by: 5)) { context in
-            let state = AgentChipState.of(model.agentPresence, serving: model.apiProblem == nil, now: context.date)
+            let state = AgentChipState.of(model.agentPresence, serving: model.apiProblem == nil, watching: model.agentsWatching, now: context.date)
             Button {
                 model.inspectorTab = .activity
             } label: {

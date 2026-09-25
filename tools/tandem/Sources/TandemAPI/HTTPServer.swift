@@ -142,7 +142,9 @@ public final class TandemHTTPServer: @unchecked Sendable {
             onRelease()
             return
         }
+        let author = request.headers["x-tandem-author"].flatMap { $0.isEmpty ? nil : $0 } ?? "agent"
         if name == "watch" && request.method == "GET" {
+            service.noteCall("watch", author: author)
             let after = request.headers["last-event-id"].flatMap(Int.init) ?? request.query["after"].flatMap(Int.init)
             await connection.stream(events: service.events, replayAfter: after, revision: service.coordinator.revision, keepAlive: keepAliveInterval)
             return
@@ -156,7 +158,6 @@ public final class TandemHTTPServer: @unchecked Sendable {
             connection.send(error: ServiceError(.badRequest, "Use POST /v1/\(name) with a JSON body."), status: 405)
             return
         }
-        let author = request.headers["x-tandem-author"].flatMap { $0.isEmpty ? nil : $0 } ?? "agent"
         do {
             let body = try await service.handle(operation, body: request.body, context: CallContext(author: author))
             connection.send(status: 200, contentType: "application/json; charset=utf-8", body: body)

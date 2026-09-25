@@ -114,6 +114,42 @@ final class HTTPTests: XCTestCase {
         XCTAssertEqual(missed?.seq, second?.seq)
     }
 
+    /// The app shows which agent is connected: every call reports its
+    /// operation and author, and open watch streams are counted.
+    func testCallsAndWatchersAreReported() async throws {
+        let served = try await Served()
+        defer { served.stop() }
+        final class Calls: @unchecked Sendable {
+            let lock = NSLock()
+            var seen: [String] = []
+            func add(_ call: String) { lock.withLock { seen.append(call) } }
+            var all: [String] { lock.withLock { seen } }
+        }
+        let calls = Calls()
+        served.harness.service.onCall = { operation, author in calls.add("\(operation) by \(author)") }
+        _ = try await served.client().call(StatusRequest())
+        _ = try await served.client(author: nil).call(TimelineRequest(format: .json))
+        XCTAssertEqual(calls.all, ["status by claude", "timeline by agent"])
+
+        XCTAssertEqual(served.harness.service.events.subscriberCount, 0)
+        let reader = Task { () -> Int in
+            var count = 0
+            do { for try await _ in served.client().events() { count += 1 } } catch {}
+            return count
+        }
+        var waited = 0
+        while served.harness.service.events.subscriberCount == 0 && waited < 50 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            waited += 1
+        }
+        XCTAssertEqual(served.harness.service.events.subscriberCount, 1)
+        XCTAssertEqual(calls.all.last, "watch by claude")
+        reader.cancel()
+        served.harness.service.events.finishAll()
+        _ = await reader.value
+        XCTAssertEqual(served.harness.service.events.subscriberCount, 0)
+    }
+
     func testStoppingTheServerEndsEventStreams() async throws {
         let served = try await Served()
         let events = served.client().events()

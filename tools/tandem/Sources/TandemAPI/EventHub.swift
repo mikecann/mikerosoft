@@ -91,6 +91,13 @@ public final class EventHub: @unchecked Sendable {
         self.capacity = capacity
     }
 
+    /// Open streams: `watch` clients, and anyone waiting in `next`.
+    public var subscriberCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return subscribers.count
+    }
+
     /// The sequence number of the newest event, or 0.
     public var lastSeq: Int {
         lock.lock()

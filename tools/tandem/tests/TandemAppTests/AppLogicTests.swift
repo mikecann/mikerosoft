@@ -348,6 +348,21 @@ final class AgentPresenceTests: XCTestCase {
         XCTAssertEqual((server["command"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }, "tandem")
     }
 
+    func testAnyCallOrOpenWatchCountsAsConnected() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        var presence = AgentPresence(author: "cli", lastSeen: now.addingTimeInterval(-3_600))
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, now: now), .idle(serving: true))
+        // A status read a moment ago.
+        presence.looked(by: "claude", at: now.addingTimeInterval(-2))
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, now: now), .connected(name: "Claude"))
+        // An hour later it's gone quiet, unless it keeps a watch stream open.
+        let later = now.addingTimeInterval(3_600)
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, now: later), .idle(serving: true))
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, watching: true, now: later), .connected(name: "Claude"))
+        // Nobody has called yet, but something is watching.
+        XCTAssertEqual(AgentChipState.of(nil, serving: true, watching: true, now: now), .connected(name: "Agent"))
+    }
+
     func testNamesForAgentsAndTools() {
         XCTAssertEqual(ActivityLog.displayName("claude"), "Claude")
         XCTAssertEqual(ActivityLog.displayName("cli"), "CLI")
