@@ -1,4 +1,9 @@
 import AppKit
+import SwiftUI
+
+/// Any SwiftUI hosting view, whatever its root.
+private protocol NSHostingViewMarker {}
+extension NSHostingView: NSHostingViewMarker {}
 
 /// Replays mouse gestures into a window through the same `mouseDown`,
 /// `mouseDragged` and `mouseUp` calls AppKit makes, so smoke tests and
@@ -6,6 +11,10 @@ import AppKit
 ///
 ///     open -g "tandem://simulate?drag=600,700,700,700&mods=cmd"
 ///     open -g "tandem://simulate?menu=600,700&out=/tmp/menu.txt"
+///     open -g "tandem://simulate?drop=tandem-effect:vignette&at=600,700"
+///
+/// A drop hands a library payload (see `LibraryDrag`) to the drop target
+/// under the point, as if it had been dragged there from a library tab.
 ///
 /// Points are in window coordinates measured from the top left.
 @MainActor
@@ -17,6 +26,10 @@ enum InputSimulator {
             /// Lists the context menu's items into a file instead of showing it.
             case menu(out: String)
             case scroll(dx: CGFloat, dy: CGFloat)
+            case drop(payload: String)
+            /// Moves the pointer to the point and leaves it there, for
+            /// hover previews.
+            case hover
         }
         var kind: Kind
         var at: CGPoint
@@ -59,6 +72,14 @@ enum InputSimulator {
         if scroll.count == 4 {
             return Gesture(kind: .scroll(dx: scroll[2], dy: scroll[3]), at: CGPoint(x: scroll[0], y: scroll[1]), modifiers: flags)
         }
+        let hover = numbers(query["hover"])
+        if hover.count == 2 {
+            return Gesture(kind: .hover, at: CGPoint(x: hover[0], y: hover[1]), modifiers: flags)
+        }
+        let at = numbers(query["at"])
+        if let payload = query["drop"], at.count == 2, LibraryDrag.parse(payload) != nil {
+            return Gesture(kind: .drop(payload: payload), at: CGPoint(x: at[0], y: at[1]), modifiers: flags)
+        }
         return nil
     }
 
@@ -99,6 +120,31 @@ enum InputSimulator {
             cgEvent.location = CGPoint(x: window.frame.minX + start.x, y: (NSScreen.screens.first?.frame.height ?? 0) - (window.frame.minY + start.y))
             cgEvent.flags = CGEventFlags(rawValue: UInt64(gesture.modifiers.rawValue))
             if let event = NSEvent(cgEvent: cgEvent) { target.scrollWheel(with: event) }
+        case .hover:
+            // Tracking areas (and SwiftUI's hover) hear about the pointer
+            // from the view under it, not from the window.
+            guard let moved = mouse(.mouseMoved, start) else { return }
+            var view: NSView? = target
+            while let current = view {
+                current.mouseEntered(with: moved)
+                current.mouseMoved(with: moved)
+                if current is NSHostingViewMarker { break }
+                view = current.superview
+            }
+        case .drop(let payload):
+            // The nearest view up the chain that takes drops.
+            var view: NSView? = target
+            while let candidate = view, candidate.registeredDraggedTypes.isEmpty { view = candidate.superview }
+            guard let destination = view else { return }
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.mikerosoft.tandem.simulated-drop"))
+            pasteboard.clearContents()
+            pasteboard.setString(payload, forType: .string)
+            let info = SimulatedDrop(window: window, location: start, pasteboard: pasteboard)
+            if destination.draggingEntered(info) != [], destination.performDragOperation(info) {
+                destination.concludeDragOperation(info)
+            } else {
+                destination.draggingExited(info)
+            }
         }
     }
 
@@ -119,4 +165,39 @@ enum InputSimulator {
         }
         return lines.joined(separator: "\n")
     }
+}
+
+/// Just enough of a drag for a drop target to read: where it is and what
+/// it carries.
+@MainActor
+private final class SimulatedDrop: NSObject, @preconcurrency NSDraggingInfo {
+    let draggingDestinationWindow: NSWindow?
+    let draggingLocation: NSPoint
+    let draggingPasteboard: NSPasteboard
+    var draggingFormation: NSDraggingFormation = .default
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+
+    init(window: NSWindow, location: NSPoint, pasteboard: NSPasteboard) {
+        draggingDestinationWindow = window
+        draggingLocation = location
+        draggingPasteboard = pasteboard
+    }
+
+    var draggingSourceOperationMask: NSDragOperation { .copy }
+    var draggedImageLocation: NSPoint { draggingLocation }
+    var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    func resetSpringLoading() {}
+    func enumerateDraggingItems(
+        options enumOpts: NSDraggingItemEnumerationOptions = [],
+        for view: NSView?,
+        classes classArray: [AnyClass],
+        searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:],
+        using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
 }

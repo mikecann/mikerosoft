@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
     func applicationDidFinishLaunching(_ notification: Notification) {
         launched = true
         quitCleanlyOnSIGTERM()
+        // Opens the asset library in the background, adding the starter
+        // emoji, icons and logos the first time.
+        AssetLibraryHost.shared.open()
         NSApp.setActivationPolicy(.regular)
         let arguments = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         let fromCommandLine = arguments.map { URL(fileURLWithPath: NSString(string: $0).expandingTildeInPath) }
@@ -141,6 +144,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
                 return NSLog("Tandem: no folder at %@", folder)
             }
             documents.createProject(inFolder: URL(fileURLWithPath: folder, isDirectory: true))
+        case .assets(let section, let search, let online):
+            let host = AssetLibraryHost.shared
+            if section.isAudio { host.audioSection = section } else { host.graphicsSection = section }
+            front?.model.libraryTab = section.isAudio ? .audio : .graphics
+            if let search { host.update(section) { $0.text = search } }
+            if online { host.searchOnline(section) }
         case .saveVersion(let out):
             // Links never replace a file; Save As in the app asks first.
             guard let front, !FileManager.default.fileExists(atPath: out) else {

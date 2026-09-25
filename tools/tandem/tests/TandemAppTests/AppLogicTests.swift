@@ -154,6 +154,8 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://new?folder=/videos/static-hosting")!), .newProject(folder: "/videos/static-hosting"))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://version?out=/videos/a/Video%20v2.tandem")!), .saveVersion(out: "/videos/a/Video v2.tandem"))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt")!), .debug(out: "/tmp/tree.txt"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=icons&search=rocket&online=1")!), .assets(section: .icons, search: "rocket", online: true))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://assets?section=fonts")!))
     }
 
     func testRejectsNonsense() {
@@ -173,6 +175,11 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://new?folder=videos")!))
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://simulate?menu=10,10&out=/Users/mike/.zshrc")!))
         XCTAssertNotNil(AppURLCommand.parse(URL(string: "tandem://simulate?menu=10,10&out=/tmp/menu.txt")!))
+        XCTAssertEqual(
+            AppURLCommand.parse(URL(string: "tandem://simulate?drop=tandem-effect:vignette&at=600,700")!),
+            .simulate(InputSimulator.Gesture(kind: .drop(payload: "tandem-effect:vignette"), at: CGPoint(x: 600, y: 700), modifiers: []))
+        )
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://simulate?drop=hello&at=600,700")!), "only library payloads")
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/tmp/Shot.PNG")!), .screenshot(out: "/tmp/Shot.PNG"))
     }
 }

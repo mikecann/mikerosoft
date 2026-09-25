@@ -19,8 +19,11 @@ struct EditorRootView: View {
             VStack(spacing: 0) {
                 TopBar(model: model, actions: actions)
                 HStack(spacing: 0) {
+                    // Leading, so nothing that asks for more room than the
+                    // panel has can push the whole panel sideways.
                     LibraryPanel(model: model, actions: actions)
-                        .frame(width: Theme.Metrics.mediaPanelWidth)
+                        .frame(width: Theme.Metrics.mediaPanelWidth, alignment: .topLeading)
+                        .clipped()
                     Rectangle().fill(Theme.border.color).frame(width: 1)
                     ViewerPanel(model: model, actions: actions)
                         .frame(maxWidth: .infinity)

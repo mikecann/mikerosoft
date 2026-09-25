@@ -3,8 +3,8 @@ import SwiftUI
 import TandemCore
 import TandemMedia
 
-/// The left panel: media from the project folder, and the text,
-/// transition, effect, graphics and audio libraries.
+/// The left panel: media from the project folder, the asset library's
+/// audio and graphics, and the built-in titles, transitions and effects.
 struct LibraryPanel: View {
     let model: EditorModel
     let actions: EditorActions
@@ -13,14 +13,20 @@ struct LibraryPanel: View {
         Group {
             switch model.libraryTab {
             case .media: MediaBrowser(model: model, title: "Media", filter: nil)
-            case .graphics: MediaBrowser(model: model, title: "Graphics", filter: [.graphics, .images])
-            case .audio: MediaBrowser(model: model, title: "Audio", filter: [.music, .sfx])
-            case .text: TextLibrary(model: model)
-            case .transitions: TransitionLibrary(model: model)
-            case .effects: EffectLibrary(model: model)
+            case .graphics:
+                AssetBrowser(model: model, sections: AssetSection.graphics, section: Binding(get: { AssetLibraryHost.shared.graphicsSection }, set: { AssetLibraryHost.shared.graphicsSection = $0 }))
+            case .audio:
+                AssetBrowser(model: model, sections: AssetSection.audio, section: Binding(get: { AssetLibraryHost.shared.audioSection }, set: { AssetLibraryHost.shared.audioSection = $0 }))
+            case .text: TitleLibrary(model: model)
+            case .transitions, .effects:
+                EffectsLibrary(model: model, showTransitions: Binding(
+                    get: { model.libraryTab == .transitions },
+                    set: { model.libraryTab = $0 ? .transitions : .effects }
+                ))
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
         .background(Theme.panel.color)
     }
 }
@@ -190,9 +196,13 @@ private struct EmptyMediaNote: View {
     }
 }
 
-struct SearchField: View {
+struct SearchField<Accessory: View>: View {
     @Binding var text: String
     let prompt: String
+    /// Return: after handing the keys back to the timeline.
+    var onSubmit: (() -> Void)?
+    /// Something at the end of the field, like a filter menu.
+    @ViewBuilder var accessory: () -> Accessory
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -206,7 +216,10 @@ struct SearchField: View {
                 .foregroundStyle(Theme.text.color)
                 .focused($focused)
                 // Return or Escape hands the keys back to the timeline.
-                .onSubmit { focused = false }
+                .onSubmit {
+                    focused = false
+                    onSubmit?()
+                }
                 .onExitCommand { focused = false }
             if !text.isEmpty {
                 Button {
@@ -218,6 +231,7 @@ struct SearchField: View {
                 }
                 .buttonStyle(.plain)
             }
+            accessory()
         }
         .padding(.horizontal, 10)
         .frame(height: 28)
@@ -244,12 +258,20 @@ struct ChipView: View {
     }
 }
 
+extension SearchField where Accessory == EmptyView {
+    init(text: Binding<String>, prompt: String, onSubmit: (() -> Void)? = nil) {
+        self.init(text: text, prompt: prompt, onSubmit: onSubmit) { EmptyView() }
+    }
+}
+
 /// Wraps its children onto new lines, for filter chips.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 300
+        // Asked for an ideal size: one line, so a parent never grows to a
+        // made-up width.
+        let width = proposal.width ?? subviews.reduce(0) { $0 + $1.sizeThatFits(.unspecified).width + spacing }
         var x: CGFloat = 0
         var y: CGFloat = 0
         var line: CGFloat = 0
@@ -467,145 +489,5 @@ private struct AudioRow: View {
         .padding(.vertical, 5)
         .padding(.horizontal, 6)
         .background(RoundedRectangle(cornerRadius: 6).fill(selected ? Theme.rowSelected.color : .clear))
-    }
-}
-
-// MARK: - Text, transitions and effects
-
-/// Built-in title styles until title packs arrive: each adds a text clip on
-/// the Text track at the playhead.
-struct TextLibrary: View {
-    let model: EditorModel
-
-    struct Preset: Identifiable {
-        let id: String
-        let name: String
-        let detail: String
-        let text: String
-        let style: TextStyle
-        let seconds: Double
-    }
-
-    static let presets: [Preset] = [
-        Preset(id: "title", name: "Plain title", detail: "Big and bold, centred", text: "Title", style: TextStyle(size: 96, weight: 800), seconds: 3),
-        Preset(id: "section", name: "Section card", detail: "Two lines, for chapters", text: "Section\nThe leaderboard", style: TextStyle(size: 72, weight: 800, backgroundColor: RGBA(r: 0.07, g: 0.07, b: 0.08, a: 0.85)), seconds: 3),
-        Preset(id: "label", name: "Label", detail: "Small callout over the screen", text: "Label", style: TextStyle(size: 44, weight: 700, color: RGBA(r: 0.05, g: 0.05, b: 0.06), backgroundColor: RGBA(r: 1, g: 0.7, b: 0.14)), seconds: 2.5),
-        Preset(id: "caption", name: "Caption", detail: "Bottom of frame, with a shadow", text: "Caption", style: TextStyle(size: 48, weight: 700, shadow: true), seconds: 3)
-    ]
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                PanelHeader(title: "Text", detail: "adds at the playhead") { EmptyView() }
-                ForEach(Self.presets) { preset in
-                    LibraryRow(title: preset.name, detail: preset.detail) { add(preset) }
-                }
-            }
-            .padding(14)
-        }
-        .scrollIndicators(.hidden)
-    }
-
-    private func add(_ preset: Preset) {
-        let project = model.project
-        guard let track = project.track(named: "Text", kind: .video) ?? project.videoTracks.last else {
-            model.show(.info, "Add a video track for text first.")
-            return
-        }
-        let clip = Clip(
-            name: preset.name,
-            content: .text(TextContent(text: preset.text, preset: preset.id, style: preset.style, animationIn: "fadeIn", animationOut: "fadeOut")),
-            start: model.playback.time,
-            duration: Time(seconds: preset.seconds)
-        )
-        if let result = model.apply(EditBatch(label: "Add \(preset.name.lowercased())", commands: [.insertClip(trackID: track.id, clip: clip, mode: .overwrite)])) {
-            model.selection = Set(result.createdIDs)
-        }
-    }
-}
-
-struct TransitionLibrary: View {
-    let model: EditorModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                PanelHeader(title: "Transitions", detail: "on the nearest cut") { EmptyView() }
-                ForEach(TransitionType.allCases, id: \.self) { type in
-                    LibraryRow(title: type.displayName, detail: String(format: "%.2f s", type.defaultDuration.seconds)) {
-                        let batch = TimelineEdits.addDefaultTransition(model.project, playhead: model.playback.time, selection: model.selection, type: type)
-                        if batch == nil { model.show(.info, "Put the playhead on a cut between two clips.") }
-                        model.apply(batch)
-                    }
-                }
-            }
-            .padding(14)
-        }
-        .scrollIndicators(.hidden)
-    }
-}
-
-struct EffectLibrary: View {
-    let model: EditorModel
-
-    var body: some View {
-        let definitions = EffectRegistry.standard.sorted
-        let categories = Array(Set(definitions.map(\.category))).sorted()
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                PanelHeader(title: "Effects", detail: "for the selected clips") { Text(verbatim: String(definitions.count)).font(.ui(11.5)).foregroundStyle(Theme.textFaint.color) }
-                ForEach(categories, id: \.self) { category in
-                    Text(category)
-                        .font(.ui(11.5, .semibold))
-                        .foregroundStyle(Theme.textMuted.color)
-                        .padding(.top, 4)
-                    ForEach(definitions.filter { $0.category == category }, id: \.type) { definition in
-                        LibraryRow(title: definition.name, detail: definition.summary) { add(definition) }
-                    }
-                }
-            }
-            .padding(14)
-        }
-        .scrollIndicators(.hidden)
-    }
-
-    private func add(_ definition: EffectDefinition) {
-        let kind: TrackKind = definition.domain == .video ? .video : .audio
-        let targets = TimelineEdits.ordered(model.selection, in: model.project).filter { model.project.location(ofClip: $0)?.track.kind == kind }
-        guard !targets.isEmpty else {
-            model.show(.info, "Select a \(kind == .video ? "video" : "sound") clip to add \(definition.name.lowercased()) to.")
-            return
-        }
-        model.apply(EditBatch(label: "Add \(definition.name.lowercased())", commands: targets.map { .addEffect(clipID: $0, effect: Effect(type: definition.type)) }))
-        model.inspectorTab = definition.category == "Colour" ? .colour : (kind == .audio ? .audio : .video)
-    }
-}
-
-struct LibraryRow: View {
-    let title: String
-    let detail: String
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.ui(12.5, .semibold))
-                    .foregroundStyle(Theme.text.color)
-                Text(detail)
-                    .font(.ui(11))
-                    .foregroundStyle(Theme.textMuted.color)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 7).fill(hovering ? Theme.rowSelected.color : Theme.field.color))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }
