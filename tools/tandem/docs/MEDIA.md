@@ -82,8 +82,11 @@ to 0 with a note in `ScanReport.notes`.
 
 `FolderWatcher(folder:debounce:settleTime:handler:)` reports
 `Changes(added:changed:removed:)` as project-relative paths. Events are
-debounced (1 s), and a file is only reported once it hasn't changed for
-`settleTime` (2 s), so a recording in progress is reported once, at the end.
+debounced (1 s), and a file is only reported once its size and date haven't
+changed for `settleTime` (2 s) by this Mac's clock, so a recording in
+progress is reported once, at the end, and a file dated in the future
+still settles. Folder events inside `.tandem` and `exports` never cause a
+rescan, so analysis commits don't make the watcher walk the folder.
 The app should call `refreshMedia()` (or `scanReport`) on each batch and then
 `requestDefaults`, and `stop()` the watcher when the project closes (safe
 from inside the handler too).
@@ -98,7 +101,9 @@ write into `.tmp-<key>-<uuid>/` beside the entries and rename it into place
 with the manifest already inside, so a lookup never sees half a result.
 Temporaries whose newest file is over an hour old are removed on start.
 Past the size limit (50 GB default) entries go least recently used first;
-a lookup counts as a use (folder date, bumped at most once a minute).
+a lookup counts as a use (folder date, bumped at most once a minute). An
+evicted entry is renamed away before it's deleted, so a lookup never sees
+a manifest whose files are half gone.
 
 Only the settings a kind uses go into its key (`AnalysisSettings.canonical`),
 and bumping `AnalysisKind.algorithmVersion` rebuilds that kind.
@@ -161,12 +166,16 @@ Notes on each:
   0 to 1) and cut to the closed person, scaled up and maxed with the
   person mask. Vision's guess on a frame with no person can be noise.
   Frames Vision fails on hold the frame before. `matteURL(for:mode:)` finds
-  a `.person` matte if one was made with that setting.
+  a `.person` matte if one was made with that setting. The segmentation
+  request is stateful, but three workers sharing frames, a fresh request
+  per frame and one worker in order give byte-identical mattes (measured
+  on 20 s of the camera), so the workers take frames in any order.
 - **Isolated voice.** AUSoundIsolation (voice model, 100% wet) in offline
-  manual rendering. The unit's reported latency (3,665 samples) is dropped
-  from the front and fed as silence at the end, and silence is added in
-  front if the audio starts after zero; resampled sources are padded to
-  the exact length. The render module mixes it with the original by
+  manual rendering. The unit's reported latency (3,665 samples in stereo,
+  2,705 in mono) is dropped from the front and fed as silence at the end,
+  silence is added in front if the audio starts after zero, and output
+  stops at the source's length (resampled sources are padded to it). Both
+  layouts line up within a sample on the real footage. The render module mixes it with the original by
   `voiceIsolation`.
 
 ## Wiring it up
