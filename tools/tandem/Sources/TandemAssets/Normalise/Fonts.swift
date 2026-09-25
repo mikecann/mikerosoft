@@ -40,7 +40,8 @@ public enum FontInstaller {
                     let failed = (error.userInfo[kCTFontManagerErrorFontURLsKey as String] as? [URL]) ?? []
                     for url in failed { collector.add(url, error.localizedDescription) }
                 }
-                if done { continuation.resume(returning: collector.failures) }
+                // Resume once, even if Core Text reports done twice.
+                if done, collector.finish() { continuation.resume(returning: collector.failures) }
                 return true
             }
         }
@@ -50,6 +51,16 @@ public enum FontInstaller {
     private final class FailureCollector: @unchecked Sendable {
         private let lock = NSLock()
         private var stored: [URL: String] = [:]
+        private var finished = false
+
+        /// True the first time it's called.
+        func finish() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if finished { return false }
+            finished = true
+            return true
+        }
 
         func add(_ url: URL, _ reason: String) {
             lock.lock()
