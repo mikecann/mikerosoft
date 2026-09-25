@@ -594,3 +594,21 @@ extension AssetLibrary {
         return restored
     }
 }
+
+extension AssetLibrary {
+    /// Removes an asset and its files from the library, for example the
+    /// generated takes that weren't kept. Refuses assets used in a project
+    /// (their record is the proof of use) and import folder files (delete
+    /// those from the folder instead; the next scan notices).
+    public func remove(_ id: String) throws {
+        guard let asset = try catalog.asset(id: id) else { throw AssetError.notFound("asset \(id)") }
+        guard asset.provider != "import" else {
+            throw AssetError.invalid("\(asset.name) lives in an import folder; delete the file there and the library will notice")
+        }
+        guard try catalog.usage(forAsset: id).isEmpty else {
+            throw AssetError.invalid("\(asset.name) is used in a project, so its record stays for the credits")
+        }
+        try? FileManager.default.removeItem(at: folder(for: asset))
+        try catalog.delete(id: id)
+    }
+}

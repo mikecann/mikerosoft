@@ -345,3 +345,25 @@ final class HousekeepingTests: XCTestCase {
         XCTAssertTrue(font.editCommands(at: .zero, in: project).isEmpty)
     }
 }
+
+final class RemoveTests: XCTestCase {
+    func testDiscardingGeneratedTakesThatWerentKept() async throws {
+        let transport = FixtureTransport()
+        transport.on("api.elevenlabs.io/v1/sound-generation", data: Data(count: 48_000))
+        let library = try makeLibrary(transport, secrets: ["elevenlabs": "k"])
+        let takes = try await library.generate(GenerationRequest(kind: .sfx, prompt: "Pop", duration: 0.5, variations: 3))
+        XCTAssertEqual(takes.count, 3)
+        let kept = takes[1]
+        try library.catalog.recordUsage(AssetUsage(assetID: kept.id, projectID: "prj"))
+
+        for take in takes where take.id != kept.id {
+            let folder = library.folder(for: take)
+            try library.remove(take.id)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+        }
+
+        XCTAssertEqual(try library.search(AssetQuery(providers: ["elevenlabs"])).map(\.id), [kept.id])
+        XCTAssertThrowsError(try library.remove(kept.id))
+        XCTAssertThrowsError(try library.remove("elevenlabs:nope"))
+    }
+}
