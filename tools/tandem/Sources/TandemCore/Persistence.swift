@@ -143,14 +143,16 @@ public final class ProjectJournal: @unchecked Sendable {
         write(Entry(revision: revision, date: Date(), batch: nil, seed: nil, snapshot: project, reason: reason))
     }
 
-    /// Entries newer than `revision`, oldest first.
+    /// Entries newer than `revision`, oldest first. Each line is read on
+    /// its own, so one cut short by a crash (even mid-character) costs only
+    /// itself.
     public func entries(after revision: Int) -> [Entry] {
         queue.sync {
-            guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else { return [] }
+            guard let data = try? Data(contentsOf: url) else { return [] }
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            return text.split(separator: "\n").compactMap { line in
-                try? decoder.decode(Entry.self, from: Data(line.utf8))
+            return data.split(separator: 0x0A).compactMap { line in
+                try? decoder.decode(Entry.self, from: Data(line))
             }.filter { $0.revision > revision }
         }
     }
@@ -186,12 +188,28 @@ public final class ProjectJournal: @unchecked Sendable {
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             guard var line = try? encoder.encode(entry) else { return }
             line.append(0x0A)
-            if let handle = try? FileHandle(forWritingTo: url) {
-                handle.seekToEndOfFile()
-                handle.write(line)
-                try? handle.close()
-            } else {
-                try? line.write(to: url, options: .atomic)
+            // Appends only: opening never replaces what's there (a journal
+            // that can't be opened is left alone), and a failed write
+            // returns an error where FileHandle's raises an exception, as
+            // it does on a full disk.
+            let fd = open(url.path, O_RDWR | O_APPEND | O_CREAT | O_CLOEXEC, 0o644)
+            guard fd >= 0 else { return }
+            defer { close(fd) }
+            // A last line cut short by a crash would swallow this one, so
+            // start a new line after it.
+            var info = stat()
+            if fstat(fd, &info) == 0, info.st_size > 0 {
+                var last: UInt8 = 0
+                if pread(fd, &last, 1, info.st_size - 1) == 1, last != 0x0A { line.insert(0x0A, at: 0) }
+            }
+            line.withUnsafeBytes { bytes in
+                var offset = 0
+                while offset < bytes.count {
+                    let written = Darwin.write(fd, bytes.baseAddress! + offset, bytes.count - offset)
+                    if written < 0 && errno == EINTR { continue }
+                    guard written > 0 else { return }
+                    offset += written
+                }
             }
         }
     }

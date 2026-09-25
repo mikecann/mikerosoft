@@ -80,6 +80,32 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(ProjectFile.journalURL(for: url).lastPathComponent, "Video.journal.jsonl")
     }
 
+    func testALineCutShortDoesntCostTheEntriesAroundIt() throws {
+        // A crash or a full disk can leave the last line half written,
+        // even in the middle of a character ("é" is two bytes).
+        let journal = journal()
+        journal.append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)
+        let handle = try FileHandle(forWritingTo: journal.url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(#"{"batch":{"label":"Caf"#.utf8) + Data([0xC3]))
+        try handle.close()
+
+        journal.append(batch: marker("mk_2", at: 2), revision: 2, seed: 2)
+        XCTAssertEqual(journal.entries(after: 0).map(\.revision), [1, 2])
+        let recovered = try XCTUnwrap(journal.recover(project: Project.standard(name: "Video"), revision: 0))
+        XCTAssertEqual(recovered.project.markers.map(\.id), ["mk_1", "mk_2"])
+    }
+
+    func testAnAppendThatCantOpenTheJournalLeavesItAlone() throws {
+        let journal = journal()
+        journal.append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)
+        journal.append(batch: marker("mk_2", at: 2), revision: 2, seed: 2)
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: journal.url.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: journal.url.path) }
+        journal.append(batch: marker("mk_3", at: 3), revision: 3, seed: 3)
+        XCTAssertEqual(journal.entries(after: 0).map(\.revision), [1, 2], "the entries already there survive")
+    }
+
     func testTruncatingForASaveKeepsTheEditsItMissed() throws {
         let journal = journal()
         journal.append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)
