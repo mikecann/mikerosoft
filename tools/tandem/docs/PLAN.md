@@ -59,16 +59,18 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 ## Milestone 5: the app
 
-- [ ] Shell in the Graphite look: window, menus, open, new, recent, save as version [app]
-- [ ] Media browser from the folder: takes, graphics, B-roll, music, SFX, search [app]
-- [ ] Viewer with transport, J K L, proxy toggle, fit [app]
-- [ ] Timeline: tracks, clips with thumbnails and waveforms, ruler, playhead, markers, transcript lane, zoom [app]
-- [ ] Tools: select, blade, trim, ripple trim, roll, slip, slide, snapping, drag to move, overwrite and insert, link, ripple delete, I and O with lift and extract, nudge, markers [app]
-- [ ] Keymap (Premiere-style defaults, JSON), 1 to 4 for layout presets [app]
-- [ ] Inspector built from parameter definitions: Video, Colour, Audio, Info [app]
-- [ ] Export sheet and job status bar [app]
-- [ ] Activity feed: agent edits with labels, undo per batch [app]
-- [ ] Hosts the API while a project is open [app]
+- [x] Shell in the Graphite look: window, menus, open, new, recent, save as version [app]
+- [x] Media browser from the folder: takes, graphics, B-roll, music, SFX, search [app]
+- [x] Viewer with transport, J K L, proxy toggle, fit [app]
+- [x] Timeline: tracks, clips with thumbnails and waveforms, ruler, playhead, markers, transcript lane, zoom [app]
+- [x] Tools: select, blade, trim, ripple trim, roll, slip, slide, snapping, drag to move, overwrite and insert, link, ripple delete, I and O with lift and extract, nudge, markers [app]
+- [x] Keymap (Premiere-style defaults, JSON), 1 to 4 for layout presets [app]
+- [x] Inspector built from parameter definitions: Video, Colour, Audio, Info [app]
+- [x] Export sheet and job status bar [app]
+- [x] Activity feed: agent edits with labels, undo per batch [app]
+- [x] Hosts the API while a project is open [app]
+- [ ] Keyframe editing in the timeline, drops from Finder [app]
+- [~] Exact paused frames from original files (black in VFR gaps today; the viewer uses the player frame) [render]
 
 ## Milestone 6: real projects
 
@@ -81,7 +83,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 - [x] Asset library: catalogue (SQLite FTS5), providers (import folders, ElevenLabs, Noto, Iconify, SVGL, Fontsource, Pexels, Pixabay, Freesound), normalising (alpha stickers to HEVC, Lottie, SVG, audio loudness), project use and credits [assets]
 - [x] Asset commands in the CLI and MCP (`tandem assets ...`, five MCP tools) [api]
-- [ ] Asset browser in the app (hover previews, drag to timeline) [app, after its first pass]
+- [~] Asset browser in the app (hover previews, drag to timeline) [app]
 - [x] Sources as providers; paid libraries through watched import folders. ElevenLabs sound effects need the key's `sound_generation` permission (music works)
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
 - [ ] Stickers: Lottie and HEVC with alpha
