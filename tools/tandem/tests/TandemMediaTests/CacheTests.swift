@@ -95,6 +95,9 @@ final class AnalysisCacheTests: TempFolderTestCase {
         XCTAssertNil(cache.lookup(kind: .thumbnails, key: "middle"))
         XCTAssertNotNil(cache.lookup(kind: .thumbnails, key: "new"))
         XCTAssertLessThanOrEqual(cache.totalSize, 25_000)
+        // Evicted entries are renamed away and then deleted: nothing left over.
+        let left = try FileManager.default.contentsOfDirectory(atPath: temp.appendingPathComponent("thumbnails").path).sorted()
+        XCTAssertEqual(left, ["new", "old"])
     }
 
     func testCommitEvictsOthersButNeverItself() throws {

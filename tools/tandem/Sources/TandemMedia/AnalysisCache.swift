@@ -117,7 +117,7 @@ public final class AnalysisCache: @unchecked Sendable {
             }
             if error == ENOTEMPTY || error == EEXIST {
                 // A broken entry without a manifest: replace it.
-                try? FileManager.default.removeItem(at: destination)
+                Self.delete(destination)
                 if Foundation.rename(pending.folder.path, destination.path) != 0 {
                     throw MediaError.failed("Couldn't store the \(pending.kind.rawValue) result (\(String(cString: strerror(errno))))")
                 }
@@ -138,8 +138,19 @@ public final class AnalysisCache: @unchecked Sendable {
     }
 
     public func remove(kind: AnalysisKind, key: String) {
-        try? FileManager.default.removeItem(at: entryURL(kind: kind, key: key))
+        Self.delete(entryURL(kind: kind, key: key))
         lock.withLock { _ = sizes?.removeValue(forKey: "\(kind.rawValue)/\(key)") }
+    }
+
+    /// Renames an entry out of the way before deleting it, so a lookup never
+    /// sees a manifest whose files are half gone.
+    static func delete(_ entry: URL) {
+        let doomed = entry.deletingLastPathComponent().appendingPathComponent("\(temporaryPrefix)evicted-\(UUID().uuidString)", isDirectory: true)
+        if Foundation.rename(entry.path, doomed.path) == 0 {
+            try? FileManager.default.removeItem(at: doomed)
+        } else {
+            try? FileManager.default.removeItem(at: entry)
+        }
     }
 
     // MARK: - Size and eviction
@@ -159,7 +170,7 @@ public final class AnalysisCache: @unchecked Sendable {
         var remaining = total
         for entry in entriesByLastUse() where remaining > limit {
             guard !keeping.contains(entry.id) else { continue }
-            try? FileManager.default.removeItem(at: entry.url)
+            Self.delete(entry.url)
             remaining -= entry.bytes
             removed.append(entry.id)
             lock.withLock { _ = sizes?.removeValue(forKey: entry.id) }
