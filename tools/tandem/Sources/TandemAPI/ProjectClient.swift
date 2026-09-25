@@ -92,6 +92,29 @@ public final class TandemAPIHost: @unchecked Sendable {
     }
 }
 
+extension ProjectSession {
+    /// Opens a project the way the app should: when a CLI command has it
+    /// for a moment, waits for it to finish; when `tandem serve` has it,
+    /// asks it to save and let go. Gives up after `timeout` seconds with the
+    /// usual "is open in Tandem" error.
+    public static func open(_ url: URL, owner: Owner, waitingUpTo timeout: TimeInterval) async throws -> ProjectSession {
+        let deadline = Date().addingTimeInterval(timeout)
+        var asked = false
+        while true {
+            do {
+                return try open(url, owner: owner)
+            } catch let error as EditError {
+                guard case .locked = error, Date() < deadline else { throw error }
+                if !asked, let lock = liveLock(for: url), lock.owner == .cli, lock.port != nil {
+                    asked = true
+                    _ = await TandemAPIHost.askOwnerToRelease(url, timeout: max(0, deadline.timeIntervalSinceNow))
+                }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+    }
+}
+
 /// Finds the project a command means.
 public enum ProjectLocator {
     /// An explicit path (a `.tandem` file, or a folder holding exactly

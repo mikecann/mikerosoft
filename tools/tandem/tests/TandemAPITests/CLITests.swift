@@ -200,11 +200,11 @@ final class CLITests: XCTestCase {
         while ProjectSession.liveLock(for: url)?.port == nil && Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
         XCTAssertThrowsError(try ProjectSession.open(url, owner: .app), "serve has it")
 
-        let released = await TandemAPIHost.askOwnerToRelease(url)
-        XCTAssertTrue(released)
+        // What the app does: ask serve to let go, then open.
+        let session = try await ProjectSession.open(url, owner: .app, waitingUpTo: 10)
         serve.waitUntilExit()
         XCTAssertEqual(serve.terminationStatus, 0)
-        let session = try ProjectSession.open(url, owner: .app)
+        XCTAssertEqual(ProjectSession.readLock(for: url)?.owner, .app)
         session.close()
     }
 
