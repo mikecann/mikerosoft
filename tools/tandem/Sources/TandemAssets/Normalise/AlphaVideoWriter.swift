@@ -168,8 +168,11 @@ struct AnimatedImage {
         var elapsed = 0.0
         do {
             for index in 0..<frameCount {
-                guard let image = frame(index) else { continue }
-                try writer.append(image, at: CMTime(value: CMTimeValue((elapsed * Double(timescale)).rounded()), timescale: timescale))
+                // A frame that won't decode leaves the previous one showing
+                // for its time, so the timing stays true.
+                if let image = frame(index) {
+                    try writer.append(image, at: CMTime(value: CMTimeValue((elapsed * Double(timescale)).rounded()), timescale: timescale))
+                }
                 elapsed += delays[index]
             }
             try await writer.finish(endTime: CMTime(value: CMTimeValue((elapsed * Double(timescale)).rounded()), timescale: timescale))

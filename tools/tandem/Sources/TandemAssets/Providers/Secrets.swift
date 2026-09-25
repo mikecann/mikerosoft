@@ -15,19 +15,22 @@ public protocol SecretStore: Sendable {
 /// CLI or an overnight agent.
 public final class KeychainSecretStore: SecretStore, @unchecked Sendable {
     private let lock = NSLock()
-    private var found: [String: String] = [:]
+    private var found: [String: (value: String, at: Date)] = [:]
     private var missingSince: [String: Date] = [:]
     /// How long a missing key is remembered before asking again, so adding
     /// a key while the app runs is noticed.
     private let recheckAfter: TimeInterval = 30
+    /// How long a found key is reused, so a replaced key is picked up
+    /// without restarting.
+    private let reuseFor: TimeInterval = 600
 
     public init() {}
 
     public func secret(service: String) -> String? {
         lock.lock()
-        if let value = found[service] {
+        if let hit = found[service], Date().timeIntervalSince(hit.at) < reuseFor {
             lock.unlock()
-            return value
+            return hit.value
         }
         if let since = missingSince[service], Date().timeIntervalSince(since) < recheckAfter {
             lock.unlock()
@@ -39,9 +42,10 @@ public final class KeychainSecretStore: SecretStore, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if let value {
-            found[service] = value
+            found[service] = (value, Date())
             missingSince[service] = nil
         } else {
+            found[service] = nil
             missingSince[service] = Date()
         }
         return value
