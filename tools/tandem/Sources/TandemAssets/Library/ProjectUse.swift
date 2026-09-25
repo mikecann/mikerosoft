@@ -275,3 +275,18 @@ extension AssetLibrary {
         return quoted.dropLast().joined(separator: ", ") + " and " + quoted.last!
     }
 }
+
+extension AssetPlacement {
+    /// The edits that put this asset on the timeline at `time`: `addMedia`
+    /// unless the project already has the media, then `placeMedia`, which
+    /// routes it to the track for its role and applies the music and SFX
+    /// levels. Images last 5 s unless `duration` says otherwise. Fonts and
+    /// LUTs need no edits.
+    public func editCommands(at time: Time, in project: Project, duration: Time? = nil, mode: InsertMode? = nil) -> [EditCommand] {
+        guard let item = mediaItem else { return [] }
+        var commands: [EditCommand] = []
+        if project.media(item.id) == nil { commands.append(.addMedia(item: item)) }
+        commands.append(.placeMedia(mediaIDs: [item.id], at: time, duration: duration, mode: mode))
+        return commands
+    }
+}

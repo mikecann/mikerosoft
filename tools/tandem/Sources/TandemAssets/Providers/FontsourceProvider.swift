@@ -87,13 +87,22 @@ public final class FontsourceProvider: AssetProvider, @unchecked Sendable {
         }
         guard !files.isEmpty else { throw AssetError.notFound("font files for \(asset.name)") }
         files.sort { ($0.style == "normal" ? 0 : 1, abs($0.weight - 400), $0.weight) < ($1.style == "normal" ? 0 : 1, abs($1.weight - 400), $1.weight) }
-        var downloaded: [URL] = []
-        for file in files {
-            let ext = ProviderFiles.ext(of: file.url, fallback: "ttf")
-            let target = folder.appendingPathComponent("\(detail.id)-\(file.weight)-\(file.style).\(ext)")
-            try await http.download(file.url, to: target)
-            downloaded.append(target)
+        // A family is up to 18 small files; fetch four at a time.
+        let targets = files.map { file in
+            (file.url, folder.appendingPathComponent("\(detail.id)-\(file.weight)-\(file.style).\(ProviderFiles.ext(of: file.url, fallback: "ttf"))"))
         }
+        var start = 0
+        while start < targets.count {
+            let batch = targets[start..<min(start + 4, targets.count)]
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for (url, target) in batch {
+                    group.addTask { try await self.http.download(url, to: target) }
+                }
+                try await group.waitForAll()
+            }
+            start += 4
+        }
+        let downloaded = targets.map(\.1)
         return FetchedOriginal(asset: asset, file: downloaded[0], extras: Array(downloaded.dropFirst()))
     }
 

@@ -271,3 +271,77 @@ final class StarterContentTests: XCTestCase {
         XCTAssertEqual(try library.licence(for: icon.id)?.spdx, "Apache-2.0")
     }
 }
+
+final class HousekeepingTests: XCTestCase {
+    func testEvictionFreesUnpinnedFilesOnly() async throws {
+        let transport = try notoTransport()
+        let library = try makeLibrary(transport)
+        _ = await library.searchProviders(ProviderQuery(text: "fire"), providerIDs: ["noto"])
+        _ = await library.searchProviders(ProviderQuery(text: "eyes"), providerIDs: ["noto"])
+        _ = await library.searchProviders(ProviderQuery(text: "rocket"), providerIDs: ["noto"])
+        let imports = tempFolder("imports")
+        try Generated.sineWAV(at: imports.appendingPathComponent("click.wav"), seconds: 0.2)
+        try await library.addImportFolder(imports)
+        let click = try XCTUnwrap(library.search(AssetQuery(text: "click")).first)
+        for id in ["noto:1f525", "noto:1f440", "noto:1f680", click.id] { _ = try await library.fetch(id) }
+        try library.setFavourite("noto:1f440", true)
+        try library.catalog.recordUsage(AssetUsage(assetID: "noto:1f680", projectID: "prj"))
+        // Age every row.
+        for var asset in try library.search(AssetQuery(limit: 1000)) {
+            asset.updatedAt = Date(timeIntervalSinceNow: -200 * 24 * 3600)
+            try library.catalog.upsert(asset)
+        }
+        let fireFolder = library.folder(for: try XCTUnwrap(library.asset("noto:1f525")))
+
+        let evicted = try library.evictUnpinnedFiles(olderThan: 90 * 24 * 3600)
+
+        XCTAssertEqual(Set(evicted), ["noto:1f525", click.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fireFolder.path))
+        XCTAssertEqual(try library.asset("noto:1f525")?.state, .remote)
+        XCTAssertEqual(try library.asset("noto:1f440")?.state, .normalised)
+        XCTAssertEqual(try library.asset("noto:1f680")?.state, .normalised)
+        // The import file itself is untouched and can be normalised again.
+        let clickAfter = try XCTUnwrap(library.asset(click.id))
+        XCTAssertEqual(clickAfter.state, .original)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: imports.appendingPathComponent("click.wav").path))
+        let again = try await library.fetch(click.id)
+        XCTAssertEqual(again.state, .normalised)
+        // And the evicted sticker comes back on demand.
+        let fire = try await library.fetch("noto:1f525")
+        XCTAssertEqual(fire.state, .normalised)
+    }
+
+    func testCatalogueRebuildsFromMetaFiles() async throws {
+        let transport = try notoTransport()
+        let library = try makeLibrary(transport)
+        _ = await library.searchProviders(ProviderQuery(text: "rocket"), providerIDs: ["noto"])
+        let fetched = try await library.fetch("noto:1f680")
+        try library.catalog.delete(id: "noto:1f680")
+        XCTAssertNil(try library.asset("noto:1f680"))
+
+        XCTAssertEqual(try library.rebuildCatalogFromDisk(), 1)
+
+        let restored = try XCTUnwrap(library.asset("noto:1f680"))
+        XCTAssertEqual(restored.state, .normalised)
+        XCTAssertEqual(restored.files, fetched.files)
+        XCTAssertEqual(try library.licence(for: "noto:1f680")?.spdx, "CC-BY-4.0")
+        XCTAssertEqual(try library.rebuildCatalogFromDisk(), 0)
+    }
+
+    func testPlacementEditCommands() async throws {
+        let transport = try notoTransport()
+        let library = try makeLibrary(transport)
+        _ = await library.searchProviders(ProviderQuery(text: "rocket"), providerIDs: ["noto"])
+        var project = Project.standard(name: "Commands")
+        let placement = try await library.use("noto:1f680", in: ProjectFolder(root: tempFolder("project")), projectID: project.id)
+        let item = try XCTUnwrap(placement.mediaItem)
+
+        let first = placement.editCommands(at: Time(seconds: 2), in: project)
+        XCTAssertEqual(first, [.addMedia(item: item), .placeMedia(mediaIDs: [item.id], at: Time(seconds: 2))])
+        project.media.append(item)
+        XCTAssertEqual(placement.editCommands(at: .zero, in: project), [.placeMedia(mediaIDs: [item.id], at: .zero)])
+        var font = placement
+        font.mediaItem = nil
+        XCTAssertTrue(font.editCommands(at: .zero, in: project).isEmpty)
+    }
+}

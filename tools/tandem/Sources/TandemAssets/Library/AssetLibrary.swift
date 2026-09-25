@@ -529,3 +529,68 @@ actor FetchQueue {
         return try await task.value
     }
 }
+
+extension AssetLibrary {
+    // MARK: - Disk space
+
+    /// Frees disk by deleting the files of downloaded assets that aren't
+    /// favourites, aren't used in any project and haven't changed in `age`
+    /// seconds. Their catalogue rows go back to `remote`, so they can be
+    /// fetched again. Generated assets are never touched (they can't be
+    /// downloaded again), and files in import folders stay where they are;
+    /// only the library's normalised copies of them go. Returns the IDs of
+    /// the assets whose files were deleted.
+    @discardableResult
+    public func evictUnpinnedFiles(olderThan age: TimeInterval = 90 * 24 * 3600) throws -> [String] {
+        let pinned = try catalog.pinnedIDs()
+        let cutoff = Date().addingTimeInterval(-age)
+        var evicted: [String] = []
+        for asset in try catalog.search(AssetQuery(minState: .original, limit: Int.max)) {
+            guard !pinned.contains(asset.id), asset.updatedAt < cutoff else { continue }
+            guard let provider = provider(asset.provider), !provider.capabilities.generate else { continue }
+            let folder = self.folder(for: asset)
+            var updated = asset
+            if asset.provider == "import" {
+                // The original is Mike's file in his folder; keep it.
+                updated.state = .original
+                let original = asset.files.original
+                updated.files = AssetFiles(original: original)
+            } else {
+                updated.state = .remote
+                updated.files = AssetFiles()
+                updated.sha256 = nil
+            }
+            updated.loudness = nil
+            try? FileManager.default.removeItem(at: folder)
+            try catalog.upsert(updated)
+            evicted.append(asset.id)
+        }
+        return evicted
+    }
+
+    /// Rebuilds catalogue rows from the `meta.json` files on disk, for when
+    /// `catalog.sqlite` has been lost. Favourites and usage live only in
+    /// the database and can't come back this way. Returns how many assets
+    /// were restored.
+    @discardableResult
+    public func rebuildCatalogFromDisk() throws -> Int {
+        let fileManager = FileManager.default
+        var restored = 0
+        for provider in (try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? [] {
+            guard (try? provider.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            for folder in (try? fileManager.contentsOfDirectory(at: provider, includingPropertiesForKeys: nil)) ?? [] {
+                let metaURL = folder.appendingPathComponent("meta.json")
+                guard let data = try? Data(contentsOf: metaURL),
+                      let meta = try? JSONDecoder.iso.decode(AssetMeta.self, from: data) else { continue }
+                if try catalog.asset(id: meta.asset.id) == nil {
+                    try catalog.upsert(meta.asset)
+                    restored += 1
+                }
+                if let licence = meta.licence, try catalog.licence(for: meta.asset.id) == nil {
+                    try catalog.addLicence(licence, for: meta.asset.id)
+                }
+            }
+        }
+        return restored
+    }
+}
