@@ -159,7 +159,7 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     /// Requests an analysis (if needed) and waits for it to finish.
     @discardableResult
-    public func waitFor(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .interactive) async -> AnalysisState {
+    public func waitFor(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .interactive) async -> ResultState {
         if let id = submit(kind, for: item, priority: priority) {
             _ = await scheduler.wait(for: id)
         }
@@ -167,7 +167,7 @@ public final class MediaAnalysis: @unchecked Sendable {
     }
 
     /// Where one analysis of one item stands.
-    public func state(_ kind: AnalysisKind, for item: MediaItem) -> AnalysisState {
+    public func state(_ kind: AnalysisKind, for item: MediaItem) -> ResultState {
         guard kind.applies(to: item) else { return .notApplicable }
         guard let key = cacheKey(kind, for: item) else { return .unreadable }
         if cache.contains(kind: kind, key: key) { return .ready }
@@ -257,18 +257,21 @@ public final class MediaAnalysis: @unchecked Sendable {
     }
 }
 
-/// Where one analysis of one media item stands.
-public enum AnalysisState: Equatable, Sendable {
-    /// The kind doesn't apply (a matte for audio, a waveform for silence).
-    case notApplicable
-    /// The file can't be read.
-    case unreadable
-    /// Not made and not queued.
-    case missing
-    case queued
-    case running(progress: Double)
-    case ready
-    case failed(String)
+extension MediaAnalysis {
+    /// Where one analysis of one media item stands. (Nested because the API
+    /// module has its own `AnalysisState` for JSON.)
+    public enum ResultState: Equatable, Sendable {
+        /// The kind doesn't apply (a matte for audio, a waveform for silence).
+        case notApplicable
+        /// The file can't be read.
+        case unreadable
+        /// Not made and not queued.
+        case missing
+        case queued
+        case running(progress: Double)
+        case ready
+        case failed(String)
+    }
 }
 
 private final class DecodedResult {

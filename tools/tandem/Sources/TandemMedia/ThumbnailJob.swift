@@ -50,6 +50,8 @@ enum ThumbnailJob {
         let times = (0..<count).map { CMTime(seconds: start + Double($0) * interval, preferredTimescale: 600) }
         var files = [String?](repeating: nil, count: count)
         var done = 0
+        // Stops outstanding decodes if the job is cancelled part way.
+        defer { generator.cancelAllCGImageGeneration() }
         for await result in generator.images(for: times) {
             try context.checkCancellation()
             if case .success(let requested, let image, _) = result {
