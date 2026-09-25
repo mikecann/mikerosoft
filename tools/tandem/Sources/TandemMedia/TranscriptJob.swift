@@ -27,14 +27,16 @@ enum TranscriptJob {
 enum SpeechTranscription {
     static let engine = "SpeechAnalyzer"
 
-    static func transcribe(source: URL, localeID: String, context: JobContext, timeRange: CMTimeRange?) async throws -> Transcript {
+    /// - Parameter snapWords: pull word edges in to the voice (see
+    ///   `SpeechEnvelope`). Off only to measure what it changes.
+    static func transcribe(source: URL, localeID: String, context: JobContext, timeRange: CMTimeRange?, snapWords: Bool = true) async throws -> Transcript {
         guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: localeID)) else {
             throw MediaError.notApplicable("SpeechAnalyzer doesn't support \(localeID)")
         }
         let status = await AssetInventory.status(forModules: [makeTranscriber(locale)])
         guard status != .unsupported else { throw MediaError.notApplicable("SpeechAnalyzer can't transcribe \(localeID) on this Mac") }
         do {
-            return try await attempt(source: source, locale: locale, context: context, timeRange: timeRange)
+            return try await attempt(source: source, locale: locale, context: context, timeRange: timeRange, snapWords: snapWords)
         } catch let error where status < .installed && !context.isCancelled && !(error is CancellationError) {
             // The model usually works even when the inventory only says
             // "supported"; if it didn't, install it and try once more.
@@ -43,7 +45,7 @@ enum SpeechTranscription {
                 context.progress(0, message: "Installing the \(locale.identifier) speech model")
                 try await request.downloadAndInstall()
             }
-            return try await attempt(source: source, locale: locale, context: context, timeRange: timeRange)
+            return try await attempt(source: source, locale: locale, context: context, timeRange: timeRange, snapWords: snapWords)
         }
     }
 
@@ -51,7 +53,7 @@ enum SpeechTranscription {
         SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange, .transcriptionConfidence])
     }
 
-    static func attempt(source: URL, locale: Locale, context: JobContext, timeRange: CMTimeRange?) async throws -> Transcript {
+    static func attempt(source: URL, locale: Locale, context: JobContext, timeRange: CMTimeRange?, snapWords: Bool) async throws -> Transcript {
         let transcriber = makeTranscriber(locale)
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw MediaError.failed("SpeechAnalyzer has no audio format for \(locale.identifier)")
@@ -85,7 +87,7 @@ enum SpeechTranscription {
         }
         let words = try await collector.value
         try context.checkCancellation()
-        return Transcript(language: locale.identifier(.bcp47), engine: engine, words: feed.envelope.snap(words))
+        return Transcript(language: locale.identifier(.bcp47), engine: engine, words: snapWords ? feed.envelope.snap(words) : words)
     }
 
     /// One word per run with a time range; runs carry their leading space.

@@ -94,18 +94,30 @@ enum LoudnessJob {
         let reader = try await AudioReader(url: source, timeRange: timeRange)
         return try await Blocking.run(qos: context.qos) {
             var meter = LoudnessMeter(sampleRate: reader.sampleRate, channels: reader.channels)
+            // Decoders hand out about a thousand frames at a time; the meter
+            // is much quicker fed in larger blocks.
+            let blockFrames = 32_768
+            var block: [Float] = []
+            block.reserveCapacity(blockFrames * reader.channels)
             var seconds = 0.0
             var chunks = 0
+            func flush() {
+                guard !block.isEmpty else { return }
+                meter.process(interleaved: block)
+                block.removeAll(keepingCapacity: true)
+            }
             while try reader.next({ samples, frames, _ in
-                meter.process(interleaved: samples, frames: frames)
+                block.append(contentsOf: samples)
                 seconds += Double(frames) / reader.sampleRate
+                if block.count >= blockFrames * reader.channels { flush() }
             }) {
                 chunks += 1
-                if chunks % 64 == 0 {
+                if chunks % 256 == 0 {
                     try context.checkCancellation()
                     if reader.duration > 0 { context.progress(seconds / reader.duration) }
                 }
             }
+            flush()
             return meter.result()
         }
     }
