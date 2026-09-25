@@ -99,15 +99,23 @@ enum Thumbnailer {
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         let family = CTFontDescriptorCopyAttribute(descriptor, kCTFontFamilyNameAttribute) as? String ?? url.deletingPathExtension().lastPathComponent
         func draw(_ text: String, size: Double, y: Double) {
-            let font = CTFontCreateWithFontDescriptor(descriptor, size, nil)
-            let attributes: [NSAttributedString.Key: Any] = [
-                NSAttributedString.Key(kCTFontAttributeName as String): font,
-                NSAttributedString.Key(kCTForegroundColorAttributeName as String): foreground
-            ]
-            let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
-            let bounds = CTLineGetImageBounds(line, context)
-            context.textPosition = CGPoint(x: (Double(width) - bounds.width) / 2 - bounds.minX, y: y)
-            CTLineDraw(line, context)
+            func line(at size: Double) -> (CTLine, Double) {
+                let font = CTFontCreateWithFontDescriptor(descriptor, size, nil)
+                let attributes: [NSAttributedString.Key: Any] = [
+                    NSAttributedString.Key(kCTFontAttributeName as String): font,
+                    NSAttributedString.Key(kCTForegroundColorAttributeName as String): foreground
+                ]
+                let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
+                return (line, CTLineGetTypographicBounds(line, nil, nil, nil))
+            }
+            var (fitted, lineWidth) = line(at: size)
+            // Long family names shrink to fit the tile.
+            let room = Double(width) - 32
+            if lineWidth > room {
+                (fitted, lineWidth) = line(at: size * room / lineWidth)
+            }
+            context.textPosition = CGPoint(x: (Double(width) - lineWidth) / 2, y: y)
+            CTLineDraw(fitted, context)
         }
         draw("Aa", size: 120, y: 100)
         draw(family, size: 28, y: 32)
