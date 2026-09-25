@@ -397,14 +397,24 @@ struct AudioInspector: View {
             let audio = first.audio ?? AudioProperties()
             let ids = targets.map(\.id)
             let noun = targets.count == 1 ? "clip" : "\(targets.count) clips"
-            InspectorSection(title: "Level", accessory: {
-                GraphiteSwitch(isOn: !audio.muted) {
-                    model.apply(InspectorEdits.audio(ids, ["muted": .bool(!audio.muted)], label: audio.muted ? "Unmute \(noun)" : "Mute \(noun)"))
-                }
-                .help(audio.muted ? "Muted" : "Playing")
-            }) {
-                SliderRow(label: "Gain", value: audio.gainDB, range: -60...12, bipolar: true, format: { String(format: "%+.1f dB", $0).replacingOccurrences(of: "-", with: "−") },
+            InspectorSection(title: "Level") {
+                SliderRow(label: "Gain", value: audio.gainDB, range: -60...12, bipolar: true, valueWidth: 62,
+                          format: { String(format: "%+.1f dB", $0).replacingOccurrences(of: "-", with: "−") },
+                          parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-+0123456789.".contains($0) }) },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["gainDB": .number((value * 10).rounded() / 10)], label: "Gain")) })
+                HStack(spacing: 10) {
+                    Text("Muted")
+                        .font(.ui(12))
+                        .foregroundStyle(Theme.textMuted.color)
+                        .frame(width: 86, alignment: .leading)
+                    Text(audio.muted ? "Yes" : "No")
+                        .font(.ui(12))
+                        .foregroundStyle(Theme.text.color)
+                    Spacer()
+                    GraphiteSwitch(isOn: audio.muted) {
+                        model.apply(InspectorEdits.audio(ids, ["muted": .bool(!audio.muted)], label: audio.muted ? "Unmute \(noun)" : "Mute \(noun)"))
+                    }
+                }
                 HStack(spacing: 10) {
                     Text("Normalise")
                         .font(.ui(12))

@@ -123,6 +123,8 @@ final class TimelineRulerView: TimelineChildView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // Clicking here takes the keys back from any text field.
+        window?.makeFirstResponder(self)
         guard let model else { return }
         let point = convert(event.locationInWindow, from: nil)
         if let marker = marker(at: point) {

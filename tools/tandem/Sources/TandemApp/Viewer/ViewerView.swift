@@ -283,6 +283,8 @@ final class ViewerOverlayView: NSView {
 
     override var isFlipped: Bool { true }
 
+    override var acceptsFirstResponder: Bool { true }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     private var model: EditorModel? { viewer?.model }
@@ -334,6 +336,8 @@ final class ViewerOverlayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // Clicking here takes the keys back from any text field.
+        window?.makeFirstResponder(self)
         guard let viewer, let model else { return }
         let point = convert(event.locationInWindow, from: nil)
         if model.zoomKeyHeld {
@@ -361,6 +365,7 @@ final class ViewerOverlayView: NSView {
             let rect = CanvasGeometry.cropped(viewer.frame(of: clip, video: video), crop: video.crop)
             if rect.contains(point) {
                 model.selection = SelectionRules.members(of: clip.id, in: model.project, linkedSelection: model.linkedSelection, option: event.modifierFlags.contains(.option))
+                model.focusedClipID = clip.id
                 drag = .move(clipID: clip.id, start: point, original: video)
                 return
             }

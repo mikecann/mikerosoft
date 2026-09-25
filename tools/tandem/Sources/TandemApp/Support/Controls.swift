@@ -146,6 +146,8 @@ struct SliderRow: View {
     let value: Double
     let range: ClosedRange<Double>
     var bipolar = false
+    /// Room for the value text; wide values like "−31.0 dB" need more.
+    var valueWidth: CGFloat = 48
     var format: (Double) -> String = { String(format: "%.0f", $0) }
     var parse: (String) -> Double? = { Double($0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "%", with: "")) }
     var onPreview: (Double?) -> Void = { _ in }
@@ -180,7 +182,7 @@ struct SliderRow: View {
                     .font(.ui(12))
                     .foregroundStyle(Theme.text.color)
                     .multilineTextAlignment(.trailing)
-                    .frame(width: 48)
+                    .frame(width: valueWidth)
                     .focused($fieldFocused)
                     .onSubmit(finishTyping)
                     .onChange(of: fieldFocused) { _, focused in if !focused { finishTyping() } }
@@ -188,7 +190,7 @@ struct SliderRow: View {
                 Text(format(draft ?? value))
                     .font(.ui(12).monospacedDigit())
                     .foregroundStyle(Theme.text.color)
-                    .frame(width: 48, alignment: .trailing)
+                    .frame(width: valueWidth, alignment: .trailing)
                     .lineLimit(1)
                     .onTapGesture(count: 2) {
                         typed = format(value)

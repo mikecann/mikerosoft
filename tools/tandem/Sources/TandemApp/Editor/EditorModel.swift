@@ -78,6 +78,9 @@ final class EditorModel {
         didSet { if selection != oldValue { selectedTransitionID = selection.isEmpty ? selectedTransitionID : nil } }
     }
     var selectedTransitionID: String?
+    /// The clip last clicked, which the inspector shows when a whole link
+    /// group is selected.
+    var focusedClipID: String?
 
     // Timeline settings
     var tool: TimelineTool = .select
@@ -280,8 +283,12 @@ final class EditorModel {
     /// The clip the inspector shows: the first selected clip in timeline
     /// order, preferring picture over sound.
     var primaryClipID: String? {
+        if let focused = focusedClipID, selection.contains(focused) { return focused }
         let ordered = TimelineEdits.ordered(selection, in: project)
-        return ordered.first { project.location(ofClip: $0)?.track.kind == .video } ?? ordered.first
+        // A camera clip over its screen clip, then any picture, then sound.
+        let video = ordered.filter { project.location(ofClip: $0)?.track.kind == .video }
+        let camera = video.first { id in project.clip(id).flatMap { media(for: $0) }?.role == .camera }
+        return camera ?? video.first ?? ordered.first
     }
 
     var inOutRange: TimeRange? {

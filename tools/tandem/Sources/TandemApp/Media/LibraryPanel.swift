@@ -132,6 +132,7 @@ struct MediaBrowser: View {
                 .padding(.top, 2)
                 .padding(.bottom, 10)
             }
+            .scrollIndicators(.hidden)
         }
     }
 
@@ -204,6 +205,7 @@ private struct EmptyMediaNote: View {
 struct SearchField: View {
     @Binding var text: String
     let prompt: String
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -214,6 +216,10 @@ struct SearchField: View {
                 .textFieldStyle(.plain)
                 .font(.ui(12))
                 .foregroundStyle(Theme.text.color)
+                .focused($focused)
+                // Return or Escape hands the keys back to the timeline.
+                .onSubmit { focused = false }
+                .onExitCommand { focused = false }
             if !text.isEmpty {
                 Button {
                     text = ""
@@ -477,14 +483,16 @@ struct TextLibrary: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            PanelHeader(title: "Text", detail: "adds at the playhead") { EmptyView() }
-            ForEach(Self.presets) { preset in
-                LibraryRow(title: preset.name, detail: preset.detail) { add(preset) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                PanelHeader(title: "Text", detail: "adds at the playhead") { EmptyView() }
+                ForEach(Self.presets) { preset in
+                    LibraryRow(title: preset.name, detail: preset.detail) { add(preset) }
+                }
             }
-            Spacer()
+            .padding(14)
         }
-        .padding(14)
+        .scrollIndicators(.hidden)
     }
 
     private func add(_ preset: Preset) {
@@ -509,18 +517,20 @@ struct TransitionLibrary: View {
     let model: EditorModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            PanelHeader(title: "Transitions", detail: "on the cut nearest the playhead") { EmptyView() }
-            ForEach(TransitionType.allCases, id: \.self) { type in
-                LibraryRow(title: type.displayName, detail: String(format: "%.2f s", type.defaultDuration.seconds)) {
-                    let batch = TimelineEdits.addDefaultTransition(model.project, playhead: model.playback.time, selection: model.selection, type: type)
-                    if batch == nil { model.show(.info, "Put the playhead on a cut between two clips.") }
-                    model.apply(batch)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                PanelHeader(title: "Transitions", detail: "on the nearest cut") { EmptyView() }
+                ForEach(TransitionType.allCases, id: \.self) { type in
+                    LibraryRow(title: type.displayName, detail: String(format: "%.2f s", type.defaultDuration.seconds)) {
+                        let batch = TimelineEdits.addDefaultTransition(model.project, playhead: model.playback.time, selection: model.selection, type: type)
+                        if batch == nil { model.show(.info, "Put the playhead on a cut between two clips.") }
+                        model.apply(batch)
+                    }
                 }
             }
-            Spacer()
+            .padding(14)
         }
-        .padding(14)
+        .scrollIndicators(.hidden)
     }
 }
 
@@ -532,7 +542,7 @@ struct EffectLibrary: View {
         let categories = Array(Set(definitions.map(\.category))).sorted()
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                PanelHeader(title: "Effects", detail: "adds to the selected clips") { Text(verbatim: String(definitions.count)).font(.ui(11.5)).foregroundStyle(Theme.textFaint.color) }
+                PanelHeader(title: "Effects", detail: "for the selected clips") { Text(verbatim: String(definitions.count)).font(.ui(11.5)).foregroundStyle(Theme.textFaint.color) }
                 ForEach(categories, id: \.self) { category in
                     Text(category)
                         .font(.ui(11.5, .semibold))
@@ -545,6 +555,7 @@ struct EffectLibrary: View {
             }
             .padding(14)
         }
+        .scrollIndicators(.hidden)
     }
 
     private func add(_ definition: EffectDefinition) {

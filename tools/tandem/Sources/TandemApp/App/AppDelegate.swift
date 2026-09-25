@@ -98,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             front?.model.playback.seek(to: time)
         case .select(let ids):
             front?.model.selection = Set(ids)
+            front?.model.focusedClipID = ids.first
         case .panels(let library, let inspector, let sheet):
             if let library { front?.model.libraryTab = library }
             if let inspector { front?.model.inspectorTab = inspector }
@@ -112,6 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         case .inOut(let start, let end):
             front?.model.inPoint = start
             front?.model.outPoint = end
+        case .simulate(let gesture):
+            guard let window = front?.window else { return }
+            InputSimulator.run(gesture, in: window)
         case .debug(let out):
             guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
             try? WindowSnapshot.describe(window).write(toFile: out, atomically: true, encoding: .utf8)

@@ -24,6 +24,8 @@ final class TimelineLanesView: TimelineChildView {
     private var pressHit: TimelineHit = .nothing
     private var pressModifiers = SelectionRules.Modifiers()
     private var selectionAtPress: Set<String> = []
+    /// A selected clip Cmd-pressed: deselected on mouse up unless dragged.
+    private var pendingCommandToggle: String?
     private var marquee: (start: CGPoint, end: CGPoint)?
     private var snapLine: Time?
     private var dragLabel: (text: String, point: CGPoint)?
@@ -37,8 +39,6 @@ final class TimelineLanesView: TimelineChildView {
         super.init(frame: frame)
         registerForDraggedTypes([.tandemMedia, .string])
     }
-
-    override var acceptsFirstResponder: Bool { true }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -331,10 +331,25 @@ final class TimelineLanesView: TimelineChildView {
             return
         case .clip(let id, _, let part):
             model.selectedTransitionID = nil
+            model.focusedClipID = id
+            pendingCommandToggle = nil
             if part == .body && model.tool == .select {
-                let next = SelectionRules.click(id, in: model.project, current: model.selection, modifiers: mods, linkedSelection: model.linkedSelection)
-                model.selection = next
-                if mods.shift || mods.command { return }
+                if mods.shift {
+                    model.selection = SelectionRules.click(id, in: model.project, current: model.selection, modifiers: mods, linkedSelection: model.linkedSelection)
+                    return
+                }
+                if mods.command {
+                    // Cmd-click toggles the clip (on mouse up, if it doesn't
+                    // turn into a drag); Cmd-drag inserts.
+                    let members = SelectionRules.members(of: id, in: model.project, linkedSelection: model.linkedSelection, option: mods.option)
+                    if model.selection.contains(id) {
+                        pendingCommandToggle = id
+                    } else {
+                        model.selection.formUnion(members)
+                    }
+                } else {
+                    model.selection = SelectionRules.click(id, in: model.project, current: model.selection, modifiers: mods, linkedSelection: model.linkedSelection)
+                }
             } else if !model.selection.contains(id) {
                 model.selection = SelectionRules.members(of: id, in: model.project, linkedSelection: model.linkedSelection, option: mods.option)
             }
@@ -429,11 +444,16 @@ final class TimelineLanesView: TimelineChildView {
         if let session {
             if let batch = session.finish() {
                 model.apply(batch)
-            } else if session.distance < 2, case .clip(let id, _, .body) = pressHit, !(pressModifiers.shift || pressModifiers.command) {
-                // A plain click on a selected clip picks just that clip (and
-                // its links), like Premiere.
-                model.selection = SelectionRules.members(of: id, in: model.project, linkedSelection: model.linkedSelection, option: pressModifiers.option)
+            } else if session.distance < 2, case .clip(let id, _, .body) = pressHit {
+                if let toggle = pendingCommandToggle {
+                    model.selection.subtract(SelectionRules.members(of: toggle, in: model.project, linkedSelection: model.linkedSelection, option: pressModifiers.option))
+                } else if !(pressModifiers.shift || pressModifiers.command) {
+                    // A plain click on a selected clip picks just that clip
+                    // (and its links), like Premiere.
+                    model.selection = SelectionRules.members(of: id, in: model.project, linkedSelection: model.linkedSelection, option: pressModifiers.option)
+                }
             }
+            pendingCommandToggle = nil
         } else if let box = marquee, hypot(box.end.x - box.start.x, box.end.y - box.start.y) < 3, !(pressModifiers.shift || pressModifiers.command) {
             // A click on empty space moves the playhead there, which is
             // handy on a trackpad.

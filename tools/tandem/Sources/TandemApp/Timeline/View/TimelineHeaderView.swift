@@ -158,6 +158,8 @@ final class TimelineHeaderView: TimelineChildView {
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
+        // Clicking here takes the keys back from any text field.
+        window?.makeFirstResponder(self)
         guard let model, let lane = lane(at: event), let trackID = lane.trackID, let track = model.project.track(trackID) else { return }
         let point = convert(event.locationInWindow, from: nil)
         for (toggle, box) in toggleRects(lane) where box.insetBy(dx: -3, dy: -3).contains(point) {

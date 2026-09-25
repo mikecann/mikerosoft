@@ -326,8 +326,9 @@ struct ClipRenderer {
                 x = drawBadge(badge, at: CGPoint(x: x, y: rect.minY + 4), color: Theme.text, in: rect, context: context) + 5
             }
             let role = clip.mediaID.flatMap { project.media($0)?.role }
-            // Takes read from their track; name other clips.
-            if role != .camera && role != .screen || badgeText(for: clip) == nil {
+            // Takes read from their track, as in the design; other clips
+            // are named.
+            if role != .camera && role != .screen {
                 drawText(name(of: clip), at: CGPoint(x: x, y: rect.minY + 4), maxX: rect.maxX - 4, font: Theme.Fonts.ui(9.5, .semibold), color: Theme.text, shadow: true)
             }
         case .text:

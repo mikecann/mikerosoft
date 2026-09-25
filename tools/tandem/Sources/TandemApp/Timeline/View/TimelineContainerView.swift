@@ -199,6 +199,8 @@ class TimelineChildView: NSView {
 
     override var isFlipped: Bool { true }
 
+    override var acceptsFirstResponder: Bool { true }
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true

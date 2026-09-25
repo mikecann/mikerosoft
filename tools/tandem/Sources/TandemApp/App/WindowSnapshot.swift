@@ -96,6 +96,8 @@ enum AppURLCommand: Equatable {
     case inOut(start: Time?, end: Time?)
     /// Writes the window's view and layer tree to a text file.
     case debug(out: String)
+    /// Replays a mouse gesture; see `InputSimulator`.
+    case simulate(InputSimulator.Gesture)
 
     static func parse(_ url: URL) -> AppURLCommand? {
         guard url.scheme?.lowercased() == "tandem", let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
@@ -132,6 +134,9 @@ enum AppURLCommand: Equatable {
         case "tool":
             guard let name = query["name"], let tool = TimelineTool(rawValue: name) else { return nil }
             return .tool(tool)
+        case "simulate":
+            guard let gesture = InputSimulator.parse(query) else { return nil }
+            return .simulate(gesture)
         case "debug":
             guard let out = query["out"], !out.isEmpty else { return nil }
             return .debug(out: NSString(string: out).expandingTildeInPath)
