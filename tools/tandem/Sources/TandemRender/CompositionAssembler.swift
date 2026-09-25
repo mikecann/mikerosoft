@@ -179,18 +179,35 @@ enum CompositionAssembler {
         var matteTransforms: [String: CGAffineTransform] = [:]
         var pictureSources: [String: SourceTrack] = [:]
         var matteSources: [String: SourceTrack] = [:]
+        var pictureRecovery: [String: TimeRange] = [:]
+        var matteRecovery: [String: TimeRange] = [:]
         for segment in plan.videoSegments.sorted(by: { $0.timeline.start < $1.timeline.start }) {
             guard let u = url(for: segment), let source = sources[u], let assetTrack = source.video else { continue }
             do {
-                try insert(segment, into: videoTracks[segment.track], from: assetTrack, available: source.videoRange,
-                           end: &videoEnds[segment.track], holdLastFrame: true, frameDuration: frameDuration)
-                let direct = SourceTrack(url: u, asset: source.asset, track: assetTrack, timeRange: source.videoRange)
+                let leading = LeadingFrameCache.shared.map(for: u)
+                let bad = leading.flatMap { Self.undecodableStart(of: segment, in: $0) }
+                // A segment that starts on leading frames AVFoundation can't
+                // decode from a seek (it shows a stale frame, or a reader
+                // stalls) goes in from their keyframe; the compositor decodes
+                // the frames before it directly.
+                if let bad {
+                    if let rest = bad.rest {
+                        try insert(rest, into: videoTracks[segment.track], from: assetTrack, available: source.videoRange,
+                                   end: &videoEnds[segment.track], holdLastFrame: true, frameDuration: frameDuration)
+                    }
+                } else {
+                    try insert(segment, into: videoTracks[segment.track], from: assetTrack, available: source.videoRange,
+                               end: &videoEnds[segment.track], holdLastFrame: true, frameDuration: frameDuration)
+                }
+                let direct = SourceTrack(url: u, asset: source.asset, track: assetTrack, timeRange: source.videoRange, leading: leading)
                 if segment.role == .picture {
                     pictureTransforms[segment.clipID] = source.preferredTransform
                     pictureSources[segment.clipID] = direct
+                    pictureRecovery[segment.clipID] = bad?.timeline
                 } else {
                     matteTransforms[segment.clipID] = source.preferredTransform
                     matteSources[segment.clipID] = direct
+                    matteRecovery[segment.clipID] = bad?.timeline
                 }
             } catch {
                 warnings.add("Couldn't place \(u.lastPathComponent) for clip \(segment.clipID): \(error)")
@@ -239,6 +256,8 @@ enum CompositionAssembler {
         for (id, transform) in matteTransforms { sceneClips[id]?.matteTransform = transform }
         for (id, source) in pictureSources { sceneClips[id]?.picture = source }
         for (id, source) in matteSources { sceneClips[id]?.matte = source }
+        for (id, range) in pictureRecovery { sceneClips[id]?.pictureRecovery = range }
+        for (id, range) in matteRecovery { sceneClips[id]?.matteRecovery = range }
         let canvas = context.renderSize
         let scene = RenderScene(
             canvas: canvas, frameDuration: frameDuration, format: context.format,
@@ -266,6 +285,27 @@ enum CompositionAssembler {
             duration: plan.duration,
             warnings: warnings.list
         )
+    }
+
+    /// When a segment starts on leading frames AVFoundation can't decode
+    /// from a seek: the stretch of timeline until their keyframe (the whole
+    /// segment for a freeze frame), and the rest of the segment, starting
+    /// on that keyframe, if any is left.
+    static func undecodableStart(of segment: PlannedSegment, in map: LeadingFrameMap) -> (timeline: TimeRange, rest: PlannedSegment?)? {
+        guard let window = map.window(containing: segment.sourceStart) else { return nil }
+        if segment.freeze { return (segment.timeline, nil) }
+        let speed = segment.speed > 0 ? segment.speed : 1
+        let source = window.end - segment.sourceStart
+        let length = speed == 1 ? source : source.scaled(by: 1 / speed)
+        let end = min(segment.timeline.start + length, segment.timeline.end)
+        var rest: PlannedSegment?
+        if end < segment.timeline.end {
+            var after = segment
+            after.timeline = TimeRange(start: end, end: segment.timeline.end)
+            after.sourceStart = window.end
+            rest = after
+        }
+        return (TimeRange(start: segment.timeline.start, end: end), rest)
     }
 
     /// Places one segment on its composition track: speed through

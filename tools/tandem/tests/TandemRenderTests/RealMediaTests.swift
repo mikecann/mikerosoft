@@ -134,6 +134,123 @@ final class RealMediaTests: XCTestCase {
         print("REAL v14 vs Filmora:\n" + report.joined(separator: "\n") + "\nwarnings: \(warnings.prefix(8))")
     }
 
+    /// Share of the screen area (the PiP corner left out, since Filmora's
+    /// has a cutout) where 4x4 block averages differ by more than 30 levels:
+    /// resampling and compression stay near 0, a black or stale frame
+    /// differs over much of the screen.
+    func blockDifference(_ ours: Bitmap, _ theirs: Bitmap) -> Double {
+        var differing = 0, count = 0
+        for by in stride(from: 0, to: 268, by: 4) {
+            for bx in stride(from: 0, to: 480, by: 4) where !(bx > 280 && by > 140) {
+                var a = 0.0, b = 0.0
+                for y in by..<(by + 4) { for x in bx..<(bx + 4) { a += ours.luma(x, y); b += theirs.luma(x, y) } }
+                count += 1
+                if abs(a - b) / 16 > 30 { differing += 1 }
+            }
+        }
+        return Double(differing) / Double(count) * 100
+    }
+
+    /// Frames AVFoundation couldn't seek to in the remuxed screen recording
+    /// (open-GOP leading frames, long variable frame rate gaps, cuts that
+    /// start on leading frames) against Filmora's export: grabbed the way
+    /// `tandem frame` does, and range exports starting on them (which used
+    /// to stall).
+    func testV14HardFramesMatchFilmora() async throws {
+        let context = try v14()
+        let reference = footage.appendingPathComponent("Decision Models v14.mp4")
+        let renderer = FrameRenderer(context: context)
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: reference))
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let size = CGSize(width: 480, height: 270)
+        generator.maximumSize = size
+        // Times on the 25 fps frame grid, so both sides show the same frame.
+        let leading = [51.52, 88.08, 113.88, 154.68, 194.12, 288.44, 316.56, 356.64, 404.0, 405.24, 432.4]
+        // In static stretches of 4 to 11 s with no frames.
+        let gaps = [90.6, 104.04, 105.92, 165.56, 430.84]
+        // First frames of the nine clips that start on leading frames.
+        let cuts = [115.6, 303.76, 352.44, 369.96, 414.12, 420.12, 451.56, 465.44, 526.04]
+        var worst = 0.0
+        for (kind, times) in [("leading", leading), ("gap", gaps), ("cut", cuts)] {
+            for seconds in times {
+                let started = Date()
+                let ours = Bitmap(try await renderer.image(at: Time(seconds: seconds), maxSize: size))
+                let elapsed = Date().timeIntervalSince(started)
+                let theirs = Bitmap(try await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image)
+                let share = blockDifference(ours, theirs)
+                worst = max(worst, share)
+                print(String(format: "REAL grab %@ %8.3f s: %4.1f%% differs from Filmora (%.2f s)", kind, seconds, share, elapsed))
+            }
+        }
+        for seconds in [404.0] + cuts {
+            let out = scratch.appendingPathComponent(String(format: "range-%.2f.mp4", seconds))
+            let preset = ExportPreset(name: "range", width: 480, height: 270, codec: .h264, videoBitrate: 8_000_000, loudnessTarget: nil,
+                                      range: TimeRange(start: Time(seconds: seconds), duration: Time(seconds: 0.12)))
+            let started = Date()
+            let exporter = Exporter(context: context, preset: preset, output: out)
+            let watchdog = Task {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+                XCTFail("the export from \(seconds) s stalled")
+                exporter.cancel()
+            }
+            _ = try await exporter.run()
+            watchdog.cancel()
+            let exported = AVAssetImageGenerator(asset: AVURLAsset(url: out))
+            exported.requestedTimeToleranceBefore = .zero
+            exported.requestedTimeToleranceAfter = .zero
+            // The first frame against Filmora; the next ones against our own
+            // grabs. Filmora shows the nearest frame of variable frame rate
+            // footage, and Tandem the last one at or before the time, so
+            // mid-scroll they can be a frame apart.
+            let first = Bitmap(try await exported.image(at: .zero).image)
+            let filmora = blockDifference(first, Bitmap(try await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image))
+            var grabs = 0.0
+            for offset in [0.0, 0.04, 0.08] {
+                let frame = Bitmap(try await exported.image(at: CMTime(seconds: offset, preferredTimescale: 600)).image)
+                let grab = Bitmap(try await renderer.image(at: Time(seconds: seconds + offset), maxSize: size))
+                grabs = max(grabs, blockDifference(frame, grab))
+            }
+            worst = max(worst, filmora, grabs)
+            print(String(format: "REAL range export from %8.3f s: first frame %4.1f%% off Filmora, frames %4.1f%% off our grabs (%.1f s)",
+                         seconds, filmora, grabs, Date().timeIntervalSince(started)))
+        }
+        XCTAssertLessThan(worst, 3)
+    }
+
+    /// The app's paused player on originals at the same hard times: a seek
+    /// with zero tolerance, compared with the grab.
+    func testV14PausedPlayerOnOriginals() async throws {
+        let context = try v14()
+        let renderer = FrameRenderer(context: context)
+        let built = try await CompositionBuilder.build(context)
+        let item = built.makePlayerItem()
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        item.add(output)
+        let player = AVPlayer(playerItem: item)
+        player.isMuted = true
+        let size = CGSize(width: 480, height: 270)
+        var worst = 0.0
+        for seconds in [404.0, 51.52, 90.6, 115.6, 303.76, 414.12, 30.0] {
+            let target = CMTime(seconds: seconds, preferredTimescale: 600)
+            await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+            var pixels: CVPixelBuffer?
+            let deadline = Date().addingTimeInterval(10)
+            while pixels == nil && Date() < deadline {
+                if output.hasNewPixelBuffer(forItemTime: target) {
+                    pixels = output.copyPixelBuffer(forItemTime: target, itemTimeForDisplay: nil)
+                }
+                if pixels == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+            }
+            let shown = try XCTUnwrap(pixels, "the player showed nothing at \(seconds)")
+            let scaled = CIImage(cvPixelBuffer: shown).transformed(by: CGAffineTransform(scaleX: size.width / CGFloat(CVPixelBufferGetWidth(shown)), y: size.height / CGFloat(CVPixelBufferGetHeight(shown))))
+            let share = blockDifference(Bitmap(scaled, size: size), Bitmap(try await renderer.image(at: Time(seconds: seconds), maxSize: size)))
+            worst = max(worst, share)
+            print(String(format: "REAL paused player at %8.3f s: %4.1f%% off the grab", seconds, share))
+        }
+        XCTAssertLessThan(worst, 3)
+    }
+
     func testDecisionModelsV14MinuteExport() async throws {
         let context = try v14()
         let out = scratch.appendingPathComponent("v14-minute-120s.mp4")
@@ -143,6 +260,7 @@ final class RealMediaTests: XCTestCase {
         print(String(format: "REAL v14 60 s range export: %.1f s = %.2fx real time, %.2f LUFS, %.2f dBTP",
                      result.elapsed, 60 / result.elapsed, result.integratedLUFS ?? -99, result.truePeakDBTP ?? -99))
         print("REAL phases: " + job.timings.map { String(format: "%@ %.1f s", $0.phase, $0.seconds) }.joined(separator: ", "))
+        print("REAL frame recovery: \(FrameRecovery.shared.requests) frames, \(FrameRecovery.shared.readersOpened) readers")
         print("REAL loudness passes: " + job.loudnessPasses.map { String(format: "%+.2f dB%@ -> %.2f LUFS", $0.gainDB, $0.limited ? " limited" : "", $0.lufs) }.joined(separator: ", "))
         let length = try await AVURLAsset(url: out).load(.duration).seconds
         XCTAssertEqual(length, 60, accuracy: 0.1)

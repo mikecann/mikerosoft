@@ -120,6 +120,25 @@ final class RandomAccessTests: XCTestCase {
         }
     }
 
+    func testLeadingFrameMapFindsWindowsOnlyWhereFilesDontMarkThem() async throws {
+        let media = try TestMedia()
+        let remuxed = try await openGOPMovie(media, name: "remuxed.mov", stripSyncGroup: true)
+        let map = try XCTUnwrap(LeadingFrameMap.read(remuxed))
+        // Frames 57 to 59 lead to the keyframe at 12 s, across the gap.
+        XCTAssertEqual(map.windows.count, 1)
+        XCTAssertEqual(map.windows.first?.start.seconds ?? 0, 1.9, accuracy: 0.001)
+        XCTAssertEqual(map.windows.first?.end.seconds ?? 0, 12, accuracy: 0.001)
+        XCTAssertNotNil(map.window(containing: t(7)))
+        XCTAssertNil(map.window(containing: t(1.8)))
+        XCTAssertNil(map.window(containing: t(12)))
+        // Files that mark their keyframes, and H.264, need no map.
+        let clean = try await openGOPMovie(media, name: "clean.mov", stripSyncGroup: false)
+        let h264 = try await media.movie("h264.mov", seconds: 1, draw: { TestMedia.drawIndex($0, $1) })
+        XCTAssertNil(LeadingFrameMap.read(clean))
+        XCTAssertNil(LeadingFrameMap.read(h264))
+        XCTAssertNil(LeadingFrameMap.read(media.folder.appendingPathComponent("missing.mov")))
+    }
+
     func testRecoveryDecodesLeadingFramesDirectly() async throws {
         let media = try TestMedia()
         let url = try await openGOPMovie(media, name: "remuxed.mov", stripSyncGroup: true)
@@ -160,6 +179,40 @@ final class RandomAccessTests: XCTestCase {
         }
     }
 
+    /// Runs an export, failing the test instead of hanging if it stalls.
+    func exportWithin(_ seconds: Double, _ exporter: Exporter) async throws {
+        let watchdog = Task {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            XCTFail("the export stalled")
+            exporter.cancel()
+        }
+        defer { watchdog.cancel() }
+        _ = try await exporter.run()
+    }
+
+    func testRangeExportsStartingOnLeadingFrames() async throws {
+        let media = try TestMedia()
+        _ = try await openGOPMovie(media, name: "remuxed.mov", stripSyncGroup: true)
+        let project = project(media, file: "remuxed.mov")
+        // AVFoundation's reader stalls if its first frame is a leading frame
+        // it can't decode, so the export reads from a little earlier.
+        for start in [1.95, 5.0, 11.9] {
+            let expected = [Self.expectedIndex(at: start), Self.expectedIndex(at: start + 0.15)]
+            let out = media.folder.appendingPathComponent("range-\(start).mp4")
+            let preset = ExportPreset(name: "t", codec: .h264, videoBitrate: 4_000_000, loudnessTarget: nil,
+                                      range: TimeRange(start: t(start), duration: t(0.2)))
+            try await exportWithin(30, Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: preset, output: out))
+            let duration = try await AVURLAsset(url: out).load(.duration).seconds
+            XCTAssertEqual(duration, 0.2, accuracy: 0.05)
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: out))
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
+            let first = Bitmap(try await generator.image(at: .zero).image)
+            let later = Bitmap(try await generator.image(at: CMTime(seconds: 0.15, preferredTimescale: 600)).image)
+            XCTAssertEqual([TestMedia.readIndex(first, in: whole), TestMedia.readIndex(later, in: whole)], expected, "from \(start) s")
+        }
+    }
+
     func testACutIntoLeadingFramesExportsThem() async throws {
         let media = try TestMedia()
         _ = try await openGOPMovie(media, name: "remuxed.mov", stripSyncGroup: true)
@@ -169,8 +222,8 @@ final class RandomAccessTests: XCTestCase {
         var project = project(media, file: "remuxed.mov")
         project.videoTracks[0].clips = [first, second]
         let out = media.folder.appendingPathComponent("cut.mp4")
-        _ = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder),
-                               preset: ExportPreset(name: "t", codec: .h264, videoBitrate: 4_000_000, loudnessTarget: nil), output: out).run()
+        try await exportWithin(30, Exporter(context: RenderContext(project: project, folder: media.projectFolder),
+                                            preset: ExportPreset(name: "t", codec: .h264, videoBitrate: 4_000_000, loudnessTarget: nil), output: out))
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: out))
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero

@@ -162,6 +162,49 @@ while encoding, released on every exit including cancel and errors (not
 held during the loudness passes, which don't encode). Outputs must be
 .mp4, .mov or .m4v and can't be one of the project's media files.
 
+## Random access
+
+The frame at a time is always the last one at or before it: variable frame
+rate recordings hold their frame through static gaps (up to 20 s in Mike's
+screen recordings). AVFoundation gets that right on its own.
+
+What it gets wrong is open-GOP HEVC that doesn't mark its keyframes. A CRA
+keyframe's leading frames show just before it but decode after it,
+referring back to the previous GOP, and a file says which keyframes are
+CRAs with a `sync` sample group. record-it's files have one; copies
+remuxed by ffmpeg (`-c copy`) lose it, like decision-models'
+`edit/main-screen.mov` and `edit/main-camera.mov`. Seeking into those
+leading frames (about 4% of that screen file) then:
+
+- returns nothing to the compositor (black frame grabs, a black paused
+  player: the bug the app hit at 404 s of v14),
+- or repeats the previous clip's frame when a cut starts on them,
+- or stalls an AVAssetReader for good when its first frame is one of them
+  (a range export starting there never finished).
+
+Decoding straight through from a little earlier gets them right, which is
+why full exports were fine. So:
+
+- `LeadingFrameMap` reads a file's sample tables (in 20 ms for a 24 minute
+  recording) and lists the leading-frame windows, for HEVC with frame
+  reordering, sync samples and no `sync` group. Other files get no map.
+- A segment that starts inside a window goes into the composition from the
+  window's keyframe; the frames before it are left out.
+- `FrameRecovery` decodes a frame directly, reading from a second before
+  (backing off to 4, 16 and 64 s if the start lands on undecodable frames
+  too) and keeping the reader open so the next frames continue from it. The
+  compositor uses it for frames left out, for any window frame in a grab,
+  and whenever AVFoundation hands it no frame for a layer that should show.
+- A range export starting inside a window reads from a moment before it and
+  drops what comes before the range (the frame showing at the start goes in
+  at the start).
+- If AVFoundation stalls anyway, the export gives up after two minutes with
+  no frames ("reading the timeline stalled") rather than hanging, and
+  cancel wakes it.
+
+Filmora shows the nearest frame of variable frame rate footage, Tandem the
+last one at or before the time, so mid-scroll the two can be a frame apart.
+
 ## Measured (M5 Pro, release build)
 
 | Job | Speed |
@@ -171,6 +214,7 @@ held during the loudness passes, which don't encode). Outputs must be
 | 60 s range of the imported v14 edit (494 clips) | 4.4x |
 | The whole v14 edit, 11 min 7 s, HEVC 80 Mbps | 156 s, 4.3x, -14.09 LUFS, -1.1 dBTP (loudness passes about 5% of it) |
 | Frame grab, 4K composite (first grab builds the composition) | 0.05 to 0.4 s |
+| Frame grab that decodes leading frames directly | 0.1 to 0.25 s |
 | 20 s of a 4K still with a title and shadow | 4.0x |
 
 The spike's plain composite managed about 3.5x; the encoder is the limit.

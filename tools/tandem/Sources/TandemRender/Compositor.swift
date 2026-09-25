@@ -41,6 +41,8 @@ final class TandemInstruction: NSObject, AVVideoCompositionInstructionProtocol, 
 class TandemCompositor: NSObject, AVVideoCompositing {
     /// 8-bit 4:2:0 video range, which the VideoToolbox encoders take as is.
     class var outputPixelFormat: OSType { kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange }
+    /// True for frame grabs, where every frame is a seek.
+    class var rendersStills: Bool { false }
 
     private let queue = DispatchQueue(label: "com.mikerosoft.tandem.compositor", qos: .userInitiated, attributes: .concurrent)
     private let lock = NSLock()
@@ -106,7 +108,7 @@ class TandemCompositor: NSObject, AVVideoCompositing {
         }
         let time = Time(cmTime: request.compositionTime)
         let sources = RequestSources(request: request, trackIDs: instruction.trackIDs)
-        var image = FrameComposer(scene: instruction.scene).compose(instruction.stack, at: time, sources: sources)
+        var image = FrameComposer(scene: instruction.scene, stills: type(of: self).rendersStills).compose(instruction.stack, at: time, sources: sources)
 
         // A player or frame grab may ask for a smaller frame than the canvas.
         let canvas = instruction.scene.canvas
@@ -136,6 +138,7 @@ class TandemCompositor: NSObject, AVVideoCompositing {
 /// subsampling or video-range round trip in PNGs and golden tests.
 final class TandemRGBCompositor: TandemCompositor {
     override class var outputPixelFormat: OSType { kCVPixelFormatType_32BGRA }
+    override class var rendersStills: Bool { true }
 }
 
 /// Source frames from an AVFoundation request.

@@ -10,6 +10,9 @@ struct SourceTrack: @unchecked Sendable {
     var track: AVAssetTrack
     /// The track's media time range, for clamping.
     var timeRange: CMTimeRange
+    /// Leading frames AVFoundation can't seek to, when the file doesn't
+    /// mark them (see `LeadingFrameMap`).
+    var leading: LeadingFrameMap?
 }
 
 /// Decodes a source frame when AVFoundation hands the compositor nothing.
@@ -36,6 +39,11 @@ final class FrameRecovery: @unchecked Sendable {
     private let lock = NSLock()
     private var sessions: [Session] = []
     private let maxSessions = 3
+    /// Frames asked for, and readers opened to decode them, since launch.
+    private(set) var requests = 0
+    private(set) var readersOpened = 0
+    /// Off shows what AVFoundation alone produces, for diagnostics.
+    var enabled = true
 
     /// An open reader positioned just after the last frame it returned.
     private final class Session {
@@ -70,10 +78,11 @@ final class FrameRecovery: @unchecked Sendable {
     /// Times past the end hold the last frame; before the start, the first.
     func frame(_ source: SourceTrack, at requested: CMTime) -> CVPixelBuffer? {
         let range = source.timeRange
-        guard range.duration > .zero, requested.isNumeric else { return nil }
+        guard enabled, range.duration > .zero, requested.isNumeric else { return nil }
         let latest = CMTimeSubtract(range.end, Self.tolerance)
         let time = CMTimeMaximum(range.start, CMTimeMinimum(requested, latest))
         return lock.withLock {
+            requests += 1
             if let frame = continueSession(source.url.path, to: time) { return frame }
             for lookback in Self.lookbacks {
                 let start = CMTimeMaximum(range.start, CMTimeSubtract(time, CMTime(seconds: lookback, preferredTimescale: 600)))
@@ -121,6 +130,7 @@ final class FrameRecovery: @unchecked Sendable {
     }
 
     private func open(_ source: SourceTrack, from start: CMTime, to time: CMTime) -> (session: Session, decodedFromStart: Bool)? {
+        readersOpened += 1
         guard let reader = try? AVAssetReader(asset: source.asset) else { return nil }
         let end = CMTimeMinimum(source.timeRange.end, CMTimeAdd(time, CMTime(seconds: Self.readAhead, preferredTimescale: 600)))
         reader.timeRange = CMTimeRange(start: start, end: end)

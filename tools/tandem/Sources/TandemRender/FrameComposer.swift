@@ -22,6 +22,11 @@ struct SceneClip {
     /// directly when AVFoundation can't (see `FrameRecovery`).
     var picture: SourceTrack?
     var matte: SourceTrack?
+    /// Timeline stretches where AVFoundation's frames for this clip are
+    /// wrong: the clip starts on leading frames it can't decode, so it
+    /// shows a stale frame or nothing until the next keyframe.
+    var pictureRecovery: TimeRange?
+    var matteRecovery: TimeRange?
 
     /// Media time shown at a timeline time, following speed and freezes.
     func mediaTime(at time: Time) -> CMTime {
@@ -69,6 +74,9 @@ protocol FrameSources {
 /// frame's clip-relative time.
 struct FrameComposer {
     let scene: RenderScene
+    /// Single frames (grabs) rather than a stream: every one is a seek, so
+    /// any leading frame AVFoundation can't reach is decoded directly.
+    var stills = false
 
     func compose(_ stack: [StackNode], at time: Time, sources: FrameSources) -> CIImage {
         let rect = CGRect(origin: .zero, size: scene.canvas)
@@ -115,7 +123,7 @@ struct FrameComposer {
         switch clip.content {
         case .media:
             if let track = ref.pictureTrack {
-                guard let frame = sources.frame(track: track) ?? recovered(sceneClip.picture, sceneClip, at: time) else { return nil }
+                guard let frame = frame(track, sceneClip.picture, sceneClip.pictureRecovery, sceneClip, at: time, sources: sources) else { return nil }
                 image = Self.oriented(frame, sceneClip.pictureTransform)
             } else if let url = sceneClip.imageURL, let still = ImageCache.shared.image(at: url) {
                 image = still
@@ -161,7 +169,7 @@ struct FrameComposer {
 
         var cutOut = false
         if let cutout = video.cutout, cutout.enabled, let track = ref.matteTrack,
-           let matte = sources.frame(track: track) ?? recovered(sceneClip.matte, sceneClip, at: time) {
+           let matte = frame(track, sceneClip.matte, sceneClip.matteRecovery, sceneClip, at: time, sources: sources) {
             image = Self.cutout(image, matte: Self.oriented(matte, sceneClip.matteTransform), settings: cutout, displaySize: size, unit: unit)
             cutOut = true
         }
@@ -201,9 +209,20 @@ struct FrameComposer {
 
     // MARK: - Pieces
 
-    /// The frame AVFoundation should have supplied, decoded directly. A
-    /// layer in the stack always has a frame to show, so an empty source
-    /// means a decode failed (open-GOP leading frames), not a gap.
+    /// A layer's source frame. AVFoundation's, unless it's known to be wrong
+    /// there (then decoded directly), or missing: a layer in the stack
+    /// always has a frame to show, so an empty source means a decode failed
+    /// (open-GOP leading frames), not a gap.
+    func frame(_ track: Int, _ source: SourceTrack?, _ bad: TimeRange?, _ clip: SceneClip, at time: Time, sources: FrameSources) -> CIImage? {
+        var direct = bad?.contains(time) ?? false
+        if stills, !direct, let map = source?.leading {
+            direct = map.window(containing: Time(cmTime: clip.mediaTime(at: time))) != nil
+        }
+        if direct, let image = recovered(source, clip, at: time) { return image }
+        return sources.frame(track: track) ?? recovered(source, clip, at: time)
+    }
+
+    /// The frame at a clip's media time, decoded directly.
     func recovered(_ source: SourceTrack?, _ clip: SceneClip, at time: Time) -> CIImage? {
         guard let source, let recovery = scene.recovery,
               let pixels = recovery.frame(source, at: clip.mediaTime(at: time)) else { return nil }

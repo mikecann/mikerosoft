@@ -24,6 +24,11 @@ final class ExportPipeline: @unchecked Sendable {
 
     private let lock = NSLock()
     private var cancelled = false
+    /// The encoder in use, so cancel can wake anything waiting on it.
+    private var activeEncoder: VideoEncoder?
+    /// Longest wait for the next composed frame before giving up, in
+    /// seconds. AVFoundation can stall without failing; an export must not.
+    var stallTimeout = 120.0
     /// Seconds spent in each phase, for diagnostics and benchmarks.
     private(set) var timings: [(phase: String, seconds: Double)] = []
     /// Each loudness measurement: the gain it was made at and the result.
@@ -51,7 +56,11 @@ final class ExportPipeline: @unchecked Sendable {
     /// once nobody is inside it. Cancelling an AVAssetReader while another
     /// thread is in `copyNextSampleBuffer` crashes AVFoundation.
     func cancel() {
-        lock.withLock { cancelled = true }
+        let encoder: VideoEncoder? = lock.withLock {
+            cancelled = true
+            return activeEncoder
+        }
+        encoder?.abort()
     }
 
     private func throwIfCancelled() throws {
@@ -233,6 +242,37 @@ final class ExportPipeline: @unchecked Sendable {
         return results
     }
 
+    /// Where to start reading for an export that starts at `start`: a
+    /// little earlier if a layer's file is on leading frames AVFoundation
+    /// can't seek to there (a reader starting on them stalls). The frames
+    /// in between are read and dropped.
+    static func readStart(_ start: Time, instructions: [any AVVideoCompositionInstructionProtocol]) -> Time {
+        var time = start
+        for _ in 0..<8 {
+            guard let instruction = instructions.first(where: { CMTimeRangeContainsTime($0.timeRange, time: time.cmTime) }) as? TandemInstruction else { break }
+            var earliest = time
+            for layer in instruction.stack.flatMap(\.layers) {
+                guard let clip = instruction.scene.clips[layer.clipID], !clip.clip.freezeFrame else { continue }
+                let used: [(SourceTrack?, Int?, TimeRange?)] = [
+                    (clip.picture, layer.pictureTrack, clip.pictureRecovery),
+                    (clip.matte, layer.matteTrack, clip.matteRecovery)
+                ]
+                for (source, track, leftOut) in used {
+                    // Frames left out of the composition are decoded directly.
+                    guard track != nil, let map = source?.leading, !(leftOut?.contains(time) ?? false) else { continue }
+                    let media = Time(cmTime: clip.mediaTime(at: time))
+                    guard let window = map.window(containing: media) else { continue }
+                    let speed = max(clip.clip.speed, 0.0001)
+                    let back = time - (media - window.start).scaled(by: 1 / speed) - instruction.scene.frameDuration
+                    earliest = min(earliest, back)
+                }
+            }
+            if earliest >= time { break }
+            time = max(.zero, earliest)
+        }
+        return time
+    }
+
     /// The gain that brings the limited mix to `target`, from measurements
     /// at several gains. Loudness rises with gain, but less than a dB per dB
     /// once the limiter works, so this interpolates between the two
@@ -268,7 +308,10 @@ final class ExportPipeline: @unchecked Sendable {
 
         try throwIfCancelled()
         let reader = try AVAssetReader(asset: built.composition)
-        reader.timeRange = range.cmTimeRange
+        // Reading may start a little early (see `readStart`); frames and
+        // sound before the range are dropped.
+        let readFrom = Self.readStart(range.start, instructions: built.videoComposition.instructions)
+        reader.timeRange = CMTimeRange(start: readFrom.cmTime, end: range.end.cmTime)
         let pictures = AVAssetReaderVideoCompositionOutput(videoTracks: videoTracks, videoSettings: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
             kCVPixelBufferIOSurfacePropertiesKey as String: [String: Int]()
@@ -289,7 +332,16 @@ final class ExportPipeline: @unchecked Sendable {
 
         let size = built.renderSize
         let encoder = try VideoEncoder(size: size, codec: preset.codec, bitrate: preset.videoBitrate, fps: fps)
-        defer { encoder.invalidate() }
+        let alreadyCancelled: Bool = lock.withLock {
+            activeEncoder = encoder
+            return cancelled
+        }
+        if alreadyCancelled { encoder.abort() }
+        defer {
+            lock.withLock { activeEncoder = nil }
+            encoder.invalidate()
+        }
+        let firstWanted = range.start.cmTime
         let frameDuration = CMTime(value: fps.denominator, timescale: CMTimeScale(fps.numerator))
         let base = 0.1
 
@@ -300,9 +352,25 @@ final class ExportPipeline: @unchecked Sendable {
         let fed = DispatchGroup()
         fed.enter()
         let feeder = Thread { [weak self] in
+            // When reading starts early, the frame showing at the range's
+            // start is the last one before it: it goes in at the start.
+            var showing: CVImageBuffer?
             while !stop.isSet, !(self?.isCancelled ?? true), let sample = source.value.output.copyNextSampleBuffer() {
+                encoder.noteProgress()
+                let time = CMSampleBufferGetPresentationTimeStamp(sample)
                 guard let pixels = CMSampleBufferGetImageBuffer(sample) else { continue }
-                encoder.encode(pixels, at: CMSampleBufferGetPresentationTimeStamp(sample), duration: frameDuration)
+                if CMTimeCompare(time, firstWanted) < 0 {
+                    showing = pixels
+                    continue
+                }
+                if let held = showing, CMTimeCompare(time, firstWanted) > 0 {
+                    encoder.encode(held, at: firstWanted, duration: CMTimeSubtract(time, firstWanted))
+                }
+                showing = nil
+                encoder.encode(pixels, at: time, duration: frameDuration)
+            }
+            if let held = showing, !stop.isSet {
+                encoder.encode(held, at: firstWanted, duration: frameDuration)
             }
             encoder.finish()
             fed.leave()
@@ -312,17 +380,37 @@ final class ExportPipeline: @unchecked Sendable {
         feeder.start()
         // Every way out stops the feed and waits for it, then (if it didn't
         // run to the end) cancels the reader, now that nothing is inside it.
+        // A feed stuck inside AVFoundation is left alone rather than raced.
         func stopFeeding(cancel: Bool) async {
             stop.set()
-            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-                fed.notify(queue: .global()) { done.resume() }
+            let stopped = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+                DispatchQueue.global().async {
+                    done.resume(returning: fed.wait(timeout: .now() + 10) == .success)
+                }
+            }
+            if !stopped {
+                NSLog("TandemRender: the export's frame reader is stuck; leaving it")
+                return
             }
             if cancel { reader.cancelReading() }
         }
+        // Nothing should stall, but if AVFoundation does, fail rather than
+        // wait forever.
+        let watchdog = Task.detached { [stallTimeout] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if encoder.secondsSinceProgress > stallTimeout {
+                    encoder.abort(stalled: true)
+                    return
+                }
+            }
+        }
+        defer { watchdog.cancel() }
 
         guard let hint = encoder.waitForFormat() else {
             await stopFeeding(cancel: true)
             if isCancelled { throw RenderError.cancelled }
+            if encoder.stalled { throw RenderError.export("reading the timeline stalled") }
             throw encoder.error ?? reader.error ?? RenderError.export("the encoder produced nothing")
         }
         do {
@@ -414,6 +502,7 @@ final class ExportPipeline: @unchecked Sendable {
             if isCancelled { throw RenderError.cancelled }
             throw failure ?? RenderError.export("writing stopped")
         }
+        if encoder.stalled { writer.cancelWriting(); throw RenderError.export("reading the timeline stalled") }
         if let failure = encoder.error { writer.cancelWriting(); throw failure }
         if reader.status == .failed { writer.cancelWriting(); throw reader.error ?? RenderError.export("reading failed") }
         writer.endSession(atSourceTime: range.end.cmTime)
@@ -476,6 +565,9 @@ final class VideoEncoder: @unchecked Sendable {
     private var submitted = 0
     private var completed = 0
     private var inputDone = false
+    private var aborted = false
+    private(set) var stalled = false
+    private var lastProgress = Date()
     private(set) var error: Error?
 
     init(size: CGSize, codec: ExportPreset.Codec, bitrate: Int, fps: FrameRate) throws {
@@ -514,7 +606,12 @@ final class VideoEncoder: @unchecked Sendable {
 
     func encode(_ pixels: CVImageBuffer, at time: CMTime, duration: CMTime) {
         condition.lock()
+        if aborted {
+            condition.unlock()
+            return
+        }
         submitted += 1
+        lastProgress = Date()
         condition.unlock()
         let status = VTCompressionSessionEncodeFrame(session, imageBuffer: pixels, presentationTimeStamp: time, duration: duration, frameProperties: nil, infoFlagsOut: nil) { [weak self] status, _, sample in
             guard let self else { return }
@@ -525,6 +622,7 @@ final class VideoEncoder: @unchecked Sendable {
                 self.error = RenderError.export("encoding a frame failed (\(status))")
             }
             self.completed += 1
+            self.lastProgress = Date()
             self.condition.broadcast()
             self.condition.unlock()
         }
@@ -546,21 +644,46 @@ final class VideoEncoder: @unchecked Sendable {
         condition.unlock()
     }
 
-    private var drained: Bool { inputDone && completed == submitted }
+    private var drained: Bool { aborted || (inputDone && completed == submitted) }
+
+    /// Wakes everything waiting on the encoder: they get nothing more.
+    func abort(stalled: Bool = false) {
+        condition.lock()
+        aborted = true
+        if stalled { self.stalled = true }
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    /// The reader produced something (a frame, used or not).
+    func noteProgress() {
+        condition.lock()
+        lastProgress = Date()
+        condition.unlock()
+    }
+
+    var secondsSinceProgress: Double {
+        condition.lock()
+        defer { condition.unlock() }
+        return Date().timeIntervalSince(lastProgress)
+    }
 
     /// The first encoded frame's format, which the muxer needs up front.
     func waitForFormat() -> CMFormatDescription? {
         condition.lock()
         defer { condition.unlock() }
         while queue.isEmpty && !drained { condition.wait() }
+        if aborted { return nil }
         return queue.first.flatMap { CMSampleBufferGetFormatDescription($0) }
     }
 
-    /// The next encoded frame, waiting for one, or nil when all are out.
+    /// The next encoded frame, waiting for one, or nil when all are out
+    /// (or the encode was aborted).
     func nextEncoded() -> CMSampleBuffer? {
         condition.lock()
         defer { condition.unlock() }
         while queue.isEmpty && !drained { condition.wait() }
+        if aborted { return nil }
         return queue.isEmpty ? nil : queue.removeFirst()
     }
 
@@ -622,10 +745,15 @@ final class MasterAudio: @unchecked Sendable {
     private func pull() {
         if let mix, let buffer = mix.copyNextSampleBuffer() {
             let position = Int((CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(buffer), start).seconds * Double(AudioBuffers.sampleRate)).rounded())
-            if position > consumed {
+            var samples = AudioBuffers.samples(in: buffer)
+            if position < consumed {
+                // Sound from before the range (reading started early).
+                let skip = min(consumed - position, samples.count / channels)
+                samples.removeFirst(skip * channels)
+            } else if position > consumed {
                 process([Float](repeating: 0, count: (position - consumed) * channels))
             }
-            process(AudioBuffers.samples(in: buffer))
+            if !samples.isEmpty { process(samples) }
             return
         }
         // The mix is done (or there is none): silence up to the end, then
