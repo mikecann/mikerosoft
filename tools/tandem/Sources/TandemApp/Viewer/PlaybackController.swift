@@ -212,7 +212,9 @@ final class PlaybackController {
         let slot = hasComposition ? 1 - front : front
         let player = players[slot]
         let item = built.makePlayerItem()
-        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        // The compositor's own format: no conversion per frame, only when a
+        // capture asks for one.
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
         item.add(output)
         player.pause()
         player.replaceCurrentItem(with: item)
