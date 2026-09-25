@@ -98,8 +98,17 @@ public enum StarterContent {
         ("GitHub", "github_dark", "dark", false, ["Software"])
     ]
 
-    /// Every starter asset, as catalogue rows waiting to be fetched.
+    /// Every starter asset, as catalogue rows waiting to be fetched. Each
+    /// carries `remote["starter"] = "1"` so pruning leaves it alone.
     public static func assets(iconColour: String = "#FFFFFF") -> [Asset] {
+        starterRows(iconColour: iconColour).map { asset in
+            var marked = asset
+            marked.remote["starter"] = "1"
+            return marked
+        }
+    }
+
+    private static func starterRows(iconColour: String) -> [Asset] {
         var result: [Asset] = []
         for emoji in notoEmoji {
             var asset = NotoEmojiProvider.asset(codepoint: emoji.codepoint, tags: emoji.tags, categories: [emoji.category])

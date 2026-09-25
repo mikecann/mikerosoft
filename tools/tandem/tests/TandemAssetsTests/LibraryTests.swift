@@ -441,3 +441,21 @@ final class LibraryExtrasTests: XCTestCase {
         XCTAssertTrue(projectFailures.isEmpty)
     }
 }
+
+final class StarterProtectionTests: XCTestCase {
+    func testPruningAndSearchesKeepTheStarterSet() async throws {
+        let transport = try notoTransport()
+        let library = try makeLibrary(transport)
+        try library.installStarterContent()
+        // A provider search returns the rocket with its own tags.
+        _ = await library.searchProviders(ProviderQuery(text: "rocket"), providerIDs: ["noto"])
+        XCTAssertTrue(try XCTUnwrap(library.asset("noto:1f680")).tags.contains(StarterContent.tag))
+        // Age everything past the prune cut-off.
+        for var asset in try library.search(AssetQuery(limit: 1000)) {
+            asset.updatedAt = Date(timeIntervalSinceNow: -365 * 24 * 3600)
+            try library.catalog.upsert(asset)
+        }
+        XCTAssertEqual(try library.prune(), 0)
+        XCTAssertEqual(try library.count(AssetQuery()), 90)
+    }
+}

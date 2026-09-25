@@ -280,7 +280,10 @@ public final class AssetCatalog: @unchecked Sendable {
                         continue
                     }
                     existing.name = incoming.name
-                    existing.tags = incoming.tags
+                    // Tags the library added itself (the starter set) outlive
+                    // the provider's fresh list.
+                    let starter = existing.tags.contains(StarterContent.tag) && !incoming.tags.contains(StarterContent.tag)
+                    existing.tags = incoming.tags + (starter ? [StarterContent.tag] : [])
                     existing.summary = incoming.summary ?? existing.summary
                     existing.bpm = incoming.bpm ?? existing.bpm
                     existing.musicalKey = incoming.musicalKey ?? existing.musicalKey
@@ -617,7 +620,8 @@ public final class AssetCatalog: @unchecked Sendable {
     // MARK: - Maintenance
 
     /// Deletes rows that only came from provider searches, weren't
-    /// refreshed since `date`, and aren't favourites or used anywhere.
+    /// refreshed since `date`, and aren't favourites, used anywhere or part
+    /// of the starter set.
     /// Returns how many went.
     @discardableResult
     public func pruneRemote(notUpdatedSince date: Date) throws -> Int {
@@ -627,6 +631,7 @@ public final class AssetCatalog: @unchecked Sendable {
             WHERE state IN ('remote', 'preview') AND updated_at < ?
               AND id NOT IN (SELECT asset_id FROM favourites)
               AND id NOT IN (SELECT asset_id FROM usage)
+              AND COALESCE(json_extract(remote, '$.starter'), '') != '1'
             """, [SQLValue(date)])
             return db.changes
         }
