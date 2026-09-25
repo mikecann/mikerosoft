@@ -541,3 +541,29 @@ final class FontCreditTests: XCTestCase {
         XCTAssertEqual(try library.credits(for: project).assets.map(\.id), [asset.id])
     }
 }
+
+final class ScanQueueTests: XCTestCase {
+    func testAFailedScanDoesntJamTheQueue() async throws {
+        let queue = ScanQueue()
+        let runs = LockedCounter()
+        let failing: @Sendable () async throws -> ImportScanReport = {
+            _ = runs.next()
+            // Long enough for the other two to queue up behind it.
+            try await Task.sleep(nanoseconds: 300_000_000)
+            throw AssetError.notFound("gone")
+        }
+        let first = Task { try await queue.run("f", failing) }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        let second = Task { try await queue.run("f", failing) }
+        let third = Task { try await queue.run("f", failing) }
+        for task in [first, second, third] {
+            let result = await task.result
+            XCTAssertThrowsError(try result.get())
+        }
+        // One run, then one shared follow-up for the two who asked meanwhile.
+        XCTAssertEqual(runs.next(), 3)
+
+        let report = try await queue.run("f") { ImportScanReport(folderID: "f") }
+        XCTAssertEqual(report.folderID, "f")
+    }
+}
