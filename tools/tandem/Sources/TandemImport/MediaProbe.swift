@@ -175,6 +175,9 @@ enum FileSniffer {
         var kind: MediaKind
     }
 
+    /// Formats AVFoundation can't play: Filmora's animated stickers are WebM.
+    static let unplayableExtensions: Set<String> = ["webm", "mkv", "ogg", "ogv"]
+
     /// Extensions AVFoundation opens without help.
     static let avFoundationExtensions: Set<String> = ["mov", "mp4", "m4v", "m4a", "mp3", "wav", "aif", "aiff", "aifc", "caf", "aac", "3gp"]
 

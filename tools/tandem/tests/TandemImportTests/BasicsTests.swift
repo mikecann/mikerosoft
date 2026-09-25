@@ -157,6 +157,24 @@ final class MediaCatalogTests: XCTestCase {
         XCTAssertTrue(paths.contains { $0.hasSuffix("/\(name)/source/a-camera.mov") }, "\(paths)")
     }
 
+    func testLibraryFilesFromAnotherMachineAreLookedForInThisLibrary() {
+        let library = URL(fileURLWithPath: "/Users/me/Library/Filmora")
+        let catalog = MediaCatalog(locating: MediaLocating(prober: FakeProbe(media: [:]), filmoraLibrary: library))
+        let windows = "/C:/Users/mikec/Documents/Wondershare/Wondershare Filmora/Download/Filmora/audio/6_Gundam_Dash_01_SFX/Data/Gundam Dash 01 - SFX.wav"
+        XCTAssertTrue(catalog.candidates(for: windows).map(\.path).contains("/Users/me/Library/Filmora/Download/Filmora/audio/6_Gundam_Dash_01_SFX/Data/Gundam Dash 01 - SFX.wav"))
+        let custom = "/C:/Users/mikec/Documents/Wondershare/Wondershare Filmora/CustomResource/Compound Clip 1_17/Data/Medias/x/a.webp"
+        XCTAssertTrue(catalog.candidates(for: custom).map(\.path).contains("/Users/me/Library/Filmora/CustomResource/Compound Clip 1_17/Data/Medias/x/a.webp"))
+    }
+
+    func testMissingFilesTandemCantPlayAreNotKeptOffline() async {
+        let catalog = MediaCatalog(locating: MediaLocating(prober: FakeProbe(media: [:])))
+        var report = ImportReport(source: "x", importer: "test", projectName: "X")
+        guard case .unusable = await catalog.resolve("/gone/Sticker.webm", fallback: .video(4), report: &report) else {
+            return XCTFail("a missing WebM sticker can't be relinked into something playable")
+        }
+        XCTAssertEqual(report.count(.unsupported), 1)
+    }
+
     func testLinksFilesWithMisleadingExtensions() async throws {
         let folder = try Fixtures.temporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }

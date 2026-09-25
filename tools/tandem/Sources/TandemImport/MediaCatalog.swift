@@ -16,6 +16,11 @@ public struct MediaLocating: Sendable {
     /// (Filmora keeps some library MP3s as `.cof`). The project refers to
     /// the link. Nil keeps the original path and reports it.
     public var aliasFolder: URL?
+    /// Filmora's library folder on this Mac. Library files (downloaded
+    /// sounds, elements, custom templates) saved in projects from another
+    /// machine, Windows included, are looked for here under the same
+    /// relative path.
+    public var filmoraLibrary: URL?
 
     public struct PathRewrite: Sendable, Equatable {
         public var from: String
@@ -31,13 +36,22 @@ public struct MediaLocating: Sendable {
         prober: any MediaProbing = AVFoundationProbe(),
         pathRewrites: [PathRewrite] = [],
         searchFolders: [URL] = [],
-        aliasFolder: URL? = nil
+        aliasFolder: URL? = nil,
+        filmoraLibrary: URL? = MediaLocating.defaultFilmoraLibrary
     ) {
         self.prober = prober
         self.pathRewrites = pathRewrites
         self.searchFolders = searchFolders
         self.aliasFolder = aliasFolder
+        self.filmoraLibrary = filmoraLibrary
     }
+
+    public static let defaultFilmoraLibrary = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Application Support/Wondershare Filmora Mac/ProgramData", isDirectory: true)
+
+    /// Folders inside Filmora's library whose layout is the same on every
+    /// machine.
+    static let libraryFolders = ["Download/", "CustomResource/", "Default Effects/", "Installed Effects/", "User Media/"]
 
     /// Projects from TinkerDesk, the other Mac, keep media under its home
     /// folder. This rewrite points them at the same place here.
@@ -123,6 +137,10 @@ final class MediaCatalog {
             report.add(.unsupported, "media", "\(name) can't be used: \(lastError)", at: time)
             return .unusable
         }
+        if FileSniffer.unplayableExtensions.contains((path as NSString).pathExtension.lowercased()) {
+            report.add(.unsupported, "media", "\(name) wasn't found, and Tandem couldn't play it anyway (.\((path as NSString).pathExtension)).", at: time)
+            return .unusable
+        }
         if let fallback {
             report.add(.missingMedia, "media", "\(path) wasn't found. The clips are kept offline with the length the project recorded.", at: time)
             return .offline(makeItem(path: path, key: path, probed: fallback, role: role))
@@ -137,6 +155,14 @@ final class MediaCatalog {
         var result = [URL(fileURLWithPath: path)]
         for rewrite in locating.pathRewrites where path.hasPrefix(rewrite.from) {
             result.append(URL(fileURLWithPath: rewrite.to + path.dropFirst(rewrite.from.count)))
+        }
+        if let library = locating.filmoraLibrary {
+            for folder in MediaLocating.libraryFolders {
+                if let range = path.range(of: "/" + folder) {
+                    result.append(library.appendingPathComponent(String(path[path.index(after: range.lowerBound)...])))
+                    break
+                }
+            }
         }
         let name = (path as NSString).lastPathComponent
         let fm = FileManager.default

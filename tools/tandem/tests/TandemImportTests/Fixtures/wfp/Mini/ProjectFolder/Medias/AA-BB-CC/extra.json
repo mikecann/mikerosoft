@@ -1,0 +1,25 @@
+{
+ "mediaClipsMapInfo": {},
+ "allMarkersInfo": {
+  "MAIN-TL-MAP": [
+   {
+    "name": "",
+    "position": 30000000,
+    "comments": "check this",
+    "color": 52944
+   },
+   {
+    "name": "Chapter 2",
+    "position": 120000000,
+    "comments": "",
+    "color": 1
+   }
+  ],
+  "beatDetectInfo": {
+   "X": {
+    "algorithmType": 0,
+    "level": 0
+   }
+  }
+ }
+}
