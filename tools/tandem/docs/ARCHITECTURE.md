@@ -35,8 +35,11 @@ change the code and the tests with it.
 | `TandemAPI` | `ProjectSession`, the service (status, timeline, apply, frame, clip, export...), local HTTP server, MCP tool definitions | Core, Media, Render |
 | `TandemApp` | The macOS app (SwiftUI shell, AppKit timeline and viewer) | everything |
 | `TandemCLI` | The `tandem` command, including `tandem mcp` and `tandem export` | Core, Media, Render, API |
+| `TandemAssets` | Asset library: catalogue, providers, normalising on import, copying into projects, credits (see ASSETS.md) | Core, Media, AVFoundation, ImageIO, Core Text, Lottie |
 
-Only `TandemApp` imports AppKit or SwiftUI.
+Only `TandemApp` imports AppKit or SwiftUI. One exception: the asset
+library's SVG rasteriser uses `NSImage`, the only SVG renderer macOS has,
+drawing into its own bitmap off the main thread.
 
 ## Project folder
 
