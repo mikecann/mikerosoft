@@ -47,7 +47,7 @@ public struct EDLImporter: Sendable {
 /// One EDL import in progress.
 private final class EDLRun {
     let recipe: EDLRecipe
-    let edl: EDLImporterInput
+    let edl: SegmentEDL
     let catalog: MediaCatalog
     let builder: ProjectBuilder
     var ids = ImportIDs.Allocator()
@@ -86,7 +86,7 @@ private final class EDLRun {
 
     init(recipe: EDLRecipe, locating: MediaLocating, edl: SegmentEDL, source: String) {
         self.recipe = recipe
-        self.edl = EDLImporterInput(edl: edl, source: source)
+        self.edl = edl
         self.catalog = MediaCatalog(locating: locating)
         var settings = ProjectSettings()
         if let width = recipe.width, let height = recipe.height {
@@ -221,7 +221,7 @@ private final class EDLRun {
         let adjustments = recipe.cutAdjustments ?? []
         let replacesBefore = recipe.intro?.replacesBefore
         var matched = Set<Int>()
-        for (index, segment) in edl.edl.segments.enumerated() {
+        for (index, segment) in edl.segments.enumerated() {
             if let replacesBefore, segment.start < replacesBefore - 0.000_5 { continue }
             var start = segment.start
             var end = segment.end
@@ -410,10 +410,10 @@ private final class EDLRun {
         }
         // Top-level overlays sit on the EDL's own timeline: the original
         // segments end to end, before the intro and any adjustments.
-        if let overlays = edl.edl.overlays, !overlays.isEmpty {
+        if let overlays = edl.overlays, !overlays.isEmpty {
             var original: [(start: Double, segment: SegmentEDL.Segment)] = []
             var cursor = 0.0
-            for segment in edl.edl.segments {
+            for segment in edl.segments {
                 original.append((cursor, segment))
                 cursor += segment.end - segment.start
             }
@@ -666,13 +666,12 @@ private final class EDLRun {
             }
             guard end > start else { continue }
             let duration = end - start
-            var audio = AudioProperties(
+            let audio = AudioProperties(
                 gainDB: music.gainDB ?? 0,
                 fadeIn: start == .zero ? .zero : min(crossfade, duration),
                 fadeOut: isLast ? min(Time(seconds: music.endFadeOut ?? 0), duration) : min(crossfade, duration),
                 normalizeTo: music.normalizeTo
             )
-            if i == 0 && start == .zero { audio.fadeIn = .zero }
             let clip = Clip(
                 id: ids.make("clip", key: "music:\(i):\(path)"),
                 name: cue.section.name,
@@ -774,10 +773,4 @@ private final class EDLRun {
         stats["media"] = Double(project.media.count)
         builder.report.stats = stats
     }
-}
-
-/// The EDL being imported and where it came from.
-private struct EDLImporterInput {
-    var edl: SegmentEDL
-    var source: String
 }

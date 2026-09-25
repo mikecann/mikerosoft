@@ -370,6 +370,8 @@ private let decisionModelsRecipeJSON = #"""
     ]
   },
   "notes": [
+    "Frame rate 30, the footage's own. v14 was a 25 fps Filmora project because build_wfp.py cloned the AI Gateway template.",
+    "No audio fades at the camera and screen switches: in v14 those let about half a second of cut-out voice play under the next clip. Voice cuts stay clean.",
     "Takes: the three record-it sessions. EDL time is main-camera.mov, the sessions end to end, so each take starts at its session offset (build_wfp.py CAM_SESSIONS). A session's screen and camera share a clock (use_originals.py, intro.py).",
     "Voice levelled to -28.74 LUFS, the target build_wfp.py gave Filmora's LoudnessGain. level_voice.py's per-clip smoothing needed audio analysis and isn't reproduced.",
     "PiP and camera grade copied from the AI Gateway template clips build_wfp.py cloned: scale 50 at (0.890, 0.800); HSL red -17, purple -21, blue -3; vignette -34; black level +7.",
