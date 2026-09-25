@@ -390,11 +390,9 @@ public final class AssetLibrary: @unchecked Sendable {
             throw AssetError.notFound("preview for \(asset.name)")
         }
         let file = try await previews.fetch(remote)
-        if asset.state < .preview {
-            var updated = asset
-            updated.state = .preview
-            try catalog.upsert(updated)
-        }
+        // Only a remote asset moves to preview; a fetch that finished during
+        // the download must not be undone.
+        try catalog.markPreviewed(id)
         return file
     }
 
@@ -578,8 +576,10 @@ extension AssetLibrary {
                 updated.sha256 = nil
             }
             updated.loudness = nil
+            updated.updatedAt = Date()
+            // Skip it if something (a fetch or a use) changed it meanwhile.
+            guard try catalog.replace(updated, ifUpdatedAt: asset.updatedAt) else { continue }
             try? FileManager.default.removeItem(at: folder)
-            try catalog.upsert(updated)
             evicted.append(asset.id)
         }
         return evicted

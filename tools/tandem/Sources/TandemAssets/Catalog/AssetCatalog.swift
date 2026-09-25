@@ -264,6 +264,27 @@ public final class AssetCatalog: @unchecked Sendable {
         }
     }
 
+    /// Writes `asset` only if the stored row still has the `updatedAt` it
+    /// was read with, so a change made in the meantime (a fetch finishing)
+    /// isn't overwritten by a stale copy. Returns whether it wrote.
+    @discardableResult
+    public func replace(_ asset: Asset, ifUpdatedAt previous: Date) throws -> Bool {
+        try locked {
+            let sets = Self.assetColumns.dropFirst().map { "\($0) = ?" }.joined(separator: ", ")
+            var values = Array(Self.bindings(for: asset).dropFirst())
+            values.append(.text(asset.id))
+            values.append(SQLValue(previous))
+            try db.run("UPDATE assets SET \(sets) WHERE id = ? AND updated_at = ?", values)
+            return db.changes > 0
+        }
+    }
+
+    /// Marks a remote asset as having a cached preview. Leaves assets that
+    /// have got further (downloaded or normalised) alone.
+    public func markPreviewed(_ id: String) throws {
+        try locked { try db.run("UPDATE assets SET state = 'preview' WHERE id = ? AND state = 'remote'", [.text(id)]) }
+    }
+
     /// Records assets a provider returned without losing anything local:
     /// new ones are added as they are, known ones get fresh metadata
     /// (names, tags, preview links, popularity) but keep their state, files

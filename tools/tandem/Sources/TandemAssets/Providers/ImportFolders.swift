@@ -250,7 +250,8 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 var kept = gone
                 kept.state = .remote
                 kept.remote["missing"] = "1"
-                try catalog.upsert(kept)
+                kept.updatedAt = Date()
+                try catalog.replace(kept, ifUpdatedAt: gone.updatedAt)
             } else {
                 try catalog.delete(id: gone.id)
             }

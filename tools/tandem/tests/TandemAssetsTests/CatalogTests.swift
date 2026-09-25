@@ -337,3 +337,40 @@ final class SearchAsYouTypeTests: XCTestCase {
         XCTAssertEqual(SearchWords.variants("go"), ["go"])
     }
 }
+
+final class StaleWriteTests: XCTestCase {
+    func testConditionalReplaceRefusesStaleCopies() throws {
+        let catalog = try makeCatalog()
+        let original = sampleAsset(id: "a", name: "Original", state: .remote)
+        try catalog.upsert(original)
+        let read = try XCTUnwrap(catalog.asset(id: "import:a"))
+        // Something else finishes first.
+        var newer = read
+        newer.state = .normalised
+        newer.updatedAt = read.updatedAt.addingTimeInterval(5)
+        try catalog.upsert(newer)
+
+        var stale = read
+        stale.name = "Stale"
+        XCTAssertFalse(try catalog.replace(stale, ifUpdatedAt: read.updatedAt))
+        XCTAssertEqual(try catalog.asset(id: "import:a")?.state, .normalised)
+        XCTAssertEqual(try catalog.asset(id: "import:a")?.name, "Original")
+
+        var fresh = try XCTUnwrap(catalog.asset(id: "import:a"))
+        let stamp = fresh.updatedAt
+        fresh.name = "Renamed"
+        XCTAssertTrue(try catalog.replace(fresh, ifUpdatedAt: stamp))
+        XCTAssertEqual(try catalog.asset(id: "import:a")?.name, "Renamed")
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "renamed")).count, 1)
+    }
+
+    func testMarkingAPreviewNeverUndoesAFetch() throws {
+        let catalog = try makeCatalog()
+        try catalog.upsert(sampleAsset(id: "done", name: "Done", state: .normalised))
+        try catalog.upsert(sampleAsset(id: "new", name: "New", state: .remote))
+        try catalog.markPreviewed("import:done")
+        try catalog.markPreviewed("import:new")
+        XCTAssertEqual(try catalog.asset(id: "import:done")?.state, .normalised)
+        XCTAssertEqual(try catalog.asset(id: "import:new")?.state, .preview)
+    }
+}
