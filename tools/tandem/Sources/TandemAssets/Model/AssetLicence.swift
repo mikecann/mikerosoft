@@ -54,6 +54,16 @@ public struct AssetLicence: Codable, Equatable, Sendable {
     }
 }
 
+extension AssetLicence {
+    /// True when two snapshots record the same terms, whenever they were
+    /// taken.
+    public func hasSameTerms(as other: AssetLicence) -> Bool {
+        var copy = other
+        copy.capturedAt = capturedAt
+        return copy == self
+    }
+}
+
 /// Classifying licences by their SPDX identifier.
 public enum LicencePolicy {
     /// Licences that forbid commercial use or force share-alike on the video.

@@ -45,3 +45,14 @@ final class LicenceTests: XCTestCase {
         XCTAssertEqual(LicencePolicy.creativeCommonsURL(spdx: "CC0-1.0")?.absoluteString, "https://creativecommons.org/publicdomain/zero/1.0/")
     }
 }
+
+final class LicenceTermsTests: XCTestCase {
+    func testSameTermsIgnoresWhenTheyWereTaken() {
+        let a = AssetLicence(name: "Mixkit", licenceClass: .noCredit, capturedAt: Date(timeIntervalSince1970: 1))
+        var b = a
+        b.capturedAt = Date(timeIntervalSince1970: 2)
+        XCTAssertTrue(a.hasSameTerms(as: b))
+        b.licenceClass = .subscription
+        XCTAssertFalse(a.hasSameTerms(as: b))
+    }
+}

@@ -304,9 +304,11 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
             // Skip rows changed meanwhile; the next scan catches them.
             guard try catalog.replace(asset, ifUpdatedAt: stamp) else { continue }
             // Assets already used or fetched get a new snapshot, so the
-            // credits follow the corrected note.
-            if try catalog.licence(for: asset.id) != nil {
-                try catalog.addLicence(try await licence(for: asset), for: asset.id)
+            // credits follow the corrected note (unless the terms match the
+            // latest snapshot already).
+            if let latest = try catalog.licence(for: asset.id) {
+                let current = try await licence(for: asset)
+                if !latest.hasSameTerms(as: current) { try catalog.addLicence(current, for: asset.id) }
             }
         }
 
