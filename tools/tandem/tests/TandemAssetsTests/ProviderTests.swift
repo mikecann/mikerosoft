@@ -609,3 +609,16 @@ final class LockedCounter: @unchecked Sendable {
         return count
     }
 }
+
+final class IconifyPagingTests: XCTestCase {
+    func testPagesAskForSeparateWindows() async throws {
+        let transport = FixtureTransport()
+        try transport.on("api.iconify.design/search", fixture: "iconify_search_home.json")
+        let provider = IconifyProvider(environment: makeEnvironment(transport))
+        _ = try await provider.search(ProviderQuery(text: "home", page: 1, perPage: 16))
+        _ = try await provider.search(ProviderQuery(text: "home", page: 2, perPage: 16))
+        let urls = transport.requests.compactMap { $0.url?.absoluteString }
+        XCTAssertTrue(urls[0].contains("limit=32") && urls[0].contains("start=0"), urls[0])
+        XCTAssertTrue(urls[1].contains("limit=32") && urls[1].contains("start=32"), urls[1])
+    }
+}

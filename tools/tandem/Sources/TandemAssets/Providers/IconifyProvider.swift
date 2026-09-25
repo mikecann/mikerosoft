@@ -77,12 +77,14 @@ public final class IconifyProvider: AssetProvider, @unchecked Sendable {
     public func search(_ query: ProviderQuery) async throws -> [Asset] {
         guard query.wants(.icon), !query.text.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
         let perPage = max(1, query.perPage)
-        // Ask for more than a page: some results come from excluded sets.
+        // Ask for more than a page, since some results come from excluded
+        // sets, and page through Iconify's results a whole window at a time
+        // so pages never overlap.
         let limit = min(999, max(32, perPage * 2))
         let url = URL(string: "\(Self.api)/search")!.adding([
             URLQueryItem(name: "query", value: query.text),
             URLQueryItem(name: "limit", value: String(limit)),
-            URLQueryItem(name: "start", value: String(max(0, query.page - 1) * perPage))
+            URLQueryItem(name: "start", value: String(max(0, query.page - 1) * limit))
         ])
         let response = try await http.getJSON(SearchResponse.self, url)
         let sets = response.collections ?? [:]
