@@ -79,7 +79,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 - [ ] Asset library: local index (SQLite FTS5), packs, browser with hover previews, copy into the project on use
 - [ ] Sources: Freesound (CC0), Pexels and Pixabay, ElevenLabs sound effects, LottieFiles, Google Fonts; paid libraries through a watched folder
-- [ ] Title and template pack: plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
+- [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
 - [ ] Stickers: Lottie and HEVC with alpha
 - [ ] Portrait short layout (screen top, camera bottom, captions between)
 - [ ] Segment render cache for fast re-exports

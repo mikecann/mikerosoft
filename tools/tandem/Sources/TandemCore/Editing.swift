@@ -42,6 +42,8 @@ public enum Editing {
             try closeGap(&project, trackID: trackID, at: at, &context)
         case .insertTime(let at, let duration, let trackIDs):
             try insertTime(&project, at: at, duration: duration, trackIDs: trackIDs, &context)
+        case .insertTemplate(let template, let at, let values, let mode):
+            try insertTemplate(&project, template, at: at, values: values ?? [:], mode: mode ?? .place, &context)
         case .blade(let at, let trackIDs, let clipIDs):
             try blade(&project, at: at, trackIDs: trackIDs, clipIDs: clipIDs, &context)
         case .trim(let clipID, let edge, let to, let ripple, let includeLinked):
