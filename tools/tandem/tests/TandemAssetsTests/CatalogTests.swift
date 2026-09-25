@@ -201,7 +201,7 @@ final class CatalogTests: XCTestCase {
         try catalog.setFavourite("pexels:fav", true)
         try catalog.recordUsage(AssetUsage(assetID: "pexels:used", projectID: "prj"))
         let removed = try catalog.pruneRemote(notUpdatedSince: Date(timeIntervalSince1970: 2_000))
-        XCTAssertEqual(removed, 1)
+        XCTAssertEqual(removed, ["pexels:stale"])
         XCTAssertEqual(Set(try catalog.search(AssetQuery()).map(\.providerID)), ["fav", "used", "local"])
     }
 

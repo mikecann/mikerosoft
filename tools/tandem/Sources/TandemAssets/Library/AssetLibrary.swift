@@ -140,8 +140,21 @@ public final class AssetLibrary: @unchecked Sendable {
 
     /// `<root>/<provider>/<id>/`.
     public func folder(for asset: Asset) -> URL {
-        root.appendingPathComponent(asset.provider, isDirectory: true)
-            .appendingPathComponent(Self.folderName(for: asset.providerID), isDirectory: true)
+        folder(provider: asset.provider, providerID: asset.providerID)
+    }
+
+    func folder(provider: String, providerID: String) -> URL {
+        root.appendingPathComponent(provider, isDirectory: true)
+            .appendingPathComponent(Self.folderName(for: providerID), isDirectory: true)
+    }
+
+    /// Deletes what the library made for assets whose catalogue rows are
+    /// gone, so nothing is left on disk that nothing points to.
+    func deleteFolders(of ids: [String]) {
+        for id in ids {
+            guard let parts = Asset.parseID(id) else { continue }
+            try? FileManager.default.removeItem(at: folder(provider: parts.provider, providerID: parts.providerID))
+        }
     }
 
     /// An asset folder's path relative to the root, as stored in the catalogue.
@@ -331,7 +344,17 @@ public final class AssetLibrary: @unchecked Sendable {
             asset.size = size
         }
 
-        let result = try await normaliser.normalise(original, into: folder, fallbacks: extras)
+        let result: NormalisedAsset
+        do {
+            result = try await normaliser.normalise(original, into: folder, fallbacks: extras)
+        } catch {
+            // Keep what was downloaded, so the next fetch retries the
+            // normalising without downloading again.
+            asset.state = .original
+            asset.updatedAt = Date()
+            try? catalog.upsert(asset)
+            throw error
+        }
         if !result.fonts.isEmpty, normaliser.registersFonts, !extras.isEmpty {
             await FontInstaller.register(extras)
         }
@@ -470,17 +493,23 @@ public final class AssetLibrary: @unchecked Sendable {
         if let licence { try licence.write(in: folder) }
         let record = AssetCatalog.ImportFolderRecord(id: ImportFolderProvider.folderID(for: folder), path: folder.path, name: name ?? folder.lastPathComponent)
         try catalog.saveImportFolder(record)
-        return try await importProvider().scan(record)
+        let report = try await importProvider().scan(record)
+        deleteFolders(of: report.removedIDs)
+        return report
     }
 
     /// Stops watching a folder and forgets its assets, except any used in a
     /// project or favourited (their licence history stays either way).
     public func removeImportFolder(_ id: String) throws {
         let pinned = try catalog.pinnedIDs()
+        var removed: [String] = []
         for asset in try catalog.search(AssetQuery(providers: ["import"], limit: Int.max)) where asset.remote["folder"] == id {
-            if !pinned.contains(asset.id) { try catalog.delete(id: asset.id) }
+            guard !pinned.contains(asset.id) else { continue }
+            try catalog.delete(id: asset.id)
+            removed.append(asset.id)
         }
         try catalog.removeImportFolder(id: id)
+        deleteFolders(of: removed)
     }
 
     /// Rescans every import folder. A folder that fails (an unplugged
@@ -490,7 +519,9 @@ public final class AssetLibrary: @unchecked Sendable {
         var reports: [ImportScanReport] = []
         for record in try catalog.importFolders() {
             do {
-                reports.append(try await provider.scan(record))
+                let report = try await provider.scan(record)
+                deleteFolders(of: report.removedIDs)
+                reports.append(report)
             } catch {
                 var failed = ImportScanReport(folderID: record.id)
                 failed.error = (error as? LocalizedError)?.errorDescription ?? "\(error)"
@@ -510,7 +541,9 @@ public final class AssetLibrary: @unchecked Sendable {
             Task {
                 var reports: [ImportScanReport] = []
                 for record in records where roots.contains(record.path) {
-                    if let report = try? await provider.scan(record) { reports.append(report) }
+                    guard let report = try? await provider.scan(record) else { continue }
+                    self.deleteFolders(of: report.removedIDs)
+                    reports.append(report)
                 }
                 if !reports.isEmpty { onChange(reports) }
             }
@@ -555,7 +588,10 @@ public final class AssetLibrary: @unchecked Sendable {
     @discardableResult
     public func prune(olderThan age: TimeInterval = 30 * 24 * 3600) throws -> Int {
         previews.trim()
-        return try catalog.pruneRemote(notUpdatedSince: Date().addingTimeInterval(-age))
+        let removed = try catalog.pruneRemote(notUpdatedSince: Date().addingTimeInterval(-age))
+        // A remote row can still have a folder from a fetch that failed.
+        deleteFolders(of: removed)
+        return removed.count
     }
 }
 

@@ -459,3 +459,41 @@ final class StarterProtectionTests: XCTestCase {
         XCTAssertEqual(try library.count(AssetQuery()), 90)
     }
 }
+
+final class OrphanTests: XCTestCase {
+    func testDeletedImportFilesTakeTheirNormalisedCopiesWithThem() async throws {
+        let imports = tempFolder("orphans")
+        try Generated.sineWAV(at: imports.appendingPathComponent("gone.wav"), seconds: 0.2, sampleRate: 44_100)
+        let library = try makeLibrary()
+        try await library.addImportFolder(imports)
+        let gone = try XCTUnwrap(library.search(AssetQuery(text: "gone")).first)
+        let fetched = try await library.fetch(gone.id)
+        let folder = library.folder(for: fetched)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("normalised.wav").path))
+
+        try FileManager.default.removeItem(at: imports.appendingPathComponent("gone.wav"))
+        let reports = try await library.rescanImportFolders()
+
+        XCTAssertEqual(reports.first?.removedIDs, [gone.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    func testAFailedNormaliseKeepsTheDownload() async throws {
+        let transport = FixtureTransport()
+        // Iconify serves something that isn't an SVG.
+        transport.on("api.iconify.design/mdi/check-bold.svg", data: Data("not an image".utf8))
+        let library = try makeLibrary(transport)
+        try library.installStarterContent()
+        do {
+            _ = try await library.fetch("iconify:mdi:check-bold")
+            XCTFail("expected normalising to fail")
+        } catch {}
+        let asset = try XCTUnwrap(library.asset("iconify:mdi:check-bold"))
+        XCTAssertEqual(asset.state, .original)
+        XCTAssertEqual(asset.files.original, "original.svg")
+        // The retry doesn't download again.
+        let before = transport.requests.count
+        _ = try? await library.fetch("iconify:mdi:check-bold")
+        XCTAssertEqual(transport.requests.count, before)
+    }
+}

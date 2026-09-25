@@ -648,19 +648,21 @@ public final class AssetCatalog: @unchecked Sendable {
 
     /// Deletes rows that only came from provider searches, weren't
     /// refreshed since `date`, and aren't favourites, used anywhere or part
-    /// of the starter set.
-    /// Returns how many went.
+    /// of the starter set. Returns the IDs removed.
     @discardableResult
-    public func pruneRemote(notUpdatedSince date: Date) throws -> Int {
+    public func pruneRemote(notUpdatedSince date: Date) throws -> [String] {
         try locked {
-            try db.run("""
-            DELETE FROM assets
-            WHERE state IN ('remote', 'preview') AND updated_at < ?
-              AND id NOT IN (SELECT asset_id FROM favourites)
-              AND id NOT IN (SELECT asset_id FROM usage)
-              AND COALESCE(json_extract(remote, '$.starter'), '') != '1'
-            """, [SQLValue(date)])
-            return db.changes
+            try db.transaction {
+                let condition = """
+                WHERE state IN ('remote', 'preview') AND updated_at < ?
+                  AND id NOT IN (SELECT asset_id FROM favourites)
+                  AND id NOT IN (SELECT asset_id FROM usage)
+                  AND COALESCE(json_extract(remote, '$.starter'), '') != '1'
+                """
+                let ids = try db.query("SELECT id FROM assets \(condition)", [SQLValue(date)]).compactMap { $0.string("id") }
+                try db.run("DELETE FROM assets \(condition)", [SQLValue(date)])
+                return ids
+            }
         }
     }
 }

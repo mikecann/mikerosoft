@@ -146,6 +146,9 @@ public struct ImportScanReport: Codable, Equatable, Sendable {
     public var unreadable: [String] = []
     /// Why the whole scan failed, when it did (from `rescanImportFolders`).
     public var error: String?
+    /// Assets deleted from the catalogue because their file went, so the
+    /// library can delete what it made from them.
+    public var removedIDs: [String] = []
 
     public init(folderID: String) {
         self.folderID = folderID
@@ -319,6 +322,7 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                     try catalog.replace(kept, ifUpdatedAt: gone.updatedAt)
                 } else {
                     try catalog.delete(id: gone.id)
+                    report.removedIDs.append(gone.id)
                 }
                 report.removed += 1
             }
@@ -469,26 +473,56 @@ final class ProblemList: @unchecked Sendable {
 public final class ImportFolderWatcher: @unchecked Sendable {
     private var stream: FSEventStreamRef?
     private let queue = DispatchQueue(label: "tandem.assets.import-watcher")
-    private let handler: @Sendable ([String]) -> Void
-    /// Watched folders as given, keyed by their real path. FSEvents reports
-    /// real paths (`/private/var/...` for `/var/...`), so matching needs both.
-    private var roots: [(real: String, given: String)] = []
+
+    /// What the FSEvents callback reaches. The stream retains it, so a
+    /// callback already running when the watcher goes away still has
+    /// something valid to call; it never points back at the watcher.
+    private final class Relay: @unchecked Sendable {
+        /// Watched folders as given, keyed by their real path. FSEvents
+        /// reports real paths (`/private/var/...` for `/var/...`).
+        let roots: [(real: String, given: String)]
+        let handler: @Sendable ([String]) -> Void
+
+        init(roots: [(real: String, given: String)], handler: @escaping @Sendable ([String]) -> Void) {
+            self.roots = roots
+            self.handler = handler
+        }
+
+        func deliver(_ paths: [String]) {
+            // The licence note changing matters too, so every file counts.
+            let touched = roots.filter { root in paths.contains { $0 == root.real || $0.hasPrefix(root.real + "/") } }.map(\.given)
+            guard !touched.isEmpty else { return }
+            handler(touched)
+        }
+    }
 
     /// Starts watching `paths`. `handler` gets the watched folders (as
     /// passed in) that saw changes, at most every `latency` seconds.
     public init(paths: [String], latency: TimeInterval = 1, handler: @escaping @Sendable ([String]) -> Void) {
-        self.handler = handler
         guard !paths.isEmpty else { return }
-        roots = paths.map { (Self.realPath($0), $0) }
-        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
+        let relay = Relay(roots: paths.map { (Self.realPath($0), $0) }, handler: handler)
+        var context = FSEventStreamContext(
+            version: 0,
+            info: Unmanaged.passUnretained(relay).toOpaque(),
+            retain: { info in
+                guard let info else { return nil }
+                _ = Unmanaged<Relay>.fromOpaque(info).retain()
+                return info
+            },
+            release: { info in
+                guard let info else { return }
+                Unmanaged<Relay>.fromOpaque(info).release()
+            },
+            copyDescription: nil
+        )
         let callback: FSEventStreamCallback = { _, info, count, eventPaths, _, _ in
             guard let info else { return }
-            let watcher = Unmanaged<ImportFolderWatcher>.fromOpaque(info).takeUnretainedValue()
+            let relay = Unmanaged<Relay>.fromOpaque(info).takeUnretainedValue()
             let changed = (unsafeBitCast(eventPaths, to: NSArray.self) as? [String]) ?? []
-            watcher.deliver(Array(changed.prefix(count)))
+            relay.deliver(Array(changed.prefix(count)))
         }
         let flags = UInt32(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents)
-        let watched = roots.map(\.real) as CFArray
+        let watched = relay.roots.map(\.real) as CFArray
         stream = FSEventStreamCreate(nil, callback, &context, watched, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency, flags)
         if let stream {
             FSEventStreamSetDispatchQueue(stream, queue)
@@ -503,13 +537,6 @@ public final class ImportFolderWatcher: @unchecked Sendable {
         guard let resolved = realpath(path, nil) else { return path }
         defer { free(resolved) }
         return String(cString: resolved)
-    }
-
-    private func deliver(_ paths: [String]) {
-        // The licence note changing matters too, so every file counts.
-        let touched = roots.filter { root in paths.contains { $0 == root.real || $0.hasPrefix(root.real + "/") } }.map(\.given)
-        guard !touched.isEmpty else { return }
-        handler(touched)
     }
 
     /// Stops watching. Also happens when the watcher is released.
