@@ -377,6 +377,49 @@ final class TranscriptTests: TempFolderTestCase {
     }
 }
 
+final class EncodedMovieWriterTests: TempFolderTestCase {
+    func testKeepsTimesAndDurationsAndSkipsARepeatedTime() async throws {
+        let url = file("out.mov")
+        let writer = try EncodedMovieWriter(url: url, settings: .init(width: 64, height: 64, timescale: 600))
+        let times: [Int64] = [0, 20, 20, 50, 400]
+        for (index, time) in times.enumerated() {
+            let frame = try SyntheticMedia.makeFrame(width: 64, height: 64, index: index, pool: nil)
+            try writer.append(frame, at: CMTime(value: time, timescale: 600))
+        }
+        try await writer.finish(endTime: CMTime(value: 430, timescale: 600))
+        XCTAssertEqual(writer.framesDropped, 1)
+        let written = try await videoSampleTimes(url).map(\.value)
+        XCTAssertEqual(written, [0, 20, 50, 400])
+        let range = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)[0].load(.timeRange)
+        XCTAssertEqual(range.end, CMTime(value: 430, timescale: 600), "the last frame lasts until the end time")
+    }
+}
+
+final class PCMFillTests: XCTestCase {
+    let samples: [Float] = [0.5, -0.5, 0.25, -0.25, 1.5, -1.5]  // three stereo frames
+
+    func testInterleavedAndPlanarInt16() throws {
+        for interleaved in [true, false] {
+            let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 2, interleaved: interleaved)!
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 3)!
+            try samples.withUnsafeBufferPointer { try PCMFill.fill(buffer, from: $0.baseAddress!, frames: 3) }
+            XCTAssertEqual(buffer.frameLength, 3)
+            let data = buffer.int16ChannelData!
+            let left = interleaved ? [data[0][0], data[0][2], data[0][4]] : [data[0][0], data[0][1], data[0][2]]
+            let right = interleaved ? [data[0][1], data[0][3], data[0][5]] : [data[1][0], data[1][1], data[1][2]]
+            XCTAssertEqual(left, [16_384, 8192, 32_767], "clipped at full scale")
+            XCTAssertEqual(right, [-16_384, -8192, -32_768])
+        }
+    }
+
+    func testPlanarFloat32() throws {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 2)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 3)!
+        try samples.withUnsafeBufferPointer { try PCMFill.fill(buffer, from: $0.baseAddress!, frames: 3) }
+        XCTAssertEqual(Array(UnsafeBufferPointer(start: buffer.floatChannelData![1], count: 3)), [-0.5, -0.25, -1.5])
+    }
+}
+
 final class SpeechEnvelopeTests: XCTestCase {
     func testWordEdgesMoveInToTheVoice() {
         // 1 s quiet, 1 s voice, 1 s quiet, 1 s voice at 16 kHz.

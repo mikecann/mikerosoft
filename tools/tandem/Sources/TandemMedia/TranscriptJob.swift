@@ -164,30 +164,57 @@ final class AnalyzerFeed: @unchecked Sendable {
         }
         buffer.frameLength = AVAudioFrameCount(frames)
         try pending.withUnsafeBufferPointer { samples in
-            try Self.convert(samples.baseAddress!, count: take, into: buffer)
+            try PCMFill.fill(buffer, from: samples.baseAddress!, frames: frames)
         }
         pending.removeFirst(take)
         pendingStart = pending.isEmpty ? nil : start + CMTime(value: CMTimeValue(frames), timescale: CMTimeScale(format.sampleRate))
         return AnalyzerInput(buffer: buffer, bufferStartTime: start)
     }
 
-    static func convert(_ samples: UnsafePointer<Float>, count: Int, into buffer: AVAudioPCMBuffer) throws {
+}
+
+/// Fills a PCM buffer (Int16 or Float32, interleaved or not) from
+/// interleaved float samples.
+enum PCMFill {
+    static func fill(_ buffer: AVAudioPCMBuffer, from samples: UnsafePointer<Float>, frames: Int) throws {
+        let channels = Int(buffer.format.channelCount)
+        let count = frames * channels
+        guard frames <= Int(buffer.frameCapacity) else { throw MediaError.failed("Speech buffer too small") }
+        // One channel or interleaved: a single run of samples. Otherwise each
+        // channel gets every `channels`-th sample.
+        let planar = !buffer.format.isInterleaved && channels > 1
         switch buffer.format.commonFormat {
         case .pcmFormatInt16:
-            guard let destination = buffer.int16ChannelData?[0] else { throw MediaError.failed("Speech buffer has no data") }
-            var clipped = [Float](repeating: 0, count: count)
+            guard let destination = buffer.int16ChannelData else { throw MediaError.failed("Speech buffer has no data") }
+            var scaled = [Float](repeating: 0, count: count)
             var low: Float = -1
             var high: Float = 32767 / 32768
-            vDSP_vclip(samples, 1, &low, &high, &clipped, 1, vDSP_Length(count))
+            vDSP_vclip(samples, 1, &low, &high, &scaled, 1, vDSP_Length(count))
             var scale: Float = 32768
-            vDSP_vsmul(clipped, 1, &scale, &clipped, 1, vDSP_Length(count))
-            vDSP_vfixr16(clipped, 1, destination, 1, vDSP_Length(count))
+            vDSP_vsmul(scaled, 1, &scale, &scaled, 1, vDSP_Length(count))
+            scaled.withUnsafeBufferPointer { source in
+                if planar {
+                    for channel in 0..<channels {
+                        vDSP_vfixr16(source.baseAddress! + channel, vDSP_Stride(channels), destination[channel], 1, vDSP_Length(frames))
+                    }
+                } else {
+                    vDSP_vfixr16(source.baseAddress!, 1, destination[0], 1, vDSP_Length(count))
+                }
+            }
         case .pcmFormatFloat32:
-            guard let destination = buffer.floatChannelData?[0] else { throw MediaError.failed("Speech buffer has no data") }
-            destination.update(from: samples, count: count)
+            guard let destination = buffer.floatChannelData else { throw MediaError.failed("Speech buffer has no data") }
+            if planar {
+                var one: Float = 1
+                for channel in 0..<channels {
+                    vDSP_vsmul(samples + channel, vDSP_Stride(channels), &one, destination[channel], 1, vDSP_Length(frames))
+                }
+            } else {
+                destination[0].update(from: samples, count: count)
+            }
         default:
             throw MediaError.failed("Unsupported speech audio format \(buffer.format)")
         }
+        buffer.frameLength = AVAudioFrameCount(frames)
     }
 }
 

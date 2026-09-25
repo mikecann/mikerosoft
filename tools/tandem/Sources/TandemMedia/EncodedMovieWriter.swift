@@ -78,10 +78,21 @@ final class EncodedMovieWriter: @unchecked Sendable {
         VTCompressionSessionInvalidate(session)
     }
 
+    /// Frames dropped because their time wasn't after the previous one's.
+    private(set) var framesDropped = 0
+
     /// Queues a frame shown from `time`. Blocks while the encoder is busy.
+    ///
+    /// A frame whose time isn't after the previous frame's (a duplicate time
+    /// in a damaged file) is dropped: VideoToolbox refuses time going
+    /// backwards, and that would fail the whole build.
     func append(_ buffer: CVPixelBuffer, at time: CMTime) throws {
         try check()
         if let pending {
+            guard time > pending.time else {
+                framesDropped += 1
+                return
+            }
             try encode(pending.buffer, at: pending.time, duration: time - pending.time)
         }
         pending = (buffer, time)
