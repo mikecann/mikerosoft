@@ -80,6 +80,14 @@ no forks or branches inside a project.
 - A camera file's colour grade lives on the media (`MediaItem.look`), so every
   clip from that file gets it. Clip effects come after the look.
 - Keyframe times are relative to the clip start and move with the clip.
+- Adding a field that matters means bumping `Project.currentSchemaVersion`
+  (with a `ProjectFile.migrate` step if old files need it). Lenient decoding
+  lets an older build open a newer file, and it would silently drop the new
+  field when it saves; the version check makes it refuse instead.
+- Backups live in `.tandem/backups/`: one at most every minute of saving,
+  everything from the last hour, one per ten minutes for a day, one per day
+  for 30 days (`BackupPolicy`). Exports only replace earlier Tandem exports
+  (the ones with a `.tandem` snapshot beside them).
 
 ## Editing
 

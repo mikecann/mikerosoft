@@ -132,7 +132,7 @@ final class ProjectSessionTests: XCTestCase {
         session.autosaveDelay = 3600
         let service = TandemService(session: session, mode: .hosted, analysis: FakeAnalysis(), renderer: FakeRenderer())
         XCTAssertEqual(try service.undo(expectedRevision: nil).label, "Cut")
-        try service.apply(ApplyRequest(label: "Marker", commands: [.addMarker(marker: Marker(id: "mk_after", time: t(3), name: "After"))]), context: CallContext(author: "claude"))
+        _ = try service.apply(ApplyRequest(label: "Marker", commands: [.addMarker(marker: Marker(id: "mk_after", time: t(3), name: "After"))]), context: CallContext(author: "claude"))
         let expected = session.coordinator.project
         service.shutdown()
         try FileManager.default.removeItem(at: ProjectSession.lockURL(for: url))

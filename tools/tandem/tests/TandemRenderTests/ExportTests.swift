@@ -274,6 +274,28 @@ final class ExportTests: XCTestCase {
         XCTAssertGreaterThan(size, 1_000)
     }
 
+    func testOnlyReplacesEarlierTandemExports() async throws {
+        let media = try TestMedia()
+        _ = try await media.movie("red.mov", seconds: 1, draw: { TestMedia.fill($1, 1, 0, 0) })
+        let clip = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_r", "red.mov", seconds: 1)])
+        let context = RenderContext(project: project, folder: media.projectFolder)
+        // Someone else's render at the path: refused, and left alone.
+        let foreign = media.folder.appendingPathComponent("Filmora render.mp4")
+        try Data("not ours".utf8).write(to: foreign)
+        do {
+            _ = try await Exporter(context: context, preset: preset(loudness: nil), output: foreign).run()
+            XCTFail("expected an existing file that isn't a Tandem export to be refused")
+        } catch {
+            XCTAssertTrue("\(error)".contains("isn't a Tandem export"), "\(error)")
+        }
+        XCTAssertEqual(try Data(contentsOf: foreign), Data("not ours".utf8))
+        // Our own export, snapshot and all, can be replaced.
+        let ours = media.folder.appendingPathComponent("review.mp4")
+        _ = try await Exporter(context: context, preset: preset(loudness: nil), output: ours).run()
+        _ = try await Exporter(context: context, preset: preset(loudness: nil), output: ours).run()
+    }
+
     func testCancellingStopsAndRemovesTheFile() async throws {
         let media = try TestMedia()
         try await media.movie("long.mov", seconds: 4, draw: { TestMedia.drawIndex($0, $1) }, sound: { i in (i / 6_000) % 2 == 0 ? 0.3 : 0.01 })

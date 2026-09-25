@@ -77,6 +77,14 @@ final class ExportPipeline: @unchecked Sendable {
         if let reason = RenderOutputs.protectedReason(output, project: context.project, folder: context.folder) {
             throw RenderError.export("\(reason); export somewhere else")
         }
+        // Re-exporting over an earlier Tandem export is normal, and those
+        // have their snapshot beside them. Anything else at that path (an
+        // old Filmora render, a download) isn't ours to replace.
+        let fm = FileManager.default
+        let snapshot = output.appendingPathExtension(ProjectFile.fileExtension)
+        if fm.fileExists(atPath: output.path) && !fm.fileExists(atPath: snapshot.path) {
+            throw RenderError.export("\(output.lastPathComponent) already exists and isn't a Tandem export; pick another name or move it first")
+        }
     }
 
     func run() async throws -> ExportResult {

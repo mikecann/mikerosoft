@@ -130,3 +130,36 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(journal.entries(after: 0).map(\.revision), [])
     }
 }
+
+final class BackupPolicyTests: XCTestCase {
+    func testThinsOutOlderBackups() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func ago(_ seconds: Double) -> Date { now.addingTimeInterval(-seconds) }
+        // Oldest first: two in one old day, one too old, a burst from
+        // yesterday afternoon in the same ten minutes, and the last hour.
+        let dates = [
+            ago(40 * 86_400),          // 0: older than 30 days
+            ago(5 * 86_400 + 100),     // 1: same day as 2, older
+            ago(5 * 86_400),           // 2: newest that day
+            ago(7200 + 120),           // 3: same ten minutes as 4
+            ago(7200 + 60),            // 4: newest in its ten minutes
+            ago(1800),                 // 5: last hour
+            ago(600),                  // 6: last hour
+            ago(60)                    // 7: last hour
+        ]
+        let kept = BackupPolicy.keep(dates, now: now)
+        XCTAssertEqual(kept, [2, 4, 5, 6, 7])
+    }
+
+    func testAutosaveDoesNotBackUpEverySave() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-backup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("Video.tandem")
+        let project = Project.standard(name: "Video")
+        for revision in 0..<5 {
+            try ProjectFile.save(project, revision: revision, to: url)
+        }
+        XCTAssertEqual(ProjectFile.backups(of: url).count, 1, "one backup within the first minute, not one per save")
+    }
+}

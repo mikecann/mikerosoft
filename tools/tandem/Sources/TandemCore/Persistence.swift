@@ -28,7 +28,11 @@ public enum ProjectFile {
         return (migrated, envelope.revision)
     }
 
-    public static func save(_ project: Project, revision: Int, to url: URL, keepBackups: Int = 20) throws {
+    /// Saves atomically, keeping the previous file as a backup. With no
+    /// `keepBackups`, backups follow `BackupPolicy`: autosave writes every
+    /// second or so, so a backup is only taken when the newest is a minute
+    /// old, and older ones thin out over time.
+    public static func save(_ project: Project, revision: Int, to url: URL, keepBackups: Int? = nil) throws {
         let data = try encoder().encode(Envelope(revision: revision, project: project))
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path) {
@@ -64,22 +68,39 @@ public enum ProjectFile {
         try? FileManager.default.removeItem(at: undoHistoryURL(for: projectURL))
     }
 
-    private static func backup(_ url: URL, keep: Int) throws {
+    private static func backup(_ url: URL, keep: Int?, now: Date = Date()) throws {
         let fm = FileManager.default
         let folder = supportFolder(for: url).appendingPathComponent("backups", isDirectory: true)
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        let stamp = ISO8601DateFormatter.backupStamp.string(from: Date())
         let name = url.deletingPathExtension().lastPathComponent
+        if keep == nil, let newest = backups(of: url).last, let date = backupDate(newest.lastPathComponent, of: name),
+           now.timeIntervalSince(date) < BackupPolicy.minimumSpacing {
+            return
+        }
+        let stamp = ISO8601DateFormatter.backupStamp.string(from: now)
         let target = folder.appendingPathComponent("\(name) \(stamp).\(fileExtension)")
         if !fm.fileExists(atPath: target.path) {
             try fm.copyItem(at: url, to: target)
         }
         let existing = backups(of: url)
-        if existing.count > keep {
-            for old in existing.prefix(existing.count - keep) {
-                try? fm.removeItem(at: old)
-            }
+        let doomed: [URL]
+        if let keep {
+            doomed = existing.count > keep ? Array(existing.prefix(existing.count - keep)) : []
+        } else {
+            let dates = existing.map { backupDate($0.lastPathComponent, of: name) ?? now }
+            let kept = BackupPolicy.keep(dates, now: now)
+            doomed = existing.enumerated().filter { !kept.contains($0.offset) }.map(\.element)
         }
+        for old in doomed {
+            try? fm.removeItem(at: old)
+        }
+    }
+
+    /// When a backup was taken, from its file name.
+    static func backupDate(_ fileName: String, of name: String) -> Date? {
+        guard isBackup(fileName, of: name) else { return nil }
+        let stamp = String(fileName.dropFirst(name.count + 1).dropLast(fileExtension.count + 1))
+        return ISO8601DateFormatter.backupStamp.date(from: stamp)
     }
 
     /// The backups of the project at `url` in `.tandem/backups/`, oldest
@@ -290,6 +311,42 @@ public final class FolderAnchor: @unchecked Sendable {
         var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         guard fcntl(fd, F_GETPATH, &buffer) != -1 else { return nil }
         return String(cString: buffer)
+    }
+}
+
+/// Which backups to keep: everything from the last hour, the newest in
+/// each ten minutes for the last day, the newest each day for 30 days, and
+/// never more than 300. So a morning's editing can be rolled back minute by
+/// minute and last week's by the day.
+public enum BackupPolicy {
+    /// Autosave runs a second after each edit; a backup that often would
+    /// push history out of the window within minutes.
+    public static let minimumSpacing: TimeInterval = 60
+    public static let maximum = 300
+
+    /// Indices of `dates` (oldest first) to keep at `now`.
+    public static func keep(_ dates: [Date], now: Date) -> Set<Int> {
+        var kept = Set<Int>()
+        var buckets = Set<String>()
+        // Newest first, so the first backup seen in a bucket is its newest.
+        for (index, date) in dates.enumerated().reversed() {
+            let age = now.timeIntervalSince(date)
+            let bucket: String
+            if age < 3600 {
+                bucket = "all-\(index)"
+            } else if age < 86_400 {
+                bucket = "tenMinutes-\(Int(date.timeIntervalSince1970 / 600))"
+            } else if age < 30 * 86_400 {
+                bucket = "day-\(Int(date.timeIntervalSince1970 / 86_400))"
+            } else {
+                continue
+            }
+            if buckets.insert(bucket).inserted { kept.insert(index) }
+        }
+        if kept.count > maximum {
+            for index in kept.sorted().prefix(kept.count - maximum) { kept.remove(index) }
+        }
+        return kept
     }
 }
 
