@@ -1,0 +1,186 @@
+{
+ "host": "",
+ "asset_url_pattern": "",
+ "families": [
+  "Animated Emoji"
+ ],
+ "icons": [
+  {
+   "name": "emoji_u1f600",
+   "version": 1,
+   "popularity": 881,
+   "codepoint": "1f600",
+   "unsupported_families": [],
+   "categories": [
+    "Smileys and emotions"
+   ],
+   "tags": [
+    ":smile:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u263a_fe0f",
+   "version": 1,
+   "popularity": 857,
+   "codepoint": "263a_fe0f",
+   "unsupported_families": [],
+   "categories": [
+    "Smileys and emotions"
+   ],
+   "tags": [
+    ":warm-smile:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u1f914",
+   "version": 1,
+   "popularity": 835,
+   "codepoint": "1f914",
+   "unsupported_families": [],
+   "categories": [
+    "Smileys and emotions"
+   ],
+   "tags": [
+    ":thinking-face:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u26a1",
+   "version": 1,
+   "popularity": 742,
+   "codepoint": "26a1",
+   "unsupported_families": [],
+   "categories": [
+    "Smileys and emotions"
+   ],
+   "tags": [
+    ":electricity:",
+    ":zap:",
+    ":lightning:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u1f525",
+   "version": 1,
+   "popularity": 738,
+   "codepoint": "1f525",
+   "unsupported_families": [],
+   "categories": [
+    "Smileys and emotions"
+   ],
+   "tags": [
+    ":fire:",
+    ":burn:",
+    ":lit:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u1f4af",
+   "version": 1,
+   "popularity": 737,
+   "codepoint": "1f4af",
+   "unsupported_families": [],
+   "categories": [
+    "Smileys and emotions"
+   ],
+   "tags": [
+    ":100:",
+    ":one-hundred:",
+    ":hundred:",
+    ":points:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u1f389",
+   "version": 1,
+   "popularity": 736,
+   "codepoint": "1f389",
+   "unsupported_families": [],
+   "categories": [
+    "Smileys and emotions"
+   ],
+   "tags": [
+    ":party-popper:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u1f440",
+   "version": 1,
+   "popularity": 698,
+   "codepoint": "1f440",
+   "unsupported_families": [],
+   "categories": [
+    "Smileys and emotions"
+   ],
+   "tags": [
+    ":eyes:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u1f44d",
+   "version": 1,
+   "popularity": 651,
+   "codepoint": "1f44d",
+   "unsupported_families": [],
+   "categories": [
+    "Smileys and emotions"
+   ],
+   "tags": [
+    ":thumbs-up:",
+    ":+1:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u1f680",
+   "version": 1,
+   "popularity": 167,
+   "codepoint": "1f680",
+   "unsupported_families": [],
+   "categories": [
+    "Travel and places"
+   ],
+   "tags": [
+    ":rocket:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u26a0_fe0f",
+   "version": 1,
+   "popularity": 20,
+   "codepoint": "26a0_fe0f",
+   "unsupported_families": [],
+   "categories": [
+    "Symbols"
+   ],
+   "tags": [
+    ":warning:"
+   ],
+   "sizes_px": []
+  },
+  {
+   "name": "emoji_u2705",
+   "version": 1,
+   "popularity": 19,
+   "codepoint": "2705",
+   "unsupported_families": [],
+   "categories": [
+    "Symbols"
+   ],
+   "tags": [
+    ":check-mark:",
+    ":check-mark-green:"
+   ],
+   "sizes_px": []
+  }
+ ]
+}

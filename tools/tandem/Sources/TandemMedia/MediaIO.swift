@@ -75,6 +75,10 @@ final class AudioReader: @unchecked Sendable {
     let duration: Double
     private let reader: AVAssetReader
     private let output: AVAssetReaderTrackOutput
+    /// Reading and cancelling can come from different threads, and
+    /// AVAssetReader crashes if it's cancelled mid-copy, so they take turns.
+    private let access = NSRecursiveLock()
+    private var cancelled = false
 
     /// - Parameters:
     ///   - sampleRate: resample to this rate; nil keeps the file's.
@@ -133,6 +137,9 @@ final class AudioReader: @unchecked Sendable {
     /// Calls `body` with the next chunk of samples (`frames * channels`
     /// values) and its start in media time, or returns false at the end.
     func next(_ body: (UnsafeBufferPointer<Float>, _ frames: Int, _ start: CMTime) throws -> Void) throws -> Bool {
+        access.lock()
+        defer { access.unlock() }
+        guard !cancelled else { return false }
         guard let sample = output.copyNextSampleBuffer() else {
             if reader.status == .failed {
                 throw MediaError.failed("Audio decoding failed: \(reader.error?.localizedDescription ?? "unknown error")")
@@ -161,6 +168,10 @@ final class AudioReader: @unchecked Sendable {
     }
 
     func cancel() {
+        access.lock()
+        defer { access.unlock() }
+        guard !cancelled else { return }
+        cancelled = true
         reader.cancelReading()
     }
 }

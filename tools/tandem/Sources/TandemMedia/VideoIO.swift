@@ -22,6 +22,11 @@ final class VideoFrameReader: @unchecked Sendable {
 
     private let reader: AVAssetReader
     private let output: AVAssetReaderTrackOutput
+    /// Decoding and cancelling happen on different threads (a job's decode
+    /// thread and whoever stops the job). AVAssetReader crashes if it's
+    /// cancelled mid-copy, so the two take turns.
+    private let access = NSRecursiveLock()
+    private var cancelled = false
 
     init(url: URL, timeRange: CMTimeRange? = nil) async throws {
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
@@ -65,6 +70,9 @@ final class VideoFrameReader: @unchecked Sendable {
 
     /// The next frame and when it's shown, or nil at the end.
     func next() throws -> (buffer: CVPixelBuffer, time: CMTime)? {
+        access.lock()
+        defer { access.unlock() }
+        guard !cancelled else { return nil }
         while let sample = output.copyNextSampleBuffer() {
             // Samples without pixels (markers, empty edits) are skipped.
             guard let buffer = CMSampleBufferGetImageBuffer(sample) else { continue }
@@ -77,6 +85,10 @@ final class VideoFrameReader: @unchecked Sendable {
     }
 
     func cancel() {
+        access.lock()
+        defer { access.unlock() }
+        guard !cancelled else { return }
+        cancelled = true
         reader.cancelReading()
     }
 }

@@ -25,6 +25,7 @@ at `Tandem.app/Contents/MacOS/tandem`.
 | `Sources/TandemMedia` | Folder scanning, probing, analysis jobs |
 | `Sources/TandemRender` | Composition, compositor, audio mix, export |
 | `Sources/TandemAPI` | Project session, service, local server |
+| `Sources/TandemAssets` | Asset library: catalogue, sources, normalising, credits (`docs/ASSETS.md`) |
 | `Sources/TandemApp` | The app |
 | `Sources/TandemCLI` | The `tandem` command |
 | `tests/` | XCTest targets, one per library |
