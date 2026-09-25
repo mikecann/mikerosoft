@@ -239,6 +239,25 @@ final class ServiceTests: XCTestCase {
         XCTAssertTrue(immediate.changed)
     }
 
+    func testJobUpdatesReachWatchers() async throws {
+        let h = try ServiceHarness()
+        let events = h.service.events.subscribe()
+        let job = JobStatus(id: "job_1", kind: .transcript, mediaID: "med_camera", state: .running, progress: 0.4)
+        h.analysis.emit([job])
+        var iterator = events.makeAsyncIterator()
+        let event = await iterator.next()
+        XCTAssertEqual(event?.kind, .jobs)
+        XCTAssertEqual(event?.jobs, [job])
+        XCTAssertEqual(h.service.status().jobs, [job])
+        XCTAssertTrue(h.service.status().readableText.contains("transcript med_camera running 40%"))
+        let media = try await h.service.media(refresh: false)
+        XCTAssertEqual(media.items.first { $0.id == "med_camera" }?.analysis["transcript"]?.state, "ready", "a cached result wins over a job")
+        h.close()
+        h.analysis.emit([])
+        let after = await iterator.next()
+        XCTAssertNil(after, "shutting down ends the stream")
+    }
+
     func testScreenshotNeedsTheApp() async throws {
         let h = try ServiceHarness()
         defer { h.close() }

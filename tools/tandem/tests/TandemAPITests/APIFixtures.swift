@@ -149,8 +149,23 @@ final class FakeAnalysis: AnalysisSource, @unchecked Sendable {
     }
 
     var jobs: [JobStatus] { jobList }
-    func observeJobs(_ handler: @escaping @Sendable ([JobStatus]) -> Void) -> UUID { UUID() }
-    func removeJobsObserver(_ token: UUID) {}
+    private var observers: [UUID: @Sendable ([JobStatus]) -> Void] = [:]
+
+    func observeJobs(_ handler: @escaping @Sendable ([JobStatus]) -> Void) -> UUID {
+        let token = UUID()
+        observers[token] = handler
+        return token
+    }
+
+    func removeJobsObserver(_ token: UUID) {
+        observers.removeValue(forKey: token)
+    }
+
+    /// Pretends the job scheduler moved on.
+    func emit(_ jobs: [JobStatus]) {
+        jobList = jobs
+        for handler in observers.values { handler(jobs) }
+    }
 }
 
 /// A renderer that makes a 1x1 PNG and a small "movie" file.
