@@ -45,6 +45,7 @@ tandem search "<phrase>"           where a phrase is said
 tandem pauses [--min 0.6]          silences between words
 tandem tighten [--min 0.6] [--keep 0.15] [--apply]
 tandem captions [--from T] [--to T] [--max-words 3] [--y 0.42] [--apply]
+tandem short [--apply]             lay out a 9:16 short from the same edit
 tandem apply <batch.json | ->      [--dry-run] [--expect N] [--label L] [--key K]
 tandem undo [--expect N]    tandem redo    tandem history    tandem validate
 tandem frame <time> [-o out.png]   tandem clip <start> <end> [-o out.mp4]
@@ -646,6 +647,20 @@ rectangle `{"x": 0, "y": 0, "width": 1, "height": 1}`.
 {"zoomToRegion": {"clipID": "clip_scr1", "rect": {"x": 0.5, "y": 0.25, "width": 0.5, "height": 0.5}, "at": 42, "duration": 0.5}}
 ```
 
+#### setFormatLayout
+
+Places video clips in an alternate output format from
+`settings.alternateFormats`, such as the 9:16 short (`portrait`): the `top`
+or `bottom` half, or the `full` frame, filled edge to edge with the sides
+cropped. `cutout` turns the cutout on or off in that format only (a short
+shows the camera with its background). The landscape layout is untouched,
+so one edit makes both videos. `tandem short` does this for a whole
+project.
+
+```json
+{"setFormatLayout": {"clipIDs": ["clip_cam1"], "format": "portrait", "slot": "bottom", "cutout": false}}
+```
+
 ### Transitions
 
 #### addTransition
@@ -793,6 +808,22 @@ edits, so tightening pauses afterwards keeps them in sync. `--y` moves them:
 the default 0.42 sits between the screen and the camera in a 9:16 short;
 use about 0.85 for landscape. Run it again over the same range to redo them
 (it overwrites what's on the track there).
+
+### Make a short
+
+```bash
+tandem short                                   # the plan, nothing changes
+tandem short --apply
+tandem captions --apply                        # word captions between the halves
+tandem frame 0:30 --format portrait -o /tmp/short.png
+tandem export --preset short -o ~/Movies/short.mp4
+```
+
+The short is an alternate output format of the same project (1080x1920):
+screen, B-roll and graphics fill the top half, the camera fills the bottom
+half with its background, and full-frame camera moments fill the frame.
+Every edit to the project shows up in both videos. To cut the short down
+without touching the long one, save a version first and edit that.
 
 ### Cut a phrase
 
@@ -990,6 +1021,7 @@ publishing" first. `--optional` adds courtesy credits nobody requires
 | pauses | `tandem pauses [--min]` | `POST /v1/pauses {"min"}` | `pauses` |
 | tighten | `tandem tighten [--min] [--keep] [--apply]` | `POST /v1/tighten {"min", "keep", "apply"}` | `tighten` |
 | captions | `tandem captions [--from] [--to] [--max-words] [--y] [--apply]` | `POST /v1/captions {"from", "to", "words", "y", "apply"}` | `captions` |
+| short | `tandem short [--apply]` | `POST /v1/short {"apply"}` | `short` |
 | apply | `tandem apply <file or ->` | `POST /v1/apply <batch>` | `apply` |
 | undo, redo | `tandem undo`, `tandem redo` | `POST /v1/undo`, `/v1/redo` | `undo`, `redo` |
 | history | `tandem history` | `POST /v1/history` | `history` |

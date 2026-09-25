@@ -68,6 +68,8 @@ public enum Editing {
             try applyLayout(&project, clipIDs, preset, &context)
         case .zoomToRegion(let clipID, let rect, let at, let duration):
             try zoomToRegion(&project, clipID, rect: rect, at: at, duration: duration)
+        case .setFormatLayout(let clipIDs, let format, let slot, let cutout):
+            try setFormatLayout(&project, clipIDs, format: format, slot: slot, cutout: cutout)
         case .addTransition(let trackID, let transition):
             try addTransition(&project, trackID: trackID, transition, &context)
         case .updateTransition(let transitionID, let patch):
@@ -986,6 +988,34 @@ public enum Editing {
         video.layoutPreset = nil
         clip.video = video
         p[location].clips[index] = clip
+    }
+
+    static func setFormatLayout(_ p: inout Project, _ clipIDs: [String], format: String, slot: PortraitSlot, cutout: Bool?) throws {
+        guard let output = p.settings.alternateFormats.first(where: { $0.id == format }) else {
+            throw EditError.notFound("output format \(format); add it to settings.alternateFormats first")
+        }
+        for id in clipIDs {
+            let (location, index) = try requireClip(p, id)
+            guard p[location].kind == .video else { continue }
+            try requireUnlocked(p[location])
+            var clip = p[location].clips[index]
+            // Stills, text and solids without a known size fill as 16:9.
+            var width = Double(p.settings.width)
+            var height = Double(p.settings.height)
+            if let mediaID = clip.mediaID, let item = p.media(mediaID), let w = item.width, let h = item.height {
+                width = Double(w)
+                height = Double(h)
+            }
+            var video = clip.video ?? VideoProperties()
+            var override = video.formatOverrides[format] ?? FormatOverride()
+            override.transform = Transform.filling(slot, sourceWidth: width, sourceHeight: height, canvasWidth: Double(output.width), canvasHeight: Double(output.height))
+            override.crop = Crop()
+            override.hidden = false
+            if let cutout { override.cutout = cutout }
+            video.formatOverrides[format] = override
+            clip.video = video
+            p[location].clips[index] = clip
+        }
     }
 
     // MARK: - Transitions

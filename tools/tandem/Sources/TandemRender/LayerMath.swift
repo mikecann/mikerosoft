@@ -145,6 +145,7 @@ extension Clip {
         if override.hidden { return nil }
         if let transform = override.transform { video.transform = transform }
         if let crop = override.crop { video.crop = crop }
+        if let cutout = override.cutout, video.cutout != nil { video.cutout?.enabled = cutout }
         return video
     }
 

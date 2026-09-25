@@ -207,3 +207,15 @@ final class CaptionPlanningTests: XCTestCase {
         XCTAssertEqual(captions.map { $0.words.count }, [2])
     }
 }
+
+final class ShortLayoutTests: XCTestCase {
+    func testCameraGoesToTheBottomUnlessItsFullFrame() {
+        var pip = Clip(content: .media(mediaID: "med_c"), start: .zero, duration: Time(seconds: 2))
+        pip.video = LayoutPreset.pipRight.apply(to: nil, role: .camera, shadowID: "fx_s")
+        var full = pip
+        full.video = LayoutPreset.full.apply(to: pip.video, role: .camera, shadowID: "fx_s")
+        XCTAssertEqual(TandemService.portraitSlot(for: pip, role: .camera), .bottom)
+        XCTAssertEqual(TandemService.portraitSlot(for: full, role: .camera), .full)
+        XCTAssertEqual(TandemService.portraitSlot(for: pip, role: .screen), .top)
+    }
+}

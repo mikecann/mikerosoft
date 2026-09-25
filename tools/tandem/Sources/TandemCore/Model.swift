@@ -414,11 +414,15 @@ public struct FormatOverride: Codable, Equatable, Sendable {
     public var transform: Transform?
     public var crop: Crop?
     public var hidden: Bool
+    /// Turns the portrait cutout on or off in this format; nil keeps the
+    /// clip's own setting. A short shows the camera with its background.
+    public var cutout: Bool?
 
-    public init(transform: Transform? = nil, crop: Crop? = nil, hidden: Bool = false) {
+    public init(transform: Transform? = nil, crop: Crop? = nil, hidden: Bool = false, cutout: Bool? = nil) {
         self.transform = transform
         self.crop = crop
         self.hidden = hidden
+        self.cutout = cutout
     }
 }
 
@@ -1051,6 +1055,7 @@ extension FormatOverride {
         transform = try c.decodeIfPresent(Transform.self, forKey: .transform)
         crop = try c.decodeIfPresent(Crop.self, forKey: .crop)
         hidden = try c.decode(.hidden, or: false)
+        cutout = try c.decodeIfPresent(Bool.self, forKey: .cutout)
     }
 }
 

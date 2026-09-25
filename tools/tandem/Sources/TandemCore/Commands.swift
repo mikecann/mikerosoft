@@ -111,6 +111,10 @@ public enum EditCommand: Codable, Equatable, Sendable {
     /// animates there over `duration` (default 0.5 s) with an ease; zoom back
     /// out later with the rectangle `{x: 0, y: 0, width: 1, height: 1}`.
     case zoomToRegion(clipID: String, rect: Rect, at: Time? = nil, duration: Time? = nil)
+    /// Places video clips in an alternate output format (see
+    /// `ProjectSettings.alternateFormats`), for example the top or bottom
+    /// half of the 9:16 short. `cutout` turns the cutout on or off there.
+    case setFormatLayout(clipIDs: [String], format: String, slot: PortraitSlot, cutout: Bool? = nil)
 
     // MARK: Transitions
 
