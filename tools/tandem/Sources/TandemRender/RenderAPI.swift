@@ -24,21 +24,44 @@ public struct RenderContext: Sendable {
     public var useProxies: Bool
     /// An alternate output format ID, or nil for the main format.
     public var format: String?
+    /// Proxies, mattes, isolated voice and loudness. Defaults to `analysis`;
+    /// tests and tools can pass files directly.
+    public var assets: RenderAssets?
+    /// Renders at this size instead of the format's, for example a 1080p
+    /// export of a 4K project. Placement is resolution independent.
+    public var sizeOverride: CGSize?
+    /// Effect definitions, for parameter defaults and Core Image bindings.
+    public var effects: EffectRegistry
 
-    public init(project: Project, folder: ProjectFolder, analysis: MediaAnalysis? = nil, useProxies: Bool = false, format: String? = nil) {
+    public init(
+        project: Project,
+        folder: ProjectFolder,
+        analysis: MediaAnalysis? = nil,
+        useProxies: Bool = false,
+        format: String? = nil,
+        assets: RenderAssets? = nil,
+        sizeOverride: CGSize? = nil,
+        effects: EffectRegistry = .standard
+    ) {
         self.project = project
         self.folder = folder
         self.analysis = analysis
         self.useProxies = useProxies
         self.format = format
+        self.assets = assets ?? analysis
+        self.sizeOverride = sizeOverride
+        self.effects = effects
     }
 
-    /// Output size for the selected format.
+    /// Output size for the selected format. Always even, as 4:2:0 video
+    /// needs.
     public var renderSize: CGSize {
+        var size = CGSize(width: project.settings.width, height: project.settings.height)
         if let format, let alt = project.settings.alternateFormats.first(where: { $0.id == format }) {
-            return CGSize(width: alt.width, height: alt.height)
+            size = CGSize(width: alt.width, height: alt.height)
         }
-        return CGSize(width: project.settings.width, height: project.settings.height)
+        if let sizeOverride { size = sizeOverride }
+        return CGSize(width: max(2, (size.width / 2).rounded() * 2), height: max(2, (size.height / 2).rounded() * 2))
     }
 }
 
