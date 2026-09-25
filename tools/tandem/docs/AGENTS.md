@@ -265,10 +265,10 @@ Media
 
 Each track line has the track's ID for commands that need one. Transitions
 (`~`) sit between the clips they join, and gaps in the take are listed as
-`gap`. When most of a track's clips share a setting (a PiP camera track's
-`layout pipRight, scale 0.5 at 0.87,0.77, cutout, fx dropShadow`), the track line says it
-once as `(most clips: ...)`, each clip lists only what's different, and
-`not: ...` marks a clip that lacks one of them.
+`gap`. When most of a track's clips share settings (a PiP camera track's
+`layout pipRight, scale 0.5 at 0.87,0.77, cutout, fx dropShadow`), the
+track line says them once as `(most clips: ...)`, each clip lists only
+what's different, and `not: ...` marks a clip that lacks one of them.
 
 A real edit runs to hundreds of clips, so start with `--summary` (one line
 per track with its clip count, span and gaps, plus the markers), then read a
