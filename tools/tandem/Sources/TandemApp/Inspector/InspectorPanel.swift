@@ -179,8 +179,11 @@ struct VideoInspector: View {
                 .foregroundStyle(Theme.textMuted.color)
                 .padding(16)
         } else {
+            if case .text(let text) = clip.content {
+                TextSection(model: model, clip: clip, text: text)
+            }
             layoutSection
-            cutoutSection
+            if clip.mediaID != nil { cutoutSection }
             cropSection
             EffectStack(model: model, clip: clip, domain: .video, excludeCategories: ["Colour"])
         }
@@ -576,5 +579,100 @@ struct TransitionInspector: View {
 
     private func update(_ fields: [String: JSONValue], _ label: String) {
         model.apply(EditBatch(label: label, commands: [.updateTransition(transitionID: transition.id, patch: .object(fields))]))
+    }
+}
+
+/// A text clip's words and look. Edits patch `content.text`.
+private struct TextSection: View {
+    let model: EditorModel
+    let clip: Clip
+    let text: TextContent
+    @State private var draft = ""
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        InspectorSection(title: "Text") {
+            TextEditor(text: $draft)
+                .font(.ui(12.5))
+                .foregroundStyle(Theme.text.color)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+                .frame(height: 64)
+                .padding(6)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Theme.field.color))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.fieldBorder.color, lineWidth: 1))
+                .focused($editing)
+                .onAppear { draft = text.text }
+                .onChange(of: text.text) { _, new in if !editing { draft = new } }
+                .onChange(of: editing) { _, now in if !now { commitText() } }
+            Text("Changes apply when you click away.")
+                .font(.ui(11))
+                .foregroundStyle(Theme.textFaint.color)
+            SliderRow(label: "Size", value: text.style.size, range: 12...240, format: { String(format: "%.0f pt", $0) }) { value in
+                patch(["style": .object(["size": .number(value.rounded())])], "Text size")
+            }
+            SliderRow(label: "Weight", value: text.style.weight, range: 300...900, format: { String(format: "%.0f", $0) }) { value in
+                patch(["style": .object(["weight": .number((value / 100).rounded() * 100)])], "Text weight")
+            }
+            HStack(spacing: 10) {
+                Text("Colour").font(.ui(12)).foregroundStyle(Theme.textMuted.color).frame(width: 86, alignment: .leading)
+                ColorPicker("", selection: colourBinding(text.style.color) { patch(["style": .object(["color": ParamValue.color($0).json])], "Text colour") }, supportsOpacity: false)
+                    .labelsHidden()
+                Spacer()
+            }
+            HStack(spacing: 10) {
+                Text("Background").font(.ui(12)).foregroundStyle(Theme.textMuted.color).frame(width: 86, alignment: .leading)
+                ColorPicker("", selection: colourBinding(text.style.backgroundColor ?? RGBA(r: 0, g: 0, b: 0, a: 0)) {
+                    patch(["style": .object(["backgroundColor": ParamValue.color($0).json])], "Text background")
+                }, supportsOpacity: true)
+                    .labelsHidden()
+                if text.style.backgroundColor != nil {
+                    OutlineButton(title: "None") { patch(["style": .object(["backgroundColor": .null])], "No text background") }
+                }
+                Spacer()
+            }
+            HStack(spacing: 10) {
+                Text("Shadow").font(.ui(12)).foregroundStyle(Theme.textMuted.color).frame(width: 86, alignment: .leading)
+                Spacer()
+                GraphiteSwitch(isOn: text.style.shadow) { patch(["style": .object(["shadow": .bool(!text.style.shadow)])], "Text shadow") }
+            }
+        }
+    }
+
+    private func commitText() {
+        guard draft != text.text else { return }
+        patch(["text": .string(draft)], "Edit text")
+    }
+
+    private func patch(_ fields: [String: JSONValue], _ label: String) {
+        model.apply(EditBatch(label: label, commands: [
+            .updateClip(clipID: clip.id, patch: .object(["content": .object(["text": .object(fields)])]))
+        ]))
+    }
+
+    /// A colour binding that commits after the picker settles.
+    private func colourBinding(_ value: RGBA, commit: @escaping (RGBA) -> Void) -> Binding<Color> {
+        Binding(
+            get: { Color(.sRGB, red: value.r, green: value.g, blue: value.b, opacity: value.a) },
+            set: { colour in
+                guard let converted = NSColor(colour).usingColorSpace(.sRGB) else { return }
+                let rgba = RGBA(r: Double(converted.redComponent), g: Double(converted.greenComponent), b: Double(converted.blueComponent), a: Double(converted.alphaComponent))
+                ColourCommitter.shared.schedule { commit(rgba) }
+            }
+        )
+    }
+}
+
+/// Coalesces colour picker changes into one edit once the dragging stops.
+@MainActor
+final class ColourCommitter {
+    static let shared = ColourCommitter()
+    private var pending: DispatchWorkItem?
+
+    func schedule(_ action: @escaping () -> Void) {
+        pending?.cancel()
+        let work = DispatchWorkItem(block: action)
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 }

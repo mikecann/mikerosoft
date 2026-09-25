@@ -261,6 +261,7 @@ final class TimelineLanesView: TimelineChildView {
     private func updateCursor(_ event: NSEvent) {
         guard let model, let tester = tester(for: model.project) else { return }
         let hit = tester.hit(lanePoint(event))
+        updateToolTip(hit, model: model)
         switch model.tool {
         case .blade:
             if case .clip = hit { NSCursor.crosshair.set() } else { NSCursor.arrow.set() }
@@ -273,6 +274,35 @@ final class TimelineLanesView: TimelineChildView {
                 NSCursor.arrow.set()
             }
         }
+    }
+
+    /// "Camera · main-camera", its times and what's on it, for hovering.
+    private func updateToolTip(_ hit: TimelineHit, model: EditorModel) {
+        var tip: String?
+        switch hit {
+        case .clip(let id, let trackID, let part):
+            guard let clip = model.project.clip(id), let track = model.project.track(trackID) else { break }
+            let renderer = ClipRenderer(project: model.project, scale: model.timeline.scale, artwork: nil, visible: 0...0)
+            var lines = ["\(track.name) · \(renderer.name(of: clip))"]
+            let rate = model.frameRate
+            lines.append("\(Timecode.string(clip.start, rate: rate)) to \(Timecode.string(clip.end, rate: rate)) (\(Timecode.string(clip.duration, rate: rate)))")
+            if let badge = renderer.badgeText(for: clip) { lines.append(badge) }
+            if clip.speed != 1 { lines.append("Speed \(Int((clip.speed * 100).rounded()))%") }
+            switch part {
+            case .head: lines.append("Drag to trim the start")
+            case .tail: lines.append("Drag to trim the end")
+            case .body: break
+            }
+            tip = lines.joined(separator: "\n")
+        case .transition(let id, _):
+            if let location = model.project.location(ofTransition: id) {
+                let transition = model.project[location.track].transitions[location.index]
+                tip = "\(transition.type.displayName) · \(String(format: "%.2f s", transition.duration.seconds))"
+            }
+        case .emptyTrack, .transcript, .nothing:
+            tip = nil
+        }
+        if toolTip != tip { toolTip = tip }
     }
 
     private func modifiers(_ event: NSEvent) -> SelectionRules.Modifiers {
