@@ -166,10 +166,7 @@ private final class EDLRun {
 
     /// The take files, with the camera grade and a shared take ID.
     func addTakeMedia() async {
-        var look = recipe.cameraLook ?? []
-        for i in look.indices {
-            look[i].id = ImportIDs.make("fx", key: "look:\(i):\(look[i].type)")
-        }
+        let look = recipe.cameraLook ?? []
         var steps: [ProjectBuilder.Step] = []
         for (index, take) in recipe.takes.enumerated() {
             let cameraPath = recipe.resolve(take.camera)

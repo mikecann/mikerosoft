@@ -244,3 +244,24 @@ extension EDLImporterTests {
         XCTAssertEqual(result.report.stats["duration"], 43)
     }
 }
+
+final class DecisionModelsRecipeTests: XCTestCase {
+    func testBuiltInRecipeDecodes() throws {
+        let recipe = try EDLRecipe.decisionModels
+        XCTAssertEqual(recipe.name, "Decision Models")
+        XCTAssertEqual(recipe.takes.map(\.start), [0, 671.396458, 1349.822228])
+        XCTAssertEqual(recipe.cutAdjustments?.count, 96)
+        XCTAssertEqual(recipe.sections?.count, 10)
+        XCTAssertEqual(recipe.sections?.last?.outro, true)
+        XCTAssertEqual(recipe.inserts?.count, 6)
+        XCTAssertEqual(recipe.transitions?.topicPush?.at, [290.8, 430.6, 806.1, 965.0])
+        XCTAssertTrue(recipe.resolve("edit/edl-v2.json").hasSuffix("/dev/convex/convex-videos/decision-models/edit/edl-v2.json"))
+        XCTAssertEqual(try EDLRecipe.builtIn("decision-models"), recipe)
+        XCTAssertNil(try EDLRecipe.builtIn("nope"))
+        // Every adjustment only ever moves a segment's edges a little.
+        for adjustment in recipe.cutAdjustments ?? [] {
+            XCTAssertLessThan(abs(adjustment.newStart - adjustment.start), 1.1)
+            XCTAssertLessThan(abs(adjustment.newEnd - adjustment.end), 1.6)
+        }
+    }
+}

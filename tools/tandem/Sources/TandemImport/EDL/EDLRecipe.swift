@@ -331,11 +331,22 @@ public struct EDLRecipe: Codable, Equatable, Sendable {
     }
 
     static func decode(_ data: Data, name: String) throws -> EDLRecipe {
+        var recipe: EDLRecipe
         do {
-            return try JSONDecoder().decode(EDLRecipe.self, from: data)
+            recipe = try JSONDecoder().decode(EDLRecipe.self, from: data)
         } catch {
             throw ImportError.invalid("\(name) isn't an EDL recipe: \(error)")
         }
+        // Recipes leave effect IDs out; give them stable ones so the same
+        // recipe always builds the same project.
+        if let look = recipe.cameraLook {
+            recipe.cameraLook = look.enumerated().map { index, effect in
+                var effect = effect
+                effect.id = ImportIDs.make("fx", key: "look:\(index):\(effect.type)")
+                return effect
+            }
+        }
+        return recipe
     }
 
     /// The folder relative paths resolve against.
