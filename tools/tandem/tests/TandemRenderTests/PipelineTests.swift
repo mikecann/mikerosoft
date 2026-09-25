@@ -182,7 +182,7 @@ final class PipelineTests: XCTestCase {
         )
         let built = try await CompositionBuilder.build(RenderContext(project: project, folder: media.projectFolder))
         let tracks = try await built.composition.load(.tracks)
-        let valid = try await built.videoComposition.isValid(for: tracks, assetDuration: built.composition.duration, timeRange: CMTimeRange(start: .zero, duration: built.composition.duration), validationDelegate: nil)
+        let valid = built.videoComposition.isValid(for: tracks, assetDuration: built.composition.duration, timeRange: CMTimeRange(start: .zero, duration: built.composition.duration), validationDelegate: nil)
         XCTAssertTrue(valid)
     }
 

@@ -78,12 +78,14 @@ final class TestMedia {
             var sample = 0
         }
         let progress = Progress()
+        let io = Unchecked((writer: writer, video: video, adaptor: adaptor, audio: audio))
         // Each input pulls on its own queue: the writer interleaves, and
         // pushing one input far ahead of the other stalls it.
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             let group = DispatchGroup()
             group.enter()
-            video.requestMediaDataWhenReady(on: DispatchQueue(label: "test.video")) {
+            io.value.video.requestMediaDataWhenReady(on: DispatchQueue(label: "test.video")) {
+                let (writer, video, adaptor, _) = io.value
                 while video.isReadyForMoreMediaData {
                     if progress.frame >= frames || writer.status == .failed {
                         video.markAsFinished()
@@ -114,9 +116,11 @@ final class TestMedia {
                     progress.frame += 1
                 }
             }
-            if let audio, let sound {
+            if let sound, let input = io.value.audio {
                 group.enter()
-                audio.requestMediaDataWhenReady(on: DispatchQueue(label: "test.audio")) {
+                input.requestMediaDataWhenReady(on: DispatchQueue(label: "test.audio")) {
+                    let (writer, _, _, audio) = io.value
+                    guard let audio else { return }
                     while audio.isReadyForMoreMediaData {
                         if progress.sample >= totalSamples || writer.status == .failed {
                             audio.markAsFinished()
