@@ -24,6 +24,10 @@ final class CLITests: XCTestCase {
 
     @discardableResult
     func tandem(_ arguments: String..., in folder: URL, stdin: String? = nil, env: [String: String] = [:]) throws -> Output {
+        try tandem(arguments, in: folder, stdin: stdin, env: env)
+    }
+
+    func tandem(_ arguments: [String], in folder: URL, stdin: String? = nil, env: [String: String] = [:]) throws -> Output {
         let process = Process()
         process.executableURL = Self.binary
         process.arguments = arguments
@@ -33,6 +37,7 @@ final class CLITests: XCTestCase {
         process.standardOutput = output
         process.standardError = errors
         process.standardInput = input
+        let exited = ExitSignal(process)
         try process.run()
         if let stdin { input.fileHandleForWriting.write(Data(stdin.utf8)) }
         try input.fileHandleForWriting.close()
@@ -40,7 +45,7 @@ final class CLITests: XCTestCase {
         let reader = Thread { errorData = errors.fileHandleForReading.readDataToEndOfFile() }
         reader.start()
         let outputData = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        exited.wait()
         while !reader.isFinished { Thread.sleep(forTimeInterval: 0.005) }
         return Output(status: process.terminationStatus, stdout: String(decoding: outputData, as: UTF8.self), stderr: String(decoding: errorData, as: UTF8.self))
     }
@@ -158,6 +163,7 @@ final class CLITests: XCTestCase {
         let serveOutput = Pipe()
         serve.standardOutput = serveOutput
         serve.standardError = Pipe()
+        let exited = ExitSignal(serve)
         try serve.run()
         defer { if serve.isRunning { serve.terminate() } }
 
@@ -176,7 +182,7 @@ final class CLITests: XCTestCase {
         XCTAssertTrue(applied.stdout.contains("by codex as revision 2"), applied.stdout)
 
         serve.interrupt()
-        serve.waitUntilExit()
+        XCTAssertTrue(exited.wait(timeout: 20), "serve should stop on Ctrl-C")
         XCTAssertEqual(serve.terminationStatus, 0)
         let printed = String(decoding: serveOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         XCTAssertTrue(printed.contains("Serving \"Decision Models\""), printed)
@@ -194,6 +200,7 @@ final class CLITests: XCTestCase {
         serve.environment = Self.environment()
         serve.standardOutput = Pipe()
         serve.standardError = Pipe()
+        let exited = ExitSignal(serve)
         try serve.run()
         defer { if serve.isRunning { serve.terminate() } }
         let deadline = Date().addingTimeInterval(10)
@@ -202,7 +209,8 @@ final class CLITests: XCTestCase {
 
         // What the app does: ask serve to let go, then open.
         let session = try await ProjectSession.open(url, owner: .app, waitingUpTo: 10)
-        serve.waitUntilExit()
+        let stopped = await exited.value(timeout: 20)
+        XCTAssertTrue(stopped, "serve should quit once it has let go")
         XCTAssertEqual(serve.terminationStatus, 0)
         XCTAssertEqual(ProjectSession.readLock(for: url)?.owner, .app)
         session.close()
@@ -220,6 +228,7 @@ final class CLITests: XCTestCase {
         mcp.standardInput = input
         mcp.standardOutput = output
         mcp.standardError = Pipe()
+        let exited = ExitSignal(mcp)
         try mcp.run()
         defer { if mcp.isRunning { mcp.terminate() } }
         var lines = LineReader.lines(output.fileHandleForReading).makeAsyncIterator()
@@ -241,8 +250,9 @@ final class CLITests: XCTestCase {
         XCTAssertTrue(apply[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString?.contains("by claude as revision 2") ?? false, "\(apply)")
 
         try input.fileHandleForWriting.close()
-        mcp.waitUntilExit()
-        XCTAssertEqual(mcp.terminationStatus, 0, "exits when stdin closes")
+        let stopped = await exited.value(timeout: 20)
+        XCTAssertTrue(stopped, "exits when stdin closes")
+        XCTAssertEqual(mcp.terminationStatus, 0)
     }
 }
 
@@ -282,5 +292,40 @@ final class ImportCLITests: XCTestCase {
         let json = try JSONDecoder().decode(JSONValue.self, from: Data(result.stdout.utf8))
         guard case .object(let fields) = json else { return XCTFail("not an object: \(result.stdout)") }
         XCTAssertNotNil(fields["matchedVoice"])
+    }
+}
+
+/// Knows when a process has exited. `Process.waitUntilExit()` spins the run
+/// loop of the thread that launched the process, so in an async test that
+/// resumes on another thread it can wait forever; the termination handler
+/// runs on a queue of its own.
+final class ExitSignal: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var exited = false
+
+    /// Call before `run()`.
+    init(_ process: Process) {
+        process.terminationHandler = { [self] _ in
+            lock.withLock { exited = true }
+            semaphore.signal()
+        }
+    }
+
+    /// Blocks until the process exits, or `timeout` passes. True if it exited.
+    @discardableResult
+    func wait(timeout: TimeInterval = 120) -> Bool {
+        if lock.withLock({ exited }) { return true }
+        return semaphore.wait(timeout: .now() + timeout) == .success
+    }
+
+    /// The same without blocking a concurrency thread.
+    func value(timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if lock.withLock({ exited }) { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return lock.withLock { exited }
     }
 }
