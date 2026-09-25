@@ -53,6 +53,11 @@ tandem new <path.tandem>           tandem serve    tandem mcp
 tandem import filmora <file.wfp> [--out DIR]     a Filmora project as a .tandem
 tandem import edl [edl.json] --recipe decision-models [--out DIR]
 tandem import compare <a.tandem> <b.tandem>      how two cuts of one take differ
+tandem assets providers                          asset sources and what to fix
+tandem assets search "<text>" [--kind sfx] [--provider id] [--online] [--limit n]
+tandem assets use <id> [--at T] [--duration T]   copy into the project, add, place
+tandem assets fetch <id>    tandem assets credits [--optional]
+tandem assets generate sfx|music "<prompt>" [--duration s]    tandem assets install-starter
 ```
 
 `tandem help <command>` explains each one.
@@ -108,8 +113,9 @@ args = ["mcp"]
 The tools mirror the operations: `status`, `timeline`, `media`,
 `transcript`, `search`, `pauses`, `tighten`, `apply`, `undo`, `redo`,
 `history`, `validate`, `frame`, `screenshot`, `clip`, `export`, `loudness`,
-`watch` and `effects`. Tool results are readable text; pass `json: true`
-for the raw JSON. `frame` and `screenshot` return the picture as an image.
+`watch` and `effects`, plus the asset library's `assets_search`,
+`assets_use`, `assets_credits`, `assets_generate` and `assets_providers`.
+Tool results are readable text; pass `json: true` for the raw JSON. `frame` and `screenshot` return the picture as an image.
 The `apply` tool's input schema describes every edit command. The server
 speaks both MCP revisions in use: the `initialize` handshake (2025-11-25 and
 earlier) and the stateless 2026-07-28 revision.
@@ -299,6 +305,54 @@ clips in the range).
   transcript say which files don't have one yet.
 - `frame <time>` renders one frame (MCP returns the image, 1280 px wide by
   default). `clip <start> <end>` renders a 720p review MP4 you can watch.
+  Both, and `export`, list what the render shows differently from the
+  project, like `Warning: No cutout matte for ...-camera.mov yet, showing the
+  full frame.` while the matte is still being made; only lines about what
+  plays in the part rendered are shown.
+
+## Assets
+
+Music, sound effects, stickers, icons, logos, fonts and stock footage come
+from Mike's asset library, one per user at
+`~/Library/Application Support/Tandem/Assets/`, shared with the app's
+browser. Every asset records its licence, and every use in a project is
+recorded, which is what the description credits are built from.
+`docs/ASSETS.md` explains the sources and licences.
+
+- `tandem assets providers` (MCP `assets_providers`) lists the sources and
+  whether each works now, with what to fix: a missing key, or an ElevenLabs
+  key without the `sound_generation` permission (music still works then).
+- `tandem assets search "whoosh" --kind sfx` (`assets_search`) searches the
+  library's catalogue: import folders, downloaded and generated assets, the
+  starter set and recent provider results. `--online` asks the providers
+  too (Noto emoji, Iconify, SVGL logos and Fontsource, plus Pexels, Pixabay
+  and Freesound when they have keys), and `--provider noto` limits it to one
+  source. Kinds are music, sfx, sticker, overlay, video, image, font, icon,
+  logo, lut, title and transition. Asset IDs look like `noto:1f680`,
+  `svgl:convex` or `import:sfx-3fa2c1/Whoosh_03.wav`.
+- `tandem assets use <id>` (`assets_use`) downloads and normalises the asset
+  if needed, copies it into the project's `assets/<kind>/` folder, records
+  the use and adds it to the project's media. With `--at 1:23` it's also
+  placed on the track for its kind: sound effects on SFX at -15 dB, music on
+  Music at -31 dB with a 2 s fade out, stickers, icons and logos on
+  Graphics, stock video on B-roll. The edit goes through the app when the app
+  has the project open, as one undo step under your name. Fonts are
+  installed instead of placed; use their name in a title's style.
+- `tandem assets fetch <id>` downloads and normalises without using it.
+- `tandem assets credits` (`assets_credits`) prints the credits block for
+  the video description from what the project uses now, plus anything to
+  sort out before publishing: assets with no licence on record, credits
+  without a credit line, subscriptions that must stay active.
+- `tandem assets generate sfx "short airy whoosh" --duration 1`
+  (`assets_generate`) makes a sound effect (0.5 to 30 s) or music cue (3 to
+  600 s) with ElevenLabs. Each take is a paid request, so make one unless
+  asked for more; `--variations 3` makes three.
+- `tandem assets install-starter` puts the starter set (about 40 animated
+  emoji, 30 icons and the tech logos Mike uses) in the catalogue. Each one
+  downloads the first time it's used.
+
+`$TANDEM_ASSETS_ROOT` moves the library, and `TANDEM_ASSETS_OFFLINE=1`
+keeps it off the network and out of the Keychain (for tests, or a flight).
 
 ## Edit command reference
 
@@ -841,6 +895,60 @@ tandem export --preset youtube4k             # the full video, loudness matched
 and `export` to `exports/<name> r<revision>.mp4`. In MCP, `frame` returns
 the picture directly, so you can look at the result of an edit.
 
+### Put a whoosh on every push transition
+
+Find the cut each push transition sits on (the end of its outgoing clip,
+or the start of its incoming one), pick a whoosh, add it to the project
+once, then place it at every cut in one batch:
+
+```bash
+tandem timeline --json | jq -c '[.project.videoTracks[] | . as $t | .transitions[]
+  | select(.type == "push") | . as $x | $t.clips[]
+  | if $x.fromClipID then select(.id == $x.fromClipID) | .start + .duration
+    else select(.id == $x.toClipID) | .start end | . * 1000 | round / 1000] | unique'
+# [106.932,136.59,242.9,...]
+tandem assets search whoosh --kind sfx          # or --online, or generate one
+tandem assets use import:sfx-3fa2c1/Whoosh_03.wav   # adds it to the media, prints its media ID
+```
+
+Start each whoosh about 0.3 s before its cut so it peaks on the cut:
+
+```json
+{"label": "Whooshes on the pushes", "commands": [
+  {"placeMedia": {"mediaIDs": ["med_w4k2p8zq"], "at": 106.632}},
+  {"placeMedia": {"mediaIDs": ["med_w4k2p8zq"], "at": 136.29}},
+  {"placeMedia": {"mediaIDs": ["med_w4k2p8zq"], "at": 242.6}}
+]}
+```
+
+`placeMedia` puts each one on SFX at the usual -15 dB. When another sound is
+already there, add `"mode": "overwrite"` or name a free audio track with
+`"audioTrackID"`. For a handful, `tandem assets use <id> --at <time>` once
+per cut does the same, one undo step each.
+
+### Credits for the description
+
+```bash
+tandem assets credits
+```
+
+prints the block to paste into the YouTube description, for example:
+
+```
+Paste into the description:
+
+Credits
+Animated Noto Emoji by Google, CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+
+Before publishing:
+  - No licence on record for "Glitch Hit 02". Add a tandem-licence.json to their import folder, or replace them.
+```
+
+It counts the assets still in the project's media, so run it last, after
+removing media the cut no longer uses. Sort out everything under "Before
+publishing" first. `--optional` adds courtesy credits nobody requires
+(Pexels creators).
+
 ### Work alongside Mike
 
 - Read before you write: take the revision from `timeline` or `status` and
@@ -878,6 +986,20 @@ the picture directly, so you can look at the result of an edit.
 Output paths given to the API are absolute or relative to the project
 folder; the CLI makes them absolute from where you run it.
 
+The asset library isn't a project operation, so it has no HTTP endpoint;
+the CLI and MCP open the library themselves, and only `use` and `credits`
+reach the project (through the app's API when it's open).
+
+| Asset operation | CLI | MCP tool |
+| --- | --- | --- |
+| providers | `tandem assets providers` | `assets_providers` |
+| search | `tandem assets search "<text>" [--kind] [--provider] [--online]` | `assets_search` |
+| fetch | `tandem assets fetch <id>` | |
+| use | `tandem assets use <id> [--at] [--duration]` | `assets_use` |
+| credits | `tandem assets credits [--optional]` | `assets_credits` |
+| generate | `tandem assets generate sfx or music "<prompt>"` | `assets_generate` |
+| install-starter | `tandem assets install-starter` | |
+
 ## Troubleshooting
 
 - **"is open in the Tandem app, but the app isn't serving its API"**: the
@@ -891,3 +1013,8 @@ folder; the CLI makes them absolute from where you run it.
 - **"Nothing to undo" after editing with the app closed**: headless undo
   history only lasts while nobody else edits the project. `tandem history`
   shows what can be undone.
+- **"ElevenLabs refused: ... missing the permission sound_generation"**: the
+  key can make music but not sound effects. Mike turns the permission on
+  for the key in ElevenLabs; `tandem assets providers` says when it's fixed.
+- **"No asset ... in the library"**: search for it first (with `--online`
+  for provider assets), then use the ID the search gives.
