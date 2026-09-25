@@ -87,6 +87,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Sources as providers; paid libraries through watched import folders. ElevenLabs sound effects need the key's `sound_generation` permission (music works)
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
 - [ ] Stickers: Lottie and HEVC with alpha
+- [x] Word-by-word captions from the transcripts (`tandem captions`, MCP `captions`) [integration]
 - [ ] Portrait short layout (screen top, camera bottom, captions between)
 - [ ] Segment render cache for fast re-exports
 - [ ] Remotion graphics clips with props, rendered in the background
