@@ -266,10 +266,21 @@ public struct ExportResult: Codable, Equatable, Sendable {
 }
 
 /// Renders the timeline to a file.
+///
+/// Frames come from the same compositor as the viewer, encoded by the
+/// hardware VideoToolbox encoder at speed priority and the preset's
+/// bitrate, tagged BT.709 video range. The mix is measured first and
+/// mastered to `loudnessTarget` under `truePeakCeiling` (a lookahead
+/// true-peak limiter), then encoded as AAC, 48 kHz stereo. The preset's
+/// loudness values are used as given; nil leaves the mix alone. A snapshot
+/// of the project is written beside the file as `<output>.tandem`.
 public final class Exporter: @unchecked Sendable {
     public let context: RenderContext
     public let preset: ExportPreset
     public let output: URL
+    private let lock = NSLock()
+    private var job: ExportJob?
+    private var cancelRequested = false
 
     public init(context: RenderContext, preset: ExportPreset, output: URL) {
         self.context = context
@@ -277,10 +288,28 @@ public final class Exporter: @unchecked Sendable {
         self.output = output
     }
 
-    /// `progress` gets 0...1 on an arbitrary queue.
+    /// `progress` gets 0...1 on an arbitrary queue. Throws
+    /// `RenderError.cancelled` after `cancel()` or task cancellation, and
+    /// removes the partial file.
     public func run(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> ExportResult {
-        throw EditError.notImplemented("Exporter.run")
+        let job = ExportJob(context: context, preset: preset, output: output, progress: progress)
+        let cancelled = lock.withLock {
+            self.job = job
+            return cancelRequested
+        }
+        if cancelled { throw RenderError.cancelled }
+        return try await withTaskCancellationHandler {
+            try await job.run()
+        } onCancel: {
+            job.cancel()
+        }
     }
 
-    public func cancel() {}
+    public func cancel() {
+        let job: ExportJob? = lock.withLock {
+            cancelRequested = true
+            return self.job
+        }
+        job?.cancel()
+    }
 }
