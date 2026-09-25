@@ -70,6 +70,32 @@ public enum JSONValue: Codable, Equatable, Sendable {
 }
 
 extension JSONValue {
+    /// The merge patch that turns `old` into `new`: only the keys whose
+    /// values differ, with `null` for keys `new` doesn't have. Nil when
+    /// they're the same. Applied to something that has changed since
+    /// `old`, it leaves the other changes alone.
+    public static func mergePatch(from old: JSONValue, to new: JSONValue) -> JSONValue? {
+        guard case .object(let before) = old, case .object(let after) = new else {
+            return old == new ? nil : new
+        }
+        var patch: [String: JSONValue] = [:]
+        for (key, value) in after {
+            guard let previous = before[key] else {
+                patch[key] = value
+                continue
+            }
+            if case .object = previous, case .object = value {
+                if let inner = mergePatch(from: previous, to: value) { patch[key] = inner }
+            } else if previous != value {
+                patch[key] = value
+            }
+        }
+        for key in before.keys where after[key] == nil {
+            patch[key] = .null
+        }
+        return patch.isEmpty ? nil : .object(patch)
+    }
+
     /// Applies a merge patch to a `Codable` value by round-tripping it
     /// through JSON. Keys the patch doesn't mention are left alone.
     public static func applyMergePatch<T: Codable>(_ patch: JSONValue, to value: T) throws -> T {

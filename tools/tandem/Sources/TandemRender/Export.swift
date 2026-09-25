@@ -74,9 +74,16 @@ final class ExportPipeline: @unchecked Sendable {
         guard ["mp4", "mov", "m4v"].contains(output.pathExtension.lowercased()) else {
             throw RenderError.export("export to a .mp4, .mov or .m4v file, not \(output.lastPathComponent)")
         }
-        let target = output.standardizedFileURL.resolvingSymlinksInPath().path
-        if context.project.media.contains(where: { context.folder.url(for: $0).standardizedFileURL.resolvingSymlinksInPath().path == target }) {
-            throw RenderError.export("\(output.lastPathComponent) is media in this project; export somewhere else")
+        if let reason = RenderOutputs.protectedReason(output, project: context.project, folder: context.folder) {
+            throw RenderError.export("\(reason); export somewhere else")
+        }
+        // Re-exporting over an earlier Tandem export is normal, and those
+        // have their snapshot beside them. Anything else at that path (an
+        // old Filmora render, a download) isn't ours to replace.
+        let fm = FileManager.default
+        let snapshot = output.appendingPathExtension(ProjectFile.fileExtension)
+        if fm.fileExists(atPath: output.path) && !fm.fileExists(atPath: snapshot.path) {
+            throw RenderError.export("\(output.lastPathComponent) already exists and isn't a Tandem export; pick another name or move it first")
         }
     }
 
@@ -534,6 +541,25 @@ final class ExportPipeline: @unchecked Sendable {
         }
         let data = try ProjectFile.encoder().encode(Snapshot(revision: 0, project: project))
         try data.write(to: URL(fileURLWithPath: output.path + ".tandem"), options: .atomic)
+    }
+}
+
+/// Files a render (an export, a review clip, a frame, a screenshot) must
+/// never write over.
+public enum RenderOutputs {
+    /// Why writing `output` would destroy work, or nil when it wouldn't: it
+    /// is a Tandem project (this one or any other), or a file this project
+    /// plays. Paths are compared after resolving links, which also brings a
+    /// differently cased spelling back to the file's own name.
+    public static func protectedReason(_ output: URL, project: Project, folder: ProjectFolder) -> String? {
+        if output.pathExtension.lowercased() == ProjectFile.fileExtension {
+            return "\(output.lastPathComponent) is a Tandem project"
+        }
+        let target = output.standardizedFileURL.resolvingSymlinksInPath().path
+        if project.media.contains(where: { folder.url(for: $0).standardizedFileURL.resolvingSymlinksInPath().path == target }) {
+            return "\(output.lastPathComponent) is media in this project"
+        }
+        return nil
     }
 }
 

@@ -20,6 +20,10 @@ public struct ServiceError: Error, Codable, Equatable, CustomStringConvertible, 
         case notImplemented
         /// Something needed isn't there, like the app for a screenshot.
         case unavailable
+        /// The request reached Tandem but the connection dropped before the
+        /// answer (the app quit or crashed), so it may have run. Check
+        /// `history` before sending an edit again.
+        case interrupted
         case nothingToUndo
         case nothingToRedo
         case unauthorized
@@ -51,7 +55,7 @@ public struct ServiceError: Error, Codable, Equatable, CustomStringConvertible, 
         case .notFound: return 404
         case .overlap, .locked, .staleRevision, .nothingToUndo, .nothingToRedo: return 409
         case .notImplemented: return 501
-        case .unavailable: return 503
+        case .unavailable, .interrupted: return 503
         case .internalError, .none: return 500
         }
     }

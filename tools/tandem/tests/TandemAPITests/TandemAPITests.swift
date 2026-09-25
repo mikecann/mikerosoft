@@ -41,6 +41,109 @@ final class ProjectSessionTests: XCTestCase {
         reopened.close()
     }
 
+    func testAnUnreadableProjectPointsToItsBackups() throws {
+        let url = folder.appendingPathComponent("Video.tandem")
+        try ProjectFile.save(Project.standard(name: "Video"), revision: 1, to: url)
+        try ProjectFile.save(Project.standard(name: "Video"), revision: 2, to: url)
+        // Cut short by a crash, or broken by a hand edit.
+        try Data(#"{"project": {"name": "Vid"#.utf8).write(to: url)
+        XCTAssertThrowsError(try ProjectSession.open(url, owner: .app)) { error in
+            let message = "\(error)"
+            XCTAssertTrue(message.contains("Video.tandem"), message)
+            XCTAssertTrue(message.contains(".tandem/backups"), message)
+            let newest = ProjectFile.backups(of: url).last?.lastPathComponent
+            XCTAssertNotNil(newest)
+            XCTAssertTrue(message.contains(newest ?? "?"), message)
+        }
+        XCTAssertNil(ProjectSession.liveLock(for: url), "a failed open lets go of the lock")
+    }
+
+    func testANewProjectDoesntInheritWhatAnOldOneLeftBehind() throws {
+        // A project of this name crashed with unsaved edits and was then
+        // deleted, and the CLI had kept undo history for it.
+        let url = folder.appendingPathComponent("Video.tandem")
+        var old = Project.standard(name: "Old")
+        old.markers = [Marker(id: "mk_old", time: t(1), name: "Old")]
+        ProjectJournal.forProject(at: url).appendSnapshot(project: old, revision: 3, reason: "undo")
+        try FileManager.default.createDirectory(at: ProjectFile.supportFolder(for: url), withIntermediateDirectories: true)
+        let stale = #"{"revision": 1, "undo": [], "redo": [], "idempotent": []}"#
+        try Data(stale.utf8).write(to: ProjectFile.undoHistoryURL(for: url))
+
+        let session = try ProjectSession.create(at: url, name: "New", owner: .cli)
+        defer { session.close() }
+        XCTAssertFalse(session.recoveredEdits)
+        XCTAssertEqual(session.coordinator.project.name, "New")
+        XCTAssertEqual(session.coordinator.project.markers, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectFile.undoHistoryURL(for: url).path))
+    }
+
+    func testSavesFollowTheFolderWhenItsRenamed() throws {
+        // Mike renames the video folder in Finder with the project open.
+        let before = folder.appendingPathComponent("working title", isDirectory: true)
+        let after = folder.appendingPathComponent("decision-models", isDirectory: true)
+        try FileManager.default.createDirectory(at: before, withIntermediateDirectories: true)
+        let session = try ProjectSession.create(at: before.appendingPathComponent("Video.tandem"), owner: .app)
+        session.autosaveDelay = 3600
+        try session.coordinator.apply(EditBatch(label: "Before", commands: [.addMarker(marker: Marker(id: "mk_1", time: t(1), name: "1"))]))
+        try FileManager.default.moveItem(at: before, to: after)
+        // Something recreates the old path (the analysis cache writing into
+        // .tandem/cache, say); the project still belongs in the renamed folder.
+        try FileManager.default.createDirectory(at: before.appendingPathComponent(".tandem/cache"), withIntermediateDirectories: true)
+        try session.coordinator.apply(EditBatch(label: "After", commands: [.addMarker(marker: Marker(id: "mk_2", time: t(2), name: "2"))]))
+        session.close()
+
+        let moved = after.appendingPathComponent("Video.tandem")
+        XCTAssertEqual(try ProjectFile.load(from: moved).project.markers.map(\.id), ["mk_1", "mk_2"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: before.appendingPathComponent("Video.tandem").path))
+        XCTAssertEqual(session.fileURL.lastPathComponent, "Video.tandem")
+        XCTAssertEqual(session.fileURL.deletingLastPathComponent().lastPathComponent, "decision-models")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectSession.lockURL(for: moved).path), "the lock goes with it")
+    }
+
+    func testAnEditThatLandsDuringASaveIsStillJournaled() throws {
+        let url = folder.appendingPathComponent("Race.tandem")
+        let session = try ProjectSession.create(at: url, owner: .app)
+        session.autosaveDelay = 3600
+        try session.coordinator.apply(EditBatch(label: "First", commands: [.addMarker(marker: Marker(id: "mk_1", time: t(1), name: "1"))]))
+        // What the journal holds when an agent's edit commits after the save
+        // has taken its snapshot but before it clears the journal: an entry
+        // for the next revision, which the file being written doesn't have.
+        let late = EditBatch(label: "Late", commands: [.addMarker(marker: Marker(id: "mk_2", time: t(2), name: "2"))])
+        ProjectJournal.forProject(at: url).append(batch: late, revision: session.coordinator.revision + 1, seed: 7)
+        try session.save()
+
+        // The app dies before the next autosave.
+        try FileManager.default.removeItem(at: ProjectSession.lockURL(for: url))
+        let reopened = try ProjectSession.open(url, owner: .app)
+        defer { reopened.close() }
+        XCTAssertEqual(reopened.coordinator.project.markers.map(\.id), ["mk_1", "mk_2"])
+    }
+
+    func testAnUndoFromTheDiskHistorySurvivesACrash() throws {
+        // A CLI edit, then the app opens the project and an agent undoes
+        // that edit through the app's API (from the history kept on disk),
+        // then edits on. The app dies before autosaving.
+        let url = try APIFixture.write(to: folder)
+        let original = try ProjectFile.load(from: url).project
+        try headless(url) { service in
+            _ = try service.apply(ApplyRequest(label: "Cut", commands: [.blade(at: t(10))]), context: CallContext(author: "claude"))
+        }
+        let session = try ProjectSession.open(url, owner: .app)
+        session.autosaveDelay = 3600
+        let service = TandemService(session: session, mode: .hosted, analysis: FakeAnalysis(), renderer: FakeRenderer())
+        XCTAssertEqual(try service.undo(expectedRevision: nil).label, "Cut")
+        _ = try service.apply(ApplyRequest(label: "Marker", commands: [.addMarker(marker: Marker(id: "mk_after", time: t(3), name: "After"))]), context: CallContext(author: "claude"))
+        let expected = session.coordinator.project
+        service.shutdown()
+        try FileManager.default.removeItem(at: ProjectSession.lockURL(for: url))
+
+        let reopened = try ProjectSession.open(url, owner: .app)
+        defer { reopened.close() }
+        XCTAssertTrue(reopened.recoveredEdits)
+        XCTAssertEqual(reopened.coordinator.project, expected, "the undone cut stays undone")
+        XCTAssertEqual(reopened.coordinator.project.track(named: "Camera")?.clips, original.track(named: "Camera")?.clips)
+    }
+
     func testAutosaveWritesAfterAnEdit() throws {
         let url = folder.appendingPathComponent("Auto.tandem")
         let session = try ProjectSession.create(at: url, owner: .cli)
@@ -51,6 +154,58 @@ final class ProjectSessionTests: XCTestCase {
         XCTAssertFalse(session.isDirty)
         XCTAssertEqual(try ProjectFile.load(from: url).project.markers.count, 1)
         session.close()
+    }
+}
+
+final class MediaRefreshTests: XCTestCase {
+    /// A tiny WAV: silence at 48 kHz, 16-bit mono.
+    static func wav(samples: Int) -> Data {
+        var wav = Data("RIFF".utf8)
+        func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { wav.append(contentsOf: $0) } }
+        append(UInt32(36 + samples * 2)); wav.append(Data("WAVEfmt ".utf8))
+        append(UInt32(16)); append(UInt16(1)); append(UInt16(1)); append(UInt32(48_000)); append(UInt32(96_000)); append(UInt16(2)); append(UInt16(16))
+        wav.append(Data("data".utf8)); append(UInt32(samples * 2)); wav.append(Data(count: samples * 2))
+        return wav
+    }
+
+    func testARefreshUpdatesKnownFilesAndAddsNewOnes() async throws {
+        // An imported project: its media is listed by absolute path and has
+        // no fingerprint, so the first scan updates it as well as adding
+        // the file that's new.
+        let folder = TempFolder()
+        try FileManager.default.createDirectory(at: folder.file("sfx"), withIntermediateDirectories: true)
+        try Self.wav(samples: 4_800).write(to: folder.file("sfx/click.wav"))
+        var project = Project.standard(name: "Imported")
+        project.media = [MediaItem(id: "med_click", path: folder.file("sfx/click.wav").path, kind: .audio, role: .sfx, duration: t(0.1), hasAudio: true)]
+        let url = folder.file("Imported.tandem")
+        try ProjectFile.save(project, revision: 0, to: url)
+        try Self.wav(samples: 9_600).write(to: folder.file("sfx/new.wav"))
+
+        let session = try ProjectSession.open(url, owner: .cli)
+        defer { session.close() }
+        let added = try await session.refreshMedia()
+        XCTAssertEqual(added.count, 1)
+        let media = session.coordinator.project.media
+        XCTAssertEqual(media.map(\.path), ["sfx/click.wav", "sfx/new.wav"])
+        XCTAssertNotNil(media[0].fingerprint)
+        XCTAssertEqual(media[0].role, .sfx)
+    }
+}
+
+extension MediaRefreshTests {
+    func testRefreshesAtTheSameTimeAddAFileOnce() async throws {
+        // Opening a project in the app starts two scans at once (the
+        // window's and the folder watcher's first look), and a take
+        // recorded while Tandem was closed is new to both.
+        let folder = TempFolder()
+        let session = try ProjectSession.create(at: folder.file("Video.tandem"), owner: .cli)
+        defer { session.close() }
+        try FileManager.default.createDirectory(at: folder.file("sfx"), withIntermediateDirectories: true)
+        for name in ["a", "b", "c"] { try Self.wav(samples: 4_800).write(to: folder.file("sfx/\(name).wav")) }
+        async let first = session.refreshMedia()
+        async let second = session.refreshMedia()
+        _ = try await (first, second)
+        XCTAssertEqual(session.coordinator.project.media.map(\.path).sorted(), ["sfx/a.wav", "sfx/b.wav", "sfx/c.wav"])
     }
 }
 

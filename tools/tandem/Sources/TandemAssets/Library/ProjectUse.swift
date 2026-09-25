@@ -119,12 +119,24 @@ extension AssetLibrary {
 
         var copied: [URL] = []
         func copy(_ file: URL, as name: String) throws -> URL {
-            let destination = destinationFolder.appendingPathComponent(name)
             let fileManager = FileManager.default
-            let sourceSize = (try? fileManager.attributesOfItem(atPath: file.path)[.size] as? Int64) ?? -1
-            let existingSize = (try? fileManager.attributesOfItem(atPath: destination.path)[.size] as? Int64) ?? -2
-            if sourceSize != existingSize {
-                try? fileManager.removeItem(at: destination)
+            func size(_ url: URL) -> Int64? {
+                (try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? Int64
+            }
+            let sourceSize = size(file)
+            // A file already there that isn't this one (Mike reworked the
+            // copy, or the library's file changed since the timeline started
+            // using it) is never replaced: the copy goes beside it.
+            let stem = (name as NSString).deletingPathExtension
+            let ext = (name as NSString).pathExtension
+            var destination = destinationFolder.appendingPathComponent(name)
+            var counter = 2
+            while fileManager.fileExists(atPath: destination.path) || (try? fileManager.destinationOfSymbolicLink(atPath: destination.path)) != nil {
+                if let sourceSize, size(destination) == sourceSize { break }
+                destination = destinationFolder.appendingPathComponent(ext.isEmpty ? "\(stem) \(counter)" : "\(stem) \(counter).\(ext)")
+                counter += 1
+            }
+            if !fileManager.fileExists(atPath: destination.path) {
                 // copyItem clones on APFS, so this costs no extra space
                 // when the project is on the same volume as the library.
                 try fileManager.copyItem(at: file, to: destination)

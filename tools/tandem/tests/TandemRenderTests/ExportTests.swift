@@ -256,7 +256,12 @@ final class ExportTests: XCTestCase {
         let clip = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
         let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_r", "red.mov", seconds: 1)])
         let context = RenderContext(project: project, folder: media.projectFolder)
-        for out in [source, media.folder.appendingPathComponent("Video")] {
+        var outputs = [source, media.folder.appendingPathComponent("Video")]
+        // The same file spelled differently, on a volume that ignores case
+        // (APFS's default): replacing it would delete the source.
+        let shouted = media.folder.appendingPathComponent("RED.MOV")
+        if FileManager.default.fileExists(atPath: shouted.path) { outputs.append(shouted) }
+        for out in outputs {
             do {
                 _ = try await Exporter(context: context, preset: preset(loudness: nil), output: out).run()
                 XCTFail("expected \(out.lastPathComponent) to be refused")
@@ -267,6 +272,28 @@ final class ExportTests: XCTestCase {
         // The source is untouched.
         let size = (try FileManager.default.attributesOfItem(atPath: source.path)[.size] as? Int) ?? 0
         XCTAssertGreaterThan(size, 1_000)
+    }
+
+    func testOnlyReplacesEarlierTandemExports() async throws {
+        let media = try TestMedia()
+        _ = try await media.movie("red.mov", seconds: 1, draw: { TestMedia.fill($1, 1, 0, 0) })
+        let clip = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_r", "red.mov", seconds: 1)])
+        let context = RenderContext(project: project, folder: media.projectFolder)
+        // Someone else's render at the path: refused, and left alone.
+        let foreign = media.folder.appendingPathComponent("Filmora render.mp4")
+        try Data("not ours".utf8).write(to: foreign)
+        do {
+            _ = try await Exporter(context: context, preset: preset(loudness: nil), output: foreign).run()
+            XCTFail("expected an existing file that isn't a Tandem export to be refused")
+        } catch {
+            XCTAssertTrue("\(error)".contains("isn't a Tandem export"), "\(error)")
+        }
+        XCTAssertEqual(try Data(contentsOf: foreign), Data("not ours".utf8))
+        // Our own export, snapshot and all, can be replaced.
+        let ours = media.folder.appendingPathComponent("review.mp4")
+        _ = try await Exporter(context: context, preset: preset(loudness: nil), output: ours).run()
+        _ = try await Exporter(context: context, preset: preset(loudness: nil), output: ours).run()
     }
 
     func testCancellingStopsAndRemovesTheFile() async throws {

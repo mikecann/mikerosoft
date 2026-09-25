@@ -11,17 +11,40 @@ import TandemCore
 /// project can live anywhere. Links made for files with misleading
 /// extensions go in `linkFolder(in:name:)`, next to the project.
 public enum ImportWriter {
+    /// Writes the import, replacing an earlier import of the same name
+    /// only while it's untouched (see `checkReplaceable`).
     @discardableResult
     public static func write(_ result: ImportResult, into folder: URL, name: String) throws -> URL {
         let projectFolder = folder.appendingPathComponent(name, isDirectory: true)
-        try FileManager.default.createDirectory(at: projectFolder, withIntermediateDirectories: true)
         let url = projectFolder.appendingPathComponent("\(name).\(ProjectFile.fileExtension)")
+        try checkReplaceable(url)
+        try FileManager.default.createDirectory(at: projectFolder, withIntermediateDirectories: true)
+        ProjectFile.forgetHistory(of: url)
         try ProjectFile.save(result.project, revision: 0, to: url)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         try encoder.encode(result.report).write(to: projectFolder.appendingPathComponent("\(name).import.json"), options: .atomic)
         try Data((result.report.text + "\n").utf8).write(to: projectFolder.appendingPathComponent("\(name).import.txt"), options: .atomic)
         return url
+    }
+
+    /// Throws if `url` holds work an import mustn't replace. Imports are
+    /// written at revision 0, so a project with a higher revision, or with
+    /// edits in its journal that a crash kept from being saved, has been
+    /// edited since: it's Mike's now, not the importer's.
+    static func checkReplaceable(_ url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let advice = "Import it under another name with --name, or move \(url.lastPathComponent) away first."
+        struct Header: Decodable { var revision: Int }
+        guard let data = try? Data(contentsOf: url), let header = try? JSONDecoder().decode(Header.self, from: data) else {
+            throw ImportError.invalid("\(url.path) already exists and isn't a Tandem project this import can replace. \(advice)")
+        }
+        if header.revision > 0 {
+            throw ImportError.invalid("\(url.path) has changed since it was imported (it is at revision \(header.revision)), so it may hold edits. \(advice)")
+        }
+        if !ProjectJournal.forProject(at: url).entries(after: header.revision).isEmpty {
+            throw ImportError.invalid("\(url.path) has edits that weren't saved when Tandem last closed; open it in Tandem to recover them. \(advice)")
+        }
     }
 
     /// Where an import named `name` in `folder` keeps its media links.

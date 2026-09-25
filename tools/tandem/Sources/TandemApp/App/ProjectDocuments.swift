@@ -182,9 +182,10 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
             try model.session.save()
             let (project, revision) = model.session.coordinator.snapshot()
             let moved = VersionNaming.relocated(project, from: model.fileURL.deletingLastPathComponent(), to: target.deletingLastPathComponent())
-            // A file being replaced may have left a journal behind; replaying
-            // it over the new version would bring back its old edits.
-            ProjectJournal.forProject(at: target).truncate()
+            // A file being replaced may have left a journal or undo history
+            // behind; replaying or undoing them over the new version would
+            // bring back its old edits.
+            ProjectFile.forgetHistory(of: target)
             try ProjectFile.save(moved, revision: revision, to: target)
         } catch {
             alert("Couldn't save the version", EditorModel.describe(error))

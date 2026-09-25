@@ -137,6 +137,32 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(try ProjectFile.load(from: url).project.track(named: "Camera")?.clips.count, 3)
     }
 
+    func testIdempotencyKeysHoldBetweenTheAppAndTheCLI() throws {
+        let folder = TempFolder()
+        let url = try APIFixture.write(to: folder.url)
+        func hosted<R>(_ body: (TandemService) throws -> R) throws -> R {
+            let session = try ProjectSession.open(url, owner: .app)
+            let service = TandemService(session: session, mode: .hosted, analysis: FakeAnalysis(), renderer: FakeRenderer())
+            defer {
+                service.shutdown()
+                session.close()
+            }
+            return try body(service)
+        }
+        // Applied through the app, which quits before the agent hears back;
+        // the agent's retry reaches the CLI.
+        let cut = ApplyRequest(label: "Cut", commands: [.moveClips(clipIDs: ["clip_brl1"], delta: t(1), includeLinked: false)], idempotencyKey: "move-broll")
+        let first = try hosted { try $0.apply(cut, context: CallContext()) }
+        let retried = try headless(url) { try $0.apply(cut, context: CallContext()) }
+        XCTAssertTrue(retried.repeated)
+        XCTAssertEqual(retried.revision, first.revision)
+        // And the other way round.
+        let again = ApplyRequest(label: "Again", commands: [.moveClips(clipIDs: ["clip_brl1"], delta: t(1), includeLinked: false)], idempotencyKey: "move-broll-2")
+        _ = try headless(url) { try $0.apply(again, context: CallContext()) }
+        XCTAssertTrue(try hosted { try $0.apply(again, context: CallContext()) }.repeated)
+        XCTAssertEqual(try ProjectFile.load(from: url).project.clip("clip_brl1")?.start, t(22), "each move once")
+    }
+
     func testValidateReportsMissingFiles() throws {
         let h = try ServiceHarness()
         defer { h.close() }
@@ -192,6 +218,40 @@ final class ServiceTests: XCTestCase {
         let written = try await FrameRequest(time: t(12), output: "frames/f.png").run(on: h.service, context: h.context)
         XCTAssertEqual(written.path, h.folder.file("frames/f.png").standardizedFileURL.path)
         XCTAssertEqual(try Data(contentsOf: h.folder.file("frames/f.png")), FakeRenderer.png)
+    }
+
+    func testFramesAndScreenshotsNeverOverwriteTheProjectOrItsMedia() async throws {
+        let h = try ServiceHarness()
+        defer { h.close() }
+        h.service.screenshotProvider = { FakeRenderer.png }
+        try FileManager.default.createDirectory(at: h.folder.file("source"), withIntermediateDirectories: true)
+        let take = h.folder.file("source/take1-camera.mov")
+        try Data("camera take".utf8).write(to: take)
+        let projectBytes = try Data(contentsOf: h.url)
+
+        for output in ["source/take1-camera.mov", h.folder.file("source/take1-camera.mov").path, "Decision Models.tandem", "Other version.tandem"] {
+            do {
+                _ = try await FrameRequest(time: t(12), output: output).run(on: h.service, context: h.context)
+                XCTFail("a frame shouldn't be written to \(output)")
+            } catch {
+                XCTAssertEqual((error as? ServiceError)?.code, "invalid", "\(error)")
+            }
+            do {
+                _ = try await ScreenshotRequest(output: output).run(on: h.service, context: h.context)
+                XCTFail("a screenshot shouldn't be written to \(output)")
+            } catch {
+                XCTAssertEqual((error as? ServiceError)?.code, "invalid", "\(error)")
+            }
+        }
+        // Exports and review clips say so before they start, whatever renders them.
+        assertServiceError(.invalid) { _ = try h.service.prepareExport(ExportRequest(output: "source/take1-camera.mov")) }
+        assertServiceError(.invalid) { _ = try h.service.prepareClip(ClipRequest(start: t(0), end: t(1), output: take.path)) }
+        XCTAssertEqual(try Data(contentsOf: take), Data("camera take".utf8))
+        XCTAssertEqual(try Data(contentsOf: h.url), projectBytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: h.folder.file("Other version.tandem").path))
+        // Anywhere else is fine, including over an earlier frame.
+        _ = try await FrameRequest(time: t(12), output: "frames/f.png").run(on: h.service, context: h.context)
+        _ = try await FrameRequest(time: t(13), output: "frames/f.png").run(on: h.service, context: h.context)
     }
 
     func testRenderWarningsAreTheOnesThatMatterHere() async throws {

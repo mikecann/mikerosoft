@@ -215,6 +215,68 @@ final class ImportRequestTests: XCTestCase {
         XCTAssertTrue(text.hasPrefix("Imported \"Mini Filmora\""), text)
     }
 
+    func miniImport(into folder: URL) -> ImportRequest {
+        ImportRequest(
+            source: .filmora(Fixtures.url("wfp/Mini")),
+            output: folder,
+            prober: FakeProbe(media: FilmoraImporterTests.media, undecodable: ["Subscribe Element.webm"])
+        )
+    }
+
+    func testImportingAgainNeverReplacesAnEditedProject() async throws {
+        let folder = try Fixtures.temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (url, first) = try await miniImport(into: folder).perform()
+        // Mike edits the import in Tandem, then runs the import again.
+        var edited = first.project
+        edited.markers.append(Marker(id: "mk_mike", time: t(1), name: "Mike's"))
+        try ProjectFile.save(edited, revision: 12, to: url)
+
+        do {
+            _ = try await miniImport(into: folder).perform()
+            XCTFail("an edited project must not be replaced")
+        } catch {
+            XCTAssertTrue("\(error)".contains("--name"), "says how to import beside it: \(error)")
+        }
+        let kept = try ProjectFile.load(from: url)
+        XCTAssertEqual(kept.revision, 12)
+        XCTAssertEqual(kept.project, edited)
+    }
+
+    func testImportingAgainNeverReplacesUnsavedEdits() async throws {
+        let folder = try Fixtures.temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (url, first) = try await miniImport(into: folder).perform()
+        // Edits made in a session that died before saving: still revision
+        // 0 on disk, the edit only in the journal.
+        let batch = EditBatch(label: "Marker", commands: [.addMarker(marker: Marker(id: "mk_mike", time: t(1), name: "Mike's"))])
+        ProjectJournal.forProject(at: url).append(batch: batch, revision: 1, seed: 1)
+
+        do {
+            _ = try await miniImport(into: folder).perform()
+            XCTFail("a project with unsaved edits must not be replaced")
+        } catch {}
+        XCTAssertEqual(try ProjectFile.load(from: url).project, first.project)
+        XCTAssertEqual(ProjectJournal.forProject(at: url).entries(after: 0).count, 1)
+    }
+
+    func testAnUntouchedImportIsReplacedWithoutItsOldHistory() async throws {
+        let folder = try Fixtures.temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (url, _) = try await miniImport(into: folder).perform()
+        // Left over from an earlier project of this name that was deleted:
+        // replayed on the new import, it would bring the old one back.
+        var old = Project.standard(name: "Old")
+        old.markers = [Marker(id: "mk_old", time: t(1), name: "Old")]
+        try FileManager.default.removeItem(at: url)
+        ProjectJournal.forProject(at: url).appendSnapshot(project: old, revision: 5, reason: "undo")
+
+        let (again, result) = try await miniImport(into: folder).perform()
+        XCTAssertEqual(again, url)
+        XCTAssertEqual(ProjectJournal.forProject(at: url).entries(after: 0).count, 0)
+        XCTAssertEqual(try ProjectFile.load(from: url).project, result.project)
+    }
+
     func testNamesAreSafeForFiles() {
         XCTAssertEqual(ImportRequest.fileName("Decision Models v14"), "Decision Models v14")
         XCTAssertEqual(ImportRequest.fileName("a/b:c"), "a-b-c")

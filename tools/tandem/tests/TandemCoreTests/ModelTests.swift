@@ -41,6 +41,19 @@ final class JSONTests: XCTestCase {
         XCTAssertEqual(patch.mergePatch(into: target), expected)
     }
 
+    func testMergePatchBetweenTwoValues() throws {
+        func json(_ text: String) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)) }
+        let old = try json(#"{"id": "med_a", "path": "/x/a.wav", "role": "sfx", "rate": {"n": 30, "d": 1}, "takeID": "t1"}"#)
+        let new = try json(#"{"id": "med_a", "path": "a.wav", "role": "sfx", "rate": {"n": 25, "d": 1}, "fingerprint": "f"}"#)
+        let patch = try XCTUnwrap(JSONValue.mergePatch(from: old, to: new))
+        XCTAssertEqual(patch, try json(#"{"path": "a.wav", "rate": {"n": 25}, "fingerprint": "f", "takeID": null}"#))
+        XCTAssertEqual(patch.mergePatch(into: old), new)
+        XCTAssertNil(JSONValue.mergePatch(from: old, to: old))
+        // Laid over a value changed since, it keeps that change.
+        let since = try json(#"{"id": "med_a", "path": "/x/a.wav", "role": "music", "rate": {"n": 30, "d": 1}, "takeID": "t1"}"#)
+        XCTAssertEqual(patch.mergePatch(into: since), try json(#"{"id": "med_a", "path": "a.wav", "role": "music", "rate": {"n": 25, "d": 1}, "fingerprint": "f"}"#))
+    }
+
     func testMinimalClipJSONDecodesWithDefaults() throws {
         let json = #"{"content": {"media": {"mediaID": "med_x"}}, "start": 3, "duration": 2}"#
         let clip = try JSONDecoder().decode(Clip.self, from: Data(json.utf8))

@@ -26,8 +26,14 @@ public final class ProjectSession: @unchecked Sendable {
         public var token: String?
     }
 
-    public let fileURL: URL
+    /// Where the project file is now. If Mike renames or moves the video
+    /// folder while it's open, saves follow it there. (`folder`, which
+    /// media paths resolve against, stays where it was opened until the
+    /// project is opened again.)
+    public var fileURL: URL { projectFolder.url.appendingPathComponent(fileName) }
     public let folder: ProjectFolder
+    private let projectFolder: FolderAnchor
+    private let fileName: String
     public let coordinator: ProjectCoordinator
     public let analysis: MediaAnalysis
     public let owner: Owner
@@ -45,7 +51,8 @@ public final class ProjectSession: @unchecked Sendable {
     public var autosaveDelay: TimeInterval = 1
 
     private init(fileURL: URL, project: Project, revision: Int, owner: Owner, recovered: Bool, journal: ProjectJournal, lock: LockHandle) {
-        self.fileURL = fileURL
+        self.projectFolder = FolderAnchor(fileURL.deletingLastPathComponent())
+        self.fileName = fileURL.lastPathComponent
         self.folder = ProjectFolder(projectFile: fileURL)
         self.journal = journal
         self.lockHandle = lock
@@ -67,7 +74,7 @@ public final class ProjectSession: @unchecked Sendable {
         let url = url.standardizedFileURL
         let lock = try claimLock(for: url, owner: owner)
         do {
-            let (project, revision) = try ProjectFile.load(from: url)
+            let (project, revision) = try load(url)
             let journal = ProjectJournal.forProject(at: url)
             var recovered = false
             var start = (project, revision)
@@ -85,6 +92,21 @@ public final class ProjectSession: @unchecked Sendable {
         }
     }
 
+    /// Reads the project file. When it isn't a project Tandem can read (cut
+    /// short, or broken by a hand edit), says where the previous saves are.
+    static func load(_ url: URL) throws -> (project: Project, revision: Int) {
+        do {
+            return try ProjectFile.load(from: url)
+        } catch let error as DecodingError {
+            let reason = DecodingErrorText.describe(error)
+            var message = "\(url.lastPathComponent) couldn't be read: \(reason)\(reason.hasSuffix(".") ? "" : ".")"
+            if let newest = ProjectFile.backups(of: url).last {
+                message += " The previous saves are in .tandem/backups/ next to it; the newest is \"\(newest.lastPathComponent)\". Copy one over \(url.lastPathComponent) to go back to it."
+            }
+            throw ServiceError(.invalid, message)
+        }
+    }
+
     /// Creates a new project with Mike's usual tracks in `url`'s folder.
     public static func create(at url: URL, name: String? = nil, owner: Owner) throws -> ProjectSession {
         let url = url.standardizedFileURL
@@ -93,19 +115,24 @@ public final class ProjectSession: @unchecked Sendable {
         }
         let project = Project.standard(name: name ?? url.deletingPathExtension().lastPathComponent)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // A deleted project of this name may have left a journal or undo
+        // history; opening would replay it over the new project.
+        ProjectFile.forgetHistory(of: url)
         try ProjectFile.save(project, revision: 0, to: url)
         return try open(url, owner: owner)
     }
 
     public var isDirty: Bool { coordinator.revision != savedRevision }
 
-    /// Writes the project atomically and clears the journal.
+    /// Writes the project atomically and clears the journal up to what
+    /// was written. Edits keep committing while the file is written, and
+    /// their journal entries stay until the save that includes them.
     public func save() throws {
         try queue.sync {
             let (project, revision) = coordinator.snapshot()
             guard revision != savedRevision else { return }
             try ProjectFile.save(project, revision: revision, to: fileURL)
-            journal.truncate()
+            journal.truncate(through: revision)
             savedRevision = revision
         }
     }
@@ -165,27 +192,57 @@ public final class ProjectSession: @unchecked Sendable {
 
     /// Adds files that appeared in the folder since the last scan, as one
     /// edit by "system". Returns the new media IDs.
+    ///
+    /// The project can change while the folder is scanned: another scan
+    /// can add the same new files first (opening a project in the app
+    /// starts two), or Mike can edit. So the edit is worked out against the
+    /// project as it is when it's applied, and worked out again if it
+    /// changes in between.
     @discardableResult
     public func refreshMedia() async throws -> [String] {
         let project = coordinator.project
         let scanned = try await MediaScanner.scan(folder, known: project.media)
+        var attempt = 0
+        while true {
+            attempt += 1
+            let (current, revision) = coordinator.snapshot()
+            let (commands, added) = Self.refreshCommands(scanned, scannedFrom: project, into: current, folder: folder)
+            guard !commands.isEmpty else { return [] }
+            do {
+                try coordinator.apply(EditBatch(label: "Found new media", author: "system", commands: commands, expectedRevision: revision))
+            } catch EditError.staleRevision where attempt < 20 {
+                continue
+            }
+            let used = Set(coordinator.project.allTracks.flatMap(\.clips).compactMap(\.mediaID))
+            analysis.requestDefaults(for: coordinator.project.media, usedOnTimeline: used)
+            return added
+        }
+    }
+
+    /// The edit that brings a scan's results into `current`, and the IDs of
+    /// the media it adds. `scannedFrom` is the project the scan started
+    /// from.
+    static func refreshCommands(_ scanned: [MediaItem], scannedFrom project: Project, into current: Project, folder: ProjectFolder) -> (commands: [EditCommand], added: [String]) {
         let known = Set(project.media.map(\.id))
+        let paths = Set(current.media.map { folder.path(for: folder.url(for: $0)) })
         var commands: [EditCommand] = []
+        var added: [String] = []
         for item in scanned {
             if known.contains(item.id) {
-                if let old = project.media(item.id), old != item,
-                   let patch = try? JSONValue.from(item) {
+                // Only what the scan changed, so an edit made while it ran
+                // (a new look, a role) stays, and never the ID, which
+                // updateMedia refuses. Media removed meanwhile stays removed.
+                if current.media(item.id) != nil, let old = project.media(item.id), old != item,
+                   let before = try? JSONValue.from(old), let after = try? JSONValue.from(item),
+                   let patch = JSONValue.mergePatch(from: before, to: after) {
                     commands.append(.updateMedia(mediaID: item.id, patch: patch))
                 }
-            } else {
+            } else if !paths.contains(folder.path(for: folder.url(for: item))) {
                 commands.append(.addMedia(item: item))
+                added.append(item.id)
             }
         }
-        guard !commands.isEmpty else { return [] }
-        try coordinator.apply(EditBatch(label: "Found new media", author: "system", commands: commands))
-        let used = Set(coordinator.project.allTracks.flatMap(\.clips).compactMap(\.mediaID))
-        analysis.requestDefaults(for: coordinator.project.media, usedOnTimeline: used)
-        return scanned.map(\.id).filter { !known.contains($0) }
+        return (commands, added)
     }
 
     /// Records the API endpoint in the lock so the CLI can find the app.
@@ -353,17 +410,19 @@ final class LockHandle: @unchecked Sendable {
         self.lock = lock
     }
 
-    /// Removes the lock file (if it's still ours) and drops the lock.
+    /// Removes the lock file (if it's still ours) and drops the lock. The
+    /// file is found where it is now, in case the folder was renamed.
     func release() {
         mutex.lock()
         defer { mutex.unlock() }
         guard !released else { return }
         released = true
+        let path = FolderAnchor.path(of: fd) ?? url.path
         var opened = stat()
         var current = stat()
-        if fstat(fd, &opened) == 0, stat(url.path, &current) == 0,
+        if fstat(fd, &opened) == 0, stat(path, &current) == 0,
            opened.st_ino == current.st_ino, opened.st_dev == current.st_dev {
-            unlink(url.path)
+            unlink(path)
         }
         close(fd)
     }

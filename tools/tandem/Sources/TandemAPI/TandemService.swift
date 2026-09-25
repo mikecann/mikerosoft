@@ -369,7 +369,11 @@ public final class TandemService: @unchecked Sendable {
         }
         editLock.lock()
         defer { editLock.unlock() }
-        if mode == .headless, let key = batch.idempotencyKey, var previous = history.result(forKey: key) {
+        // Keys are kept on disk as well as by the coordinator, so a retry
+        // gets the first result whichever process took the first call: the
+        // app may quit before the agent hears back, and the retry then
+        // reaches the CLI (or the other way round).
+        if let key = batch.idempotencyKey, var previous = history.result(forKey: key) {
             previous.repeated = true
             return previous
         }
@@ -388,8 +392,10 @@ public final class TandemService: @unchecked Sendable {
             createdIDs: commit.createdIDs, warnings: commit.warnings, dryRun: false, repeated: repeated,
             added: diff.added, removed: diff.removed, changed: diff.changed, duration: after.duration
         )
-        if mode == .headless && !repeated {
-            history.recordEdit(label: batch.label, author: batch.author, before: before, beforeRevision: beforeRevision, afterRevision: commit.revision)
+        if !repeated {
+            if mode == .headless {
+                history.recordEdit(label: batch.label, author: batch.author, before: before, beforeRevision: beforeRevision, afterRevision: commit.revision)
+            }
             if let key = batch.idempotencyKey { history.remember(key: key, result: result) }
         }
         return result
@@ -504,6 +510,14 @@ public final class TandemService: @unchecked Sendable {
         folder.url(forPath: path).standardizedFileURL
     }
 
+    /// Refuses to write a render over the project's media or a Tandem
+    /// project file (see `RenderOutputs`).
+    func checkOutput(_ output: URL, what: String) throws {
+        if let reason = RenderOutputs.protectedReason(output, project: coordinator.project, folder: folder) {
+            throw ServiceError(.invalid, "\(reason); save the \(what) somewhere else.")
+        }
+    }
+
     func renderContext(_ project: Project, format: String?) throws -> RenderContext {
         if let format, format != "main", !project.settings.alternateFormats.contains(where: { $0.id == format }) {
             let known = project.settings.alternateFormats.map(\.id)
@@ -530,6 +544,7 @@ public final class TandemService: @unchecked Sendable {
         case (nil, nil): maxSize = nil
         }
         let output = request.output.map(outputURL)
+        if let output { try checkOutput(output, what: "frame") }
         let renderer = self.renderer
         let time = request.time
         let frame = TimeRange(start: time, duration: project.settings.frameRate.frameDuration)
@@ -550,8 +565,10 @@ public final class TandemService: @unchecked Sendable {
         guard let provider = screenshotProvider else {
             throw ServiceError(.unavailable, "Screenshots capture the Tandem app's window, so they need the app open. Use `frame` for a rendered frame.")
         }
+        let output = output.map(outputURL)
+        if let output { try checkOutput(output, what: "screenshot") }
         let data = try await provider()
-        return try Self.deliver(data, to: output.map(outputURL), time: nil)
+        return try Self.deliver(data, to: output, time: nil)
     }
 
     static func deliver(_ data: Data, to output: URL?, time: Time?) throws -> ImageResult {
@@ -616,6 +633,8 @@ public final class TandemService: @unchecked Sendable {
     }
 
     private func prepareRender(preset: ExportPreset, output: URL, format: String?) throws -> @Sendable () async throws -> ExportOutcome {
+        // The exporter refuses these too; this says so before anything starts.
+        try checkOutput(output, what: "export")
         let project = coordinator.project
         let context = try renderContext(project, format: format)
         let renderer = self.renderer

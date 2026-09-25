@@ -200,7 +200,7 @@ public final class ProjectClient: @unchecked Sendable {
                 if let port = lock.port, let token = lock.token {
                     do {
                         return try await TandemHTTPClient(port: port, token: token, author: author).call(call)
-                    } catch let error as ServiceError where error.knownCode == .unavailable && Date() < deadline {
+                    } catch let error as ServiceError where Self.mayRetry(call, after: error) && Date() < deadline {
                         // The owner may have just quit; look again.
                     }
                 } else if Date() >= deadline {
@@ -216,6 +216,19 @@ public final class ProjectClient: @unchecked Sendable {
             }
             try await Task.sleep(nanoseconds: delay)
             delay = min(delay * 2, 250_000_000)
+        }
+    }
+
+    /// Whether a call the owner's API failed can be sent again: always when
+    /// the API couldn't be reached, but after the owner went away mid-call
+    /// (it quit or crashed before answering) only when the call changes
+    /// nothing. An edit may already be applied and journaled by then, and
+    /// sending it again would apply it twice.
+    static func mayRetry<C: ServiceCall>(_ call: C, after error: ServiceError) -> Bool {
+        switch error.knownCode {
+        case .unavailable: return true
+        case .interrupted: return !call.changesProject
+        default: return false
         }
     }
 
@@ -297,6 +310,21 @@ public final class ProjectClient: @unchecked Sendable {
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
+extension ServiceCall {
+    /// True when running the call twice could change the project twice: an
+    /// edit, an undo or redo, or a tool asked to apply its cuts.
+    var changesProject: Bool {
+        switch self {
+        case let apply as ApplyRequest: return apply.dryRun != true
+        case is UndoRequest, is RedoRequest: return true
+        case let tighten as TightenRequest: return tighten.apply == true
+        case let captions as CaptionsRequest: return captions.apply == true
+        case let short as ShortRequest: return short.apply == true
+        default: return false
         }
     }
 }
