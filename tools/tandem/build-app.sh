@@ -73,6 +73,6 @@ fi
 codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
   --identifier "com.mikerosoft.tandem.cli" "$CLI_BIN" >/dev/null
 codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
-  "${SIGNING_REQUIREMENTS[@]}" "$APP_DIR" >/dev/null
+  ${SIGNING_REQUIREMENTS[@]+"${SIGNING_REQUIREMENTS[@]}"} "$APP_DIR" >/dev/null
 
 echo "Built $APP_DIR"
