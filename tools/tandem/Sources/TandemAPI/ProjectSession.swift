@@ -88,7 +88,7 @@ public final class ProjectSession: @unchecked Sendable {
     public static func create(at url: URL, name: String? = nil, owner: Owner) throws -> ProjectSession {
         let url = url.standardizedFileURL
         guard !FileManager.default.fileExists(atPath: url.path) else {
-            throw EditError.invalid("\(url.path) already exists")
+            throw ServiceError(.invalid, "\(url.path) already exists. Open it instead, or pick another name.")
         }
         let project = Project.standard(name: name ?? url.deletingPathExtension().lastPathComponent)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

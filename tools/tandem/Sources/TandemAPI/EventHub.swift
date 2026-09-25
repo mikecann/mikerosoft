@@ -79,6 +79,10 @@ public struct ExportJob: Codable, Equatable, Sendable {
 public final class EventHub: @unchecked Sendable {
     private let lock = NSLock()
     private var buffer: [ServiceEvent] = []
+    /// Change events on their own, so a burst of job progress can't push
+    /// edits out of `history` and `watch`.
+    private var changes: [ServiceEvent] = []
+    private let changeCapacity = 200
     private var nextSeq = 1
     private var subscribers: [UUID: AsyncStream<ServiceEvent>.Continuation] = [:]
     private let capacity: Int
@@ -103,10 +107,21 @@ public final class EventHub: @unchecked Sendable {
         nextSeq += 1
         buffer.append(event)
         if buffer.count > capacity { buffer.removeFirst(buffer.count - capacity) }
+        if event.isChange {
+            changes.append(event)
+            if changes.count > changeCapacity { changes.removeFirst(changes.count - changeCapacity) }
+        }
         let targets = Array(subscribers.values)
         lock.unlock()
         for continuation in targets { continuation.yield(event) }
         return event
+    }
+
+    /// Recent edits, undos, redos and reloads, oldest first.
+    public func recentChanges() -> [ServiceEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return changes
     }
 
     /// Buffered events newer than `seq`, oldest first.

@@ -225,6 +225,8 @@ final class HTTPConnection: @unchecked Sendable {
     private let connection: NWConnection
     private weak var server: TandemHTTPServer?
     private var buffer = Data()
+    /// Set once a whole request has arrived.
+    private var request: HTTPRequest?
     private let lock = NSLock()
     private var streamTask: Task<Void, Never>?
     private var isClosed = false
@@ -233,6 +235,9 @@ final class HTTPConnection: @unchecked Sendable {
         self.connection = connection
         self.server = server
     }
+
+    /// How long a client gets to send a whole request.
+    static let requestTimeout: TimeInterval = 30
 
     func start(on queue: DispatchQueue) {
         connection.stateUpdateHandler = { [weak self] state in
@@ -243,6 +248,12 @@ final class HTTPConnection: @unchecked Sendable {
         }
         connection.start(queue: queue)
         receive()
+        // A client that connects and never finishes a request is dropped.
+        queue.asyncAfter(deadline: .now() + Self.requestTimeout) { [weak self] in
+            guard let self else { return }
+            let waiting = self.lock.withLock { !self.isClosed && self.request == nil }
+            if waiting { self.close() }
+        }
     }
 
     private func receive() {
@@ -251,6 +262,7 @@ final class HTTPConnection: @unchecked Sendable {
             if let data { self.buffer.append(data) }
             switch HTTPRequest.parse(self.buffer) {
             case .complete(let request):
+                self.lock.withLock { self.request = request }
                 Task { [weak self] in
                     guard let self, let server = self.server else { return }
                     await server.respond(to: request, on: self)

@@ -192,6 +192,16 @@ final class MCPTests: XCTestCase {
         await mcp.close()
     }
 
+    func testBatchesGetOneArrayOfAnswers() async throws {
+        let mcp = try MCPHarness()
+        mcp.send(#"[{"jsonrpc": "2.0", "id": 1, "method": "ping"}, {"jsonrpc": "2.0", "method": "notifications/initialized"}, {"jsonrpc": "2.0", "id": "b", "method": "tools/list"}]"#)
+        let answers = try await mcp.receive()
+        let items = try XCTUnwrap(answers.array)
+        XCTAssertEqual(items.map { $0["id"] }, [.number(1), .string("b")], "one answer per request, none for the notification")
+        XCTAssertNotNil(items[1]["result"]?["tools"])
+        await mcp.close()
+    }
+
     func testAuthorNames() {
         XCTAssertEqual(MCPServer.author(fromClient: "claude-code"), "claude")
         XCTAssertEqual(MCPServer.author(fromClient: "Codex CLI"), "codex")

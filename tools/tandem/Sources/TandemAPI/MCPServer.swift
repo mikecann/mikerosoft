@@ -62,9 +62,16 @@ public final class MCPServer: @unchecked Sendable {
     /// Handles one message. Requests run concurrently; responses are
     /// written as each finishes.
     func receive(_ line: String) {
-        guard let data = line.data(using: .utf8), let message = try? JSONDecoder().decode(JSONValue.self, from: data),
-              case .object(let fields) = message else {
+        guard let data = line.data(using: .utf8), let message = try? JSONDecoder().decode(JSONValue.self, from: data) else {
             write(Self.error(id: .null, code: -32700, message: "Parse error: each line must be one JSON-RPC message."))
+            return
+        }
+        if case .array(let messages) = message {
+            batch(messages)
+            return
+        }
+        guard case .object(let fields) = message else {
+            write(Self.error(id: .null, code: -32600, message: "Invalid request: expected a JSON-RPC object."))
             return
         }
         guard case .string(let method)? = fields["method"] else {
@@ -89,6 +96,39 @@ public final class MCPServer: @unchecked Sendable {
                 }
                 if !dropped { self.write(response) }
             }
+        }
+    }
+
+    /// A JSON-RPC batch (allowed by the 2025-03-26 revision): the requests
+    /// run together and their responses go back as one array.
+    private func batch(_ messages: [JSONValue]) {
+        guard !messages.isEmpty else {
+            write(Self.error(id: .null, code: -32600, message: "Invalid request: empty batch."))
+            return
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            let responses = await withTaskGroup(of: (Int, JSONValue?).self) { group in
+                for (index, message) in messages.enumerated() {
+                    group.addTask {
+                        guard case .object(let fields) = message, case .string(let method)? = fields["method"] else {
+                            return (index, Self.error(id: .null, code: -32600, message: "Invalid request."))
+                        }
+                        let params = fields["params"] ?? .object([:])
+                        guard let id = fields["id"], id != .null else {
+                            self.notification(method, params)
+                            return (index, nil)
+                        }
+                        return (index, await self.request(method, params: params, id: id))
+                    }
+                }
+                var collected: [(Int, JSONValue)] = []
+                for await (index, response) in group {
+                    if let response { collected.append((index, response)) }
+                }
+                return collected.sorted { $0.0 < $1.0 }.map(\.1)
+            }
+            if !responses.isEmpty { self.write(.array(responses)) }
         }
     }
 

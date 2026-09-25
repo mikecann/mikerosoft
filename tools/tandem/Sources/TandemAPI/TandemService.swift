@@ -109,8 +109,10 @@ public final class TandemService: @unchecked Sendable {
         let (project, revision) = coordinator.snapshot()
         let lock = ProjectSession.readLock(for: session.fileURL)
         let owner = lock.map { OwnerInfo(owner: $0.owner.rawValue, pid: $0.pid, started: $0.started, port: $0.port) }
-        let undo = coordinator.undoLabel ?? (mode == .headless ? history.peekUndo(at: revision)?.label : nil)
-        let redo = coordinator.redoLabel ?? (mode == .headless ? history.peekRedo(at: revision)?.label : nil)
+        // What `undo` and `redo` would do: the coordinator's stacks, or the
+        // on-disk history of headless edits while it still applies.
+        let undo = coordinator.undoLabel ?? history.peekUndo(at: revision)?.label
+        let redo = coordinator.redoLabel ?? history.peekRedo(at: revision)?.label
         stateLock.lock()
         let running = exports.values.sorted { $0.id < $1.id }
         stateLock.unlock()
@@ -426,7 +428,9 @@ public final class TandemService: @unchecked Sendable {
         }
         let action = kind == .undo ? "undo" : "redo"
         if let result = kind == .undo ? coordinator.undo() : coordinator.redo() {
-            let label = result.label.replacingOccurrences(of: kind == .undo ? "Undo " : "Redo ", with: "")
+            // The coordinator labels the step "Undo <label>"; report the edit's own label.
+            let prefix = kind == .undo ? "Undo " : "Redo "
+            let label = result.label.hasPrefix(prefix) ? String(result.label.dropFirst(prefix.count)) : result.label
             return UndoResult(action: action, revision: result.revision, label: label, author: result.author)
         }
         // Nothing in memory: fall back to the history of headless edits,
@@ -460,7 +464,7 @@ public final class TandemService: @unchecked Sendable {
             undo = history.undoEntries(at: revision).prefix(limit).map { HistoryEntry(label: $0.label, author: $0.author) }
             redo = history.peekRedo(at: revision)?.label
         }
-        let changes = events.events(after: 0).filter(\.isChange).suffix(limit)
+        let changes = events.recentChanges().suffix(limit)
         return HistoryResult(revision: revision, undo: undo, redo: redo, events: Array(changes))
     }
 
@@ -685,7 +689,7 @@ public final class TandemService: @unchecked Sendable {
             $0.isChange && ($0.revision ?? 0) > start
         }
         let revision = coordinator.revision
-        let changes = events.events(after: 0).filter { $0.isChange && ($0.revision ?? 0) > start }
+        let changes = events.recentChanges().filter { ($0.revision ?? 0) > start }
         return WatchResult(revision: revision, changed: revision > start, events: changes, jobs: analysis.jobs)
     }
 }
