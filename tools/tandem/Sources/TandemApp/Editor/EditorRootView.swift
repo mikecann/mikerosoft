@@ -58,7 +58,7 @@ struct EditorRootView: View {
     /// The design's 524 pt workspace, shrunk so every track fits under it
     /// when the window is short.
     private func defaultWorkspace(available: CGFloat) -> CGFloat {
-        let tracks = TimelineLayout.make(project: model.project, showTranscript: model.showTranscript).contentHeight
+        let tracks = TimelineLayout.make(project: model.project, showTranscript: model.showTranscript, heightOverrides: model.timeline.trackHeights).contentHeight
         let timeline = Theme.Metrics.timelineToolbarHeight + Theme.Metrics.rulerHeight + tracks + 4
         return max(Theme.Metrics.minimumWorkspaceHeight, min(Theme.Metrics.workspaceHeight, available - 1 - timeline))
     }
@@ -78,7 +78,7 @@ private struct SplitHandle: View {
             .frame(height: 1)
             .overlay(Color.clear.frame(height: 7).contentShape(Rectangle()))
             .onHover { inside in
-                if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+                (inside ? NSCursor.resizeUpDown : NSCursor.arrow).set()
             }
     }
 }

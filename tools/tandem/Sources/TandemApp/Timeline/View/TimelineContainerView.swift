@@ -22,7 +22,7 @@ final class TimelineContainerView: NSView {
     init(model: EditorModel) {
         self.model = model
         self.artwork = MediaArtwork(analysis: model.session.analysis)
-        self.layoutCache = TimelineLayout.make(project: model.project, showTranscript: model.showTranscript)
+        self.layoutCache = TimelineLayout.make(project: model.project, showTranscript: model.showTranscript, heightOverrides: model.timeline.trackHeights)
         super.init(frame: NSRect(x: 0, y: 0, width: 1_200, height: 320))
         wantsLayer = true
         // Since macOS 14 views don't clip drawing to their bounds by
@@ -72,6 +72,7 @@ final class TimelineContainerView: NSView {
         _ = model.linkedSelection
         _ = model.timeline.scale
         _ = model.timeline.verticalOffset
+        _ = model.timeline.trackHeights
         _ = model.draggedMediaIDs
     }
 
@@ -94,7 +95,7 @@ final class TimelineContainerView: NSView {
 
     func relayoutLanes() {
         let project = displayedProject
-        let layout = TimelineLayout.make(project: project, showTranscript: model.showTranscript)
+        let layout = TimelineLayout.make(project: project, showTranscript: model.showTranscript, heightOverrides: model.timeline.trackHeights)
         if layout != layoutCache { layoutCache = layout }
         clampVerticalOffset()
     }

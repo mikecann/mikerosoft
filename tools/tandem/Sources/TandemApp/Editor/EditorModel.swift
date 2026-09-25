@@ -343,6 +343,8 @@ final class TimelineViewState {
     var lanesWidth: CGFloat = 1_200
     /// Set when the view should fit the whole timeline on its next layout.
     var fitPending = true
+    /// Lane heights the user has dragged, by track ID.
+    var trackHeights: [String: CGFloat] = [:]
 
     /// Zoom as 0...1 for the slider, on a log scale.
     var zoomFraction: Double {

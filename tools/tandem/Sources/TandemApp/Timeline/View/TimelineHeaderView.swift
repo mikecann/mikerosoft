@@ -25,6 +25,29 @@ final class TimelineHeaderView: TimelineChildView {
             hoverTrackID = id
             needsDisplay = true
         }
+        if resizeLane(at: event) != nil { NSCursor.resizeUpDown.set() } else { NSCursor.arrow.set() }
+    }
+
+    /// The lane whose bottom edge is under the pointer, for resizing.
+    private func resizeLane(at event: NSEvent) -> TimelineLane? {
+        guard let container else { return nil }
+        let y = convert(event.locationInWindow, from: nil).y + offset
+        return container.layoutCache.lanes.first { lane in
+            lane.trackID != nil && abs(lane.maxY + Theme.Metrics.trackGap / 2 - y) <= 3
+        }
+    }
+
+    private var resizing: (trackID: String, startY: CGFloat, startHeight: CGFloat)?
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let resizing, let model else { return }
+        let y = convert(event.locationInWindow, from: nil).y
+        let height = min(max(resizing.startHeight + y - resizing.startY, 16), 160)
+        model.timeline.trackHeights[resizing.trackID] = height.rounded()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        resizing = nil
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -160,6 +183,15 @@ final class TimelineHeaderView: TimelineChildView {
     override func mouseDown(with event: NSEvent) {
         // Clicking here takes the keys back from any text field.
         window?.makeFirstResponder(self)
+        if let lane = resizeLane(at: event), let trackID = lane.trackID {
+            if event.clickCount == 2 {
+                // Double-click the edge to go back to the standard height.
+                model?.timeline.trackHeights[trackID] = nil
+                return
+            }
+            resizing = (trackID, convert(event.locationInWindow, from: nil).y, lane.height)
+            return
+        }
         guard let model, let lane = lane(at: event), let trackID = lane.trackID, let track = model.project.track(trackID) else { return }
         let point = convert(event.locationInWindow, from: nil)
         for (toggle, box) in toggleRects(lane) where box.insetBy(dx: -3, dy: -3).contains(point) {
