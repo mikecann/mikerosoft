@@ -155,6 +155,48 @@ final class ExportTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(result.integratedLUFS), -20, accuracy: 0.3)
     }
 
+    /// Dominant frequency by counting zero crossings on the left channel.
+    func frequency(_ samples: [Float], from start: Int, frames: Int) -> Double {
+        var crossings = 0
+        for i in stride(from: start * 2 + 2, to: (start + frames) * 2, by: 2) where (samples[i - 2] < 0) != (samples[i] < 0) {
+            crossings += 1
+        }
+        return Double(crossings) / 2 / (Double(frames) / 48_000)
+    }
+
+    func tone(_ hz: Double, _ level: Double = 0.2) -> (Int) -> Float {
+        { i in Float(level * sin(2 * Double.pi * hz * Double(i) / 48_000)) }
+    }
+
+    func testSpeedChangesKeepTheirPitch() async throws {
+        let media = try TestMedia()
+        try await media.movie("tone.mov", seconds: 4, draw: { TestMedia.fill($1, 0, 0, 0) }, sound: tone(440))
+        let item = media.item("med_t", "tone.mov", seconds: 4, audio: true)
+        let fast = Clip(id: "clip_a", content: .media(mediaID: "med_t"), start: .zero, duration: t(1.5), speed: 2)
+        let project = smallProject(video: [], audio: [Track(kind: .audio, name: "A1", clips: [fast])], media: [item])
+        let out = media.folder.appendingPathComponent("fast.mp4")
+        _ = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: preset(loudness: nil), output: out).run()
+        let samples = try await decodeAudio(out)
+        XCTAssertEqual(frequency(samples, from: 12_000, frames: 48_000), 440, accuracy: 15)
+    }
+
+    func testVoiceIsolationUsesTheIsolatedFile() async throws {
+        let media = try TestMedia()
+        // The "original" is a 440 Hz tone, the "isolated voice" 880 Hz.
+        try await media.movie("take.mov", seconds: 2, draw: { TestMedia.fill($1, 0, 0, 0) }, sound: tone(440))
+        let voice = try await media.movie("voice.mov", seconds: 2, draw: { TestMedia.fill($1, 0, 0, 0) }, sound: tone(880))
+        let item = media.item("med_take", "take.mov", seconds: 2, audio: true)
+        var clip = Clip(id: "clip_v", content: .media(mediaID: "med_take"), start: .zero, duration: t(2))
+        clip.audio = AudioProperties(voiceIsolation: 1)
+        let project = smallProject(video: [], audio: [Track(kind: .audio, name: "Voice", clips: [clip])], media: [item])
+        let assets = FakeAssets()
+        assets.voices["med_take"] = voice
+        let out = media.folder.appendingPathComponent("isolated.mp4")
+        _ = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder, assets: assets), preset: preset(loudness: nil), output: out).run()
+        let samples = try await decodeAudio(out)
+        XCTAssertEqual(frequency(samples, from: 12_000, frames: 48_000), 880, accuracy: 15)
+    }
+
     func testRangeExport() async throws {
         let media = try TestMedia()
         try await media.movie("index.mov", seconds: 3, draw: { TestMedia.drawIndex($0, $1) })
