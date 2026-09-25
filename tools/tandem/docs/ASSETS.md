@@ -140,6 +140,13 @@ results are Codable so the CLI and MCP can return them as JSON.
 | Fonts | `registerFonts()` at launch, `AssetLibrary.registerFonts(in: project)` on open |
 | Housekeeping | `prune()`, `evictUnpinnedFiles()`, `rebuildCatalogFromDisk()` |
 
+An import folder's licence note is `tandem-licence.json` in the folder
+(`source`, `licence`, `licenceClass`, `url`, `credit`, `certificate`,
+`kind`, `notes`); presets exist for Envato, Mixkit, Pixabay, Sonniss, the
+YouTube Audio Library, Epidemic, Artlist, Motion Array and Storyblocks.
+Files in a folder without a note get the `unknown` licence class, and the
+credits builder warns about them.
+
 Choices made while building it:
 
 - GIF, WebP and Lottie frames go straight into HEVC with alpha through
