@@ -6,15 +6,19 @@ import Foundation
 /// tags.
 struct LocalMatcher {
     let words: [String]
+    /// Emoji in the query, matched against tags as they are.
+    let emoji: [String]
 
     init(_ text: String) {
         words = Self.tokens(text)
+        emoji = AssetCatalog.emoji(in: text)
     }
 
-    var isEmpty: Bool { words.isEmpty }
+    var isEmpty: Bool { words.isEmpty && emoji.isEmpty }
 
     static func tokens(_ text: String) -> [String] {
-        text.lowercased()
+        String(text.filter { !AssetCatalog.isEmoji($0) })
+            .lowercased()
             .folding(options: .diacriticInsensitive, locale: nil)
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
@@ -24,7 +28,8 @@ struct LocalMatcher {
     /// the name, 1 for each found only in the other text. Nil when a word
     /// doesn't match at all.
     func score(name: String, other: [String]) -> Int? {
-        guard !words.isEmpty else { return 0 }
+        for character in emoji where !other.contains(character) { return nil }
+        guard !words.isEmpty else { return emoji.isEmpty ? 0 : 1 }
         let nameTokens = Self.tokens(name)
         let otherTokens = other.flatMap(Self.tokens)
         var total = 0

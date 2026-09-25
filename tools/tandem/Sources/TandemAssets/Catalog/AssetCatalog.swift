@@ -344,11 +344,24 @@ public final class AssetCatalog: @unchecked Sendable {
     /// Words are quoted so punctuation and FTS keywords in the text are
     /// just words.
     static func ftsExpression(_ text: String) -> String? {
-        let words = text
+        // Emoji are matched separately; their variation selectors count as
+        // marks and would otherwise become words of their own.
+        let words = String(text.filter { !isEmoji($0) })
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
         guard !words.isEmpty else { return nil }
         return words.map { "\"\($0)\"*" }.joined(separator: " ")
+    }
+
+    /// Emoji typed into a search ("🚀"). The tokenizer drops them, so they
+    /// match the tags directly (Noto stickers carry their emoji as a tag).
+    static func emoji(in text: String) -> [String] {
+        text.filter(isEmoji).map(String.init)
+    }
+
+    static func isEmoji(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first else { return false }
+        return scalar.properties.isEmojiPresentation || (scalar.properties.isEmoji && character.unicodeScalars.count > 1)
     }
 
     private func buildQuery(_ query: AssetQuery, counting: Bool) -> (String, [SQLValue]) {
@@ -372,6 +385,10 @@ public final class AssetCatalog: @unchecked Sendable {
             sql += " JOIN assets_fts ON assets_fts.rowid = a.rowid"
             conditions.append("assets_fts MATCH ?")
             bindings.append(.text(fts))
+        }
+        for emoji in Self.emoji(in: query.text) {
+            conditions.append("instr(a.tags, ?) > 0")
+            bindings.append(.text(emoji))
         }
         func inList<T>(_ column: String, _ values: [T], _ value: (T) -> SQLValue) {
             guard !values.isEmpty else { return }

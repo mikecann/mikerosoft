@@ -282,3 +282,15 @@ final class BrowserSectionTests: XCTestCase {
         XCTAssertEqual(BrowserSection.allCases.map(\.title).first, "Music")
     }
 }
+
+final class EmojiSearchTests: XCTestCase {
+    func testEmojiInTheQueryMatchTags() throws {
+        let catalog = try makeCatalog()
+        try catalog.upsert(StarterContent.assets().filter { $0.provider == "noto" })
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "🚀")).map(\.id), ["noto:1f680"])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "⚠️")).map(\.id), ["noto:26a0_fe0f"])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "🔥 fire")).map(\.id), ["noto:1f525"])
+        XCTAssertEqual(try catalog.search(AssetQuery(text: "🔥 rocket")).count, 0)
+        XCTAssertEqual(AssetCatalog.emoji(in: "plain words 123"), [])
+    }
+}

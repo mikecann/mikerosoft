@@ -506,3 +506,15 @@ final class SVGLDuplicateTests: XCTestCase {
         XCTAssertEqual(all.map(\.providerID), ["same"])
     }
 }
+
+final class NotoEmojiSearchTests: XCTestCase {
+    func testSearchingWithAnEmoji() async throws {
+        let transport = FixtureTransport()
+        try transport.on("api.json", fixture: "noto_api.json")
+        let provider = NotoEmojiProvider(environment: makeEnvironment(transport))
+        let rocket = try await provider.search(ProviderQuery(text: "🚀"))
+        XCTAssertEqual(rocket.map(\.providerID), ["1f680"])
+        let warning = try await provider.search(ProviderQuery(text: "⚠️"))
+        XCTAssertEqual(warning.map(\.providerID), ["26a0_fe0f"])
+    }
+}
