@@ -42,7 +42,10 @@ final class TimelineContainerView: NSView {
         }
         loops.append(ObservationLoop(read: { [weak self] in self?.readDrawingState() }, onChange: { [weak self] in self?.modelChanged() }))
         loops.append(ObservationLoop(read: { [weak self] in _ = self?.model.playback.time }, onChange: { [weak self] in self?.playheadMoved() }))
-        loops.append(ObservationLoop(read: { [weak self] in _ = self?.model.jobs }, onChange: { [weak self] in
+        // New thumbnails, waveforms or transcripts: look again and redraw.
+        // Job progress alone doesn't redraw the timeline.
+        artwork.onDecoded = { [weak self] in self?.setAllNeedsDisplay() }
+        loops.append(ObservationLoop(read: { [weak self] in _ = self?.model.artworkRevision }, onChange: { [weak self] in
             self?.artwork.invalidate()
             self?.setAllNeedsDisplay()
         }))

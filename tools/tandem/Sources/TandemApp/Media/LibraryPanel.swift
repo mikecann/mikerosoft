@@ -293,9 +293,11 @@ struct MediaThumbnail: View {
 
     var body: some View {
         let item = mediaID.flatMap { model.project.media($0) }
+        // Looks again when new thumbnails land.
+        let revision = model.artworkRevision
         ZStack {
             RoundedRectangle(cornerRadius: corner).fill(Theme.thumbnailWell.color)
-            if let item, let image = Self.image(for: item, analysis: model.session.analysis) {
+            if let item, let image = BrowserThumbnails.shared.image(for: item, analysis: model.session.analysis, revision: revision) {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -323,10 +325,31 @@ struct MediaThumbnail: View {
         }
     }
 
-    static func image(for item: MediaItem, analysis: MediaAnalysis) -> NSImage? {
-        guard let (strip, folder) = analysis.thumbnails(for: item), !strip.files.isEmpty else { return nil }
-        let index = strip.files.count > 2 ? strip.files.count / 3 : 0
-        return NSImage(contentsOf: folder.appendingPathComponent(strip.files[index]))
+}
+
+/// One thumbnail per file for the browser, read from the analysis cache
+/// once and kept, so scrolling the browser never touches the disk.
+@MainActor
+final class BrowserThumbnails {
+    static let shared = BrowserThumbnails()
+    private let images = NSCache<NSString, NSImage>()
+    /// Files that had no thumbnails yet, and the artwork revision they were
+    /// checked at.
+    private var misses: [String: Int] = [:]
+
+    func image(for item: MediaItem, analysis: MediaAnalysis, revision: Int) -> NSImage? {
+        let key = "\(analysis.folder.root.path)|\(item.id)|\(item.fingerprint ?? item.path)" as NSString
+        if let image = images.object(forKey: key) { return image }
+        if misses[key as String] == revision { return nil }
+        // A frame a third of the way in says more than the first one.
+        guard let (strip, folder) = analysis.thumbnails(for: item), !strip.files.isEmpty,
+              let image = NSImage(contentsOf: folder.appendingPathComponent(strip.files[strip.files.count > 2 ? strip.files.count / 3 : 0])) else {
+            misses[key as String] = revision
+            return nil
+        }
+        images.setObject(image, forKey: key)
+        misses[key as String] = nil
+        return image
     }
 }
 

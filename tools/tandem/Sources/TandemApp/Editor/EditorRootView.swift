@@ -280,6 +280,14 @@ struct StatusBar: View {
                     .foregroundStyle(color(for: status.kind))
                     .lineLimit(1)
                     .truncationMode(.tail)
+            } else if let warning = PreviewWarnings.summary(model.playback.warnings, media: model.project.media) {
+                // Where the preview can't match the export yet, kept quiet.
+                Text(warning)
+                    .font(.ui(11))
+                    .foregroundStyle(Theme.textFaint.color)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(model.playback.warnings.map { PreviewWarnings.short($0, media: model.project.media) }.joined(separator: "\n"))
             }
             Spacer(minLength: 8)
             // The last agent edit stays here once its status message has
@@ -321,11 +329,13 @@ struct StatusBar: View {
         if model.exports.waiting > 0 {
             lines.append("\(model.exports.waiting) more \(model.exports.waiting == 1 ? "export" : "exports") queued")
         }
-        for job in model.jobs where job.state == .running {
+        // Two running jobs by name, then a count, so warnings keep room.
+        let running = model.jobs.filter { $0.state == .running }
+        for job in running.prefix(2) {
             lines.append(JobText.describe(job, in: model.project))
         }
-        let queued = model.jobs.filter { $0.state == .queued }.count
-        if queued > 0 { lines.append("\(queued) analysis \(queued == 1 ? "job" : "jobs") waiting") }
+        let more = max(0, running.count - 2) + model.jobs.filter { $0.state == .queued }.count
+        if more > 0 { lines.append("\(more) more analysis \(more == 1 ? "job" : "jobs")") }
         return lines
     }
 
@@ -354,7 +364,7 @@ struct StatusBar: View {
 /// Sentence-case descriptions of analysis jobs for the status bar.
 enum JobText {
     static func describe(_ job: JobStatus, in project: Project) -> String {
-        let name = project.media(job.mediaID).map { URL(fileURLWithPath: $0.path).deletingPathExtension().lastPathComponent } ?? "media"
+        let name = project.media(job.mediaID).map(MediaCatalog.shortName) ?? "media"
         let verb: String
         switch job.kind {
         case .thumbnails: verb = "Thumbnails"

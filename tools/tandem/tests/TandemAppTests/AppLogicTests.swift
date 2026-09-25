@@ -127,6 +127,13 @@ final class MediaCatalogTests: XCTestCase {
         XCTAssertEqual(MediaCatalog.groups(for: project(), only: .music).map(\.kind), [.music])
     }
 
+    func testJobsNameTakesByTheirTime() {
+        let project = project()
+        XCTAssertEqual(JobText.describe(JobStatus(id: "j1", kind: .proxy, mediaID: "m1", state: .running, progress: 0.23), in: project), "Proxy camera 10:52 · 23%")
+        XCTAssertEqual(JobText.describe(JobStatus(id: "j2", kind: .transcript, mediaID: "m3", state: .running), in: project), "Transcribing camera 10:28")
+        XCTAssertEqual(JobText.describe(JobStatus(id: "j3", kind: .waveform, mediaID: "m6", state: .running, progress: 0.5), in: project), "Waveform c3b · 50%")
+    }
+
     func testTimeOfDayFromRecordItNames() {
         XCTAssertEqual(MediaCatalog.timeOfDay(fromFileName: "2026-09-24_102826-camera.mov"), "10:28")
         XCTAssertNil(MediaCatalog.timeOfDay(fromFileName: "main-camera.mov"))
@@ -247,6 +254,18 @@ final class SmallPieceTests: XCTestCase {
         XCTAssertEqual(phrases[1].start, t(1.5))
     }
 
+    func testZoomedOutTranscriptShowsEveryFewPhrases() {
+        // A phrase every 2 s; at 10 px a second each is 20 px wide.
+        let phrases = (0..<10).map { TranscriptPhrase(text: "phrase \($0)", start: t(Double($0) * 2), end: t(Double($0) * 2 + 1.5)) }
+        let groups = TranscriptPhrase.readableGroups(phrases, minWidth: 70) { CGFloat($0.seconds * 10) }
+        // Each shown phrase gets at least 70 px before the next one shown.
+        XCTAssertEqual(groups, [0..<4, 4..<8, 8..<10])
+        // Zoomed in, every phrase has room of its own.
+        let wide = TranscriptPhrase.readableGroups(phrases, minWidth: 70) { CGFloat($0.seconds * 100) }
+        XCTAssertEqual(wide.count, 10)
+        XCTAssertTrue(TranscriptPhrase.readableGroups([], minWidth: 70) { CGFloat($0.seconds) }.isEmpty)
+    }
+
     func testMediaDragPayload() {
         XCTAssertEqual(MediaDrag.ids(from: MediaDrag.payload(["med_a", "med_b"])), ["med_a", "med_b"])
         XCTAssertEqual(MediaDrag.ids(from: "hello"), [])
@@ -357,5 +376,60 @@ final class AgentPresenceTests: XCTestCase {
         var bare = fixture.project
         bare.markers = []
         XCTAssertNil(ChangeRegion.section(at: t(31), in: bare))
+    }
+}
+
+final class JobChangesTests: XCTestCase {
+    func job(_ id: String, _ kind: AnalysisKind, _ state: JobState) -> JobStatus {
+        JobStatus(id: id, kind: kind, mediaID: "med_" + id, state: state)
+    }
+
+    func testReportsJobsAsTheyFinish() {
+        let before = [job("a", .thumbnails, .running), job("b", .proxy, .queued), job("c", .waveform, .done)]
+        let after = [job("b", .proxy, .running), job("a", .thumbnails, .done), job("c", .waveform, .done)]
+        let finished = JobChanges.newlyDone(old: before, new: after)
+        XCTAssertEqual(finished.map(\.id), ["a"])
+        XCTAssertTrue(JobChanges.affectsArtwork(finished))
+        XCTAssertFalse(JobChanges.affectsPlayback(finished))
+
+        let later = [job("b", .proxy, .done), job("a", .thumbnails, .done), job("c", .waveform, .done)]
+        let proxy = JobChanges.newlyDone(old: after, new: later)
+        XCTAssertEqual(proxy.map(\.id), ["b"])
+        XCTAssertTrue(JobChanges.affectsPlayback(proxy))
+        XCTAssertFalse(JobChanges.affectsArtwork(proxy))
+
+        // Failed and cancelled jobs change nothing on screen.
+        XCTAssertTrue(JobChanges.newlyDone(old: later, new: later + [job("d", .matte, .failed)]).isEmpty)
+    }
+}
+
+final class PreviewWarningTests: XCTestCase {
+    func testWarningsNameFilesNotPaths() {
+        let media = [
+            MediaItem(id: "m1", path: "/Users/mike/videos/decision-models/edit/main-camera.mov", kind: .video, role: .camera),
+            MediaItem(id: "m2", path: "music/c1a.mp3", kind: .audio, role: .music),
+            MediaItem(id: "m3", path: "/Users/mike/videos/decision-models/source/2026-09-24_105434-camera.mov", kind: .video, role: .camera)
+        ]
+        XCTAssertEqual(
+            PreviewWarnings.short("No cutout matte for /Users/mike/videos/decision-models/edit/main-camera.mov yet, showing the full frame.", media: media),
+            "No cutout matte for main-camera yet, showing the full frame."
+        )
+        XCTAssertEqual(PreviewWarnings.short("No loudness measurement for music/c1a.mp3 yet, so it isn't normalised.", media: media),
+                       "No loudness measurement for c1a yet, so it isn't normalised.")
+        XCTAssertEqual(PreviewWarnings.short("No cutout matte for /Users/mike/videos/decision-models/source/2026-09-24_105434-camera.mov yet, showing the full frame.", media: media),
+                       "No cutout matte for camera 10:54 yet, showing the full frame.")
+        XCTAssertEqual(PreviewWarnings.summary(["One.", "Two.", "Three."], media: []), "One. (+2 more)")
+        XCTAssertNil(PreviewWarnings.summary([], media: []))
+    }
+}
+
+final class PreviewSizeTests: XCTestCase {
+    func testProxyPlaybackCompositesAt1080p() {
+        XCTAssertEqual(PlaybackController.previewSize(for: CGSize(width: 3840, height: 2160)), CGSize(width: 1920, height: 1080))
+        XCTAssertEqual(PlaybackController.previewSize(for: CGSize(width: 2560, height: 1440)), CGSize(width: 1920, height: 1080))
+        XCTAssertEqual(PlaybackController.previewSize(for: CGSize(width: 2160, height: 3840)), CGSize(width: 1080, height: 1920))
+        // Already small enough: the project's own size.
+        XCTAssertNil(PlaybackController.previewSize(for: CGSize(width: 1920, height: 1080)))
+        XCTAssertNil(PlaybackController.previewSize(for: CGSize(width: 1080, height: 1920)))
     }
 }

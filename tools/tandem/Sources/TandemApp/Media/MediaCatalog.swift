@@ -84,6 +84,15 @@ enum MediaCatalog {
         URL(fileURLWithPath: item.path).deletingPathExtension().lastPathComponent
     }
 
+    /// A short name for status lines: record-it files read "camera 10:54",
+    /// anything else its file name without the extension.
+    static func shortName(_ item: MediaItem) -> String {
+        if item.role == .camera || item.role == .screen, let time = timeOfDay(fromFileName: fileName(item)) {
+            return "\(item.role == .camera ? "camera" : "screen") \(time)"
+        }
+        return baseName(item)
+    }
+
     /// The time of day a record-it file was made, from its name
     /// (`2026-09-24_102826-camera.mov` is 10:28).
     static func timeOfDay(fromFileName name: String) -> String? {

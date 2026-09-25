@@ -147,9 +147,20 @@ final class PlaybackController {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
+    /// Proxy playback composites at 1080p on the short side, which is as
+    /// much as the viewer shows; full quality uses the project's size.
+    /// Nil when the project is no bigger than that.
+    nonisolated static func previewSize(for size: CGSize, shortSide: CGFloat = 1080) -> CGSize? {
+        let short = min(size.width, size.height)
+        guard short > shortSide else { return nil }
+        let scale = shortSide / short
+        return CGSize(width: (size.width * scale / 2).rounded() * 2, height: (size.height * scale / 2).rounded() * 2)
+    }
+
     private func rebuild() {
         guard var context = makeContext?() else { return }
         context.useProxies = useProxies
+        if useProxies { context.sizeOverride = Self.previewSize(for: context.renderSize) }
         buildGeneration += 1
         let generation = buildGeneration
         let started = ProcessInfo.processInfo.systemUptime

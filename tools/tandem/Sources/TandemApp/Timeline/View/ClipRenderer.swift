@@ -144,13 +144,17 @@ struct ClipRenderer {
             let tile = CGRect(x: x, y: rect.minY, width: tileWidth, height: rect.height)
             if hasThumbnails, let item {
                 let time = scale.time(atX: min(max(x + tileWidth / 2, rect.minX), rect.maxX), rate: project.settings.frameRate)
-                if let image = artwork?.thumbnail(for: item, at: clip.sourceTime(atTimelineTime: time)),
-                   let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                if let cg = artwork?.thumbnail(for: item, at: clip.sourceTime(atTimelineTime: time)) {
                     context.saveGState()
+                    context.interpolationQuality = .medium
                     context.translateBy(x: tile.minX, y: tile.maxY)
                     context.scaleBy(x: 1, y: -1)
                     context.draw(cg, in: CGRect(origin: .zero, size: tile.size))
                     context.restoreGState()
+                } else {
+                    // Still decoding: the placeholder frame for a moment.
+                    context.setFillColor(style.detail.opacity(0.35).cg)
+                    context.fill(tile.insetBy(dx: 1, dy: 3))
                 }
             } else {
                 // Placeholder frame: a faint panel with a lighter band where a
@@ -166,8 +170,7 @@ struct ClipRenderer {
 
     private func drawGraphicThumbnail(_ clip: Clip, rect: CGRect, in context: CGContext) {
         guard let item = clip.mediaID.flatMap({ project.media($0) }),
-              let image = artwork?.thumbnail(for: item, at: clip.sourceStart),
-              let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+              let cg = artwork?.thumbnail(for: item, at: clip.sourceStart) else { return }
         let width = min(rect.height * 16 / 9, rect.width / 2)
         guard width > 12 else { return }
         context.saveGState()

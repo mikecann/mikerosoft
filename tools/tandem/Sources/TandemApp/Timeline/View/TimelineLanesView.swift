@@ -34,7 +34,7 @@ final class TimelineLanesView: TimelineChildView {
     private var autoscrollTimer: Timer?
     private var lastDragEvent: NSEvent?
     private var trackingArea: NSTrackingArea?
-    private var phraseCache: (revision: Int, phrases: [TranscriptPhrase])?
+    private var phraseCache: (revision: Int, artwork: Int, phrases: [TranscriptPhrase])?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -211,12 +211,15 @@ final class TimelineLanesView: TimelineChildView {
             return
         }
         let playhead = model.playback.time
-        for (index, phrase) in phrases.enumerated() {
-            let x0 = model.timeline.scale.x(phrase.start)
-            let next = index + 1 < phrases.count ? model.timeline.scale.x(phrases[index + 1].start) : bounds.width + 400
+        let scale = model.timeline.scale
+        let groups = TranscriptPhrase.readableGroups(phrases, minWidth: 64) { scale.x($0) }
+        for (index, group) in groups.enumerated() {
+            let first = phrases[group.lowerBound]
+            let x0 = scale.x(first.start)
+            let next = index + 1 < groups.count ? scale.x(phrases[groups[index + 1].lowerBound].start) : bounds.width + 400
             guard next >= 0, x0 <= bounds.width else { continue }
-            let current = phrase.start <= playhead && playhead < phrase.end
-            renderer.drawText(phrase.text, at: CGPoint(x: max(x0, 0) + 2, y: y), maxX: min(next - 6, bounds.width), font: font, color: current ? Theme.text : Theme.textFaint)
+            let current = first.start <= playhead && playhead < phrases[group.upperBound - 1].end
+            renderer.drawText(first.text, at: CGPoint(x: max(x0, 0) + 2, y: y), maxX: min(next - 6, bounds.width), font: font, color: current ? Theme.text : Theme.textFaint)
         }
     }
 
@@ -225,21 +228,30 @@ final class TimelineLanesView: TimelineChildView {
     private func transcriptPhrases(_ project: Project, artwork: MediaArtwork) -> [TranscriptPhrase] {
         guard let model else { return [] }
         let revision = previewProject == nil ? model.revision : -1
-        if let cache = phraseCache, cache.revision == revision, revision >= 0 { return cache.phrases }
+        // A transcript that lands changes the phrases without an edit.
+        let artworkRevision = model.artworkRevision
+        if let cache = phraseCache, cache.revision == revision, cache.artwork == artworkRevision, revision >= 0 { return cache.phrases }
         var words: [(text: String, start: Time, end: Time)] = []
-        // Transcripts live on the camera sound, placed on the Voice track.
-        for track in project.audioTracks where track.rippleMode == .cut {
-            for clip in track.clips {
+        // Where a track above already had words, so the same speech heard
+        // on two tracks (camera and screen microphones) isn't listed twice.
+        var covered: [TimeRange] = []
+        // Transcripts live on the take's sound, on the tracks the take cuts.
+        for track in project.audioTracks where track.rippleMode == .cut && !track.muted {
+            var spoken: [TimeRange] = []
+            for clip in track.clips where clip.enabled {
                 guard let item = clip.mediaID.flatMap({ project.media($0) }), let transcript = artwork.transcript(for: item) else { continue }
+                spoken.append(clip.range)
                 for word in transcript.words where word.end > clip.sourceStart && word.start < clip.sourceEnd {
                     let start = clip.start + Time(seconds: max(0, (word.start - clip.sourceStart).seconds) / clip.speed)
                     let end = clip.start + Time(seconds: max(0, (word.end - clip.sourceStart).seconds) / clip.speed)
+                    if covered.contains(where: { $0.start <= start && start < $0.end }) { continue }
                     words.append((word.text, start, min(end, clip.end)))
                 }
             }
+            covered += spoken
         }
         let phrases = TranscriptPhrase.group(words.sorted { $0.start < $1.start })
-        phraseCache = (revision, phrases)
+        phraseCache = (revision, artworkRevision, phrases)
         return phrases
     }
 
@@ -729,6 +741,24 @@ struct TranscriptPhrase: Equatable {
         }
         flush()
         return phrases
+    }
+
+    /// Runs of phrases to show one at a time, so each shown phrase has at
+    /// least `minWidth` points before the next one. Zoomed out, an eleven
+    /// minute take shows every few phrases instead of none; zoomed in,
+    /// every phrase shows. Groups start from the first phrase, so they
+    /// don't jump about while scrolling.
+    static func readableGroups(_ phrases: [TranscriptPhrase], minWidth: CGFloat, x: (Time) -> CGFloat) -> [Range<Int>] {
+        var groups: [Range<Int>] = []
+        var index = 0
+        while index < phrases.count {
+            let start = x(phrases[index].start)
+            var next = index + 1
+            while next < phrases.count, x(phrases[next].start) - start < minWidth { next += 1 }
+            groups.append(index..<next)
+            index = next
+        }
+        return groups
     }
 }
 

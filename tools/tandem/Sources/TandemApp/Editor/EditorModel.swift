@@ -71,6 +71,9 @@ final class EditorModel {
     private(set) var isDirty = false
     private(set) var activity = ActivityLog()
     private(set) var jobs: [JobStatus] = []
+    /// Goes up when thumbnails, waveforms or transcripts land, so views
+    /// that draw them look again.
+    private(set) var artworkRevision = 0
     let exports = ExportQueue()
 
     // Selection
@@ -141,7 +144,7 @@ final class EditorModel {
         }
         jobToken = session.analysis.observe { [weak self] jobs in
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.jobs = jobs }
+                MainActor.assumeIsolated { self?.jobsChanged(jobs) }
             }
         }
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -316,6 +319,17 @@ final class EditorModel {
         if pruned != selection { selection = pruned }
         if let id = selectedTransitionID, project.location(ofTransition: id) == nil { selectedTransitionID = nil }
         playback.projectChanged(duration: project.duration, frameRate: project.settings.frameRate)
+    }
+
+    // MARK: - Analysis
+
+    private func jobsChanged(_ new: [JobStatus]) {
+        let finished = JobChanges.newlyDone(old: jobs, new: new)
+        jobs = new
+        guard !finished.isEmpty else { return }
+        if JobChanges.affectsArtwork(finished) { artworkRevision += 1 }
+        // A new proxy or matte changes what the viewer can play.
+        if JobChanges.affectsPlayback(finished) { playback.scheduleRebuild(delay: 0.5) }
     }
 
     // MARK: - Media
