@@ -80,7 +80,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 ## Wave 2
 
 - [x] Asset library: catalogue (SQLite FTS5), providers (import folders, ElevenLabs, Noto, Iconify, SVGL, Fontsource, Pexels, Pixabay, Freesound), normalising (alpha stickers to HEVC, Lottie, SVG, audio loudness), project use and credits [assets]
-- [~] Asset commands in the CLI and MCP [api]
+- [x] Asset commands in the CLI and MCP (`tandem assets ...`, five MCP tools) [api]
 - [ ] Asset browser in the app (hover previews, drag to timeline) [app, after its first pass]
 - [x] Sources as providers; paid libraries through watched import folders. ElevenLabs sound effects need the key's `sound_generation` permission (music works)
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
