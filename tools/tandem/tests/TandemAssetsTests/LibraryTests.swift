@@ -193,7 +193,7 @@ final class GenerationTests: XCTestCase {
         transport.on("api.elevenlabs.io/v1/sound-generation", data: pcm)
         let library = try makeLibrary(transport, secrets: ["elevenlabs": "k"])
 
-        let made = try await library.generate(GenerationRequest(kind: .sfx, prompt: "Short soft click", duration: 0.5))
+        let made = try await library.generate(GenerationRequest(kind: .sfx, prompt: "Short soft click", duration: 0.5)).assets
 
         XCTAssertEqual(made.count, 1)
         let asset = made[0]
@@ -351,7 +351,7 @@ final class RemoveTests: XCTestCase {
         let transport = FixtureTransport()
         transport.on("api.elevenlabs.io/v1/sound-generation", data: Data(count: 48_000))
         let library = try makeLibrary(transport, secrets: ["elevenlabs": "k"])
-        let takes = try await library.generate(GenerationRequest(kind: .sfx, prompt: "Pop", duration: 0.5, variations: 3))
+        let takes = try await library.generate(GenerationRequest(kind: .sfx, prompt: "Pop", duration: 0.5, variations: 3)).assets
         XCTAssertEqual(takes.count, 3)
         let kept = takes[1]
         try library.catalog.recordUsage(AssetUsage(assetID: kept.id, projectID: "prj"))
@@ -395,7 +395,7 @@ final class EvictGeneratedTests: XCTestCase {
         let transport = FixtureTransport()
         transport.on("api.elevenlabs.io/v1/sound-generation", data: Data(count: 48_000))
         let library = try makeLibrary(transport, secrets: ["elevenlabs": "k"])
-        let made = try await library.generate(GenerationRequest(kind: .sfx, prompt: "Tick", duration: 0.5))
+        let made = try await library.generate(GenerationRequest(kind: .sfx, prompt: "Tick", duration: 0.5)).assets
         var asset = made[0]
         asset.updatedAt = Date(timeIntervalSinceNow: -365 * 24 * 3600)
         try library.catalog.upsert(asset)

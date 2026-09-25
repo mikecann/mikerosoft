@@ -128,7 +128,7 @@ final class PaidLiveTests: XCTestCase {
     func testOneSoundEffect() async throws {
         let library = try liveLibrary()
         do {
-            let made = try await library.generate(GenerationRequest(kind: .sfx, prompt: "A short soft UI click", duration: 1))
+            let made = try await library.generate(GenerationRequest(kind: .sfx, prompt: "A short soft UI click", duration: 1)).assets
             let asset = try XCTUnwrap(made.first)
             print("ELEVENLABS SFX OK: \(asset.id) \(asset.duration ?? 0) s, channels \(asset.remote["channels"] ?? "?"), loudness \(asset.loudness?.integratedLUFS ?? 0) LUFS")
             XCTAssertEqual(asset.state, .normalised)
@@ -144,7 +144,7 @@ final class PaidLiveTests: XCTestCase {
 
     func testOneMusicCue() async throws {
         let library = try liveLibrary()
-        let made = try await library.generate(GenerationRequest(kind: .music, prompt: "Chilled lounge downtempo bed, Rhodes, round bass, brushed drums, 85 BPM, instrumental", duration: 10))
+        let made = try await library.generate(GenerationRequest(kind: .music, prompt: "Chilled lounge downtempo bed, Rhodes, round bass, brushed drums, 85 BPM, instrumental", duration: 10)).assets
         let asset = try XCTUnwrap(made.first)
         print("ELEVENLABS MUSIC OK: \(asset.id) \(asset.duration ?? 0) s, loudness \(asset.loudness?.integratedLUFS ?? 0) LUFS, song \(asset.remote["songID"] ?? "?")")
         XCTAssertEqual(asset.state, .normalised)

@@ -34,8 +34,9 @@ public enum WAVFile {
     /// ElevenLabs sends for speech and sound effects.
     public static func guessChannels(byteCount: Int, sampleRate: Int, expectedSeconds: Double?) -> Int {
         guard let seconds = expectedSeconds, seconds > 0 else { return 1 }
-        let perChannel = Double(sampleRate) * 2 * seconds
-        let channels = Int((Double(byteCount) / perChannel).rounded())
-        return min(max(channels, 1), 2)
+        let ratio = Double(byteCount) / (Double(sampleRate) * 2 * seconds)
+        // Only a body close to twice the mono size is stereo; anything else
+        // (a slightly long or short mono take) stays mono.
+        return (1.7...2.3).contains(ratio) ? 2 : 1
     }
 }

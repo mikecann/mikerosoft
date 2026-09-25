@@ -100,7 +100,7 @@ public final class ElevenLabsProvider: AssetProvider, @unchecked Sendable {
 
     // MARK: - Generating
 
-    public func generate(_ request: GenerationRequest, into folder: URL) async throws -> [FetchedOriginal] {
+    public func generate(_ request: GenerationRequest, into folder: URL) async throws -> GeneratedTakes {
         guard let key = secrets.secret(service: Self.keychainService) else {
             throw AssetError.providerUnavailable(provider: displayName, reason: "no API key in the Keychain (service elevenlabs)")
         }
@@ -109,17 +109,28 @@ public final class ElevenLabsProvider: AssetProvider, @unchecked Sendable {
         guard request.kind == .sfx || request.kind == .music else {
             throw AssetError.invalid("ElevenLabs makes sound effects and music, not \(request.kind.rawValue)")
         }
+        // Check the request before spending anything.
+        _ = request.kind == .music ? try Self.musicBody(request, prompt: prompt) : try Self.soundBody(request, prompt: prompt)
         let variations = min(max(1, request.variations), 4)
-        var results: [FetchedOriginal] = []
+        var takes: [FetchedOriginal] = []
         for variation in 0..<variations {
             let target = folder.appendingPathComponent("take-\(variation + 1)", isDirectory: true)
-            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
-            let result = request.kind == .music
-                ? try await music(request, prompt: prompt, key: key, into: target)
-                : try await soundEffect(request, prompt: prompt, key: key, into: target)
-            results.append(result)
+            do {
+                try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+                let take = request.kind == .music
+                    ? try await music(request, prompt: prompt, key: key, into: target)
+                    : try await soundEffect(request, prompt: prompt, key: key, into: target)
+                takes.append(take)
+            } catch {
+                // Nothing made yet: the caller should see the error itself.
+                guard !takes.isEmpty else { throw error }
+                // Keep what was paid for and stop, rather than spend more
+                // on requests that are likely to fail the same way.
+                let reason = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                return GeneratedTakes(takes: takes, failures: ["Take \(variation + 1) of \(variations) failed: \(reason)"])
+            }
         }
-        return results
+        return GeneratedTakes(takes: takes)
     }
 
     /// The JSON body for a sound effect.
@@ -185,7 +196,11 @@ public final class ElevenLabsProvider: AssetProvider, @unchecked Sendable {
             remember(permission, nil)
             return result
         } catch AssetError.permission(let provider, let message) {
-            remember(permission, message)
+            // A missing permission is worth remembering; a bad or revoked
+            // key (also a 401) isn't a property of the key's permissions.
+            if message.contains("missing_permissions") || message.contains(permission) {
+                remember(permission, message)
+            }
             throw AssetError.permission(provider: provider, message: message)
         }
     }

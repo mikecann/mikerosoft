@@ -309,7 +309,7 @@ final class ElevenLabsProviderTests: XCTestCase {
         let provider = ElevenLabsProvider(environment: makeEnvironment(transport, secrets: ["elevenlabs": "XI-SECRET"]))
         let folder = tempFolder("generate")
 
-        let takes = try await provider.generate(GenerationRequest(kind: .sfx, prompt: "Soft whoosh, left to right", duration: 1, promptInfluence: 0.5), into: folder)
+        let takes = try await provider.generate(GenerationRequest(kind: .sfx, prompt: "Soft whoosh, left to right", duration: 1, promptInfluence: 0.5), into: folder).takes
 
         XCTAssertEqual(takes.count, 1)
         let take = takes[0]
@@ -371,7 +371,7 @@ final class ElevenLabsProviderTests: XCTestCase {
         transport.on("api.elevenlabs.io/v1/music", headers: ["song-id": "song-123"], data: Data("ID3".utf8) + Data(count: 100))
         let provider = ElevenLabsProvider(environment: makeEnvironment(transport, secrets: ["elevenlabs": "XI-SECRET"]))
 
-        let takes = try await provider.generate(GenerationRequest(kind: .music, prompt: "Chilled lounge downtempo, Rhodes, 85 BPM", duration: 30, variations: 2), into: tempFolder("music"))
+        let takes = try await provider.generate(GenerationRequest(kind: .music, prompt: "Chilled lounge downtempo, Rhodes, 85 BPM", duration: 30, variations: 2), into: tempFolder("music")).takes
 
         XCTAssertEqual(takes.count, 2)
         XCTAssertEqual(takes[0].file.pathExtension, "mp3")
@@ -487,7 +487,7 @@ final class ElevenLabsLoopTests: XCTestCase {
         let transport = FixtureTransport()
         transport.on("api.elevenlabs.io/v1/sound-generation", data: Data("ID3".utf8) + Data(count: 64))
         let provider = ElevenLabsProvider(environment: makeEnvironment(transport, secrets: ["elevenlabs": "k"]))
-        let takes = try await provider.generate(GenerationRequest(kind: .sfx, prompt: "Rain loop", duration: 10, loop: true), into: tempFolder("loop"))
+        let takes = try await provider.generate(GenerationRequest(kind: .sfx, prompt: "Rain loop", duration: 10, loop: true), into: tempFolder("loop")).takes
         XCTAssertEqual(takes[0].file.lastPathComponent, "original.mp3")
         XCTAssertEqual(takes[0].asset.remote["outputFormat"], "mp3_44100_128")
         XCTAssertEqual(takes[0].asset.remote["loop"], "1")
@@ -549,5 +549,63 @@ final class PixabayRefreshTests: XCTestCase {
         let image = try XCTUnwrap(found.first)
         _ = try await provider.fetchOriginal(image, into: tempFolder("pixabay"))
         XCTAssertTrue(transport.requests(matching: "id=").isEmpty)
+    }
+}
+
+final class ElevenLabsPartialTests: XCTestCase {
+    /// Serves one good take, then fails every request after it.
+    func failingAfterOne() -> FixtureTransport {
+        let transport = FixtureTransport()
+        let calls = LockedCounter()
+        transport.on("api.elevenlabs.io/v1/sound-generation", status: 200) { _ in
+            if calls.next() > 1 { throw URLError(.networkConnectionLost) }
+            return Data(count: 48_000)
+        }
+        return transport
+    }
+
+    func testAFailedTakeKeepsTheOnesAlreadyPaidFor() async throws {
+        let transport = failingAfterOne()
+        let library = try makeLibrary(transport, secrets: ["elevenlabs": "k"])
+
+        let result = try await library.generate(GenerationRequest(kind: .sfx, prompt: "Pop", duration: 0.5, variations: 3))
+
+        XCTAssertEqual(result.assets.count, 1)
+        XCTAssertEqual(result.assets.first?.state, .normalised)
+        XCTAssertEqual(result.failures.count, 1)
+        XCTAssertTrue(result.failures[0].hasPrefix("Take 2 of 3 failed"))
+        // It stopped instead of spending on a third request.
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(try library.search(AssetQuery(providers: ["elevenlabs"])).count, 1)
+    }
+
+    func testABadKeyIsntRememberedAsAMissingPermission() async throws {
+        let transport = FixtureTransport()
+        transport.on("api.elevenlabs.io/v1/sound-generation", status: 401, data: Data(#"{"detail":{"status":"invalid_api_key","message":"Invalid API key"}}"#.utf8))
+        let provider = ElevenLabsProvider(environment: makeEnvironment(transport, secrets: ["elevenlabs": "old"]))
+        do {
+            _ = try await provider.generate(GenerationRequest(kind: .sfx, prompt: "x", duration: 1), into: tempFolder("badkey"))
+            XCTFail("expected an error")
+        } catch let error as AssetError {
+            guard case .permission(_, let message) = error else { return XCTFail("wrong error \(error)") }
+            XCTAssertTrue(message.contains("invalid_api_key"))
+        }
+        XCTAssertTrue(provider.refusals().isEmpty)
+        let status = await provider.status()
+        XCTAssertEqual(status, .ready)
+    }
+}
+
+/// Counts calls from any thread.
+final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    /// 1 on the first call, 2 on the second...
+    func next() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        count += 1
+        return count
     }
 }

@@ -38,9 +38,10 @@ public protocol AssetProvider: AnyObject, Sendable {
     /// Assets that sound or look like this one (Freesound, Epidemic).
     func similar(to asset: Asset, limit: Int) async throws -> [Asset]
 
-    /// Makes new assets (ElevenLabs). Each result is already on disk in
-    /// `folder`, one subfolder per variation.
-    func generate(_ request: GenerationRequest, into folder: URL) async throws -> [FetchedOriginal]
+    /// Makes new assets (ElevenLabs). Each take is already on disk in
+    /// `folder`, one subfolder per variation. Throws only when no take came
+    /// back; takes that did are never thrown away for a later failure.
+    func generate(_ request: GenerationRequest, into folder: URL) async throws -> GeneratedTakes
 }
 
 extension AssetProvider {
@@ -52,7 +53,7 @@ extension AssetProvider {
         throw AssetError.unsupported("\(displayName) can't find similar assets")
     }
 
-    public func generate(_ request: GenerationRequest, into folder: URL) async throws -> [FetchedOriginal] {
+    public func generate(_ request: GenerationRequest, into folder: URL) async throws -> GeneratedTakes {
         throw AssetError.unsupported("\(displayName) can't generate assets")
     }
 
@@ -224,6 +225,18 @@ extension GenerationRequest {
         instrumental = try c.decodeIfPresent(Bool.self, forKey: .instrumental) ?? true
         variations = try c.decodeIfPresent(Int.self, forKey: .variations) ?? 1
         model = try c.decodeIfPresent(String.self, forKey: .model)
+    }
+}
+
+/// What a generation produced: the takes that came back, and why any
+/// others didn't.
+public struct GeneratedTakes: Sendable {
+    public var takes: [FetchedOriginal]
+    public var failures: [String]
+
+    public init(takes: [FetchedOriginal], failures: [String] = []) {
+        self.takes = takes
+        self.failures = failures
     }
 }
 

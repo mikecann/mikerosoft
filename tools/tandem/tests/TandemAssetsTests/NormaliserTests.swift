@@ -243,6 +243,8 @@ final class NormaliserTests: XCTestCase {
         XCTAssertEqual(WAVFile.guessChannels(byteCount: pcm.count, sampleRate: 48_000, expectedSeconds: 1), 2)
         XCTAssertEqual(WAVFile.guessChannels(byteCount: pcm.count / 2, sampleRate: 48_000, expectedSeconds: 1), 1)
         XCTAssertEqual(WAVFile.guessChannels(byteCount: pcm.count, sampleRate: 48_000, expectedSeconds: nil), 1)
+        // A mono take half as long again as asked for is still mono.
+        XCTAssertEqual(WAVFile.guessChannels(byteCount: pcm.count * 3 / 4, sampleRate: 48_000, expectedSeconds: 1), 1)
     }
 }
 

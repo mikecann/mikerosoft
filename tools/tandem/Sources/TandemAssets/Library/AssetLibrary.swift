@@ -404,10 +404,18 @@ public final class AssetLibrary: @unchecked Sendable {
 
     // MARK: - Generating
 
+    /// What `generate` made, and why any takes are missing.
+    public struct GenerationResult: Codable, Sendable {
+        public var assets: [Asset]
+        /// Takes that failed, or were saved but couldn't be normalised.
+        public var failures: [String]
+    }
+
     /// Makes new assets with a generating provider (ElevenLabs), normalises
     /// them and adds them to the catalogue with their prompt, so a kept
-    /// result can be found again and remade.
-    public func generate(_ request: GenerationRequest, provider providerID: String = "elevenlabs") async throws -> [Asset] {
+    /// result can be found again and remade. Every take that came back is
+    /// kept, even when another failed.
+    public func generate(_ request: GenerationRequest, provider providerID: String = "elevenlabs") async throws -> GenerationResult {
         guard let provider = provider(providerID) else { throw AssetError.notFound("provider \(providerID)") }
         guard provider.capabilities.generate else { throw AssetError.unsupported("\(provider.displayName) can't generate assets") }
         let status = await provider.status()
@@ -416,11 +424,12 @@ public final class AssetLibrary: @unchecked Sendable {
         }
         let staging = root.appendingPathComponent("staging/\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: staging) }
-        let takes = try await provider.generate(request, into: staging)
-        var made: [Asset] = []
-        for take in takes {
+        let generated = try await provider.generate(request, into: staging)
+        var result = GenerationResult(assets: [], failures: generated.failures)
+        for (index, take) in generated.takes.enumerated() {
             var asset = take.asset
             let folder = self.folder(for: asset)
+            // Paid for, so it goes into the library before anything else can fail.
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let original = folder.appendingPathComponent("original.\(take.file.pathExtension)")
             try? FileManager.default.removeItem(at: original)
@@ -430,9 +439,15 @@ public final class AssetLibrary: @unchecked Sendable {
             asset.files.original = original.lastPathComponent
             try catalog.upsert(asset)
             try catalog.addLicence(try await provider.licence(for: asset), for: asset.id)
-            made.append(try await finish(FetchedOriginal(asset: asset, file: original), id: asset.id, provider: provider, folder: folder))
+            do {
+                result.assets.append(try await finish(FetchedOriginal(asset: asset, file: original), id: asset.id, provider: provider, folder: folder))
+            } catch {
+                let reason = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                result.failures.append("Take \(index + 1) is saved as \(asset.id) but couldn't be normalised: \(reason)")
+                result.assets.append(try catalog.asset(id: asset.id) ?? asset)
+            }
         }
-        return made
+        return result
     }
 
     // MARK: - Import folders
