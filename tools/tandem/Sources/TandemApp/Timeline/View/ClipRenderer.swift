@@ -9,6 +9,8 @@ struct ClipDrawState {
     var linked = false
     /// Changed by the drag being previewed.
     var previewed = false
+    /// The chosen keyframe's clip-relative time, when it's on this clip.
+    var selectedKeyframe: Time?
 }
 
 /// Draws clips, transitions and their labels in the Graphite style. Pure
@@ -86,7 +88,7 @@ struct ClipRenderer {
             drawPictureDetail(clip, rect: rect, style: style, in: context)
         case .voice, .music, .sfx, .audio:
             if lane.style != .sfx { drawWaveform(clip, rect: rect, style: style, in: context) }
-            if lane.style == .music || clip.audio?.fadeIn ?? .zero > .zero || clip.audio?.fadeOut ?? .zero > .zero {
+            if lane.style == .music || clip.audio?.fadeIn ?? .zero > .zero || clip.audio?.fadeOut ?? .zero > .zero || clip.keyframes["audio.gainDB"] != nil {
                 drawVolumeLine(clip, rect: rect, in: context)
             }
         case .graphics:
@@ -94,7 +96,7 @@ struct ClipRenderer {
         case .text, .transcript:
             break
         }
-        drawKeyframes(clip, rect: rect, in: context)
+        drawZoomBands(clip, lane: lane, rect: rect, in: context)
         context.restoreGState()
 
         // Border.
@@ -107,6 +109,8 @@ struct ClipRenderer {
         }
         drawLabel(clip, lane: lane, rect: rect, style: style, in: context)
         context.restoreGState()
+
+        drawKeyframes(clip, lane: lane, rect: rect, state: state, in: context)
 
         if state.selected || state.previewed {
             let inset = rect.insetBy(dx: 1, dy: 1)
@@ -218,62 +222,81 @@ struct ClipRenderer {
         context.strokePath()
     }
 
-    /// The clip's level with its fades, like Filmora's volume line.
+    /// The clip's level with its fades, like Filmora's volume line. With
+    /// gain keyframes it follows the animated level.
     private func drawVolumeLine(_ clip: Clip, rect: CGRect, in context: CGContext) {
         let audio = clip.audio ?? AudioProperties()
-        // -60 dB at the bottom, +6 dB at the top.
-        let db = min(max(audio.gainDB, -60), 6)
-        let level = rect.maxY - 3 - CGFloat((db + 60) / 66) * (rect.height - 6)
         let bottom = rect.maxY - 2
         let fadeIn = min(scale.width(of: audio.fadeIn), rect.width / 2)
         let fadeOut = min(scale.width(of: audio.fadeOut), rect.width / 2)
         let path = CGMutablePath()
-        path.move(to: CGPoint(x: rect.minX, y: fadeIn > 0 ? bottom : level))
-        path.addLine(to: CGPoint(x: rect.minX + fadeIn, y: level))
-        path.addLine(to: CGPoint(x: rect.maxX - fadeOut, y: level))
-        path.addLine(to: CGPoint(x: rect.maxX, y: fadeOut > 0 ? bottom : level))
+        if let keys = clip.keyframes["audio.gainDB"], !keys.isEmpty {
+            let start = max(rect.minX, visible.lowerBound - 3)
+            let end = min(rect.maxX, visible.upperBound + 3)
+            guard start < end else { return }
+            var x = start
+            var first = true
+            while true {
+                let clipTime = Time(seconds: scale.seconds(atX: x)) - clip.start
+                var y = KeyframeGeometry.gainY(keys.value(at: clipTime)?.number ?? audio.gainDB, in: rect)
+                // Fades pull the line down to silence at the ends.
+                if fadeIn > 0, x - rect.minX < fadeIn { y = bottom + (y - bottom) * (x - rect.minX) / fadeIn }
+                if fadeOut > 0, rect.maxX - x < fadeOut { y = bottom + (y - bottom) * (rect.maxX - x) / fadeOut }
+                if first { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
+                first = false
+                if x >= end { break }
+                x = min(end, x + 3)
+            }
+        } else {
+            let level = KeyframeGeometry.gainY(audio.gainDB, in: rect)
+            path.move(to: CGPoint(x: rect.minX, y: fadeIn > 0 ? bottom : level))
+            path.addLine(to: CGPoint(x: rect.minX + fadeIn, y: level))
+            path.addLine(to: CGPoint(x: rect.maxX - fadeOut, y: level))
+            path.addLine(to: CGPoint(x: rect.maxX, y: fadeOut > 0 ? bottom : level))
+        }
         context.addPath(path)
         context.setStrokeColor(Theme.text.opacity(0.7).cg)
         context.setLineWidth(1.2)
         context.strokePath()
     }
 
-    /// Transform keyframes as amber diamonds along the bottom, and zoomed
-    /// stretches as an amber band, like the design's "Zoom 150%".
-    private func drawKeyframes(_ clip: Clip, rect: CGRect, in context: CGContext) {
-        let keys = clip.keyframes.filter { $0.key.hasPrefix("video.transform") }
-        guard !keys.isEmpty else { return }
-        let times = Set(keys.values.flatMap { $0.map(\.time) }).sorted()
-        // Zoom band: from the first keyframe that zooms in to the next one
-        // that returns to 1.
-        if let scales = clip.keyframes["video.transform.scale"], scales.count >= 2 {
-            var bandStart: Time?
-            for frame in scales.sorted(by: { $0.time < $1.time }) {
-                let value = frame.value.number ?? 1
-                if value > 1.001, bandStart == nil { bandStart = frame.time }
-                if value <= 1.001, let begin = bandStart {
-                    drawZoomBand(from: begin, to: frame.time, clip: clip, rect: rect, in: context)
-                    bandStart = nil
-                }
-            }
-            if let begin = bandStart {
-                drawZoomBand(from: begin, to: clip.duration, clip: clip, rect: rect, in: context)
+    /// Zoomed stretches of a screen recording as an amber band, like the
+    /// design's "Zoom 150%".
+    private func drawZoomBands(_ clip: Clip, lane: TimelineLane, rect: CGRect, in context: CGContext) {
+        guard lane.kind == .video, let scales = clip.keyframes["video.transform.scale"], scales.count >= 2 else { return }
+        var bandStart: Time?
+        for frame in scales.sorted(by: { $0.time < $1.time }) {
+            let value = frame.value.number ?? 1
+            if value > 1.001, bandStart == nil { bandStart = frame.time }
+            if value <= 1.001, let begin = bandStart {
+                drawZoomBand(from: begin, to: frame.time, clip: clip, rect: rect, in: context)
+                bandStart = nil
             }
         }
-        for time in times {
-            let x = scale.x(clip.start + time)
-            guard x >= rect.minX - 4, x <= rect.maxX + 4 else { continue }
-            let size: CGFloat = 7
-            let centre = CGPoint(x: x, y: rect.maxY - size / 2 - 3)
-            let diamond = CGMutablePath()
-            diamond.move(to: CGPoint(x: centre.x, y: centre.y - size / 2))
-            diamond.addLine(to: CGPoint(x: centre.x + size / 2, y: centre.y))
-            diamond.addLine(to: CGPoint(x: centre.x, y: centre.y + size / 2))
-            diamond.addLine(to: CGPoint(x: centre.x - size / 2, y: centre.y))
-            diamond.closeSubpath()
-            context.addPath(diamond)
-            context.setFillColor(Theme.amber.cg)
+        if let begin = bandStart {
+            drawZoomBand(from: begin, to: clip.duration, clip: clip, rect: rect, in: context)
+        }
+    }
+
+    /// Keyframes as amber diamonds: gain on the volume line, everything
+    /// else along the bottom. Bigger on selected clips; the chosen one is
+    /// white.
+    private func drawKeyframes(_ clip: Clip, lane: TimelineLane, rect: CGRect, state: ClipDrawState, in context: CGContext) {
+        guard !clip.keyframes.isEmpty, rect.width >= 8 else { return }
+        let tolerance = KeyframeEdits.tolerance(project.settings.frameRate)
+        let diamonds = KeyframeGeometry.diamonds(for: clip, rect: rect, isAudio: lane.kind == .audio, scale: scale, tolerance: tolerance)
+        let size = state.selected ? KeyframeGeometry.size : KeyframeGeometry.size - 2
+        for diamond in diamonds where diamond.centre.x >= rect.minX - 5 && diamond.centre.x <= rect.maxX + 5
+            && diamond.centre.x >= visible.lowerBound - 6 && diamond.centre.x <= visible.upperBound + 6 {
+            let chosen = state.selectedKeyframe.map { abs(($0 - diamond.time).flicks) <= tolerance.flicks } ?? false
+            let path = KeyframeGeometry.path(at: diamond.centre, size: chosen ? size + 2 : size)
+            context.addPath(path)
+            context.setFillColor((chosen ? Theme.text : (state.selected ? Theme.amber : Theme.amber.opacity(0.75))).cg)
             context.fillPath()
+            context.addPath(path)
+            context.setStrokeColor(Theme.window.opacity(chosen ? 0.9 : 0.6).cg)
+            context.setLineWidth(1)
+            context.strokePath()
         }
     }
 
@@ -366,7 +389,11 @@ struct ClipRenderer {
             drawText(name(of: clip), at: CGPoint(x: x, y: rect.midY - 7), maxX: rect.maxX - 4, font: Theme.Fonts.ui(10.5), color: style.label)
         case .music:
             var text = name(of: clip)
-            if let gain = clip.audio?.gainDB, gain != 0 {
+            if let levels = clip.keyframes["audio.gainDB"]?.compactMap(\.value.number), let low = levels.min(), let high = levels.max() {
+                // Animated: the range it moves through.
+                let range = low == high ? String(format: "%.0f dB", low) : String(format: "%.0f to %.0f dB", low, high)
+                text += " · " + range.replacingOccurrences(of: "-", with: "−")
+            } else if let gain = clip.audio?.gainDB, gain != 0 {
                 text += " · " + String(format: "%.0f dB", gain).replacingOccurrences(of: "-", with: "−")
             }
             drawText(text, at: CGPoint(x: left + 8, y: rect.minY + 3), maxX: rect.maxX - 4, font: Theme.Fonts.ui(10, .medium), color: style.label)

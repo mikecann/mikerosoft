@@ -32,7 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         pendingURLs = []
         handle(urls)
         if documents.windows.isEmpty && !documents.isOpening { documents.showWelcome() }
-        NSApp.activate()
+        // No activate() here: Finder, the Dock and `open` bring the app
+        // forward themselves, and `open -g` (agents, scripts) must leave
+        // whatever Mike is using in front.
         scheduleLaunchScreenshot()
     }
 

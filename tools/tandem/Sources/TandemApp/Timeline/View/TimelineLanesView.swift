@@ -35,6 +35,10 @@ final class TimelineLanesView: TimelineChildView {
     /// An asset library item on its way: placed at `time` once it's
     /// downloaded and copied into the project.
     private var assetDrop: (id: String, time: Time)?
+    /// A keyframe being dragged: its clip as it was, the diamond, the rect
+    /// the clip had (for reading levels off the volume line), and the edit
+    /// so far.
+    private var keyframeDrag: (clip: Clip, diamond: KeyframeDiamond, rect: CGRect, batch: EditBatch?, time: Time)?
     private var autoscrollTimer: Timer?
     private var lastDragEvent: NSEvent?
     private var trackingArea: NSTrackingArea?
@@ -117,6 +121,9 @@ final class TimelineLanesView: TimelineChildView {
                 state.selected = selected.contains(clip.id)
                 state.linked = !state.selected && clip.linkGroup.map(linkedGroups.contains) == true
                 state.previewed = changed.contains(clip.id) && !state.selected
+                if let keyframe = model.selectedKeyframe, keyframe.clipID == clip.id {
+                    state.selectedKeyframe = keyframeDrag?.clip.id == clip.id ? keyframeDrag?.time : keyframe.time
+                }
                 renderer.draw(clip, lane: shifted, rect: clipRect, state: state, in: context)
             }
             for transition in track.transitions {
@@ -279,7 +286,13 @@ final class TimelineLanesView: TimelineChildView {
 
     private func updateCursor(_ event: NSEvent) {
         guard let model, let tester = tester(for: model.project) else { return }
-        let hit = tester.hit(lanePoint(event))
+        let point = lanePoint(event)
+        if model.tool != .blade, let found = tester.keyframe(at: point) {
+            updateKeyframeToolTip(found.clipID, diamond: found.diamond, model: model)
+            NSCursor.pointingHand.set()
+            return
+        }
+        let hit = tester.hit(point)
         updateToolTip(hit, model: model)
         switch model.tool {
         case .blade:
@@ -324,6 +337,23 @@ final class TimelineLanesView: TimelineChildView {
         if toolTip != tip { toolTip = tip }
     }
 
+    /// "Keyframe · Scale and position", when it is and its easing.
+    private func updateKeyframeToolTip(_ clipID: String, diamond: KeyframeDiamond, model: EditorModel) {
+        guard let clip = model.project.clip(clipID) else { return }
+        var lines = ["Keyframe · \(KeyframeEdits.summary(of: diamond.parameters, in: clip))"]
+        var detail = Timecode.string(clip.start + diamond.time, rate: model.frameRate)
+        if diamond.onVolumeLine, let db = clip.keyframes["audio.gainDB"]?.value(at: diamond.time)?.number {
+            detail += String(format: " · %+.1f dB", db).replacingOccurrences(of: "-", with: "−")
+        }
+        if let easing = KeyframeEdits.easing(in: clip, at: diamond.time, tolerance: model.keyframeTolerance) {
+            detail += " · \(easing.displayName.lowercased())"
+        }
+        lines.append(detail)
+        lines.append(diamond.onVolumeLine ? "Drag to change the level or the time; Shift keeps the time" : "Drag to move it; right-click for easing")
+        let tip = lines.joined(separator: "\n")
+        if toolTip != tip { toolTip = tip }
+    }
+
     private func modifiers(_ event: NSEvent) -> SelectionRules.Modifiers {
         let flags = event.modifierFlags
         return SelectionRules.Modifiers(shift: flags.contains(.shift), command: flags.contains(.command), option: flags.contains(.option))
@@ -350,6 +380,24 @@ final class TimelineLanesView: TimelineChildView {
         pressModifiers = mods
         selectionAtPress = model.selection
         session = nil
+        keyframeDrag = nil
+
+        if event.clickCount == 1, model.tool != .blade, let found = tester.keyframe(at: point), let clip = model.project.clip(found.clipID),
+           let lane = container?.layoutCache.lane(forTrack: found.trackID) {
+            model.selectedTransitionID = nil
+            model.focusedClipID = clip.id
+            if !model.selection.contains(clip.id) {
+                model.selection = SelectionRules.members(of: clip.id, in: model.project, linkedSelection: model.linkedSelection, option: mods.option)
+            }
+            model.selectedKeyframe = KeyframeRef(clipID: clip.id, time: found.diamond.time, parameters: found.diamond.parameters)
+            model.playback.pause()
+            model.playback.seek(to: clip.start + found.diamond.time)
+            model.inspectorTab = lane.kind == .audio ? .audio : (model.inspectorTab == .audio || model.inspectorTab == .activity || model.inspectorTab == .info ? .video : model.inspectorTab)
+            let rect = CGRect(x: model.timeline.scale.x(clip.start), y: lane.y, width: model.timeline.scale.x(clip.end) - model.timeline.scale.x(clip.start), height: lane.height)
+            keyframeDrag = (clip, found.diamond, rect, nil, found.diamond.time)
+            needsDisplay = true
+            return
+        }
 
         if event.clickCount == 2, let id = hit.clipID {
             model.selection = SelectionRules.members(of: id, in: model.project, linkedSelection: model.linkedSelection, option: mods.option)
@@ -425,6 +473,32 @@ final class TimelineLanesView: TimelineChildView {
     private func dragUpdate(_ event: NSEvent) {
         guard let model, let container else { return }
         let point = lanePoint(event)
+        if var drag = keyframeDrag {
+            let travelled = hypot(point.x - pressPoint.x, point.y - pressPoint.y)
+            guard travelled >= 2 else { return }
+            let scale = model.timeline.scale
+            var time = drag.diamond.time
+            if !event.modifierFlags.contains(.shift) {
+                time = (drag.diamond.time + Time(seconds: scale.seconds(atX: point.x) - scale.seconds(atX: pressPoint.x))).roundedToFrame(model.frameRate)
+            }
+            time = min(max(time, .zero), drag.clip.duration)
+            var value: ParamValue?
+            var label = Timecode.string(drag.clip.start + time, rate: model.frameRate)
+            if drag.diamond.onVolumeLine {
+                let db = (KeyframeGeometry.gain(atY: point.y, in: drag.rect) * 10).rounded() / 10
+                value = .number(db)
+                label = String(format: "%+.1f dB", db).replacingOccurrences(of: "-", with: "−") + "  " + label
+            }
+            let commands = KeyframeEdits.moveKeyframes(in: drag.clip, from: drag.diamond.time, to: time, parameters: drag.diamond.parameters, tolerance: model.keyframeTolerance, value: value)
+            drag.batch = commands.isEmpty ? nil : EditBatch(label: drag.diamond.onVolumeLine ? "Change level" : "Move keyframe", commands: commands)
+            drag.time = time
+            keyframeDrag = drag
+            previewProject = drag.batch.flatMap { EditPreview.apply($0, to: model.project) }
+            dragLabel = (label, point)
+            container.relayoutLanes()
+            container.setAllNeedsDisplay()
+            return
+        }
         if var session {
             let deltaX = point.x - model.timeline.scale.x(seconds: pressSeconds)
             let travelled = hypot(point.x - pressPoint.x, point.y - pressPoint.y)
@@ -490,6 +564,18 @@ final class TimelineLanesView: TimelineChildView {
         autoscrollTimer?.invalidate()
         autoscrollTimer = nil
         guard let model, let container else { return }
+        if let drag = keyframeDrag {
+            keyframeDrag = nil
+            if let batch = drag.batch, model.apply(batch) != nil {
+                model.selectedKeyframe = KeyframeRef(clipID: drag.clip.id, time: drag.time, parameters: drag.diamond.parameters)
+                model.playback.seek(to: drag.clip.start + drag.time)
+            }
+            previewProject = nil
+            dragLabel = nil
+            container.relayoutLanes()
+            container.setAllNeedsDisplay()
+            return
+        }
         if let session {
             if let batch = session.finish() {
                 model.apply(batch)
@@ -526,6 +612,14 @@ final class TimelineLanesView: TimelineChildView {
         let hit = tester.hit(point)
         let time = model.timeline.scale.time(atX: point.x, rate: model.frameRate)
         let menu = NSMenu()
+        if let found = tester.keyframe(at: point), let clip = model.project.clip(found.clipID) {
+            if !model.selection.contains(clip.id) {
+                model.selection = SelectionRules.members(of: clip.id, in: model.project, linkedSelection: model.linkedSelection, option: false)
+            }
+            model.selectedKeyframe = KeyframeRef(clipID: clip.id, time: found.diamond.time, parameters: found.diamond.parameters)
+            buildKeyframeMenu(menu, clip: clip, diamond: found.diamond)
+            return menu
+        }
         switch hit {
         case .clip(let id, let trackID, _):
             if !model.selection.contains(id) {
@@ -613,6 +707,36 @@ final class TimelineLanesView: TimelineChildView {
             menu.add("Show media in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([model.folder.url(for: item)])
             }
+        }
+    }
+
+    /// Easing, delete, and ending the animation.
+    private func buildKeyframeMenu(_ menu: NSMenu, clip: Clip, diamond: KeyframeDiamond) {
+        guard let model else { return }
+        let tolerance = model.keyframeTolerance
+        let current = KeyframeEdits.easing(in: clip, at: diamond.time, tolerance: tolerance)
+        menu.addItem(withTitle: "Keyframe · \(KeyframeEdits.summary(of: diamond.parameters, in: clip))", action: nil, keyEquivalent: "").isEnabled = false
+        for easing in Interpolation.menuOrder {
+            menu.add(easing.displayName, checked: current == easing) {
+                model.setEasing(easing, in: clip, at: diamond.time, parameters: diamond.parameters)
+            }
+        }
+        menu.addItem(.separator())
+        menu.add("Delete keyframe") {
+            model.apply(EditBatch(label: "Remove keyframe", commands: KeyframeEdits.removeKeyframes(in: clip, at: diamond.time, parameters: diamond.parameters, tolerance: tolerance)))
+            model.selectedKeyframe = nil
+        }
+        menu.add("Stop animating \(KeyframeEdits.summary(of: diamond.parameters, in: clip).lowercased())") {
+            // Every keyframe of these parameters goes; each keeps the value
+            // it has at this keyframe.
+            var commands: [EditCommand] = []
+            for parameter in diamond.parameters {
+                guard let value = KeyframeEdits.value(of: parameter, in: clip, at: diamond.time) else { continue }
+                commands.append(.setKeyframes(clipID: clip.id, parameter: parameter, keyframes: []))
+                if let plain = KeyframeEdits.plainValueCommand(parameter, value: value, in: clip) { commands.append(plain) }
+            }
+            model.apply(EditBatch(label: "Stop animating", commands: commands))
+            model.selectedKeyframe = nil
         }
     }
 

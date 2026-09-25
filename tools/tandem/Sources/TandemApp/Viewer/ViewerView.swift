@@ -424,18 +424,37 @@ final class ViewerOverlayView: NSView {
         case .move(let id, _, let original), .scale(let id, _, _, let original):
             let preview = model.videoPreview[id]
             model.videoPreview[id] = nil
-            guard let preview, preview.transform != original.transform else { return }
+            guard let preview, preview.transform != original.transform, let clip = model.project.clip(id) else { return }
             let transform = preview.transform
             let label = transform.scale != original.transform.scale ? "Scale in viewer" : "Move in viewer"
-            model.apply(EditBatch(label: label, commands: [.updateClip(clipID: id, patch: .object([
-                "video": .object([
-                    "transform": .object([
-                        "scale": .number(transform.scale),
-                        "position": .object(["x": .number(transform.position.x), "y": .number(transform.position.y)])
-                    ]),
-                    "layoutPreset": .null
-                ])
-            ]))]))
+            // Animated position or scale get a keyframe at the playhead; the
+            // rest changes the plain transform.
+            let time = model.clipTime(of: clip)
+            var commands: [EditCommand] = []
+            var plain = (clip.video ?? VideoProperties()).transform
+            var plainChanged = false
+            if transform.position != original.transform.position {
+                if let keyed = KeyframeEdits.setValue(.point(transform.position), for: "video.transform.position", in: clip, at: time, tolerance: model.keyframeTolerance) {
+                    commands.append(keyed)
+                } else {
+                    plain.position = transform.position
+                    plainChanged = true
+                }
+            }
+            if transform.scale != original.transform.scale {
+                if let keyed = KeyframeEdits.setValue(.number(transform.scale), for: "video.transform.scale", in: clip, at: time, tolerance: model.keyframeTolerance) {
+                    commands.append(keyed)
+                } else {
+                    plain.scale = transform.scale
+                    plainChanged = true
+                }
+            }
+            if plainChanged {
+                commands += InspectorEdits.transform(id, plain, label: label).commands
+            } else {
+                commands += KeyframeEdits.layoutCleared(for: ["video.transform.position"], in: clip)
+            }
+            model.apply(EditBatch(label: label, commands: commands))
         case .zoomRect(let start, let end):
             needsDisplay = true
             let selectionRect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))

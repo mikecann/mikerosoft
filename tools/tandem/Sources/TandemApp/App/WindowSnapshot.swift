@@ -57,7 +57,9 @@ enum WindowSnapshot {
 
     /// The view and layer tree as text, for debugging layout from agents.
     static func describe(_ window: NSWindow) -> String {
-        var lines: [String] = []
+        // Whether Tandem is the active app, to check that background
+        // commands (`open -g`) leave focus alone.
+        var lines: [String] = ["app active: \(NSApp.isActive ? "yes" : "no"), window key: \(window.isKeyWindow ? "yes" : "no")"]
         func visit(_ view: NSView, depth: Int) {
             let pad = String(repeating: "  ", count: depth)
             let layer = view.layer.map { " layer=\(type(of: $0)) sublayers=\($0.sublayers?.count ?? 0)" } ?? ""

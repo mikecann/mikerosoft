@@ -35,7 +35,7 @@ final class EditorActions {
         switch command {
         case .undo: return model.undoLabel != nil
         case .redo: return model.redoLabel != nil
-        case .lift, .rippleDelete: return !model.selection.isEmpty || model.selectedTransitionID != nil
+        case .lift, .rippleDelete: return !model.selection.isEmpty || model.selectedTransitionID != nil || model.selectedKeyframe != nil
         case .nudgeLeft, .nudgeRight, .nudgeLeftFive, .nudgeRightFive, .link, .deselectAll: return !model.selection.isEmpty
         case .liftInOut, .extractInOut: return model.inOutRange != nil
         default: return true
@@ -104,6 +104,8 @@ final class EditorActions {
             guard model.apply(result.batch) != nil else { return false }
             seek(result.playhead)
         case .lift, .rippleDelete:
+            // A keyframe chosen on the timeline goes before its clip does.
+            if command == .lift, model.selectedKeyframe != nil { return model.deleteSelectedKeyframe() }
             if model.selection.isEmpty, let id = model.selectedTransitionID {
                 model.selectedTransitionID = nil
                 return model.apply(EditBatch(label: "Remove transition", commands: [.removeTransition(transitionID: id)])) != nil
@@ -119,6 +121,9 @@ final class EditorActions {
             return apply(TimelineEdits.addMarker(project, at: playhead), otherwise: "")
         case .addTransition:
             return apply(TimelineEdits.addDefaultTransition(project, playhead: playhead, selection: model.selection), otherwise: "Put the playhead on a cut between two clips.")
+        case .toggleKeyframe: return model.toggleKeyframes()
+        case .previousKeyframe: return model.seekKeyframe(forward: false)
+        case .nextKeyframe: return model.seekKeyframe(forward: true)
         case .layoutFull: return layout(.full)
         case .layoutPipRight: return layout(.pipRight)
         case .layoutPipLeft: return layout(.pipLeft)

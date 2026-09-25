@@ -44,7 +44,8 @@ final class KeymapTests: XCTestCase {
             "shift+,": .nudgeLeftFive, "shift+.": .nudgeRightFive, "shift+z": .zoomToFit,
             "cmd+=": .zoomIn, "cmd+-": .zoomOut, "s": .toggleSnapping, "cmd+l": .link, "m": .addMarker,
             "cmd+z": .undo, "cmd+shift+z": .redo, "cmd+s": .save, "cmd+e": .export,
-            "1": .layoutFull, "2": .layoutPipRight, "3": .layoutPipLeft, "4": .layoutSplit
+            "1": .layoutFull, "2": .layoutPipRight, "3": .layoutPipLeft, "4": .layoutSplit,
+            "option+k": .toggleKeyframe, "shift+j": .previousKeyframe, "shift+k": .nextKeyframe
         ]
         for (text, command) in expected {
             XCTAssertEqual(keymap.command(for: KeyChord(text)!), command, text)
@@ -132,5 +133,14 @@ final class KeyboardRouterTests: XCTestCase {
         XCTAssertTrue(router.route(KeyChord("z")!, keyUp: false, isRepeat: false))
         _ = router.route(KeyChord("z")!, keyUp: true, isRepeat: false)
         XCTAssertEqual(held.map(\.1), [true, false])
+
+        // Shift-K is the next keyframe, not K held, and it repeats.
+        steps = []
+        XCTAssertTrue(router.route(KeyChord("shift+k")!, keyUp: false, isRepeat: false))
+        XCTAssertTrue(router.route(KeyChord("shift+k")!, keyUp: false, isRepeat: true))
+        XCTAssertTrue(router.route(KeyChord("option+k")!, keyUp: false, isRepeat: false))
+        XCTAssertTrue(router.route(KeyChord("option+k")!, keyUp: false, isRepeat: true), "one keyframe per press")
+        XCTAssertEqual(performed.suffix(3), [.nextKeyframe, .nextKeyframe, .toggleKeyframe])
+        XCTAssertTrue(steps.isEmpty)
     }
 }

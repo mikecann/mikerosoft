@@ -128,6 +128,7 @@ final class KeyboardRouter {
     /// Commands that make sense to repeat while a key is held.
     static let repeatable: Set<EditorCommand> = [
         .stepBack, .stepForward, .stepBackFive, .stepForwardFive, .nudgeLeft, .nudgeRight,
-        .nudgeLeftFive, .nudgeRightFive, .zoomIn, .zoomOut, .previousEdit, .nextEdit, .undo, .redo
+        .nudgeLeftFive, .nudgeRightFive, .zoomIn, .zoomOut, .previousEdit, .nextEdit, .undo, .redo,
+        .previousKeyframe, .nextKeyframe
     ]
 }

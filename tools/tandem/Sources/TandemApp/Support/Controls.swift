@@ -151,6 +151,8 @@ struct SliderRow: View {
     var format: (Double) -> String = { String(format: "%.0f", $0) }
     var parse: (String) -> Double? = { Double($0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "%", with: "")) }
     var onPreview: (Double?) -> Void = { _ in }
+    /// Something after the value, like a keyframe diamond.
+    var accessory: AnyView? = nil
     let onCommit: (Double) -> Void
     @State private var draft: Double?
     @State private var typing = false
@@ -199,6 +201,7 @@ struct SliderRow: View {
                     }
                     .help("Double-click to type a value")
             }
+            if let accessory { accessory }
         }
     }
 

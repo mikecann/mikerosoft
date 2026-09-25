@@ -78,8 +78,15 @@ final class EditorModel {
 
     // Selection
     var selection: Set<String> = [] {
-        didSet { if selection != oldValue { selectedTransitionID = selection.isEmpty ? selectedTransitionID : nil } }
+        didSet {
+            guard selection != oldValue else { return }
+            selectedTransitionID = selection.isEmpty ? selectedTransitionID : nil
+            // A keyframe stays chosen only while its clip is selected.
+            if let keyframe = selectedKeyframe, !selection.contains(keyframe.clipID) { selectedKeyframe = nil }
+        }
     }
+    /// The keyframe last clicked on the timeline, which Delete removes.
+    var selectedKeyframe: KeyframeRef?
     var selectedTransitionID: String?
     /// The clip last clicked, which the inspector shows when a whole link
     /// group is selected.
@@ -325,6 +332,10 @@ final class EditorModel {
         isDirty = session.isDirty
         let pruned = SelectionRules.pruned(selection, in: project)
         if pruned != selection { selection = pruned }
+        if let keyframe = selectedKeyframe {
+            let still = project.clip(keyframe.clipID).map { KeyframeEdits.parameters(in: $0, keyedAt: keyframe.time, tolerance: keyframeTolerance, among: keyframe.parameters) } ?? []
+            selectedKeyframe = still.isEmpty ? nil : KeyframeRef(clipID: keyframe.clipID, time: keyframe.time, parameters: still)
+        }
         if let id = selectedTransitionID, project.location(ofTransition: id) == nil { selectedTransitionID = nil }
         playback.projectChanged(duration: project.duration, frameRate: project.settings.frameRate)
     }

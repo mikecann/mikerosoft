@@ -168,7 +168,12 @@ struct VideoInspector: View {
     let model: EditorModel
     let clip: Clip
 
-    private var video: VideoProperties { model.videoPreview[clip.id] ?? clip.video ?? VideoProperties() }
+    /// What the clip looks like at the playhead: animated values follow it.
+    private var video: VideoProperties {
+        if let preview = model.videoPreview[clip.id] { return preview }
+        guard !clip.keyframes.isEmpty else { return clip.video ?? VideoProperties() }
+        return clip.resolvedVideo(at: model.clipTime(of: clip))
+    }
     private var isVideo: Bool { model.project.location(ofClip: clip.id)?.track.kind == .video }
     private var canvas: CGSize { CGSize(width: model.project.settings.width, height: model.project.settings.height) }
 
@@ -182,6 +187,7 @@ struct VideoInspector: View {
             if case .text(let text) = clip.content {
                 TextSection(model: model, clip: clip, text: text)
             }
+            AnimationSection(model: model, clip: clip, domain: "video.")
             layoutSection
             if clip.mediaID != nil { cutoutSection }
             cropSection
@@ -208,15 +214,37 @@ struct VideoInspector: View {
             )
             SliderRow(label: "Scale", value: video.transform.scale * 100, range: 0...400, format: { "\(Int($0.rounded()))%" },
                       onPreview: preview { properties, value in properties.transform.scale = (value ?? 0) / 100 },
-                      onCommit: commitTransform { transform, value in transform.scale = value / 100 })
-            PositionRow(model: model, clip: clip, transform: video.transform, canvas: canvas)
+                      accessory: key("video.transform.scale"),
+                      onCommit: { value in
+                          commit("video.transform.scale", .number(value / 100), label: "Scale", plain: commitTransform { transform in transform.scale = value / 100 })
+                      })
+            PositionRow(model: model, clip: clip, transform: video.transform, canvas: canvas) { position in
+                commit("video.transform.position", .point(position), label: "Position", plain: commitTransform { transform in transform.position = position })
+            }
             SliderRow(label: "Rotation", value: video.transform.rotation, range: -180...180, bipolar: true, format: { "\(Int($0.rounded()))°" },
                       onPreview: preview { properties, value in properties.transform.rotation = value ?? 0 },
-                      onCommit: commitTransform { transform, value in transform.rotation = value })
+                      accessory: key("video.transform.rotation"),
+                      onCommit: { value in
+                          commit("video.transform.rotation", .number(value), label: "Rotation", plain: commitTransform { transform in transform.rotation = value })
+                      })
             SliderRow(label: "Opacity", value: video.opacity * 100, range: 0...100, format: { "\(Int($0.rounded()))%" },
                       onPreview: preview { properties, value in properties.opacity = (value ?? 0) / 100 },
-                      onCommit: { value in model.apply(InspectorEdits.video(clip.id, ["opacity": .number(value / 100)], label: "Opacity")) })
+                      accessory: key("video.opacity"),
+                      onCommit: { value in
+                          commit("video.opacity", .number(value / 100), label: "Opacity") { InspectorEdits.video(clip.id, ["opacity": .number(value / 100)], label: "Opacity") }
+                      })
         }
+    }
+
+    /// The keyframe diamond for a parameter.
+    private func key(_ parameter: String) -> AnyView {
+        AnyView(KeyframeButton(model: model, clip: clip, parameter: parameter))
+    }
+
+    /// Sets a parameter at the playhead when it's animated, or its plain
+    /// value when it isn't.
+    private func commit(_ parameter: String, _ value: ParamValue, label: String, plain: () -> EditBatch?) {
+        model.setParameter(parameter, to: value, in: clip, label: label, plain: plain)
     }
 
     private var cutoutSection: some View {
@@ -259,10 +287,11 @@ struct VideoInspector: View {
                               if let value { set(edge, value / 100, in: &preview.crop) }
                               model.videoPreview[clip.id] = value == nil ? nil : preview
                           },
+                          accessory: key("video.crop.\(edge)"),
                           onCommit: { value in
-                              var crop = video.crop
+                              var crop = (clip.video ?? VideoProperties()).crop
                               set(edge, value / 100, in: &crop)
-                              model.apply(InspectorEdits.crop(clip.id, crop))
+                              commit("video.crop.\(edge)", .number(value / 100), label: "Crop") { InspectorEdits.crop(clip.id, crop) }
                           })
             }
         }
@@ -286,24 +315,26 @@ struct VideoInspector: View {
         }
     }
 
-    /// Live viewer preview while a slider moves; nil clears it.
+    /// Live viewer preview while a slider moves; nil clears it. It starts
+    /// from the clip as it is at the playhead, so animated values hold.
     private func preview(_ change: @escaping (inout VideoProperties, Double?) -> Void) -> (Double?) -> Void {
         { value in
             guard let value else {
                 model.videoPreview[clip.id] = nil
                 return
             }
-            var properties = clip.video ?? VideoProperties()
+            var properties = clip.keyframes.isEmpty ? (clip.video ?? VideoProperties()) : clip.resolvedVideo(at: model.clipTime(of: clip))
             change(&properties, value)
             model.videoPreview[clip.id] = properties
         }
     }
 
-    private func commitTransform(_ change: @escaping (inout Transform, Double) -> Void) -> (Double) -> Void {
-        { value in
+    /// The plain transform patch, for parameters that aren't animated.
+    private func commitTransform(_ change: @escaping (inout Transform) -> Void) -> () -> EditBatch? {
+        {
             var transform = (clip.video ?? VideoProperties()).transform
-            change(&transform, value)
-            model.apply(InspectorEdits.transform(clip.id, transform, label: "Transform"))
+            change(&transform)
+            return InspectorEdits.transform(clip.id, transform, label: "Transform")
         }
     }
 }
@@ -314,6 +345,7 @@ private struct PositionRow: View {
     let clip: Clip
     let transform: Transform
     let canvas: CGSize
+    let commit: (Point) -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -322,17 +354,14 @@ private struct PositionRow: View {
                 .foregroundStyle(Theme.textMuted.color)
                 .frame(width: 86, alignment: .leading)
             NumberField(prefix: "x", value: transform.position.x * canvas.width) { x in
-                var next = transform
-                next.position.x = x / canvas.width
-                model.apply(InspectorEdits.transform(clip.id, next, label: "Position"))
+                commit(Point(x: x / canvas.width, y: transform.position.y))
             }
             Text("·").foregroundStyle(Theme.textFaint.color)
             NumberField(prefix: "y", value: transform.position.y * canvas.height) { y in
-                var next = transform
-                next.position.y = y / canvas.height
-                model.apply(InspectorEdits.transform(clip.id, next, label: "Position"))
+                commit(Point(x: transform.position.x, y: y / canvas.height))
             }
             Spacer(minLength: 0)
+            KeyframeButton(model: model, clip: clip, parameter: "video.transform.position")
         }
     }
 }
@@ -400,11 +429,22 @@ struct AudioInspector: View {
             let audio = first.audio ?? AudioProperties()
             let ids = targets.map(\.id)
             let noun = targets.count == 1 ? "clip" : "\(targets.count) clips"
+            AnimationSection(model: model, clip: first, domain: "audio.")
             InspectorSection(title: "Level") {
-                SliderRow(label: "Gain", value: audio.gainDB, range: -60...12, bipolar: true, valueWidth: 62,
+                // Animated gain follows the playhead.
+                let gain = first.keyframes["audio.gainDB"] == nil ? audio.gainDB : first.resolvedAudio(at: model.clipTime(of: first)).gainDB
+                SliderRow(label: "Gain", value: gain, range: -60...12, bipolar: true, valueWidth: 62,
                           format: { String(format: "%+.1f dB", $0).replacingOccurrences(of: "-", with: "−") },
                           parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-+0123456789.".contains($0) }) },
-                          onCommit: { value in model.apply(InspectorEdits.audio(ids, ["gainDB": .number((value * 10).rounded() / 10)], label: "Gain")) })
+                          accessory: targets.count == 1 ? AnyView(KeyframeButton(model: model, clip: first, parameter: "audio.gainDB")) : nil,
+                          onCommit: { value in
+                              let db = (value * 10).rounded() / 10
+                              if targets.count == 1 {
+                                  model.setParameter("audio.gainDB", to: .number(db), in: first, label: "Gain") { InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain") }
+                              } else {
+                                  model.apply(InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain"))
+                              }
+                          })
                 HStack(spacing: 10) {
                     Text("Muted")
                         .font(.ui(12))

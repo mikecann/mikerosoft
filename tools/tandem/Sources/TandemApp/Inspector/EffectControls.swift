@@ -22,8 +22,12 @@ struct EffectStack: View {
     }
 
     var body: some View {
-        let effects = (domain == .video ? clip.video?.effects : clip.audio?.effects) ?? []
+        // Animated parameters show their value at the playhead.
+        let effects = clip.keyframes.isEmpty
+            ? ((domain == .video ? clip.video?.effects : clip.audio?.effects) ?? [])
+            : (domain == .video ? clip.resolvedVideo(at: model.clipTime(of: clip)).effects : clip.resolvedAudio(at: model.clipTime(of: clip)).effects)
         let shown = effects.filter { belongs($0.type) }
+        let prefix = domain == .video ? "video.effects." : "audio.effects."
         let available = EffectRegistry.standard.sorted.filter { $0.domain == domain && belongs($0.type) }
         InspectorSection(title: title, accessory: {
             Menu {
@@ -63,8 +67,13 @@ struct EffectStack: View {
                     remove: {
                         model.apply(EditBatch(label: "Remove \((EffectRegistry.standard.definition(effect.type)?.name ?? effect.type).lowercased())", commands: [.removeEffect(clipID: clip.id, effectID: effect.id)]))
                     },
+                    keyframe: { param in
+                        AnyView(KeyframeButton(model: model, clip: clip, parameter: prefix + effect.id + "." + param.key))
+                    },
                     commit: { key, value, name in
-                        model.apply(InspectorEdits.effectParam(clip.id, effectID: effect.id, key: key, value: value, label: name))
+                        model.setParameter(prefix + effect.id + "." + key, to: value, in: clip, label: name) {
+                            InspectorEdits.effectParam(clip.id, effectID: effect.id, key: key, value: value, label: name)
+                        }
                     }
                 )
             }
@@ -79,6 +88,8 @@ struct EffectRow: View {
     let toggleExpanded: () -> Void
     let setEnabled: (Bool) -> Void
     var remove: (() -> Void)?
+    /// The keyframe diamond for an animatable parameter, where keyframes apply.
+    var keyframe: ((ParamDefinition) -> AnyView)? = nil
     let commit: (String, ParamValue, String) -> Void
 
     private var definition: EffectDefinition? { EffectRegistry.standard.definition(effect.type) }
@@ -118,7 +129,7 @@ struct EffectRow: View {
                 if let remove { Button("Remove", action: remove) }
             }
             if expanded, let definition {
-                ParamControls(definition: definition, values: definition.resolvedParams(effect), commit: commit)
+                ParamControls(definition: definition, values: definition.resolvedParams(effect), keyframe: keyframe, commit: commit)
                     .padding(.leading, 4)
                 if let remove {
                     Button(action: remove) {
@@ -161,6 +172,7 @@ enum ParamFormatting {
 struct ParamControls: View {
     let definition: EffectDefinition
     let values: [String: ParamValue]
+    var keyframe: ((ParamDefinition) -> AnyView)? = nil
     let commit: (String, ParamValue, String) -> Void
 
     var body: some View {
@@ -181,7 +193,8 @@ struct ParamControls: View {
             SliderRow(
                 label: param.name, value: value.number ?? 0, range: lower...upper, bipolar: lower < 0 && upper > 0,
                 format: { ParamFormatting.format($0, param) },
-                parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-0123456789.".contains($0) }) }
+                parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-0123456789.".contains($0) }) },
+                accessory: param.animatable ? keyframe?(param) : nil
             ) { newValue in
                 let step = param.step ?? 0
                 let snapped = step > 0 ? (newValue / step).rounded() * step : newValue
