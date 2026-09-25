@@ -143,3 +143,47 @@ public struct AssetUsage: Codable, Equatable, Sendable {
         self.usedAt = usedAt
     }
 }
+
+/// The browser's left rail, and the asset kinds each entry shows. Each
+/// entry has Favourites, Recently used, Downloaded and In this project:
+/// combine `kinds` with the `AssetQuery` presets.
+public enum BrowserSection: String, Codable, Sendable, CaseIterable {
+    case music, sfx, stickers, overlaysAndBroll, titles, transitions, effects, luts, fonts, iconsAndLogos
+
+    public var title: String {
+        switch self {
+        case .music: return "Music"
+        case .sfx: return "SFX"
+        case .stickers: return "Stickers"
+        case .overlaysAndBroll: return "Overlays and B-roll"
+        case .titles: return "Titles"
+        case .transitions: return "Transitions"
+        case .effects: return "Effects"
+        case .luts: return "LUTs"
+        case .fonts: return "Fonts"
+        case .iconsAndLogos: return "Icons and logos"
+        }
+    }
+
+    /// The kinds listed here. Effects come from packs (`EffectRegistry`),
+    /// not the asset library, so that entry has none.
+    public var kinds: Set<AssetKind> {
+        switch self {
+        case .music: return [.music]
+        case .sfx: return [.sfx]
+        case .stickers: return [.sticker]
+        case .overlaysAndBroll: return [.overlay, .video, .image]
+        case .titles: return [.title]
+        case .transitions: return [.transition]
+        case .effects: return []
+        case .luts: return [.lut]
+        case .fonts: return [.font]
+        case .iconsAndLogos: return [.icon, .logo]
+        }
+    }
+
+    /// The section an asset kind is listed under.
+    public static func section(for kind: AssetKind) -> BrowserSection {
+        allCases.first { $0.kinds.contains(kind) } ?? .overlaysAndBroll
+    }
+}

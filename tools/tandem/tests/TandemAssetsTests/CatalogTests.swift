@@ -270,3 +270,15 @@ final class CodableTests: XCTestCase {
         XCTAssertEqual(try catalog.search(AssetQuery(text: "CAFÉ")).map(\.providerID), ["cafe"])
     }
 }
+
+final class BrowserSectionTests: XCTestCase {
+    func testEveryKindHasExactlyOneSection() {
+        for kind in AssetKind.allCases {
+            let sections = BrowserSection.allCases.filter { $0.kinds.contains(kind) }
+            XCTAssertEqual(sections.count, 1, "\(kind)")
+            XCTAssertEqual(BrowserSection.section(for: kind), sections.first)
+        }
+        XCTAssertTrue(BrowserSection.effects.kinds.isEmpty)
+        XCTAssertEqual(BrowserSection.allCases.map(\.title).first, "Music")
+    }
+}
