@@ -362,3 +362,29 @@ final class LockedFlag: @unchecked Sendable {
         return true
     }
 }
+
+final class JSONOutputTests: XCTestCase {
+    /// What the CLI and MCP will send back must encode, including silent
+    /// audio (whose loudness is minus infinity before it's stored).
+    func testResultsEncodeAsJSON() async throws {
+        let transport = try notoTransport()
+        let library = try makeLibrary(transport)
+        let imports = tempFolder("silence")
+        try WAVFile.wrap(pcm16: Data(count: 44_100 * 2), sampleRate: 44_100, channels: 1).write(to: imports.appendingPathComponent("silence.wav"))
+        try await library.addImportFolder(imports, licence: FolderLicence.presets["mixkit"])
+        let silence = try XCTUnwrap(library.search(AssetQuery(text: "silence")).first)
+        let results = await library.searchProviders(ProviderQuery(text: "rocket"), providerIDs: ["noto"])
+        let project = ProjectFolder(root: tempFolder("project"))
+        let placement = try await library.use(silence.id, in: project, projectID: "prj_json")
+        let credits = try library.credits(assetIDs: [silence.id, "noto:1f680"])
+        let info = await library.providerInfo()
+
+        let encoder = JSONEncoder()
+        XCTAssertNoThrow(try encoder.encode(results))
+        XCTAssertNoThrow(try encoder.encode(placement))
+        XCTAssertNoThrow(try encoder.encode(credits))
+        XCTAssertNoThrow(try encoder.encode(info))
+        XCTAssertNoThrow(try encoder.encode(try library.search(AssetQuery())))
+        XCTAssertEqual(placement.asset.loudness?.integratedLUFS, -144)
+    }
+}
