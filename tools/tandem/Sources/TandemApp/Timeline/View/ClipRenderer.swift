@@ -395,8 +395,9 @@ struct ClipRenderer {
 
     func drawText(_ text: String, at point: CGPoint, maxX: CGFloat, font: NSFont, color: Swatch, shadow: Bool = false) {
         let width = maxX - point.x
-        // Truncated to a letter or two ("m…") it only adds clutter.
-        guard width >= 20 else { return }
+        // Truncated to a letter or two ("m…") it only adds clutter, but
+        // short text that fits ("Full") always draws.
+        guard width > 6 else { return }
         if width < 40, TextMetrics.width(of: text, font: font) > width { return }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
