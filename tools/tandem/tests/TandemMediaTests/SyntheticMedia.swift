@@ -260,3 +260,57 @@ class TempFolderTestCase: XCTestCase {
         FileManager.default.createFile(atPath: file(relative).path, contents: Data(contents.utf8))
     }
 }
+
+extension SyntheticMedia {
+    /// Speaks `text` with the system voice into a WAV file, after `leadIn`
+    /// seconds of silence. Returns false when no voice is available.
+    static func writeSpeech(_ text: String, to url: URL, leadIn: Double) async throws -> Bool {
+        let synthesizer = AVSpeechSynthesizer()
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        guard utterance.voice != nil else { return false }
+
+        final class Sink: @unchecked Sendable {
+            var file: AVAudioFile?
+            var error: Error?
+            let url: URL
+            let leadIn: Double
+            init(url: URL, leadIn: Double) { self.url = url; self.leadIn = leadIn }
+
+            func add(_ buffer: AVAudioPCMBuffer) {
+                do {
+                    if file == nil {
+                        try? FileManager.default.removeItem(at: url)
+                        let created = try AVAudioFile(forWriting: url, settings: buffer.format.settings, commonFormat: buffer.format.commonFormat, interleaved: buffer.format.isInterleaved)
+                        let silence = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: AVAudioFrameCount(leadIn * buffer.format.sampleRate))!
+                        silence.frameLength = silence.frameCapacity
+                        if let data = silence.int16ChannelData { data[0].update(repeating: 0, count: Int(silence.frameLength)) }
+                        if let data = silence.floatChannelData { data[0].update(repeating: 0, count: Int(silence.frameLength)) }
+                        try created.write(from: silence)
+                        file = created
+                    }
+                    try file?.write(from: buffer)
+                } catch {
+                    self.error = error
+                }
+            }
+        }
+        let sink = Sink(url: url, leadIn: leadIn)
+        let finished: Bool = await withCheckedContinuation { continuation in
+            var resumed = false
+            synthesizer.write(utterance) { buffer in
+                guard let pcm = buffer as? AVAudioPCMBuffer else { return }
+                if pcm.frameLength == 0 {
+                    if !resumed { resumed = true; continuation.resume(returning: sink.file != nil) }
+                    return
+                }
+                sink.add(pcm)
+            }
+        }
+        if let error = sink.error { throw error }
+        // Closing the file writes its header.
+        sink.file = nil
+        _ = synthesizer
+        return finished
+    }
+}

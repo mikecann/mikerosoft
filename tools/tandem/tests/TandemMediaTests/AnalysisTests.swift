@@ -291,3 +291,66 @@ final class AnalysisTests: TempFolderTestCase {
         XCTAssertEqual(leftovers, [])
     }
 }
+
+final class TranscriptTests: TempFolderTestCase {
+    func testSpokenWordsComeBackWithMediaTimes() async throws {
+        guard #available(macOS 26, *) else { throw XCTSkip("SpeechAnalyzer needs macOS 26") }
+        let url = file("source/said-camera.wav")
+        let spoken = try await SyntheticMedia.writeSpeech("Convex keeps every word of the take in sync with the timeline.", to: url, leadIn: 1.5)
+        try XCTSkipUnless(spoken, "no system voice to make test speech with")
+        let folder = ProjectFolder(root: temp)
+        let item = try await MediaScanner.probe(url, folder: folder)
+        let analysis = MediaAnalysis(folder: folder, encoderLock: EncoderLock())
+        let state = await analysis.waitFor(.transcript, for: item)
+        XCTAssertEqual(state, .ready)
+
+        let transcript = try XCTUnwrap(analysis.transcript(for: item))
+        XCTAssertEqual(transcript.engine, "SpeechAnalyzer")
+        XCTAssertEqual(transcript.language, "en-US")
+        let words = transcript.words.map { $0.text.lowercased().trimmingCharacters(in: .punctuationCharacters) }
+        XCTAssertTrue(words.contains("every"), words.description)
+        XCTAssertTrue(words.contains("timeline"), words.description)
+        let first = try XCTUnwrap(transcript.words.first)
+        XCTAssertEqual(first.start.seconds, 1.5, accuracy: 0.1, "the lead-in silence is in media time, not in the word")
+        for (a, b) in zip(transcript.words, transcript.words.dropFirst()) {
+            XCTAssertLessThanOrEqual(a.start, b.start)
+            XCTAssertLessThanOrEqual(a.start, a.end)
+        }
+        XCTAssertLessThanOrEqual(transcript.words.last!.end.seconds, item.duration!.seconds + 0.05)
+    }
+}
+
+final class SpeechEnvelopeTests: XCTestCase {
+    func testWordEdgesMoveInToTheVoice() {
+        // 1 s quiet, 1 s voice, 1 s quiet, 1 s voice at 16 kHz.
+        let rate = 16_000.0
+        var samples: [Float] = []
+        for second in 0..<4 {
+            let loud = second % 2 == 1
+            for i in 0..<Int(rate) {
+                samples.append(loud ? Float(0.3 * sin(2 * Double.pi * 200 * Double(i) / rate)) : Float(0.0005 * sin(Double(i))))
+            }
+        }
+        var envelope = SpeechEnvelope(origin: 10, sampleRate: rate)
+        samples.withUnsafeBufferPointer { all in
+            // Arrives in uneven chunks, stamped in media time.
+            var offset = 0
+            for size in [1000, 7000, 24_000, 32_000] {
+                envelope.add(UnsafeBufferPointer(rebasing: all[offset..<(offset + size)]), at: 10 + Double(offset) / rate)
+                offset += size
+            }
+        }
+        let words = [
+            TranscriptWord(text: "first", start: Time(seconds: 10.2), end: Time(seconds: 12.0)),
+            TranscriptWord(text: "second", start: Time(seconds: 12.0), end: Time(seconds: 14.0)),
+            TranscriptWord(text: "tight", start: Time(seconds: 13.2), end: Time(seconds: 13.5))
+        ]
+        let snapped = envelope.snap(words)
+        XCTAssertEqual(snapped[0].start.seconds, 10.98, accuracy: 0.011)
+        XCTAssertEqual(snapped[0].end.seconds, 12.0, accuracy: 0.001, "voice right to the end: unchanged")
+        XCTAssertEqual(snapped[1].start.seconds, 12.98, accuracy: 0.011)
+        XCTAssertEqual(snapped[2], words[2], "a word that's all voice stays as it was")
+        let pauses = Transcript(language: "en-US", engine: "test", words: Array(snapped.prefix(2))).pauses(longerThan: Time(seconds: 0.5))
+        XCTAssertEqual(pauses.count, 1)
+    }
+}

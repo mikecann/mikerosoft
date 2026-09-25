@@ -57,9 +57,9 @@ enum SpeechTranscription {
             throw MediaError.failed("SpeechAnalyzer has no audio format for \(locale.identifier)")
         }
         let reader = try await AudioReader(url: source, sampleRate: format.sampleRate, channels: Int(format.channelCount), timeRange: timeRange)
-        let feed = try AnalyzerFeed(reader: reader, format: format, context: context)
-        let duration = reader.duration
         let start = timeRange?.start.seconds ?? 0
+        let feed = try AnalyzerFeed(reader: reader, format: format, context: context, origin: start)
+        let duration = reader.duration
 
         let analyzer = SpeechAnalyzer(modules: [transcriber], options: .init(priority: .utility, modelRetention: .lingering))
         let collector = Task { () -> [TranscriptWord] in
@@ -85,7 +85,7 @@ enum SpeechTranscription {
         }
         let words = try await collector.value
         try context.checkCancellation()
-        return Transcript(language: locale.identifier(.bcp47), engine: engine, words: words)
+        return Transcript(language: locale.identifier(.bcp47), engine: engine, words: feed.envelope.snap(words))
     }
 
     /// One word per run with a time range; runs carry their leading space.
@@ -117,8 +117,10 @@ final class AnalyzerFeed: @unchecked Sendable {
     private var pending: [Float] = []
     private var pendingStart: CMTime?
     private var finished = false
+    /// Loudness of the audio as it goes past, to tidy word edges afterwards.
+    private(set) var envelope: SpeechEnvelope
 
-    init(reader: AudioReader, format: AVAudioFormat, context: JobContext) throws {
+    init(reader: AudioReader, format: AVAudioFormat, context: JobContext, origin: Double) throws {
         guard format.channelCount == AVAudioChannelCount(reader.channels) else {
             throw MediaError.failed("Speech audio format mismatch")
         }
@@ -126,6 +128,7 @@ final class AnalyzerFeed: @unchecked Sendable {
         self.format = format
         self.context = context
         chunkFrames = Int(format.sampleRate)
+        envelope = SpeechEnvelope(origin: origin, sampleRate: reader.sampleRate)
     }
 
     func next() throws -> AnalyzerInput? {
@@ -137,6 +140,7 @@ final class AnalyzerFeed: @unchecked Sendable {
             let more = try reader.next { samples, _, start in
                 if pendingStart == nil || pending.isEmpty { pendingStart = start }
                 pending.append(contentsOf: samples)
+                if reader.channels == 1 { envelope.add(samples, at: start.seconds) }
             }
             if !more { finished = true }
         }
@@ -189,6 +193,89 @@ struct AnalyzerInputs: AsyncSequence, Sendable {
             let feed = self.feed
             // Decoding blocks, so it runs off the cooperative threads.
             return try await Blocking.run(qos: feed.context.qos) { try feed.next() }
+        }
+    }
+}
+
+
+/// A 100 Hz loudness envelope of the speech audio, used to pull word edges
+/// in to where the voice actually is.
+///
+/// SpeechAnalyzer's word ranges swallow the silence around them (in the
+/// transcription spike they covered 8.7 of 11.7 s of pauses; Whisper 5.1),
+/// which would hide the pauses Tandem tightens. A word that starts or ends
+/// in 100 ms or more of quiet is trimmed to its loud part, with a little
+/// padding so no consonant is clipped.
+struct SpeechEnvelope {
+    static let rate = 100.0
+    let origin: Double
+    let sampleRate: Double
+    private(set) var energy: [Double] = []
+    private(set) var counts: [Int] = []
+
+    init(origin: Double, sampleRate: Double) {
+        self.origin = origin
+        self.sampleRate = sampleRate
+    }
+
+    mutating func add(_ samples: UnsafeBufferPointer<Float>, at start: Double) {
+        var position = Int(((start - origin) * sampleRate).rounded())
+        let perBucket = sampleRate / Self.rate
+        var offset = 0
+        while offset < samples.count {
+            let bucket = Int(Double(max(0, position)) / perBucket)
+            let bucketEnd = Int((Double(bucket + 1) * perBucket).rounded())
+            let count = max(1, min(samples.count - offset, bucketEnd - max(0, position)))
+            var sum: Float = 0
+            vDSP_svesq(samples.baseAddress! + offset, 1, &sum, vDSP_Length(count))
+            if bucket >= energy.count {
+                energy.append(contentsOf: repeatElement(0, count: bucket - energy.count + 1))
+                counts.append(contentsOf: repeatElement(0, count: bucket - counts.count + 1))
+            }
+            energy[bucket] += Double(sum)
+            counts[bucket] += count
+            offset += count
+            position += count
+        }
+    }
+
+    /// Level of each 10 ms in dBFS (RMS), -120 for digital silence.
+    var levels: [Double] {
+        zip(energy, counts).map { energy, count in
+            count > 0 && energy > 0 ? 10 * log10(energy / Double(count)) : -120
+        }
+    }
+
+    /// Between the room's noise and the voice: 10 dB over the quietest
+    /// tenth, and never more than 30 dB under the loud tenth.
+    static func threshold(for levels: [Double]) -> Double {
+        let sorted = levels.sorted()
+        guard !sorted.isEmpty else { return -120 }
+        let floor = sorted[sorted.count / 10]
+        let loud = sorted[min(sorted.count - 1, sorted.count * 9 / 10)]
+        return max(floor + 10, loud - 30)
+    }
+
+    func snap(_ words: [TranscriptWord]) -> [TranscriptWord] {
+        let levels = self.levels
+        guard levels.count > 10 else { return words }
+        let threshold = Self.threshold(for: levels)
+        let quiet = 0.1
+        let padBefore = 0.02
+        let padAfter = 0.04
+        return words.map { word in
+            let first = max(0, Int(((word.start.seconds - origin) * Self.rate).rounded(.down)))
+            let last = min(levels.count - 1, Int(((word.end.seconds - origin) * Self.rate).rounded(.up)) - 1)
+            guard last >= first,
+                  let loudFirst = (first...last).first(where: { levels[$0] > threshold }),
+                  let loudLast = (first...last).last(where: { levels[$0] > threshold })
+            else { return word }
+            var snapped = word
+            let voiceStart = origin + Double(loudFirst) / Self.rate - padBefore
+            if voiceStart - word.start.seconds >= quiet { snapped.start = Time(seconds: voiceStart) }
+            let voiceEnd = origin + Double(loudLast + 1) / Self.rate + padAfter
+            if word.end.seconds - voiceEnd >= quiet { snapped.end = Time(seconds: voiceEnd) }
+            return snapped
         }
     }
 }
