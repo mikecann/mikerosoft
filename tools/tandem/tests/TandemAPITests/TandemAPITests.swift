@@ -117,6 +117,41 @@ final class ProjectSessionTests: XCTestCase {
     }
 }
 
+final class MediaRefreshTests: XCTestCase {
+    /// A tiny WAV: silence at 48 kHz, 16-bit mono.
+    static func wav(samples: Int) -> Data {
+        var wav = Data("RIFF".utf8)
+        func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { wav.append(contentsOf: $0) } }
+        append(UInt32(36 + samples * 2)); wav.append(Data("WAVEfmt ".utf8))
+        append(UInt32(16)); append(UInt16(1)); append(UInt16(1)); append(UInt32(48_000)); append(UInt32(96_000)); append(UInt16(2)); append(UInt16(16))
+        wav.append(Data("data".utf8)); append(UInt32(samples * 2)); wav.append(Data(count: samples * 2))
+        return wav
+    }
+
+    func testARefreshUpdatesKnownFilesAndAddsNewOnes() async throws {
+        // An imported project: its media is listed by absolute path and has
+        // no fingerprint, so the first scan updates it as well as adding
+        // the file that's new.
+        let folder = TempFolder()
+        try FileManager.default.createDirectory(at: folder.file("sfx"), withIntermediateDirectories: true)
+        try Self.wav(samples: 4_800).write(to: folder.file("sfx/click.wav"))
+        var project = Project.standard(name: "Imported")
+        project.media = [MediaItem(id: "med_click", path: folder.file("sfx/click.wav").path, kind: .audio, role: .sfx, duration: t(0.1), hasAudio: true)]
+        let url = folder.file("Imported.tandem")
+        try ProjectFile.save(project, revision: 0, to: url)
+        try Self.wav(samples: 9_600).write(to: folder.file("sfx/new.wav"))
+
+        let session = try ProjectSession.open(url, owner: .cli)
+        defer { session.close() }
+        let added = try await session.refreshMedia()
+        XCTAssertEqual(added.count, 1)
+        let media = session.coordinator.project.media
+        XCTAssertEqual(media.map(\.path), ["sfx/click.wav", "sfx/new.wav"])
+        XCTAssertNotNil(media[0].fingerprint)
+        XCTAssertEqual(media[0].role, .sfx)
+    }
+}
+
 final class SessionWatchingTests: XCTestCase {
     func testNewFilesJoinAWatchedProject() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-watch-\(UUID().uuidString)")

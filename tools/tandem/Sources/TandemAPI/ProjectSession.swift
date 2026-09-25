@@ -178,8 +178,12 @@ public final class ProjectSession: @unchecked Sendable {
         var commands: [EditCommand] = []
         for item in scanned {
             if known.contains(item.id) {
+                // Only what the scan changed, so an edit made while it ran
+                // (a new look, a role) stays, and never the ID, which
+                // updateMedia refuses.
                 if let old = project.media(item.id), old != item,
-                   let patch = try? JSONValue.from(item) {
+                   let before = try? JSONValue.from(old), let after = try? JSONValue.from(item),
+                   let patch = JSONValue.mergePatch(from: before, to: after) {
                     commands.append(.updateMedia(mediaID: item.id, patch: patch))
                 }
             } else {
