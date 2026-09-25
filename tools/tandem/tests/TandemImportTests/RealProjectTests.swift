@@ -90,4 +90,47 @@ final class RealProjectTests: XCTestCase {
     func testMagicJevBall() async throws {
         try await importFilmora("decision-models/Magic Jev Ball.wfp", name: "magic-jev-ball")
     }
+
+    /// Imports every `.wfp` under TANDEM_FILMORA_CORPUS (for example the
+    /// Filmora audit's corpus) as a robustness check: each must validate
+    /// with no failed steps. Nothing is written.
+    func testFilmoraCorpus() async throws {
+        guard let root = ProcessInfo.processInfo.environment["TANDEM_FILMORA_CORPUS"] else {
+            throw XCTSkip("Set TANDEM_FILMORA_CORPUS to a folder of .wfp files.")
+        }
+        let files = FileManager.default.enumerator(at: URL(fileURLWithPath: root), includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "wfp" }.sorted { $0.path < $1.path } ?? []
+        XCTAssertFalse(files.isEmpty)
+        var totals: [ImportReport.Severity: Int] = [:]
+        for file in files {
+            do {
+                let result = try await FilmoraImporter().importProject(at: file)
+                assertValid(result.project)
+                XCTAssertEqual(result.report.count(.failed), 0, "\(file.lastPathComponent):\n\(result.report.text)")
+                for severity in ImportReport.Severity.allCases { totals[severity, default: 0] += result.report.count(severity) }
+                let stats = result.report.stats
+                print(String(format: "%@ | %.1f s | %d/%d clips | %d/%d transitions | missing %d, unsupported %d, approximated %d",
+                             file.lastPathComponent, stats["duration"] ?? 0, Int(stats["clips"] ?? 0), Int(stats["filmora.clips"] ?? 0),
+                             Int(stats["transitions"] ?? 0), Int(stats["filmora.transitions"] ?? 0),
+                             result.report.count(.missingMedia), result.report.count(.unsupported), result.report.count(.approximated)))
+            } catch {
+                XCTFail("\(file.lastPathComponent): \(error)")
+            }
+        }
+        print("corpus: \(files.count) projects, \(totals)")
+    }
+
+    /// Prints the report for one project, for looking into an import:
+    /// TANDEM_IMPORT_ONE=/path/to/project.wfp
+    func testImportOne() async throws {
+        guard let path = ProcessInfo.processInfo.environment["TANDEM_IMPORT_ONE"] else {
+            throw XCTSkip("Set TANDEM_IMPORT_ONE to a .wfp to print its import report.")
+        }
+        let result = try await FilmoraImporter().importProject(at: URL(fileURLWithPath: path))
+        assertValid(result.project)
+        print(result.report.text)
+        for track in result.project.allTracks {
+            print("track \(track.name) (\(track.kind.rawValue), \(track.rippleMode.rawValue)): \(track.clips.count) clips, \(track.transitions.count) transitions")
+        }
+    }
 }

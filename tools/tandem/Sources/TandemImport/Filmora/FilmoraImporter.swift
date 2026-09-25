@@ -114,7 +114,7 @@ private final class FilmoraRun {
 
     func build() async -> ImportResult {
         let main = wfp.mainTimeline!
-        await resolveMedia(in: main, shift: 0, depth: 0)
+        await resolveMedia(in: main)
         for track in main.tracks {
             plan(track)
         }
@@ -159,19 +159,53 @@ private final class FilmoraRun {
         return nil
     }
 
+    /// What the clips say about one file, for when it can't be found and
+    /// Filmora kept no resource record for it.
+    struct Usage {
+        var firstClip: WfpClip
+        var at: Time
+        var video = false
+        var audio = false
+        /// The furthest media time any clip reaches.
+        var reach = 0.0
+    }
+
     /// Probes every file the timeline (and the templates on it) uses.
-    /// `shift` takes a template's times to the main timeline's.
-    private func resolveMedia(in timeline: WfpTimeline, shift: Int64, depth: Int) async {
-        guard depth < 4 else { return }
-        for track in timeline.tracks {
-            for clip in track.clips {
-                if clip.isVideo || clip.isAudio, let path = mediaPath(clip) {
-                    let fallback = clip.sourceUuid.flatMap { wfp.resources[$0]?.probed }
-                    _ = await catalog.resolve(path, role: roleHint(clip, path: path), fallback: fallback, report: &report, at: Wfp.time(clip.begin + shift))
-                } else if let nested = clip.nestedTimelineID.flatMap(wfp.timeline) {
-                    await resolveMedia(in: nested, shift: shift + clip.begin - clip.inPoint, depth: depth + 1)
+    private func resolveMedia(in main: WfpTimeline) async {
+        var usage: [String: Usage] = [:]
+        var order: [String] = []
+        func collect(_ timeline: WfpTimeline, shift: Int64, depth: Int) {
+            guard depth < 4 else { return }
+            for track in timeline.tracks {
+                for clip in track.clips {
+                    if clip.isVideo || clip.isAudio, let path = mediaPath(clip) {
+                        if usage[path] == nil {
+                            usage[path] = Usage(firstClip: clip, at: Wfp.time(clip.begin + shift))
+                            order.append(path)
+                        }
+                        usage[path]!.video = usage[path]!.video || clip.isVideo
+                        usage[path]!.audio = usage[path]!.audio || clip.isAudio
+                        usage[path]!.reach = max(usage[path]!.reach, FilmoraSpeed(clip).sourceEnd)
+                    } else if let nested = clip.nestedTimelineID.flatMap(wfp.timeline) {
+                        collect(nested, shift: shift + clip.begin - clip.inPoint, depth: depth + 1)
+                    }
                 }
             }
+        }
+        collect(main, shift: 0, depth: 0)
+        for path in order {
+            let use = usage[path]!
+            var fallback = use.firstClip.sourceUuid.flatMap { wfp.resources[$0]?.probed }
+            if fallback == nil, use.reach > 0 {
+                // No record of the file, so make one from how the clips use it.
+                fallback = ProbedMedia(kind: use.video ? .video : .audio, duration: Time(seconds: use.reach), hasVideo: use.video, hasAudio: use.audio)
+            } else if var known = fallback, known.kind != .image {
+                known.hasVideo = known.hasVideo || use.video
+                known.hasAudio = known.hasAudio || use.audio
+                if let duration = known.duration, duration.seconds < use.reach { known.duration = Time(seconds: use.reach) }
+                fallback = known
+            }
+            _ = await catalog.resolve(path, role: roleHint(use.firstClip, path: path), fallback: fallback, report: &report, at: use.at)
         }
     }
 
@@ -244,6 +278,7 @@ private final class FilmoraRun {
         var speed = (speedInfo.sourceEnd - speedInfo.sourceStart) / filmoraSeconds
         var sourceStart = speedInfo.sourceStart + Double(begin - clip.begin) / WfpProject.ticksPerSecond * speed
         var duration = Wfp.time(end + shift) - start
+        guard duration > .zero else { return nil }
         var freeze = false
         if item.kind == .image {
             speed = 1
@@ -590,6 +625,7 @@ private final class FilmoraRun {
     private func titleClip(_ clip: WfpClip, shift: Int64, window: Range<Int64>?, template: String?, transform: Transform? = nil) -> PlannedClip? {
         guard let (begin, end) = clamp(clip, to: window) else { return nil }
         let start = Wfp.time(begin + shift)
+        guard Wfp.time(end + shift) > start else { return nil }
         guard let mapped = FilmoraText.map(clip) else {
             report.add(.failed, "title", "A title had no text data.", at: start)
             return nil
@@ -667,6 +703,7 @@ private final class FilmoraRun {
         }
         let soundsKey = "\(id)@\(clip.begin + shift)"
         let takeSounds = flattenedSounds.insert(soundsKey).inserted
+        let firstChild = track.clips.count
         for nestedTrack in nested.tracks {
             for child in nestedTrack.clips {
                 switch child.type {
@@ -703,6 +740,15 @@ private final class FilmoraRun {
                     place(child, on: track, shift: childShift, window: childWindow, template: name, depth: depth + 1)
                 }
             }
+        }
+        // The template's own transitions belong to the layers at its edges.
+        let head = edge(clip.preTransition, at: begin, window: window)
+        let tail = edge(clip.postTransition, at: end, window: window)
+        let start = Wfp.time(begin + shift)
+        let finish = Wfp.time(end + shift)
+        for i in track.clips.indices.dropFirst(firstChild) {
+            if track.clips[i].head == nil, track.clips[i].clip.start == start { track.clips[i].head = head }
+            if track.clips[i].tail == nil, track.clips[i].clip.end == finish { track.clips[i].tail = tail }
         }
     }
 
