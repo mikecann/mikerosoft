@@ -166,11 +166,12 @@ held during the loudness passes, which don't encode). Outputs must be
 
 | Job | Speed |
 | --- | --- |
-| 60 s 4K: screen + 50% cutout PiP camera with grade and shadow, voice, music, HEVC 80 Mbps | 16.3 s, 3.7x real time |
-| Same at 30 Mbps | 3.6x |
-| 60 s range of the imported v14 edit (494 clips) | 4.3x |
+| 60 s 4K: screen + 50% cutout PiP camera with grade and shadow, voice, music, HEVC 80 Mbps | 15.8 s, 3.8x real time |
+| Same at 30 Mbps | 3.7x |
+| 60 s range of the imported v14 edit (494 clips) | 4.4x |
 | The whole v14 edit, 11 min 7 s, HEVC 80 Mbps | 156 s, 4.3x, -14.09 LUFS, -1.1 dBTP (loudness passes about 5% of it) |
-| Frame grab, 4K composite | 0.07 to 0.4 s |
+| Frame grab, 4K composite (first grab builds the composition) | 0.05 to 0.4 s |
+| 20 s of a 4K still with a title and shadow | 4.0x |
 
 The spike's plain composite managed about 3.5x; the encoder is the limit.
 
@@ -193,7 +194,8 @@ The spike's plain composite managed about 3.5x; the encoder is the limit.
 
 ## Tests
 
-`swift test --package-path tools/tandem` runs everything in about 30 s:
+`swift test --package-path tools/tandem` runs the render tests in about
+5 s (the whole package in about 25 s):
 pure maths and plan tests, golden-pixel compositor tests with stand-in
 frames, end-to-end grabs and exports of synthetic movies (frame-number
 stripes, a flash and a beep, tones with clicks). Real footage is opt-in:
