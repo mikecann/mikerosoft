@@ -24,15 +24,15 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 ## Milestone 2: media
 
-- [ ] Scan the project folder, probe files, guess roles, pair record-it takes [media]
-- [ ] Watch the folder and add new files as they land [media]
-- [ ] Analysis cache and one job scheduler with priorities and an encoder lock [media]
-- [ ] Thumbnails and waveforms [media]
-- [ ] Loudness (EBU R128 integrated, true peak, LRA) in Swift [media]
-- [ ] 1080p all-intra HEVC proxies [media]
-- [ ] Transcripts with SpeechAnalyzer, word timings in media time [media]
-- [ ] Person matte for the cutout (Vision), greyscale HEVC [media]
-- [ ] Isolated voice (AUSoundIsolation), latency compensated [media]
+- [x] Scan the project folder, probe files, guess roles, pair record-it takes [media]
+- [x] Watch the folder and add new files as they land [media]
+- [x] Analysis cache and one job scheduler with priorities and an encoder lock [media]
+- [x] Thumbnails and waveforms [media]
+- [x] Loudness (EBU R128 integrated, true peak, LRA) in Swift [media]
+- [x] 1080p all-intra HEVC proxies [media]
+- [x] Transcripts with SpeechAnalyzer, word timings in media time [media]
+- [x] Person matte for the cutout (Vision), greyscale HEVC [media]
+- [x] Isolated voice (AUSoundIsolation), latency compensated [media]
 
 ## Milestone 3: render and export
 

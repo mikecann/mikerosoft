@@ -41,6 +41,7 @@ public final class ProjectSession: @unchecked Sendable {
     private var autosaveWork: DispatchWorkItem?
     private var observerToken: UUID?
     private var closed = false
+    private var watcher: FolderWatcher?
     public var autosaveDelay: TimeInterval = 1
 
     private init(fileURL: URL, project: Project, revision: Int, owner: Owner, recovered: Bool, journal: ProjectJournal, lock: LockHandle) {
@@ -117,12 +118,50 @@ public final class ProjectSession: @unchecked Sendable {
             return !closed
         }
         guard first else { return }
+        stopWatching()
         if let token = observerToken { coordinator.removeObserver(token) }
         queue.sync { autosaveWork?.cancel() }
         try? save()
         analysis.cancelAll()
         lockHandle.release()
     }
+
+    /// For long-lived sessions (the app and `tandem serve`, not one-shot CLI
+    /// commands): starts the usual background analysis for the project's
+    /// media, timeline media first, and watches the folder so files that
+    /// land in it (a new record-it take, a downloaded sound) join the
+    /// project on their own.
+    public func startWatching() {
+        let started: Bool = queue.sync {
+            guard watcher == nil, !closed else { return false }
+            let watcher = FolderWatcher(folder: folder) { [weak self] changes in
+                guard let self, !changes.isEmpty else { return }
+                Task { _ = try? await self.refreshMedia() }
+            }
+            do {
+                try watcher.start()
+            } catch {
+                return false
+            }
+            self.watcher = watcher
+            return true
+        }
+        guard started else { return }
+        let project = coordinator.project
+        let used = Set(project.allTracks.flatMap(\.clips).compactMap(\.mediaID))
+        analysis.requestDefaults(for: project.media, usedOnTimeline: used)
+        Task { [weak self] in _ = try? await self?.refreshMedia() }
+    }
+
+    public func stopWatching() {
+        let current: FolderWatcher? = queue.sync {
+            defer { watcher = nil }
+            return watcher
+        }
+        current?.stop()
+    }
+
+    public var isWatching: Bool { queue.sync { watcher != nil } }
 
     /// Adds files that appeared in the folder since the last scan, as one
     /// edit by "system". Returns the new media IDs.

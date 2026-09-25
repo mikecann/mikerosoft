@@ -33,15 +33,7 @@ public final class MediaAnalysisSource: AnalysisSource, @unchecked Sendable {
     public func loudness(for item: MediaItem) -> Loudness? { analysis.loudness(for: item) }
 
     public func isReady(_ kind: AnalysisKind, for item: MediaItem) -> Bool {
-        switch kind {
-        case .thumbnails: return analysis.thumbnails(for: item) != nil
-        case .waveform: return analysis.waveform(for: item) != nil
-        case .loudness: return analysis.loudness(for: item) != nil
-        case .proxy: return analysis.proxyURL(for: item) != nil
-        case .transcript: return analysis.transcript(for: item) != nil
-        case .matte: return analysis.matteURL(for: item) != nil
-        case .isolatedVoice: return analysis.isolatedVoiceURL(for: item) != nil
-        }
+        analysis.isCached(kind, for: item)
     }
 
     public var jobs: [JobStatus] { analysis.jobs }
