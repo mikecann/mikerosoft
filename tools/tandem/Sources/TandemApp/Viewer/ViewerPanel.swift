@@ -83,7 +83,7 @@ struct TransportBar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Safe margins")
-                ToggleText(title: "Proxy", on: playback.useProxies, help: "Play from 1080p proxies. Paused frames use the originals.") {
+                ToggleText(title: "Proxy", on: playback.useProxies, help: "Play from 1080p proxies where they're ready. Off plays the original files.") {
                     playback.useProxies.toggle()
                 }
                 Menu {

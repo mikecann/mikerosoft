@@ -11,9 +11,9 @@ import TandemRender
 ///
 /// The render module builds the project into a composition that plays
 /// through `AVPlayer`, from 1080p proxies where they exist (`useProxies`).
-/// When the playhead rests, an exact frame from the originals comes from
-/// `FrameRenderer` and sits over the player, so a paused frame is the one
-/// the export will have.
+/// It can also lay an exact frame from the originals over a paused player
+/// (`stillsFromOriginals`), rendered by `FrameRenderer` at the viewer's
+/// size; that's off for now, see the flag.
 ///
 /// Two players take turns. A rebuilt composition loads into the one that's
 /// hidden, seeks to the playhead and swaps in once its first frame is up,
@@ -39,7 +39,7 @@ final class PlaybackController {
     /// Where the preview can't match the export yet, from the latest build:
     /// a cutout matte still being made, a missing file.
     private(set) var warnings: [String] = []
-    /// Proxies for motion; paused frames always come from the originals.
+    /// Play from 1080p proxies where they exist.
     var useProxies = true {
         didSet { if oldValue != useProxies { scheduleRebuild(delay: 0) } }
     }
@@ -306,12 +306,20 @@ final class PlaybackController {
         return lastFrame
     }
 
+    /// Paused frames from the originals over the proxy player. Off because
+    /// exact grabs of a screen recording's variable frame rate gaps come
+    /// back black from the originals (v14 at 6:44, main-screen 16:05), while
+    /// the proxies, which carry every frame's duration, and exports, which
+    /// read in order, are right. Turn on once the render module fills those
+    /// gaps for grabs.
+    static let stillsFromOriginals = false
+
     /// Once the playhead has rested for a moment, renders the exact frame
     /// from the originals and lays it over the player. Only needed while
     /// the player runs on proxies.
     private func scheduleStill() {
         stillWork?.cancel()
-        guard useProxies, rate == 0, hasComposition else { return }
+        guard Self.stillsFromOriginals, useProxies, rate == 0, hasComposition else { return }
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated { self?.renderStill() }
         }
