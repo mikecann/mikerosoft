@@ -137,6 +137,12 @@ aliases (`popIn`, `fadeOut`...).
 - Every hard cut gets a 3 ms fade each side. Joins that continue the same
   media seamlessly (same file, contiguous source, same speed and gain) don't.
 - Speed changes keep their pitch (spectral time-pitch).
+- `pitchShift` (semitones, keyframable) renders the clip's sound once
+  through Apple's time-pitch unit, offline, into a cached copy in
+  `~/Library/Caches/Tandem/pitch` (keyed by the file, range, pitch and,
+  for keyframes, the timing), and the composition plays the copy. The unit
+  adds no delay offline, so sync is untouched; a speed change on the same
+  clip still keeps the shifted pitch.
 
 ## Export
 

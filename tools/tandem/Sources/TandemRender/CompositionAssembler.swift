@@ -228,14 +228,35 @@ enum CompositionAssembler {
             mixParameters.append(parameters)
         }
         var audioEnds = Array(repeating: Time.zero, count: audioTracks.count)
+        let audioClips = Dictionary(project.audioTracks.flatMap(\.clips).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for segment in plan.audioSegments.sorted(by: { $0.timeline.start < $1.timeline.start }) {
             guard let u = url(for: segment), let source = sources[u], let assetTrack = source.audio else {
                 if url(for: segment) != nil { warnings.add("No sound in the file for clip \(segment.clipID).") }
                 continue
             }
             do {
-                try insert(segment, into: audioTracks[segment.track], from: assetTrack, available: source.audioRange,
-                           end: &audioEnds[segment.track], holdLastFrame: false, frameDuration: frameDuration)
+                var placed = false
+                if !segment.freeze, let clip = audioClips[segment.clipID], let effect = PitchShift.effect(of: clip, registry: context.effects) {
+                    // Pitch-shifted sound comes from a rendered copy that
+                    // starts at the segment's source start.
+                    do {
+                        let pitched = try await PitchShift.file(for: segment, clip: clip, effect: effect, source: u, registry: context.effects)
+                        let shifted = try await SourceCache.shared.source(for: pitched)
+                        if let shiftedTrack = shifted.audio {
+                            var fromCopy = segment
+                            fromCopy.sourceStart = Time(cmTime: shifted.audioRange.start)
+                            try insert(fromCopy, into: audioTracks[segment.track], from: shiftedTrack, available: shifted.audioRange,
+                                       end: &audioEnds[segment.track], holdLastFrame: false, frameDuration: frameDuration)
+                            placed = true
+                        }
+                    } catch {
+                        warnings.add("Couldn't shift the pitch of clip \(segment.clipID), playing it as it is: \(error)")
+                    }
+                }
+                if !placed {
+                    try insert(segment, into: audioTracks[segment.track], from: assetTrack, available: source.audioRange,
+                               end: &audioEnds[segment.track], holdLastFrame: false, frameDuration: frameDuration)
+                }
                 let parameters = mixParameters[segment.track]
                 for (a, b) in zip(segment.envelope, segment.envelope.dropFirst()) where b.time > a.time {
                     parameters.setVolumeRamp(
