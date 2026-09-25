@@ -71,13 +71,17 @@ public struct BuiltComposition: @unchecked Sendable {
     public var audioMix: AVAudioMix
     public var renderSize: CGSize
     public var duration: Time
+    /// Things that render differently from the project because something
+    /// is missing: a matte or loudness not analysed yet, a missing file.
+    public var warnings: [String]
 
-    public init(composition: AVComposition, videoComposition: AVVideoComposition, audioMix: AVAudioMix, renderSize: CGSize, duration: Time) {
+    public init(composition: AVComposition, videoComposition: AVVideoComposition, audioMix: AVAudioMix, renderSize: CGSize, duration: Time, warnings: [String] = []) {
         self.composition = composition
         self.videoComposition = videoComposition
         self.audioMix = audioMix
         self.renderSize = renderSize
         self.duration = duration
+        self.warnings = warnings
     }
 
     /// A player item ready for the viewer.
@@ -85,32 +89,111 @@ public struct BuiltComposition: @unchecked Sendable {
         let item = AVPlayerItem(asset: composition)
         item.videoComposition = videoComposition
         item.audioMix = audioMix
+        // Speed changes keep their pitch, as they do in export.
+        item.audioTimePitchAlgorithm = .spectral
         return item
     }
 }
 
 /// Turns a project into an AVFoundation composition with Tandem's compositor.
+///
+/// Video clips go on composition tracks from a shared pool, alternating
+/// A/B wherever a centred transition overlaps two clips; cutout mattes get
+/// tracks mirroring their clip. Images, text, solids and adjustment layers
+/// are drawn by the compositor. The timeline is split into instructions at
+/// every clip and transition boundary, each carrying its layer stack.
 public enum CompositionBuilder {
+    /// Builds the composition. Media files are opened once and cached, so
+    /// rebuilding after an edit is cheap.
+    public static func build(_ context: RenderContext) async throws -> BuiltComposition {
+        try await CompositionAssembler.build(context)
+    }
+
+    /// Blocking version for synchronous callers. Prefer the async one: this
+    /// waits on a background task while media files load.
     public static func build(_ context: RenderContext) throws -> BuiltComposition {
-        throw EditError.notImplemented("CompositionBuilder.build")
+        final class Box: @unchecked Sendable { var result: Result<BuiltComposition, Error>? }
+        let box = Box()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            do {
+                box.result = .success(try await CompositionAssembler.build(context))
+            } catch {
+                box.result = .failure(error)
+            }
+            done.signal()
+        }
+        done.wait()
+        return try box.result!.get()
     }
 }
 
 /// Renders single frames without a player: API frame grabs, thumbnails of
-/// the timeline, golden-frame tests.
+/// the timeline, golden-frame tests. It goes through the same composition
+/// and compositor as export, with RGBA output and zero time tolerance, so
+/// the frame is exactly the one at `time`.
 public final class FrameRenderer: @unchecked Sendable {
     public let context: RenderContext
+    private let lock = NSLock()
+    private var prepared: Task<Prepared, Error>?
+
+    /// The composition, and a copy of its video composition using the RGBA
+    /// compositor.
+    private struct Prepared: @unchecked Sendable {
+        var built: BuiltComposition
+        var rgb: AVVideoComposition
+    }
 
     public init(context: RenderContext) {
         self.context = context
     }
 
+    /// The frame at `time`, clamped to the timeline. `maxSize` scales it
+    /// down to fit, keeping the aspect.
     public func image(at time: Time, maxSize: CGSize? = nil) async throws -> CGImage {
-        throw EditError.notImplemented("FrameRenderer.image")
+        let prepared = try await composition()
+        let built = prepared.built
+        let generator = AVAssetImageGenerator(asset: built.composition)
+        generator.videoComposition = prepared.rgb
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        generator.appliesPreferredTrackTransform = false
+        if let maxSize { generator.maximumSize = maxSize }
+        let last = max(.zero, built.duration - context.project.settings.frameRate.frameDuration)
+        let (image, _) = try await generator.image(at: min(max(time, .zero), last).cmTime)
+        return image
     }
 
     public func pngData(at time: Time, maxSize: CGSize? = nil) async throws -> Data {
-        throw EditError.notImplemented("FrameRenderer.pngData")
+        let image = try await image(at: time, maxSize: maxSize)
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, "public.png" as CFString, 1, nil) else {
+            throw RenderError.compositor("couldn't make a PNG")
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw RenderError.compositor("couldn't make a PNG") }
+        return data as Data
+    }
+
+    /// Warnings from building the composition, for the API to pass on.
+    public func warnings() async throws -> [String] {
+        try await composition().built.warnings
+    }
+
+    private func composition() async throws -> Prepared {
+        let task: Task<Prepared, Error> = lock.withLock {
+            if let prepared { return prepared }
+            let context = self.context
+            let task = Task { () async throws -> Prepared in
+                let built = try await CompositionAssembler.build(context)
+                let rgb = built.videoComposition.mutableCopy() as! AVMutableVideoComposition
+                rgb.customVideoCompositorClass = TandemRGBCompositor.self
+                return Prepared(built: built, rgb: rgb)
+            }
+            prepared = task
+            return task
+        }
+        return try await task.value
     }
 }
 
