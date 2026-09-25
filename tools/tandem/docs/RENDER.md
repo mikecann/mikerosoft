@@ -82,10 +82,12 @@ apply their effects to everything below, mixed in by their opacity.
   neighbours; near-greys are untouched. Hue ±100 is ±30 degrees.
 - **LUT.** `.cube` 3D or 1D (1D is expanded to 33 points), path relative to
   the project folder, parsed once and cached.
-- **Cutout.** The matte multiplies alpha. Feather, choke and repair shapes
-  are worked out at the matte's resolution. The matte is assumed to cover
-  the whole frame in the file's display orientation (its own preferred
-  transform is applied). No matte yet means no cutout, with a warning.
+- **Cutout.** The matte multiplies alpha (its luma, full range). Feather,
+  choke and repair shapes are worked out at the matte's resolution. The
+  matte covers the whole frame with the source's frame times, and its own
+  preferred transform is applied. A clip uses the matte made in its cutout
+  mode (`matteURL(for:mode:)`), else the default one; no matte yet means no
+  cutout, with a warning.
 - **Border** follows the alpha when the layer is cut out, otherwise it's a
   crisp frame outside the (rounded) rectangle.
 - **Drop shadow** follows the alpha. `angle` is where the light comes from,
@@ -156,7 +158,9 @@ aliases (`popIn`, `fadeOut`...).
 The preset's `loudnessTarget` and `truePeakCeiling` are used as given (nil
 leaves the mix alone). To follow a project's own settings, build the preset
 from `project.settings`. The encoder lock is held at `.export` priority
-while encoding (not during the loudness passes).
+while encoding, released on every exit including cancel and errors (not
+held during the loudness passes, which don't encode). Outputs must be
+.mp4, .mov or .m4v and can't be one of the project's media files.
 
 ## Measured (M5 Pro, release build)
 
@@ -181,6 +185,11 @@ The spike's plain composite managed about 3.5x; the encoder is the limit.
   context colour-matches it. Use `CGColor(srgbRed:...)`.
 - AVAssetWriter interleaves inputs: pushing all video before any audio
   stalls. Pull each input with `requestMediaDataWhenReady`.
+- Calling `cancelReading()` on an AVAssetReader while another thread is in
+  `copyNextSampleBuffer()`, or reading an output after its reader has been
+  released, crashes. Export cancel is a flag: the encoder feed and muxers
+  stop at the next sample, the feed thread (which holds the reader) is
+  joined, and only then is the reader cancelled.
 
 ## Tests
 
