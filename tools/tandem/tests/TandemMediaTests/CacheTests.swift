@@ -43,6 +43,17 @@ final class AnalysisCacheTests: TempFolderTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: pending.folder.path))
     }
 
+    func testAnotherProcessStillWritingIsLeftAlone() throws {
+        let key = "busy"
+        let pending = try AnalysisCache(root: temp).begin(kind: .matte, key: key)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7200)], ofItemAtPath: pending.folder.path)
+        // The folder is old but the file in it was just written.
+        try Data(repeating: 1, count: 100).write(to: pending.folder.appendingPathComponent("matte.mov"))
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7200)], ofItemAtPath: pending.folder.path)
+        AnalysisCache(root: temp).removeStaleTemporaryFolders(olderThan: 3600)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pending.folder.path))
+    }
+
     func testInFlightWritesSurviveCleanup() throws {
         let cache = AnalysisCache(root: temp)
         let pending = try cache.begin(kind: .proxy, key: "k")

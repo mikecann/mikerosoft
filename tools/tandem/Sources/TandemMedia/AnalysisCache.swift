@@ -177,8 +177,9 @@ public final class AnalysisCache: @unchecked Sendable {
             for name in names where name.hasPrefix(Self.temporaryPrefix) {
                 let url = parent.appendingPathComponent(name, isDirectory: true)
                 guard !active.contains(url) else { continue }
-                let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-                if modified < cutoff { try? FileManager.default.removeItem(at: url) }
+                // A long build in another process keeps writing its file, so
+                // the newest date inside says whether anyone is still at it.
+                if Self.lastModified(url) < cutoff { try? FileManager.default.removeItem(at: url) }
             }
         }
     }
@@ -249,6 +250,18 @@ public final class AnalysisCache: @unchecked Sendable {
             files.append((path.hasPrefix(base) ? String(path.dropFirst(base.count)) : url.lastPathComponent, Int64(values.fileSize ?? 0)))
         }
         return files
+    }
+
+    /// The newest modification date of a folder or anything in it.
+    static func lastModified(_ folder: URL) -> Date {
+        let key = URLResourceKey.contentModificationDateKey
+        var newest = (try? folder.resourceValues(forKeys: [key]))?.contentModificationDate ?? .distantPast
+        if let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [key]) {
+            for case let url as URL in enumerator {
+                if let date = (try? url.resourceValues(forKeys: [key]))?.contentModificationDate, date > newest { newest = date }
+            }
+        }
+        return newest
     }
 
     static func folderSize(_ folder: URL) -> Int64 {
