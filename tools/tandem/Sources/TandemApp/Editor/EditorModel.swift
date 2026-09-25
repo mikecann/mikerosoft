@@ -107,6 +107,16 @@ final class EditorModel {
     /// it's committed.
     var videoPreview: [String: VideoProperties] = [:]
 
+    // Agents
+    /// Who last reached the project over the API, for the agent chip.
+    private(set) var agentPresence: AgentPresence?
+    /// The API's port while it serves, for the agent chip.
+    private(set) var apiPort: Int?
+    /// Why the API isn't serving, when it couldn't start.
+    private(set) var apiProblem: String?
+    @ObservationIgnored private var apiHost: TandemAPIHost?
+    @ObservationIgnored private var apiStopped = false
+
     @ObservationIgnored private var lastScan: Date = .distantPast
     @ObservationIgnored private var scanning = false
     @ObservationIgnored private var observerToken: UUID?
@@ -160,8 +170,9 @@ final class EditorModel {
         }
     }
 
-    /// Stops observers and timers. Call before closing the session.
+    /// Stops the API, observers and timers. Call before closing the session.
     func tearDown() {
+        stopAPI()
         if let observerToken { session.coordinator.removeObserver(observerToken) }
         if let jobToken { session.analysis.removeObserver(jobToken) }
         dirtyTimer?.invalidate()
@@ -237,11 +248,61 @@ final class EditorModel {
     // MARK: - Change handling
 
     private func handle(_ event: ProjectCoordinator.ChangeEvent) {
+        let before = project
         activity.record(event.kind, revision: event.revision, label: event.label, author: event.author)
         refresh()
-        if !ActivityLog.isPerson(event.author) && event.author != ActivityLog.systemAuthor && event.kind == .edit {
+        guard !ActivityLog.isPerson(event.author), event.author != ActivityLog.systemAuthor else { return }
+        // An agent's edit, undo or redo, through the API.
+        let section = ChangeRegion.between(before, project).flatMap { ChangeRegion.section(at: $0.start, in: project) }
+        var presence = agentPresence ?? AgentPresence(author: event.author, lastSeen: Date())
+        presence.edited(by: event.author, section: section, at: Date())
+        agentPresence = presence
+        if event.kind == .edit {
             show(.info, "\(ActivityLog.displayName(event.author)): \(event.label)")
         }
+    }
+
+    // MARK: - API
+
+    /// Serves the local API while the project is open, so the CLI and MCP
+    /// reach this window instead of opening the file themselves. Agent
+    /// edits come back through the coordinator like any other.
+    /// `screenshot` captures the project window for `tandem screenshot`.
+    func startAPI(screenshot: @escaping @Sendable () async throws -> Data) {
+        Task { @MainActor [weak self] in
+            guard let self, !self.apiStopped else { return }
+            do {
+                let host = try await TandemAPIHost.start(session: self.session)
+                // The window may have closed while the server started.
+                guard !self.apiStopped else { return host.stop() }
+                host.service.screenshotProvider = { [weak self] in
+                    await self?.agentLooked()
+                    return try await screenshot()
+                }
+                self.apiHost = host
+                self.apiPort = host.port
+                self.apiProblem = nil
+            } catch {
+                self.apiProblem = Self.describe(error)
+                self.show(.warning, "Agents can't reach this project: \(Self.describe(error))")
+            }
+        }
+    }
+
+    /// Stops serving. Call before closing the session.
+    func stopAPI() {
+        apiStopped = true
+        apiHost?.stop()
+        apiHost = nil
+        apiPort = nil
+    }
+
+    /// An agent asked for a screenshot: it's connected, even if it hasn't
+    /// edited anything.
+    private func agentLooked() {
+        var presence = agentPresence ?? AgentPresence(author: "agent", lastSeen: Date())
+        presence.lastSeen = Date()
+        agentPresence = presence
     }
 
     /// Pulls the latest project from the coordinator.

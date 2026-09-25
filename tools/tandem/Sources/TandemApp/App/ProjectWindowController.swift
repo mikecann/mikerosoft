@@ -107,6 +107,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         NSWorkspace.shared.activateFileViewerSelecting([model.fileURL])
     }
 
+    // MARK: - API
+
+    /// Captures this window for the API's `screenshot`. It waits a moment
+    /// first, so an edit the agent just made has drawn.
+    func screenshotProvider() -> @Sendable () async throws -> Data {
+        let capturer = WindowCapturer(window: window)
+        return {
+            try await Task.sleep(nanoseconds: 250_000_000)
+            return try await capturer.png()
+        }
+    }
+
     // MARK: - Window
 
     func windowWillClose(_ notification: Notification) {
@@ -181,5 +193,23 @@ extension String {
         let firstWord = prefix { $0 != " " }
         if firstWord.dropFirst().contains(where: \.isUppercase) { return self }
         return first.lowercased() + dropFirst()
+    }
+}
+
+/// Holds the window weakly, so a screenshot request can't keep a closed
+/// window alive.
+@MainActor
+private final class WindowCapturer {
+    private weak var window: NSWindow?
+
+    init(window: NSWindow?) {
+        self.window = window
+    }
+
+    func png() throws -> Data {
+        guard let window, window.isVisible else {
+            throw ServiceError(.unavailable, "The project's window is closed.")
+        }
+        return try WindowSnapshot.pngData(of: window)
     }
 }

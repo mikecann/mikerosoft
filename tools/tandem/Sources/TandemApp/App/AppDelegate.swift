@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         let urls = pendingURLs + fromCommandLine
         pendingURLs = []
         handle(urls)
-        if documents.windows.isEmpty { documents.showWelcome() }
+        if documents.windows.isEmpty && !documents.isOpening { documents.showWelcome() }
         NSApp.activate()
         scheduleLaunchScreenshot()
     }

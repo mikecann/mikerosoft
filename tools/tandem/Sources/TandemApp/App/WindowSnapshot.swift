@@ -67,12 +67,18 @@ enum WindowSnapshot {
         return lines.joined(separator: "\n")
     }
 
-    static func write(_ window: NSWindow, to url: URL) throws {
+    /// The window as PNG data.
+    static func pngData(of window: NSWindow) throws -> Data {
         guard let image = image(of: window) else { throw EditError.invalid("couldn't render the window") }
         let rep = NSBitmapImageRep(cgImage: image)
         guard let data = rep.representation(using: .png, properties: [:]) else {
             throw EditError.invalid("couldn't encode the screenshot")
         }
+        return data
+    }
+
+    static func write(_ window: NSWindow, to url: URL) throws {
+        let data = try pngData(of: window)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
     }

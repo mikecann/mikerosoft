@@ -86,7 +86,7 @@ struct ActivityFeed: View {
     /// An MCP server entry that runs the bundled `tandem` CLI on this project.
     static func mcpConfig(for projectURL: URL) -> String {
         let cli = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("tandem").path ?? "tandem"
-        let object: [String: Any] = ["mcpServers": ["tandem": ["command": cli, "args": ["mcp", projectURL.path]]]]
+        let object: [String: Any] = ["mcpServers": ["tandem": ["command": cli, "args": ["mcp", "--project", projectURL.path]]]]
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]),
               let text = String(data: data, encoding: .utf8) else { return "" }
         return text

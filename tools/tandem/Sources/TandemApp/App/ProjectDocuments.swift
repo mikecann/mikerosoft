@@ -23,7 +23,15 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
 
     // MARK: - Opening
 
+    /// Projects waiting for a CLI command or `tandem serve` to let go.
+    private var opening: Set<URL> = []
+    /// True while a project is still on its way, so launch doesn't show the
+    /// welcome window in the meantime.
+    var isOpening: Bool { !opening.isEmpty }
+
     /// Opens a project, or brings its window forward if it's already open.
+    /// Returns nil if it failed, or if it's waiting for another process to
+    /// let go, in which case the window comes up when it does.
     @discardableResult
     func open(_ url: URL, frame: NSRect? = nil) -> ProjectWindowController? {
         let url = url.standardizedFileURL
@@ -32,20 +40,54 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
             return existing
         }
         do {
-            let session = try ProjectSession.open(url, owner: .app)
-            let controller = present(EditorModel(session: session), frame: frame)
-            noteRecent(url)
-            // Pick up files added to the folder while Tandem was closed.
-            controller.model.rescanMedia(ifOlderThan: 0)
-            return controller
+            return opened(try ProjectSession.open(url, owner: .app), url: url, frame: frame)
         } catch {
-            if (error as NSError).domain == NSCocoaErrorDomain, (error as NSError).code == NSFileReadNoSuchFileError {
-                recent.remove(url.path)
-                recent.save()
+            if Self.isLocked(error) {
+                openWhenFree(url, frame: frame)
+            } else {
+                failedToOpen(url, error)
             }
-            alert("Couldn't open \(url.lastPathComponent)", EditorModel.describe(error))
             return nil
         }
+    }
+
+    /// A CLI command has the project for a moment, or `tandem serve` has
+    /// it open: wait a few seconds, asking the server to hand it over.
+    private func openWhenFree(_ url: URL, frame: NSRect?) {
+        guard opening.insert(url).inserted else { return }
+        Task { @MainActor in
+            do {
+                let session = try await ProjectSession.open(url, owner: .app, waitingUpTo: 5)
+                self.opening.remove(url)
+                self.opened(session, url: url, frame: frame)
+            } catch {
+                self.opening.remove(url)
+                self.failedToOpen(url, error)
+            }
+        }
+    }
+
+    @discardableResult
+    private func opened(_ session: ProjectSession, url: URL, frame: NSRect?) -> ProjectWindowController {
+        let controller = present(EditorModel(session: session), frame: frame)
+        noteRecent(url)
+        // Pick up files added to the folder while Tandem was closed.
+        controller.model.rescanMedia(ifOlderThan: 0)
+        return controller
+    }
+
+    private func failedToOpen(_ url: URL, _ error: Error) {
+        if (error as NSError).domain == NSCocoaErrorDomain, (error as NSError).code == NSFileReadNoSuchFileError {
+            recent.remove(url.path)
+            recent.save()
+        }
+        alert("Couldn't open \(url.lastPathComponent)", EditorModel.describe(error))
+        if windows.isEmpty && opening.isEmpty && !isTerminating { showWelcome() }
+    }
+
+    private static func isLocked(_ error: Error) -> Bool {
+        guard let edit = error as? EditError, case .locked = edit else { return false }
+        return true
     }
 
     private func present(_ model: EditorModel, frame: NSRect?) -> ProjectWindowController {
@@ -60,6 +102,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         controller.window?.makeKeyAndOrderFront(nil)
         welcome?.close()
         welcome = nil
+        model.startAPI(screenshot: controller.screenshotProvider())
         return controller
     }
 
@@ -97,10 +140,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         }
         do {
             let session = try ProjectSession.create(at: url, name: Self.projectName(forFolder: name), owner: .app)
-            let controller = present(EditorModel(session: session), frame: nil)
-            noteRecent(url)
-            controller.model.rescanMedia(ifOlderThan: 0)
-            return controller
+            return opened(session, url: url, frame: nil)
         } catch {
             alert("Couldn't create the project", EditorModel.describe(error))
             return nil

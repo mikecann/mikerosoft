@@ -32,6 +32,8 @@ struct ActivityLog: Equatable {
     static func displayName(_ author: String) -> String {
         if isPerson(author) { return "You" }
         if author == systemAuthor { return "Tandem" }
+        // The command line tools are acronyms.
+        if ["cli", "mcp", "api"].contains(author.lowercased()) { return author.uppercased() }
         return author.prefix(1).uppercased() + author.dropFirst()
     }
 

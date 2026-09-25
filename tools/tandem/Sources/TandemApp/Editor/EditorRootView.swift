@@ -90,22 +90,39 @@ struct TopBar: View {
     let actions: EditorActions
 
     var body: some View {
-        HStack(spacing: 14) {
-            // The window's own traffic lights sit here.
-            Color.clear.frame(width: 52, height: 12)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(model.project.name)
-                    .font(.ui(13, .bold))
-                    .foregroundStyle(Theme.text.color)
-                    .lineLimit(1)
-                Text("\(model.folderName) / \(model.fileName) · \(model.isDirty ? "edited" : "saved")")
-                    .font(.ui(10.5))
-                    .foregroundStyle(Theme.textFaint.color)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+        // The library tabs sit in the middle of the window, so they stay put
+        // when the title or the agent chip changes width.
+        ZStack {
+            HStack(spacing: 14) {
+                // The window's own traffic lights sit here.
+                Color.clear.frame(width: 52, height: 12)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(model.project.name)
+                        .font(.ui(13, .bold))
+                        .foregroundStyle(Theme.text.color)
+                        .lineLimit(1)
+                    Text("\(model.folderName) / \(model.fileName) · \(model.isDirty ? "edited" : "saved")")
+                        .font(.ui(10.5))
+                        .foregroundStyle(Theme.textFaint.color)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .frame(maxWidth: 260, alignment: .leading)
+                Spacer(minLength: 12)
+                AgentChip(model: model)
+                Button {
+                    model.showExportSheet = true
+                } label: {
+                    Text("Export")
+                        .font(.ui(12.5, .bold))
+                        .foregroundStyle(Theme.onAmber.color)
+                        .padding(.horizontal, 14)
+                        .frame(height: 28)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Theme.amber.color))
+                }
+                .buttonStyle(.plain)
+                .help("Export (⌘E)")
             }
-            .frame(maxWidth: 260, alignment: .leading)
-            Spacer(minLength: 12)
             HStack(spacing: 2) {
                 ForEach(LibraryTab.allCases) { tab in
                     LibraryTabButton(tab: tab, selected: model.libraryTab == tab) {
@@ -113,20 +130,6 @@ struct TopBar: View {
                     }
                 }
             }
-            Spacer(minLength: 12)
-            AgentChip(model: model)
-            Button {
-                model.showExportSheet = true
-            } label: {
-                Text("Export")
-                    .font(.ui(12.5, .bold))
-                    .foregroundStyle(Theme.onAmber.color)
-                    .padding(.horizontal, 14)
-                    .frame(height: 28)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Theme.amber.color))
-            }
-            .buttonStyle(.plain)
-            .help("Export (⌘E)")
         }
         .padding(.leading, 16)
         .padding(.trailing, 14)
@@ -216,38 +219,40 @@ private struct AgentChip: View {
     let model: EditorModel
 
     var body: some View {
-        let entry = model.activity.lastAgentEntry
-        let recent = entry.map { Date().timeIntervalSince($0.date) < 30 } ?? false
-        Button {
-            model.inspectorTab = .activity
-        } label: {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(entry == nil ? Theme.textFainter.color : (recent ? Theme.amber.color : Theme.green.color))
-                    .frame(width: 7, height: 7)
-                if let entry {
-                    Text(ActivityLog.displayName(entry.author))
+        // Ticks over every few seconds, so "is editing" settles into
+        // "connected" and then "edited" without any new events.
+        SwiftUI.TimelineView(.periodic(from: .now, by: 5)) { context in
+            let state = AgentChipState.of(model.agentPresence, serving: model.apiProblem == nil, now: context.date)
+            Button {
+                model.inspectorTab = .activity
+            } label: {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(state.isActive ? Theme.green.color : Theme.textFainter.color)
+                        .frame(width: 7, height: 7)
+                    Text(state.name)
                         .font(.ui(12, .semibold))
                         .foregroundStyle(Theme.text.color)
-                    Text(recent ? "is editing" : "edited \(entry.date.formatted(date: .omitted, time: .shortened))")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.textMuted.color)
-                } else {
-                    Text("Agents")
-                        .font(.ui(12, .semibold))
-                        .foregroundStyle(Theme.textStrong.color)
-                    Text("no edits yet")
+                    Text(state.detail)
                         .font(.ui(12))
                         .foregroundStyle(Theme.textMuted.color)
                 }
+                .padding(.horizontal, 11)
+                .frame(height: 28)
+                .background(Capsule().fill(Theme.raised.color))
+                .overlay(Capsule().stroke(Theme.controlBorder.color, lineWidth: 1))
             }
-            .padding(.horizontal, 11)
-            .frame(height: 28)
-            .background(Capsule().fill(Theme.raised.color))
-            .overlay(Capsule().stroke(Theme.controlBorder.color, lineWidth: 1))
+            .buttonStyle(.plain)
+            .help(help)
         }
-        .buttonStyle(.plain)
-        .help("Edits from agents show in the activity feed")
+    }
+
+    private var help: String {
+        if let port = model.apiPort {
+            return "Agents reach this project through the local API on port \(port). Their edits show in the activity feed."
+        }
+        if let problem = model.apiProblem { return "The local API couldn't start: \(problem)" }
+        return "Starting the local API"
     }
 }
 
@@ -277,11 +282,16 @@ struct StatusBar: View {
                     .truncationMode(.tail)
             }
             Spacer(minLength: 8)
+            // The last agent edit stays here once its status message has
+            // gone, so the bar never says the same thing twice.
             if let entry = model.activity.lastAgentEntry {
-                Text("\(ActivityLog.displayName(entry.author)): \(entry.label)")
-                    .font(.ui(11))
-                    .foregroundStyle(Theme.textFaint.color)
-                    .lineLimit(1)
+                let text = "\(ActivityLog.displayName(entry.author)): \(entry.label)"
+                if model.status?.text != text {
+                    Text(text)
+                        .font(.ui(11))
+                        .foregroundStyle(Theme.textFaint.color)
+                        .lineLimit(1)
+                }
             }
             Text(formatSummary)
                 .font(.ui(11))

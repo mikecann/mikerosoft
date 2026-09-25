@@ -286,3 +286,76 @@ final class SmallPieceTests: XCTestCase {
         XCTAssertEqual("PiP right".lowercasedFirst, "PiP right")
     }
 }
+
+final class AgentPresenceTests: XCTestCase {
+    func testChipFollowsTheLastContact() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(AgentChipState.of(nil, serving: true, now: now), .idle(serving: true))
+        XCTAssertEqual(AgentChipState.of(nil, serving: true, now: now).detail, "not connected")
+        XCTAssertEqual(AgentChipState.of(nil, serving: false, now: now).detail, "API off")
+
+        // A screenshot a minute ago.
+        var presence = AgentPresence(author: "claude", lastSeen: now.addingTimeInterval(-60))
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, now: now), .connected(name: "Claude"))
+
+        presence.edited(by: "claude", section: "§4", at: now.addingTimeInterval(-5))
+        let editing = AgentChipState.of(presence, serving: true, now: now)
+        XCTAssertEqual(editing, .editing(name: "Claude", section: "§4"))
+        XCTAssertEqual(editing.name, "Claude")
+        XCTAssertEqual(editing.detail, "is editing §4")
+        XCTAssertTrue(editing.isActive)
+
+        // An edit that lands nowhere in particular keeps the last section.
+        presence.edited(by: "claude", section: nil, at: now)
+        XCTAssertEqual(presence.section, "§4")
+
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, now: now.addingTimeInterval(120)), .connected(name: "Claude"))
+        let later = AgentChipState.of(presence, serving: true, now: now.addingTimeInterval(3_600))
+        XCTAssertEqual(later, .edited(name: "Claude", at: now))
+        XCTAssertFalse(later.isActive)
+
+        // Only looked, long ago.
+        let looked = AgentPresence(author: "codex", lastSeen: now.addingTimeInterval(-3_600))
+        XCTAssertEqual(AgentChipState.of(looked, serving: true, now: now), .idle(serving: true))
+    }
+
+    func testMCPConfigPointsAtTheProject() throws {
+        let text = ActivityFeed.mcpConfig(for: URL(fileURLWithPath: "/videos/a/Video v2.tandem"))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        let server = try XCTUnwrap((object["mcpServers"] as? [String: Any])?["tandem"] as? [String: Any])
+        XCTAssertEqual(server["args"] as? [String], ["mcp", "--project", "/videos/a/Video v2.tandem"])
+        XCTAssertEqual((server["command"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }, "tandem")
+    }
+
+    func testNamesForAgentsAndTools() {
+        XCTAssertEqual(ActivityLog.displayName("claude"), "Claude")
+        XCTAssertEqual(ActivityLog.displayName("cli"), "CLI")
+        XCTAssertEqual(ActivityLog.displayName("mcp"), "MCP")
+        XCTAssertEqual(ActivityLog.displayName("user"), "You")
+        XCTAssertEqual(ActivityLog.displayName("system"), "Tandem")
+    }
+
+    func testChangeRegionNamesTheSection() throws {
+        let fixture = try AppFixture()
+        try fixture.coordinator.apply(EditBatch(label: "Sections", commands: [
+            .addMarker(marker: Marker(id: "mk_s1", time: .zero, name: "§1 The hook", kind: .section))
+        ]))
+        let before = fixture.project
+        XCTAssertNil(ChangeRegion.between(before, before))
+
+        try fixture.coordinator.apply(EditBatch(label: "Remove B-roll", commands: [.removeClips(clipIDs: [fixture.clip("B-roll").id])]))
+        let removed = try XCTUnwrap(ChangeRegion.between(before, fixture.project))
+        XCTAssertEqual(removed, TimeRange(start: t(20), end: t(25)))
+        XCTAssertEqual(ChangeRegion.section(at: removed.start, in: fixture.project), "§1")
+
+        let beforeCut = fixture.project
+        try fixture.coordinator.apply(EditBatch(label: "Cut", commands: [.blade(at: t(40), clipIDs: [fixture.clip("Camera").id])]))
+        let cut = try XCTUnwrap(ChangeRegion.between(beforeCut, fixture.project))
+        XCTAssertEqual(cut, TimeRange(start: .zero, end: t(60)))
+        XCTAssertEqual(ChangeRegion.section(at: t(31), in: fixture.project), "Section 2")
+
+        var bare = fixture.project
+        bare.markers = []
+        XCTAssertNil(ChangeRegion.section(at: t(31), in: bare))
+    }
+}
