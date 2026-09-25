@@ -160,6 +160,7 @@ final class PlanarFeed: @unchecked Sendable {
     private var queue: [Float] = []
     private var queueOffset = 0
     private var leadingSilence: Int?
+    private var framesToDrop = 0
     private let rangeStart: Double
     private var supplied = 0
     private var exhausted = false
@@ -208,14 +209,19 @@ final class PlanarFeed: @unchecked Sendable {
 
     private func pull() {
         do {
-            let more = try reader.next { samples, _, start in
+            let more = try reader.next { samples, frames, start in
                 if leadingSilence == nil {
-                    // Line the result up with media time zero.
-                    let silence = max(0, Int(((start.seconds - rangeStart) * reader.sampleRate).rounded()))
-                    leadingSilence = silence
-                    queue.append(contentsOf: repeatElement(0, count: silence * channels))
+                    // Line the result up with media time zero: silence in
+                    // front of audio that starts late, and anything stamped
+                    // before zero (encoder priming) dropped.
+                    let offset = Int(((start.seconds - rangeStart) * reader.sampleRate).rounded())
+                    leadingSilence = max(0, offset)
+                    queue.append(contentsOf: repeatElement(0, count: max(0, offset) * channels))
+                    framesToDrop = max(0, -offset)
                 }
-                queue.append(contentsOf: samples)
+                let dropped = min(frames, framesToDrop)
+                framesToDrop -= dropped
+                queue.append(contentsOf: samples[(dropped * channels)...])
             }
             if !more { exhausted = true }
         } catch {
