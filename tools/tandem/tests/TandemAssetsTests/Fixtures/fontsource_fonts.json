@@ -1,0 +1,307 @@
+[
+ {
+  "id": "bebas-neue",
+  "family": "Bebas Neue",
+  "subsets": [
+   "latin",
+   "latin-ext"
+  ],
+  "weights": [
+   400
+  ],
+  "styles": [
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": false,
+  "lastModified": "2025-09-16",
+  "category": "sans-serif",
+  "license": "OFL-1.1",
+  "type": "google"
+ },
+ {
+  "id": "fira-code",
+  "family": "Fira Code",
+  "subsets": [
+   "cyrillic",
+   "cyrillic-ext",
+   "greek",
+   "greek-ext",
+   "latin",
+   "latin-ext",
+   "symbols2"
+  ],
+  "weights": [
+   300,
+   400,
+   500,
+   600,
+   700
+  ],
+  "styles": [
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": true,
+  "lastModified": "2025-09-16",
+  "category": "monospace",
+  "license": "OFL-1.1",
+  "type": "google"
+ },
+ {
+  "id": "inter",
+  "family": "Inter",
+  "subsets": [
+   "cyrillic",
+   "cyrillic-ext",
+   "greek",
+   "greek-ext",
+   "latin",
+   "latin-ext",
+   "vietnamese"
+  ],
+  "weights": [
+   100,
+   200,
+   300,
+   400,
+   500,
+   600,
+   700,
+   800,
+   900
+  ],
+  "styles": [
+   "italic",
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": true,
+  "lastModified": "2025-09-10",
+  "category": "sans-serif",
+  "license": "OFL-1.1",
+  "type": "google"
+ },
+ {
+  "id": "jetbrains-mono",
+  "family": "JetBrains Mono",
+  "subsets": [
+   "cyrillic",
+   "cyrillic-ext",
+   "greek",
+   "latin",
+   "latin-ext",
+   "vietnamese"
+  ],
+  "weights": [
+   100,
+   200,
+   300,
+   400,
+   500,
+   600,
+   700,
+   800
+  ],
+  "styles": [
+   "italic",
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": true,
+  "lastModified": "2025-09-11",
+  "category": "monospace",
+  "license": "OFL-1.1",
+  "type": "google"
+ },
+ {
+  "id": "lato",
+  "family": "Lato",
+  "subsets": [
+   "latin",
+   "latin-ext"
+  ],
+  "weights": [
+   100,
+   300,
+   400,
+   700,
+   900
+  ],
+  "styles": [
+   "italic",
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": false,
+  "lastModified": "2025-09-16",
+  "category": "sans-serif",
+  "license": "OFL-1.1",
+  "type": "google"
+ },
+ {
+  "id": "montserrat",
+  "family": "Montserrat",
+  "subsets": [
+   "cyrillic",
+   "cyrillic-ext",
+   "latin",
+   "latin-ext",
+   "vietnamese"
+  ],
+  "weights": [
+   100,
+   200,
+   300,
+   400,
+   500,
+   600,
+   700,
+   800,
+   900
+  ],
+  "styles": [
+   "italic",
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": true,
+  "lastModified": "2025-09-05",
+  "category": "sans-serif",
+  "license": "OFL-1.1",
+  "type": "google"
+ },
+ {
+  "id": "open-sans",
+  "family": "Open Sans",
+  "subsets": [
+   "cyrillic",
+   "cyrillic-ext",
+   "greek",
+   "greek-ext",
+   "hebrew",
+   "latin",
+   "latin-ext",
+   "math",
+   "symbols",
+   "vietnamese"
+  ],
+  "weights": [
+   300,
+   400,
+   500,
+   600,
+   700,
+   800
+  ],
+  "styles": [
+   "italic",
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": true,
+  "lastModified": "2025-09-16",
+  "category": "sans-serif",
+  "license": "OFL-1.1",
+  "type": "google"
+ },
+ {
+  "id": "poppins",
+  "family": "Poppins",
+  "subsets": [
+   "devanagari",
+   "latin",
+   "latin-ext"
+  ],
+  "weights": [
+   100,
+   200,
+   300,
+   400,
+   500,
+   600,
+   700,
+   800,
+   900
+  ],
+  "styles": [
+   "italic",
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": false,
+  "lastModified": "2025-09-16",
+  "category": "sans-serif",
+  "license": "OFL-1.1",
+  "type": "google"
+ },
+ {
+  "id": "roboto",
+  "family": "Roboto",
+  "subsets": [
+   "cyrillic",
+   "cyrillic-ext",
+   "greek",
+   "greek-ext",
+   "latin",
+   "latin-ext",
+   "math",
+   "symbols",
+   "vietnamese"
+  ],
+  "weights": [
+   100,
+   200,
+   300,
+   400,
+   500,
+   600,
+   700,
+   800,
+   900
+  ],
+  "styles": [
+   "italic",
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": true,
+  "lastModified": "2026-02-19",
+  "category": "sans-serif",
+  "license": "OFL-1.1",
+  "type": "google"
+ },
+ {
+  "id": "source-code-pro",
+  "family": "Source Code Pro",
+  "subsets": [
+   "cyrillic",
+   "cyrillic-ext",
+   "greek",
+   "greek-ext",
+   "latin",
+   "latin-ext",
+   "vietnamese"
+  ],
+  "weights": [
+   200,
+   300,
+   400,
+   500,
+   600,
+   700,
+   800,
+   900
+  ],
+  "styles": [
+   "italic",
+   "normal"
+  ],
+  "defSubset": "latin",
+  "variable": true,
+  "lastModified": "2025-09-08",
+  "category": "monospace",
+  "license": "OFL-1.1",
+  "type": "google"
+ }
+]

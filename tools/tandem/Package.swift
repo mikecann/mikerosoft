@@ -14,7 +14,12 @@ let package = Package(
         .library(name: "TandemCore", targets: ["TandemCore"]),
         .library(name: "TandemMedia", targets: ["TandemMedia"]),
         .library(name: "TandemRender", targets: ["TandemRender"]),
-        .library(name: "TandemAPI", targets: ["TandemAPI"])
+        .library(name: "TandemAPI", targets: ["TandemAPI"]),
+        .library(name: "TandemAssets", targets: ["TandemAssets"])
+    ],
+    dependencies: [
+        // Renders Lottie stickers to video at import (TandemAssets only).
+        .package(url: "https://github.com/airbnb/lottie-ios.git", from: "4.6.1")
     ],
     targets: [
         // Timeline model, time maths, edit commands, undo, persistence and the
@@ -49,6 +54,20 @@ let package = Package(
             name: "TandemImportTests",
             dependencies: ["TandemImport"],
             path: "tests/TandemImportTests",
+            resources: [.copy("Fixtures")]
+        ),
+        // The asset library: catalogue (system SQLite with FTS5), providers,
+        // normalising on import and copying assets into projects.
+        .target(
+            name: "TandemAssets",
+            dependencies: ["TandemCore", "TandemMedia", .product(name: "Lottie", package: "lottie-ios")],
+            path: "Sources/TandemAssets",
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
+        .testTarget(
+            name: "TandemAssetsTests",
+            dependencies: ["TandemAssets"],
+            path: "tests/TandemAssetsTests",
             resources: [.copy("Fixtures")]
         ),
         // The app's pure logic: timeline maths, snapping, hit testing, the

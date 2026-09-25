@@ -1,0 +1,163 @@
+[
+ {
+  "id": 41,
+  "title": "React",
+  "category": "Library",
+  "route": {
+   "light": "https://svgl.app/library/react_light.svg",
+   "dark": "https://svgl.app/library/react_dark.svg"
+  },
+  "wordmark": {
+   "light": "https://svgl.app/library/react_wordmark_light.svg",
+   "dark": "https://svgl.app/library/react_wordmark_dark.svg"
+  },
+  "url": "https://react.dev/"
+ },
+ {
+  "id": 77,
+  "title": "Tailwind CSS",
+  "category": "Framework",
+  "route": "https://svgl.app/library/tailwindcss.svg",
+  "wordmark": {
+   "light": "https://svgl.app/library/tailwindcss-wordmark.svg",
+   "dark": "https://svgl.app/library/tailwindcss-wordmark-dark.svg"
+  },
+  "brandUrl": "https://tailwindcss.com/brand",
+  "url": "https://tailwindcss.com/"
+ },
+ {
+  "id": 112,
+  "title": "TypeScript",
+  "category": "Language",
+  "route": "https://svgl.app/library/typescript.svg",
+  "url": "https://www.typescriptlang.org"
+ },
+ {
+  "id": 113,
+  "title": "Bun",
+  "category": "Library",
+  "route": "https://svgl.app/library/bun.svg",
+  "url": "https://bun.sh",
+  "brandUrl": "https://bun.sh/press-kit"
+ },
+ {
+  "id": 266,
+  "title": "OpenAI",
+  "category": "AI",
+  "route": {
+   "light": "https://svgl.app/library/openai.svg",
+   "dark": "https://svgl.app/library/openai_dark.svg"
+  },
+  "wordmark": {
+   "light": "https://svgl.app/library/openai_wordmark_light.svg",
+   "dark": "https://svgl.app/library/openai_wordmark_dark.svg"
+  },
+  "url": "https://openai.com/",
+  "brandUrl": "https://openai.com/brand/"
+ },
+ {
+  "id": 439,
+  "title": "Next.js",
+  "category": [
+   "Framework",
+   "Vercel"
+  ],
+  "route": "https://svgl.app/library/nextjs_icon_dark.svg",
+  "wordmark": {
+   "light": "https://svgl.app/library/nextjs_logo_light.svg",
+   "dark": "https://svgl.app/library/nextjs_logo_dark.svg"
+  },
+  "url": "https://nextjs.org/"
+ },
+ {
+  "id": 446,
+  "title": "Supabase",
+  "category": "Database",
+  "route": "https://svgl.app/library/supabase.svg",
+  "url": "https://supabase.com/",
+  "wordmark": {
+   "light": "https://svgl.app/library/supabase_wordmark_light.svg",
+   "dark": "https://svgl.app/library/supabase_wordmark_dark.svg"
+  },
+  "brandUrl": "https://supabase.com/brand-assets"
+ },
+ {
+  "id": 555,
+  "title": "Vercel",
+  "category": [
+   "Hosting",
+   "Vercel"
+  ],
+  "route": {
+   "light": "https://svgl.app/library/vercel.svg",
+   "dark": "https://svgl.app/library/vercel_dark.svg"
+  },
+  "wordmark": {
+   "light": "https://svgl.app/library/vercel_wordmark.svg",
+   "dark": "https://svgl.app/library/vercel_wordmark_dark.svg"
+  },
+  "brandUrl": "https://vercel.com/geist/brands",
+  "url": "https://vercel.com/"
+ },
+ {
+  "id": 566,
+  "title": "Anthropic",
+  "category": "AI",
+  "route": {
+   "light": "https://svgl.app/library/anthropic_black.svg",
+   "dark": "https://svgl.app/library/anthropic_white.svg"
+  },
+  "wordmark": {
+   "light": "https://svgl.app/library/anthropic_black_wordmark.svg",
+   "dark": "https://svgl.app/library/anthropic_white_wordmark.svg"
+  },
+  "url": "https://www.anthropic.com/"
+ },
+ {
+  "id": 575,
+  "title": "GitHub",
+  "category": "Software",
+  "route": {
+   "light": "https://svgl.app/library/github_light.svg",
+   "dark": "https://svgl.app/library/github_dark.svg"
+  },
+  "wordmark": {
+   "light": "https://svgl.app/library/github_wordmark_light.svg",
+   "dark": "https://svgl.app/library/github_wordmark_dark.svg"
+  },
+  "url": "https://github.com/",
+  "brandUrl": "https://brand.github.com/"
+ },
+ {
+  "id": 579,
+  "title": "Convex",
+  "category": [
+   "Database",
+   "Software"
+  ],
+  "route": "https://svgl.app/library/convex.svg",
+  "wordmark": {
+   "light": "https://svgl.app/library/convex_wordmark_light.svg",
+   "dark": "https://svgl.app/library/convex_wordmark_dark.svg"
+  },
+  "url": "https://www.convex.dev/"
+ },
+ {
+  "id": 580,
+  "title": "Clerk",
+  "category": [
+   "Software",
+   "Authentication"
+  ],
+  "route": {
+   "light": "https://svgl.app/library/clerk-icon-light.svg",
+   "dark": "https://svgl.app/library/clerk-icon-dark.svg"
+  },
+  "wordmark": {
+   "light": "https://svgl.app/library/clerk-wordmark-light.svg",
+   "dark": "https://svgl.app/library/clerk-wordmark-dark.svg"
+  },
+  "url": "https://clerk.com",
+  "brandUrl": "https://clerk.com/design"
+ }
+]

@@ -61,6 +61,7 @@ public final class TandemAPIHost: @unchecked Sendable {
             service.shutdown()
             throw error
         }
+        session.startWatching()
         return TandemAPIHost(session: session, service: service, server: server)
     }
 
@@ -86,6 +87,7 @@ public final class TandemAPIHost: @unchecked Sendable {
 
     /// Stops serving. The project stays open; close the session separately.
     public func stop() {
+        session.stopWatching()
         try? session.stopAdvertising()
         server.stop()
         service.shutdown()

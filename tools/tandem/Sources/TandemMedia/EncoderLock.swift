@@ -47,4 +47,14 @@ public actor EncoderLock {
     }
 
     public var isBusy: Bool { busy }
+
+    /// True when someone is waiting with a higher priority than `priority`.
+    /// Long background builds check this between frames and hand the
+    /// encoder over, so an export never waits for a whole proxy.
+    public func hasWaiters(above priority: Priority) -> Bool {
+        waiters.contains { $0.priority > priority }
+    }
+
+    /// How many are waiting, for status displays.
+    public var waitingCount: Int { waiters.count }
 }

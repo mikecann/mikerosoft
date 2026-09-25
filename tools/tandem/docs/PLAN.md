@@ -24,27 +24,28 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 ## Milestone 2: media
 
-- [ ] Scan the project folder, probe files, guess roles, pair record-it takes [media]
-- [ ] Watch the folder and add new files as they land [media]
-- [ ] Analysis cache and one job scheduler with priorities and an encoder lock [media]
-- [ ] Thumbnails and waveforms [media]
-- [ ] Loudness (EBU R128 integrated, true peak, LRA) in Swift [media]
-- [ ] 1080p all-intra HEVC proxies [media]
-- [ ] Transcripts with SpeechAnalyzer, word timings in media time [media]
-- [ ] Person matte for the cutout (Vision), greyscale HEVC [media]
-- [ ] Isolated voice (AUSoundIsolation), latency compensated [media]
+- [x] Scan the project folder, probe files, guess roles, pair record-it takes [media]
+- [x] Watch the folder and add new files as they land [media]
+- [x] Analysis cache and one job scheduler with priorities and an encoder lock [media]
+- [x] Thumbnails and waveforms [media]
+- [x] Loudness (EBU R128 integrated, true peak, LRA) in Swift [media]
+- [x] 1080p all-intra HEVC proxies [media]
+- [x] Transcripts with SpeechAnalyzer, word timings in media time [media]
+- [x] Person matte for the cutout (Vision), greyscale HEVC [media]
+- [x] Isolated voice (AUSoundIsolation), latency compensated [media]
 
 ## Milestone 3: render and export
 
-- [ ] Transform maths shared by viewer and export, with tests [render]
-- [ ] Composition builder: video layers, audio tracks, proxies for playback [render]
-- [ ] Compositor: transform, crop, opacity, solids, adjustment layers, cutout with matte [render]
-- [ ] Effects: colour, HSL, vignette, sharpen, LUT, blur, pixelate, drop shadow, border, rounded corners, Core Image bindings [render]
-- [ ] Transitions: dissolve, fade to and from black, push (4 directions), slide, cut slide, wipe, zoom [render]
-- [ ] Native titles: Core Text, the four styles, in and out animations, word-by-word captions [render]
-- [ ] Audio mix: gain, fades, keyframes, normalisation, voice isolation, crossfades, 3 ms micro-fades [render]
-- [ ] Frame renderer for grabs and tests [render]
-- [ ] Exporter: VideoToolbox speed priority, presets, master loudness to -14 LUFS under -1 dBTP, range export, snapshot beside the file [render]
+- [x] Transform maths shared by viewer and export, with tests [render]
+- [x] Composition builder: video layers, audio tracks, proxies for playback [render]
+- [x] Compositor: transform, crop, opacity, solids, adjustment layers, cutout with matte [render]
+- [x] Effects: colour, HSL, vignette, sharpen, LUT, blur, pixelate, drop shadow, border, rounded corners, Core Image bindings [render]
+- [x] Transitions: dissolve, fade to and from black, push (4 directions), slide, cut slide, wipe, zoom [render]
+- [x] Native titles: Core Text, the four styles, in and out animations, word-by-word captions [render]
+- [x] Audio mix: gain, fades, keyframes, normalisation, voice isolation, crossfades, 3 ms micro-fades, pitch-kept speed changes [render]
+- [ ] Graphic clips (rendered template files) and the pitchShift effect [render]
+- [x] Frame renderer for grabs and tests [render]
+- [x] Exporter: VideoToolbox speed priority, presets, master loudness to -14 LUFS under -1 dBTP, range export, snapshot beside the file [render] (the whole 11 min v14 edit in 156 s, 4.3x real time)
 
 ## Milestone 4: agents
 
@@ -73,13 +74,15 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 - [x] Import the decision-models EDL into a .tandem project [importer] (676.6 s vs v14 667.3 s: Mike's hand trims after the pipeline)
 - [x] Import Filmora .wfp projects [importer] (v14 487/487 clips and 34/34 transitions exact; 119-project corpus imports without failures)
-- [ ] Render the imported v14 and compare frames against Filmora's export [render]
+- [x] Render the imported v14 and compare frames against Filmora's export [render] (placement exact; grade within about 4/255)
 - [x] `tandem import filmora|edl|compare` in the CLI [integration]
 
 ## Wave 2
 
-- [~] Asset library: catalogue (SQLite FTS5), providers, normalising, credits [assets]; browser UI after the app lands
-- [ ] Sources: Freesound (CC0), Pexels and Pixabay, ElevenLabs sound effects, LottieFiles, Google Fonts; paid libraries through a watched folder
+- [x] Asset library: catalogue (SQLite FTS5), providers (import folders, ElevenLabs, Noto, Iconify, SVGL, Fontsource, Pexels, Pixabay, Freesound), normalising (alpha stickers to HEVC, Lottie, SVG, audio loudness), project use and credits [assets]
+- [~] Asset commands in the CLI and MCP [api]
+- [ ] Asset browser in the app (hover previews, drag to timeline) [app, after its first pass]
+- [x] Sources as providers; paid libraries through watched import folders. ElevenLabs sound effects need the key's `sound_generation` permission (music works)
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
 - [ ] Stickers: Lottie and HEVC with alpha
 - [ ] Portrait short layout (screen top, camera bottom, captions between)

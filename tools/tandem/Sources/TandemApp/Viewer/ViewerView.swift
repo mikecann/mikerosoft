@@ -27,8 +27,7 @@ final class ViewerView: NSView, CaptureAware {
         clipsToBounds = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         layer?.backgroundColor = Theme.viewer.cg
-        playerHost.playerLayer.player = model.playback.player
-        playerHost.playerLayer.videoGravity = .resizeAspect
+        playerHost.host(model.playback.playerLayers + [model.playback.stillLayer])
         addSubview(playerHost)
         overlay.viewer = self
         addSubview(overlay)
@@ -64,9 +63,13 @@ final class ViewerView: NSView, CaptureAware {
 
     override func layout() {
         super.layout()
-        playerHost.frame = canvasRect
+        let canvas = canvasRect
+        playerHost.frame = canvas
         playerHost.isHidden = !model.playback.hasComposition
         overlay.frame = bounds
+        // Stills are rendered at the size they're shown, in pixels.
+        let scale = window?.backingScaleFactor ?? 2
+        model.playback.stillSize = CGSize(width: (canvas.width * scale).rounded(), height: (canvas.height * scale).rounded())
     }
 
     // MARK: - Schematic
@@ -255,9 +258,10 @@ final class ViewerView: NSView, CaptureAware {
     }
 }
 
-/// Hosts the player layer, sized to the canvas.
+/// Hosts the playback layers (two players and the paused still), all
+/// sized to the canvas.
 final class PlayerHostView: NSView {
-    let playerLayer = AVPlayerLayer()
+    private var hosted: [CALayer] = []
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -267,7 +271,19 @@ final class PlayerHostView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    override func makeBackingLayer() -> CALayer { playerLayer }
+    func host(_ layers: [CALayer]) {
+        hosted = layers
+        for layer in layers { self.layer?.addSublayer(layer) }
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for layer in hosted { layer.frame = bounds }
+        CATransaction.commit()
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

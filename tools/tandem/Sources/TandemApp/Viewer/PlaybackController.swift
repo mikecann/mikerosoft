@@ -9,10 +9,17 @@ import TandemRender
 
 /// Plays the timeline and owns the playhead.
 ///
-/// When the render module can build a composition, playback goes through
-/// `AVPlayer` and the viewer shows its layer. Until then (or if a build
-/// fails) a clock moves the playhead at the requested rate, so transport,
-/// J K L and the timeline behave the same either way.
+/// The render module builds the project into a composition that plays
+/// through `AVPlayer`, from 1080p proxies where they exist (`useProxies`).
+/// When the playhead rests, an exact frame from the originals comes from
+/// `FrameRenderer` and sits over the player, so a paused frame is the one
+/// the export will have.
+///
+/// Two players take turns. A rebuilt composition loads into the one that's
+/// hidden, seeks to the playhead and swaps in once its first frame is up,
+/// so an edit never flashes the viewer black or loses the playhead. If a
+/// build fails, a clock moves the playhead instead, so transport, J K L and
+/// the timeline behave the same either way.
 @MainActor
 @Observable
 final class PlaybackController {
@@ -25,47 +32,98 @@ final class PlaybackController {
     /// The end of the timeline.
     private(set) var duration: Time = .zero
     private(set) var frameRate: FrameRate = .fps30
-    /// True once a composition is loaded into the player.
+    /// True once a composition is on screen.
     private(set) var hasComposition = false
     /// Why there's no picture, shown on the placeholder canvas.
     private(set) var renderMessage: String? = "Starting the viewer"
-    /// Proxies for motion; paused frames use the originals.
+    /// Where the preview can't match the export yet, from the latest build:
+    /// a cutout matte still being made, a missing file.
+    private(set) var warnings: [String] = []
+    /// Proxies for motion; paused frames always come from the originals.
     var useProxies = true {
-        didSet { if oldValue != useProxies { scheduleRebuild() } }
+        didSet { if oldValue != useProxies { scheduleRebuild(delay: 0) } }
     }
 
-    @ObservationIgnored let player = AVPlayer()
+    /// The layers the viewer hosts: the two players (one hidden) and the
+    /// paused still above them. The controller shows and hides them.
+    @ObservationIgnored let playerLayers: [AVPlayerLayer]
+    @ObservationIgnored let stillLayer = CALayer()
     /// Supplies what to build from. Set by the editor model.
     @ObservationIgnored var makeContext: (() -> RenderContext)?
+    /// The canvas size in pixels, so stills are rendered no bigger than
+    /// they're shown. Set by the viewer.
+    @ObservationIgnored var stillSize = CGSize(width: 1920, height: 1080)
+    /// How long the last composition took to build, for `describe`.
+    @ObservationIgnored private(set) var lastBuildSeconds: Double = 0
+
+    @ObservationIgnored private let players: [AVPlayer]
+    @ObservationIgnored private var outputs: [AVPlayerItemVideoOutput?] = [nil, nil]
+    /// The player on screen.
+    @ObservationIgnored private var front = 0
+    @ObservationIgnored private var timeObservers: [Any] = []
+    @ObservationIgnored private var endObserver: NSObjectProtocol?
+    @ObservationIgnored private var readyObservation: NSKeyValueObservation?
     @ObservationIgnored private var clock: Timer?
     @ObservationIgnored private var lastTick: TimeInterval = 0
-    @ObservationIgnored private var timeObserver: Any?
-    @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var seeking = false
     @ObservationIgnored private var pendingSeek: Time?
     @ObservationIgnored private var rebuildWork: DispatchWorkItem?
+    @ObservationIgnored private var buildTask: Task<Void, Never>?
     @ObservationIgnored private var buildGeneration = 0
-    /// Reads decoded frames back, so a window capture can show the picture
-    /// the player layer is drawing.
-    @ObservationIgnored private var videoOutput: AVPlayerItemVideoOutput?
+    /// Bumped whenever the project changes, so stills made from an older
+    /// project aren't shown.
+    @ObservationIgnored private var projectVersion = 0
+    @ObservationIgnored private var renderer: FrameRenderer?
+    @ObservationIgnored private var rendererVersion = -1
+    @ObservationIgnored private var stillWork: DispatchWorkItem?
+    @ObservationIgnored private var stillTask: Task<Void, Never>?
+    /// The playhead time the still on screen shows, nil when hidden.
+    @ObservationIgnored private var stillTime: Time?
+    @ObservationIgnored private var stillImage: CGImage?
     @ObservationIgnored private var lastFrame: CGImage?
     @ObservationIgnored private lazy var imageContext = CIContext()
 
     init() {
-        player.actionAtItemEnd = .pause
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
-            MainActor.assumeIsolated { self?.playerAdvanced(to: time) }
+        players = [AVPlayer(), AVPlayer()]
+        playerLayers = players.map { AVPlayerLayer(player: $0) }
+        for (index, player) in players.enumerated() {
+            player.actionAtItemEnd = .pause
+            // Local files: start at once rather than buffering first.
+            player.automaticallyWaitsToMinimizeStalling = false
+            let layer = playerLayers[index]
+            layer.videoGravity = .resizeAspect
+            layer.isHidden = true
+            timeObservers.append(player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] time in
+                MainActor.assumeIsolated { self?.playerAdvanced(to: time, slot: index) }
+            })
+        }
+        stillLayer.contentsGravity = .resizeAspect
+        stillLayer.isHidden = true
+        endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil, queue: .main) { [weak self] note in
+            let item = note.object as AnyObject?
+            MainActor.assumeIsolated {
+                guard let self, let item, item === self.players[self.front].currentItem else { return }
+                self.reachedEnd()
+            }
         }
     }
 
     func invalidate() {
         clock?.invalidate()
         clock = nil
-        if let timeObserver { player.removeTimeObserver(timeObserver) }
-        timeObserver = nil
+        rebuildWork?.cancel()
+        buildTask?.cancel()
+        stillWork?.cancel()
+        stillTask?.cancel()
+        readyObservation = nil
+        for (index, player) in players.enumerated() {
+            if index < timeObservers.count { player.removeTimeObserver(timeObservers[index]) }
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+        }
+        timeObservers = []
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-        player.pause()
-        player.replaceCurrentItem(with: nil)
+        endObserver = nil
     }
 
     // MARK: - Timeline changes
@@ -75,6 +133,7 @@ final class PlaybackController {
     func projectChanged(duration: Time, frameRate: FrameRate) {
         self.duration = duration
         self.frameRate = frameRate
+        projectVersion += 1
         if time > duration { seek(to: duration) }
         scheduleRebuild()
     }
@@ -93,17 +152,20 @@ final class PlaybackController {
         context.useProxies = useProxies
         buildGeneration += 1
         let generation = buildGeneration
-        let immutableContext = context
-        Task.detached(priority: .userInitiated) {
+        let started = ProcessInfo.processInfo.systemUptime
+        buildTask?.cancel()
+        // The builder is async and loads media off the main thread.
+        buildTask = Task { [weak self] in
             let result: Result<BuiltComposition, Error>
             do {
-                result = .success(try CompositionBuilder.build(immutableContext))
+                result = .success(try await CompositionBuilder.build(context))
             } catch {
                 result = .failure(error)
             }
-            await MainActor.run { [weak self] in
-                self?.finishBuild(result, generation: generation)
-            }
+            guard let self, !Task.isCancelled else { return }
+            self.lastBuildSeconds = ProcessInfo.processInfo.systemUptime - started
+            DrawTiming.record("composition builds", self.lastBuildSeconds)
+            self.finishBuild(result, generation: generation)
         }
     }
 
@@ -111,40 +173,119 @@ final class PlaybackController {
         guard generation == buildGeneration else { return }
         switch result {
         case .success(let built):
-            let resumeRate = rate
-            let item = built.makePlayerItem()
-            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
-            item.add(output)
-            videoOutput = output
-            lastFrame = nil
-            player.replaceCurrentItem(with: item)
-            if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-            endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reachedEnd() }
-            }
-            hasComposition = true
-            renderMessage = nil
-            clock?.invalidate()
-            clock = nil
-            player.seek(to: time.cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
-            if resumeRate != 0 { player.rate = Float(resumeRate) }
+            warnings = built.warnings
+            load(built, generation: generation)
         case .failure(let error):
+            warnings = []
             hasComposition = false
-            player.replaceCurrentItem(with: nil)
+            readyObservation = nil
+            for (index, player) in players.enumerated() {
+                player.pause()
+                player.replaceCurrentItem(with: nil)
+                outputs[index] = nil
+                playerLayers[index].isHidden = true
+            }
+            hideStill()
             if case EditError.notImplemented = error {
                 renderMessage = "Preview arrives with the render module"
             } else {
-                renderMessage = "Can't preview: \(error.localizedDescription)"
+                renderMessage = "Can't preview: \(EditorModel.describe(error))"
             }
             if rate != 0 { startClock() }
         }
     }
 
-    /// The frame the player is showing, for screenshots. Nil when there's
-    /// no composition or nothing has decoded yet.
+    /// Loads a built composition into the hidden player and swaps it in
+    /// once it shows the frame at the playhead.
+    private func load(_ built: BuiltComposition, generation: Int) {
+        let slot = hasComposition ? 1 - front : front
+        let player = players[slot]
+        let item = built.makePlayerItem()
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        item.add(output)
+        player.pause()
+        player.replaceCurrentItem(with: item)
+        outputs[slot] = output
+        readyObservation = nil
+        player.seek(to: time.cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.whenReady(slot: slot, generation: generation) }
+            }
+        }
+    }
+
+    private func whenReady(slot: Int, generation: Int) {
+        guard generation == buildGeneration else { return }
+        let layer = playerLayers[slot]
+        if layer.isReadyForDisplay {
+            show(slot: slot)
+            return
+        }
+        // A hidden layer still decodes its first frame; wait for it, but
+        // never leave the viewer on the old cut for long.
+        readyObservation = layer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] layer, _ in
+            guard layer.isReadyForDisplay else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, generation == self.buildGeneration else { return }
+                    self.show(slot: slot)
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, generation == self.buildGeneration, self.readyObservation != nil else { return }
+                self.show(slot: slot)
+            }
+        }
+    }
+
+    private func show(slot: Int) {
+        readyObservation = nil
+        let old = front
+        let wasShowing = hasComposition
+        front = slot
+        seeking = false
+        pendingSeek = nil
+        let player = players[slot]
+        // The playhead may have moved while the new cut loaded.
+        if player.currentTime() != time.cmTime {
+            player.seek(to: time.cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayers[slot].isHidden = false
+        if old != slot { playerLayers[old].isHidden = true }
+        CATransaction.commit()
+        if wasShowing, old != slot {
+            players[old].pause()
+            players[old].replaceCurrentItem(with: nil)
+            outputs[old] = nil
+        }
+        lastFrame = nil
+        hasComposition = true
+        renderMessage = nil
+        clock?.invalidate()
+        clock = nil
+        if rate != 0 {
+            play(rate: rate)
+        } else {
+            // The still over the player is from the old cut.
+            hideStill()
+            scheduleStill()
+        }
+    }
+
+    // MARK: - Frames
+
+    /// The frame on screen, for window captures (the player layer doesn't
+    /// draw into them). Nil when there's no composition or nothing has
+    /// decoded yet.
     func currentFrame() -> CGImage? {
-        guard hasComposition, let output = videoOutput else { return nil }
-        let itemTime = output.itemTime(forHostTime: CACurrentMediaTime())
+        guard hasComposition else { return nil }
+        if stillTime != nil, let stillImage { return stillImage }
+        guard let output = outputs[front] else { return lastFrame }
+        let itemTime = players[front].currentTime()
         if let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
             let image = CIImage(cvPixelBuffer: buffer)
             lastFrame = imageContext.createCGImage(image, from: image.extent)
@@ -152,25 +293,86 @@ final class PlaybackController {
         return lastFrame
     }
 
+    /// Once the playhead has rested for a moment, renders the exact frame
+    /// from the originals and lays it over the player. Only needed while
+    /// the player runs on proxies.
+    private func scheduleStill() {
+        stillWork?.cancel()
+        guard useProxies, rate == 0, hasComposition else { return }
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.renderStill() }
+        }
+        stillWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    private func renderStill() {
+        guard rate == 0, hasComposition, var context = makeContext?() else { return }
+        if renderer == nil || rendererVersion != projectVersion {
+            context.useProxies = false
+            renderer = FrameRenderer(context: context)
+            rendererVersion = projectVersion
+        }
+        guard let renderer else { return }
+        let target = time
+        let version = projectVersion
+        let size = stillSize
+        stillTask?.cancel()
+        stillTask = Task { [weak self] in
+            let started = ProcessInfo.processInfo.systemUptime
+            guard let image = try? await renderer.image(at: target, maxSize: size) else { return }
+            DrawTiming.record("paused stills", ProcessInfo.processInfo.systemUptime - started)
+            guard let self, !Task.isCancelled, self.rate == 0, self.time == target, self.projectVersion == version else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.stillLayer.contents = image
+            self.stillLayer.isHidden = false
+            CATransaction.commit()
+            self.stillTime = target
+            self.stillImage = image
+        }
+    }
+
+    private func hideStill() {
+        stillTask?.cancel()
+        guard stillTime != nil || !stillLayer.isHidden else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        stillLayer.isHidden = true
+        stillLayer.contents = nil
+        CATransaction.commit()
+        stillTime = nil
+        stillImage = nil
+    }
+
     // MARK: - Transport
 
     func seek(to target: Time) {
         let clamped = min(max(target, .zero), max(duration, .zero))
         time = clamped
+        if stillTime != clamped { hideStill() }
+        scheduleStill()
         guard hasComposition else { return }
+        seekPlayer(to: clamped)
+    }
+
+    /// Exact seeks, one at a time: while one is running, only the latest
+    /// request waits, so scrubbing keeps up without a backlog.
+    private func seekPlayer(to target: Time) {
         if seeking {
-            pendingSeek = clamped
+            pendingSeek = target
             return
         }
         seeking = true
-        player.seek(to: clamped.cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        let slot = front
+        players[slot].seek(to: target.cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard let self else { return }
+                    guard let self, slot == self.front else { return }
                     self.seeking = false
                     if let next = self.pendingSeek {
                         self.pendingSeek = nil
-                        self.seek(to: next)
+                        self.seekPlayer(to: next)
                     }
                 }
             }
@@ -181,12 +383,17 @@ final class PlaybackController {
         if newRate > 0 && time >= duration { seek(to: .zero) }
         if newRate < 0 && time <= .zero { return }
         rate = newRate
+        stillWork?.cancel()
+        hideStill()
         if hasComposition {
+            let player = players[front]
             if newRate < 0, player.currentItem?.canPlayReverse == false {
                 // The composition can't run backwards, so the clock steps it.
                 player.pause()
                 startClock()
             } else {
+                clock?.invalidate()
+                clock = nil
                 player.rate = Float(newRate)
             }
         } else {
@@ -196,9 +403,10 @@ final class PlaybackController {
 
     func pause() {
         rate = 0
-        player.pause()
+        for player in players { player.pause() }
         clock?.invalidate()
         clock = nil
+        scheduleStill()
     }
 
     func togglePlay() {
@@ -245,18 +453,20 @@ final class PlaybackController {
             seek(to: .zero)
             pause()
         } else {
-            seek(to: next)
+            time = next
+            if hasComposition { seekPlayer(to: next) }
         }
     }
 
-    private func playerAdvanced(to cmTime: CMTime) {
-        guard hasComposition, player.rate != 0, cmTime.isNumeric else { return }
+    private func playerAdvanced(to cmTime: CMTime, slot: Int) {
+        guard hasComposition, slot == front, players[slot].rate != 0, cmTime.isNumeric else { return }
         time = Time(cmTime: cmTime)
     }
 
     private func reachedEnd() {
         rate = 0
         time = duration
+        scheduleStill()
     }
 }
 

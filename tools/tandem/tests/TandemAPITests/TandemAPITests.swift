@@ -53,3 +53,29 @@ final class ProjectSessionTests: XCTestCase {
         session.close()
     }
 }
+
+final class SessionWatchingTests: XCTestCase {
+    func testNewFilesJoinAWatchedProject() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-watch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Watch.tandem"), owner: .cli)
+        defer { session.close() }
+        session.startWatching()
+        XCTAssertTrue(session.isWatching)
+        // A tiny WAV: 0.1 s of silence at 48 kHz, 16-bit mono.
+        let samples = 4_800
+        var wav = Data("RIFF".utf8)
+        func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { wav.append(contentsOf: $0) } }
+        append(UInt32(36 + samples * 2)); wav.append(Data("WAVEfmt ".utf8))
+        append(UInt32(16)); append(UInt16(1)); append(UInt16(1)); append(UInt32(48_000)); append(UInt32(96_000)); append(UInt16(2)); append(UInt16(16))
+        wav.append(Data("data".utf8)); append(UInt32(samples * 2)); wav.append(Data(count: samples * 2))
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("sfx"), withIntermediateDirectories: true)
+        try wav.write(to: folder.appendingPathComponent("sfx/click.wav"))
+        let deadline = Date().addingTimeInterval(15)
+        while session.coordinator.project.media.isEmpty && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        XCTAssertEqual(session.coordinator.project.media.map(\.path), ["sfx/click.wav"])
+        session.stopWatching()
+        XCTAssertFalse(session.isWatching)
+    }
+}

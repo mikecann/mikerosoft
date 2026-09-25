@@ -1,0 +1,61 @@
+{
+ "id": "inter",
+ "family": "Inter",
+ "subsets": [
+  "cyrillic",
+  "cyrillic-ext",
+  "greek",
+  "greek-ext",
+  "latin",
+  "latin-ext",
+  "vietnamese"
+ ],
+ "weights": [
+  100,
+  200,
+  300,
+  400,
+  500,
+  600,
+  700,
+  800,
+  900
+ ],
+ "styles": [
+  "italic",
+  "normal"
+ ],
+ "defSubset": "latin",
+ "variable": true,
+ "lastModified": "2025-09-10",
+ "category": "sans-serif",
+ "license": "OFL-1.1",
+ "type": "google",
+ "version": "v20",
+ "source": "https://github.com/google/fonts",
+ "npmVersion": "5.3.0",
+ "variants": {
+  "400": {
+   "normal": {
+    "latin": {
+     "url": {
+      "woff2": "https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-400-normal.woff2",
+      "woff": "https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-400-normal.woff",
+      "ttf": "https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-400-normal.ttf"
+     }
+    }
+   }
+  },
+  "700": {
+   "normal": {
+    "latin": {
+     "url": {
+      "woff2": "https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-700-normal.woff2",
+      "woff": "https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-700-normal.woff",
+      "ttf": "https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-700-normal.ttf"
+     }
+    }
+   }
+  }
+ }
+}
