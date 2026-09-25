@@ -195,3 +195,29 @@ final class MediaCatalogTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: item.path), cof.path)
     }
 }
+
+final class ImportRequestTests: XCTestCase {
+    func testImportsAndWritesAProjectWithItsReport() async throws {
+        let folder = try Fixtures.temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let request = ImportRequest(
+            source: .filmora(Fixtures.url("wfp/Mini")),
+            output: folder,
+            prober: FakeProbe(media: FilmoraImporterTests.media, undecodable: ["Subscribe Element.webm"])
+        )
+        let (url, result) = try await request.perform()
+        XCTAssertEqual(url.path, folder.appendingPathComponent("Mini Filmora/Mini Filmora.tandem").path)
+        let loaded = try ProjectFile.load(from: url)
+        XCTAssertEqual(loaded.project, result.project)
+        let report = try JSONDecoder().decode(ImportReport.self, from: Data(contentsOf: folder.appendingPathComponent("Mini Filmora/Mini Filmora.import.json")))
+        XCTAssertEqual(report, result.report)
+        let text = try String(contentsOf: folder.appendingPathComponent("Mini Filmora/Mini Filmora.import.txt"), encoding: .utf8)
+        XCTAssertTrue(text.hasPrefix("Imported \"Mini Filmora\""), text)
+    }
+
+    func testNamesAreSafeForFiles() {
+        XCTAssertEqual(ImportRequest.fileName("Decision Models v14"), "Decision Models v14")
+        XCTAssertEqual(ImportRequest.fileName("a/b:c"), "a-b-c")
+        XCTAssertEqual(ImportRequest.fileName("  "), "Imported")
+    }
+}

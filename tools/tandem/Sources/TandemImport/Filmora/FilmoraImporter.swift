@@ -355,6 +355,11 @@ final class FilmoraRun {
             tail: end == clip.end ? edge(clip.postTransition, at: end) : nil,
             flattened: shift != 0 || window != nil
         )
+        if let animation = clip.node["animation"]["name"].string ?? clip.node["inAnimation"]["name"].string, !animation.isEmpty {
+            report.add(.unsupported, "animation", "Clip animation \"\(animation)\" isn't supported.", at: start)
+        } else if clip.node["animation"]["stringParam"].string != nil {
+            report.add(.unsupported, "animation", "A clip in or out animation isn't supported.", at: start)
+        }
         if track.kind == .video {
             // Keyframes are keyed to where the clip starts in its media,
             // Filmora's virtual 3600 s included for stills.
@@ -641,6 +646,10 @@ final class FilmoraRun {
         }
         for note in mapped.notes {
             report.add(.approximated, "title", note, at: start)
+        }
+        for effect in clip.effects where effect.isOn && !effect.params.isEmpty
+            && !["video/effect/transform", "video/effect/crop-pan-zoom"].contains(effect.id) {
+            report.add(.unsupported, "title", "Title effect \"\(effect.display)\" isn't supported.", at: start)
         }
         if !titleSizeNoted {
             titleSizeNoted = true
