@@ -288,6 +288,8 @@ struct FilmoraSpeed {
     var sourceEnd: Double
     /// The speed curve changes inside the clip.
     var ramp: Bool
+    /// The speed Filmora plays the clip at, when it's one speed throughout.
+    var uniform: Double?
     var freeze: Bool
     var reverse: Bool
 
@@ -310,6 +312,7 @@ struct FilmoraSpeed {
         // A trailing 1.0 at the end of the media is Filmora's end marker.
         if values.count > 1, abs(values.last! - 1) < 0.001 { values.removeLast() }
         ramp = Set(values.map { ($0 * 1000).rounded() }).count > 1
+        uniform = !ramp ? values.first.flatMap { $0 > 0 ? $0 : nil } : nil
         let freezes = parameter["_freeze"].array
         freeze = !freezes.isEmpty
         reverse = speed["reverse"].bool ?? false

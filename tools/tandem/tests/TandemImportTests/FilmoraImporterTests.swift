@@ -63,7 +63,7 @@ final class FilmoraImporterTests: XCTestCase {
             TimeRange(start: t(20), end: t(22))
         ])
         XCTAssertEqual(main.map(\.sourceStart), [t(10), t(20), t(30), t(50)])
-        XCTAssertEqual(main[3].speed, 2, accuracy: 1e-9)
+        XCTAssertEqual(main.map(\.speed), [1, 1, 1, 2], "speeds are Filmora's exact values, not rounded ratios")
         XCTAssertEqual(main[3].sourceEnd, t(54))
         XCTAssertEqual(p.media(main[1].mediaID!)?.path, "/FIXTURE/source/take-screen.mov")
         let music = p.clips(on: "Music")
@@ -247,5 +247,90 @@ final class FilmoraImporterTests: XCTestCase {
             }
         }
         return result
+    }
+}
+
+final class FilmoraMappingTests: XCTestCase {
+    func clip(_ json: String) -> WfpClip {
+        WfpClip(JSONNode(jsonString: json))
+    }
+
+    func testSpeedComesFromFilmorasOwnValue() {
+        // Filmora's inclusive ends leave the source range a tick short.
+        let normal = clip(#"{"type": 1, "tlBegin": 323500000, "tlEnd": 408399999, "inPoint": 1490000000, "outPoint": 1574899999, "speed": {"offset": 149.0, "offsetEnd": 157.4899999, "speedParam": "{\"Version\": 3, \"keyframeSets\": [{\"_time\": 0.0, \"_value\": 1.0}, {\"_time\": 671.39, \"_value\": 1.0}]}"}}"#)
+        let speed = FilmoraSpeed(normal)
+        XCTAssertEqual(speed.uniform, 1)
+        XCTAssertFalse(speed.ramp)
+        XCTAssertEqual(speed.sourceStart, 149)
+        // In and out points are divided by the speed; offsets aren't.
+        let fast = clip(#"{"type": 1, "tlBegin": 0, "tlEnd": 51539999, "inPoint": 508120000, "outPoint": 559669999, "speed": {"offset": 406.5, "offsetEnd": 447.733, "speedParam": "{\"Version\": 3, \"keyframeSets\": [{\"_time\": 0.0, \"_value\": 8.0}, {\"_time\": 762.4, \"_value\": 1.0}]}"}}"#)
+        XCTAssertEqual(FilmoraSpeed(fast).uniform, 8)
+        XCTAssertEqual(FilmoraSpeed(fast).sourceStart, 406.5)
+        let ramp = clip(#"{"type": 1, "tlBegin": 0, "tlEnd": 49999999, "speed": {"offset": 0.0, "offsetEnd": 4.3, "speedParam": "{\"Version\": 2, \"keyframeSets\": [{\"_time\": 0.0, \"_value\": 1.0}, {\"_time\": 3.2, \"_value\": 0.98}, {\"_time\": 3.7, \"_value\": 0.4}, {\"_time\": 5.0, \"_value\": 0.1}]}"}}"#)
+        XCTAssertTrue(FilmoraSpeed(ramp).ramp)
+        XCTAssertNil(FilmoraSpeed(ramp).uniform)
+        let reversed = clip(#"{"type": 2, "tlBegin": 0, "tlEnd": 9999999, "speed": {"offset": 0.0, "offsetEnd": 1.0, "reverse": true}}"#)
+        XCTAssertTrue(FilmoraSpeed(reversed).reverse)
+    }
+
+    func testTransitionNamesMapOntoTandemTypes() {
+        typealias M = FilmoraTransitions.Mapped
+        XCTAssertEqual(FilmoraTransitions.map("Cut Slide Transition 03", onAudio: false, placement: .between), M(type: .cutSlide, direction: nil, exact: true))
+        XCTAssertEqual(FilmoraTransitions.map("Push Down", onAudio: false, placement: .head), M(type: .push, direction: .down, exact: true))
+        XCTAssertEqual(FilmoraTransitions.map("Push Up", onAudio: false, placement: .tail), M(type: .push, direction: .up, exact: true))
+        XCTAssertEqual(FilmoraTransitions.map("Push Left", onAudio: false, placement: .between), M(type: .push, direction: .left, exact: true))
+        XCTAssertEqual(FilmoraTransitions.map("Fast Push Right", onAudio: false, placement: .between), M(type: .push, direction: .right, exact: true))
+        XCTAssertEqual(FilmoraTransitions.map("Dissolve", onAudio: false, placement: .between), M(type: .dissolve, direction: nil, exact: true))
+        XCTAssertEqual(FilmoraTransitions.map("fade_black", onAudio: false, placement: .tail).type, .fadeToBlack)
+        XCTAssertEqual(FilmoraTransitions.map("fade_black", onAudio: false, placement: .head).type, .fadeFromBlack)
+        XCTAssertEqual(FilmoraTransitions.map("Fast Wipe Up", onAudio: false, placement: .between), M(type: .wipe, direction: .up, exact: true))
+        XCTAssertEqual(FilmoraTransitions.map("Basic Zoom In", onAudio: false, placement: .between).type, .zoom)
+        XCTAssertFalse(FilmoraTransitions.map("Sparkle Motion Transition 15", onAudio: false, placement: .between).exact)
+        XCTAssertEqual(FilmoraTransitions.map("audio fade", onAudio: true, placement: .between), M(type: .dissolve, direction: nil, exact: true))
+        XCTAssertEqual(FilmoraTransitions.map("Push Left", onAudio: true, placement: .between).type, .dissolve, "audio always crossfades")
+    }
+
+    func testColourGradeMapsOntoTandemEffects() {
+        let params = JSONNode(jsonString: #"{"bEnableHSL": 1, "Red_satVal": -17.0, "Purple_satVal": -21.0, "Aqua_hueVal": 4.0, "Red_brightnessVal": 2.0, "Red_degreeMinVal": 3.0, "amount": -34.0, "size": 60.0, "roundness": 20.0, "u_blackLevel": 7.0, "u_contrast": 25.0, "u_temperature": -3.0, "u_exposure": 10.0, "u_saturation": 0.0}"#).object!
+        let mapped = FilmoraColour.map(params, idKey: "clip")
+        let byType = Dictionary(uniqueKeysWithValues: mapped.effects.map { ($0.type, $0.params) })
+        XCTAssertEqual(byType["hsl"], ["redSaturation": .number(-17), "purpleSaturation": .number(-21), "aquaHue": .number(4), "redLuminance": .number(2)])
+        XCTAssertEqual(byType["vignette"], ["amount": .number(-34), "size": .number(60)])
+        XCTAssertEqual(byType["colorAdjust"]?["blackLevel"], .number(7))
+        XCTAssertEqual(byType["colorAdjust"]?["contrast"], .number(25))
+        XCTAssertEqual(byType["colorAdjust"]?["temperature"], .number(-3))
+        XCTAssertNotNil(byType["colorAdjust"]?["exposure"])
+        XCTAssertEqual(mapped.approximated, ["u_exposure"])
+        XCTAssertEqual(mapped.unmapped, ["roundness"])
+    }
+
+    func testTitleColoursAreRGB() {
+        XCTAssertEqual(FilmoraText.color(16_777_215), .white)
+        XCTAssertEqual(FilmoraText.color(0xD4AA57), RGBA(r: 0xD4 / 255.0, g: 0xAA / 255.0, b: 0x57 / 255.0), "the gold of Mike's awards titles")
+        XCTAssertNil(FilmoraText.color(-1), "-1 means not set")
+        XCTAssertEqual(FilmoraText.weight(font: "HarmonyOS Sans Black", bold: false), 900)
+        XCTAssertEqual(FilmoraText.weight(font: "Kanit Bold", bold: false), 700)
+        XCTAssertEqual(FilmoraText.weight(font: "Arial", bold: true), 700)
+        XCTAssertEqual(FilmoraText.animationName("Typewriter Appears", entering: true), "typewriter")
+        XCTAssertEqual(FilmoraText.animationName("Up Dir Insert", entering: true), "slideUp")
+        XCTAssertNil(FilmoraText.animationName("Wavy Appearance", entering: true))
+    }
+
+    func testKeyframeListsInTicksOrSeconds() {
+        let seconds = JSONNode(jsonString: #"{"Version": 3, "keyframeSets": [{"_time": 3600.04, "_value": 55.3}, {"_time": 3600.5, "_value": 80.0}]}"#)
+        let ticks = JSONNode(jsonString: #"{"Version": 2, "keyframeSets": [{"_time": 36000400000.0, "_value": 0.0}, {"_time": 36005000000.0, "_value": 100.0}]}"#)
+        let a = FilmoraKeyframes.points(seconds, sourceStart: 3600, speed: 1)
+        XCTAssertEqual(a.map { ($0.time * 1000).rounded() / 1000 }, [0.04, 0.5], "relative to the clip's source start")
+        let b = FilmoraKeyframes.points(ticks, sourceStart: 3600, speed: 1)
+        XCTAssertEqual(b.map { ($0.time * 1000).rounded() / 1000 }, [0.04, 0.5])
+        XCTAssertEqual(FilmoraKeyframes.value(b, at: 0.27) ?? -1, 50, accuracy: 1e-6)
+        XCTAssertEqual(FilmoraKeyframes.points(seconds, sourceStart: 3600, speed: 2).last?.time ?? 0, 0.25, accuracy: 1e-9, "twice as fast, half the time")
+    }
+
+    func testPathsFromFilmoraFilenames() {
+        XCTAssertEqual(Wfp.path(fromFilename: "file://Users/m5-mike/a b/c.mov"), "/Users/m5-mike/a b/c.mov")
+        XCTAssertEqual(Wfp.path(fromFilename: "file:///Users/x/c.mov"), "/Users/x/c.mov")
+        XCTAssertEqual(Wfp.path(fromFilename: "file:/Users/x/c.mov"), "/Users/x/c.mov")
+        XCTAssertNil(Wfp.path(fromFilename: "6_Cartoon_Whoosh_02/Data/Cartoon Whoosh 02.m4a"), "relative library paths use the resource's path")
     }
 }

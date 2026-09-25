@@ -275,7 +275,10 @@ private final class FilmoraRun {
         let speedInfo = FilmoraSpeed(clip)
         let filmoraSeconds = Double(clip.end - clip.begin) / WfpProject.ticksPerSecond
         guard filmoraSeconds > 0 else { return nil }
-        var speed = (speedInfo.sourceEnd - speedInfo.sourceStart) / filmoraSeconds
+        // Filmora's own speed value is exact; the source range carries its
+        // inclusive-end rounding, so dividing it gives 0.99999999.
+        var speed = speedInfo.uniform ?? (speedInfo.sourceEnd - speedInfo.sourceStart) / filmoraSeconds
+        if abs(speed - 1) < 0.000_1 { speed = 1 }
         var sourceStart = speedInfo.sourceStart + Double(begin - clip.begin) / WfpProject.ticksPerSecond * speed
         var duration = Wfp.time(end + shift) - start
         guard duration > .zero else { return nil }
