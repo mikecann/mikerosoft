@@ -1,0 +1,13 @@
+{
+  "segments": [
+    {"start": 5.0, "end": 8.0, "layout": "cam"},
+    {"start": 10.0, "end": 14.0, "layout": "cam"},
+    {"start": 15.0, "end": 20.0, "layout": "screen"},
+    {"start": 22.0, "end": 26.0, "layout": "screen"},
+    {"start": 30.0, "end": 35.0, "layout": "screen"},
+    {"start": 40.0, "end": 46.0, "layout": "cam", "broll": [[42.0, 2.0]]},
+    {"start": 97.0, "end": 99.5, "layout": "screen"},
+    {"start": 105.0, "end": 110.0, "layout": "cam"},
+    {"start": 112.0, "end": 118.0, "layout": "screen"}
+  ]
+}

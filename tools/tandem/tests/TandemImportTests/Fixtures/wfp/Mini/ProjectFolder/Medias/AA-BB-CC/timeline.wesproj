@@ -1,0 +1,1523 @@
+{
+ "currentTimelineId": 1,
+ "resources": [
+  {
+   "sourceUuid": "cam",
+   "filename": "file://FIXTURE/source/take-camera.mov",
+   "mediaLength": 1200000000,
+   "streamType": 2,
+   "videoStreamCount": 1,
+   "audioStreamCount": 1,
+   "vidStreamInfo": [
+    {
+     "width": 3840,
+     "height": 2160,
+     "frameRate": {
+      "num": 30,
+      "den": 1
+     },
+     "streamLength": 1200000000
+    }
+   ],
+   "audStreamInfo": [
+    {
+     "duration": 120.0
+    }
+   ]
+  },
+  {
+   "sourceUuid": "scr",
+   "filename": "file://FIXTURE/source/take-screen.mov",
+   "mediaLength": 1200000000,
+   "streamType": 2,
+   "videoStreamCount": 1,
+   "audioStreamCount": 1,
+   "vidStreamInfo": [
+    {
+     "width": 3200,
+     "height": 1800,
+     "frameRate": {
+      "num": 30,
+      "den": 1
+     }
+    }
+   ],
+   "audStreamInfo": [
+    {
+     "duration": 120.0
+    }
+   ]
+  },
+  {
+   "sourceUuid": "music",
+   "filename": "file://FIXTURE/music/bed.mp3",
+   "mediaLength": 3000000000,
+   "streamType": 3,
+   "audioStreamCount": 1,
+   "audStreamInfo": [
+    {
+     "duration": 300.0
+    }
+   ]
+  },
+  {
+   "sourceUuid": "whoosh",
+   "filename": "file://FIXTURE/Filmora/audio/6_Cartoon_Whoosh_02/Data/Cartoon Whoosh 02.m4a",
+   "mediaLength": 8000000,
+   "streamType": 3,
+   "audioStreamCount": 1
+  },
+  {
+   "sourceUuid": "gfx",
+   "filename": "file://FIXTURE/graphics/chart.mp4",
+   "mediaLength": 50000000,
+   "streamType": 2,
+   "videoStreamCount": 1
+  },
+  {
+   "sourceUuid": "sticker",
+   "filename": "file://FIXTURE/library/Subscribe Element.webm",
+   "mediaLength": 40000000,
+   "streamType": 2
+  },
+  {
+   "sourceUuid": "gone",
+   "filename": "file://FIXTURE/gone/old-broll.mp4",
+   "mediaLength": 100000000,
+   "streamType": 2,
+   "videoStreamCount": 1,
+   "audioStreamCount": 0,
+   "vidStreamInfo": [
+    {
+     "width": 1920,
+     "height": 1080,
+     "frameRate": {
+      "num": 25,
+      "den": 1
+     }
+    }
+   ]
+  },
+  {
+   "sourceUuid": "img",
+   "filename": "file://FIXTURE/images/logo.png",
+   "mediaLength": 0,
+   "streamType": 5
+  }
+ ],
+ "timelineInfos": [
+  {
+   "timelineId": 1,
+   "resolutionWidth": 3840,
+   "resolutionHeight": 2160,
+   "userData": [
+    {
+     "key": 3,
+     "data": "TUFJTi1UTC1NQVAAAAAAAAAAAAAAAAAAAAAAAA==",
+     "size": 28
+    }
+   ],
+   "trackInfos": [
+    {
+     "trackType": 2,
+     "uuid": "t0",
+     "clipList": [
+      {
+       "type": 2,
+       "tlBegin": 0,
+       "tlEnd": 219999999,
+       "inPoint": 50000000,
+       "outPoint": 269999999,
+       "filename": "file://FIXTURE/music/bed.mp3",
+       "sourceUuid": "music",
+       "thisUId": "uid-2-0-music",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLU1VU0lDAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 26
+        },
+        {
+         "key": 50,
+         "data": "YmVk",
+         "size": 3
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "audio/effect/volume",
+           "display": "volume",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "VolumeGain",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -30.6
+             }
+            }
+           ]
+          },
+          {
+           "id": "audio/effect/fade",
+           "display": "fade",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "FadeInTime",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1.0
+             }
+            },
+            {
+             "name": "FadeOutTime",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 2.0
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 5,
+        "offsetEnd": 27,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       }
+      }
+     ]
+    },
+    {
+     "trackType": 2,
+     "uuid": "t1",
+     "mute": true,
+     "clipList": [
+      {
+       "type": 2,
+       "tlBegin": 48000000,
+       "tlEnd": 55999999,
+       "inPoint": 0,
+       "outPoint": 7999999,
+       "filename": "Filmora/audio/6_Cartoon_Whoosh_02/Data/Cartoon Whoosh 02.m4a",
+       "sourceUuid": "whoosh",
+       "thisUId": "uid-2-4.8-whoosh",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLVcxAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        },
+        {
+         "key": 50,
+         "data": "Q2FydG9vbiBXaG9vc2ggMDI=",
+         "size": 17
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "audio/effect/volume",
+           "display": "volume",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "VolumeGain",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -15.0
+             }
+            }
+           ]
+          },
+          {
+           "id": "audio/effect/fade",
+           "display": "fade",
+           "type": 3,
+           "paramList": []
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 0,
+        "offsetEnd": 0.8,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       }
+      },
+      {
+       "type": 2,
+       "tlBegin": 90000000,
+       "tlEnd": 97999999,
+       "inPoint": 0,
+       "outPoint": 7999999,
+       "filename": "Filmora/audio/6_Cartoon_Whoosh_02/Data/Cartoon Whoosh 02.m4a",
+       "sourceUuid": "whoosh",
+       "thisUId": "uid-2-9-whoosh",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLVcyAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "audio/effect/volume",
+           "display": "volume",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "VolumeGain",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -15.0
+             }
+            }
+           ]
+          },
+          {
+           "id": "audio/effect/fade",
+           "display": "fade",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "FadeOutTime",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1.6
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 0,
+        "offsetEnd": 0.8,
+        "reverse": true,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       }
+      }
+     ]
+    },
+    {
+     "trackType": 2,
+     "uuid": "t2",
+     "trackTag": 1,
+     "userData": [
+      {
+       "key": 20,
+       "data": "AwAAAA==",
+       "size": 4
+      }
+     ],
+     "clipList": [
+      {
+       "type": 2,
+       "tlBegin": 0,
+       "tlEnd": 49999999,
+       "inPoint": 100000000,
+       "outPoint": 149999999,
+       "filename": "file://FIXTURE/source/take-camera.mov",
+       "sourceUuid": "cam",
+       "thisUId": "uid-2-0-cam",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLU0xAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "audio/effect/volume",
+           "display": "volume",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "LoudnessGainEnable",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": true
+             }
+            },
+            {
+             "name": "LoudnessGain",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 3.0
+             }
+            }
+           ]
+          },
+          {
+           "id": "audio/effect/fade",
+           "display": "fade",
+           "type": 3,
+           "paramList": []
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 10,
+        "offsetEnd": 15,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "postTransition": {
+        "display": "audio fade",
+        "id": "audio/blender/transition-fade",
+        "tlBegin": 44800000,
+        "tlEnd": 55199998,
+        "type": 5,
+        "thisUId": "tr-audio fade-4.48",
+        "virtualTransitionId": "audio/blender/transition-fade"
+       }
+      },
+      {
+       "type": 2,
+       "tlBegin": 50000000,
+       "tlEnd": 119999999,
+       "inPoint": 200000000,
+       "outPoint": 269999999,
+       "filename": "file://FIXTURE/source/take-screen.mov",
+       "sourceUuid": "scr",
+       "thisUId": "uid-2-5-scr",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLU0yAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "audio/effect/volume",
+           "display": "volume",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "VolumeGain",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 0.0
+             }
+            }
+           ]
+          },
+          {
+           "id": "audio/effect/fade",
+           "display": "fade",
+           "type": 3,
+           "paramList": []
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 20,
+        "offsetEnd": 27,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       }
+      },
+      {
+       "type": 2,
+       "tlBegin": 120000000,
+       "tlEnd": 159999999,
+       "inPoint": 300000000,
+       "outPoint": 339999999,
+       "filename": "file://FIXTURE/source/take-camera.mov",
+       "sourceUuid": "cam",
+       "thisUId": "uid-2-12-cam",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLU0zAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "audio/effect/volume",
+           "display": "volume",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "LoudnessGainEnable",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": true
+             }
+            },
+            {
+             "name": "LoudnessGain",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 3.0
+             }
+            }
+           ]
+          },
+          {
+           "id": "audio/effect/fade",
+           "display": "fade",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "FadeOutTime",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1.0
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 30,
+        "offsetEnd": 34,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "postTransition": {
+        "display": "audio fade",
+        "id": "audio/blender/transition-fade",
+        "tlBegin": 150000000,
+        "tlEnd": 159999999,
+        "type": 5,
+        "thisUId": "tr-audio fade-15.0",
+        "virtualTransitionId": "audio/blender/transition-fade"
+       }
+      },
+      {
+       "type": 2,
+       "tlBegin": 200000000,
+       "tlEnd": 219999999,
+       "inPoint": 250000000,
+       "outPoint": 269999999,
+       "filename": "file://FIXTURE/source/take-camera.mov",
+       "sourceUuid": "cam",
+       "thisUId": "uid-2-20-cam",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLU00AAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "audio/effect/volume",
+           "display": "volume",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "LoudnessGainEnable",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": true
+             }
+            },
+            {
+             "name": "LoudnessGain",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 3.0
+             }
+            }
+           ]
+          },
+          {
+           "id": "audio/effect/fade",
+           "display": "fade",
+           "type": 3,
+           "paramList": []
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 50,
+        "offsetEnd": 54,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 2.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       }
+      }
+     ]
+    },
+    {
+     "trackType": 1,
+     "uuid": "t3",
+     "trackTag": 2,
+     "clipList": [
+      {
+       "type": 1,
+       "tlBegin": 0,
+       "tlEnd": 49999999,
+       "inPoint": 100000000,
+       "outPoint": 149999999,
+       "filename": "file://FIXTURE/source/take-camera.mov",
+       "sourceUuid": "cam",
+       "thisUId": "uid-1-0-cam",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLU0xAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        },
+        {
+         "key": 50,
+         "data": "dGFrZS1jYW1lcmE=",
+         "size": 11
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "video/effect/transform",
+           "display": "transform",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "dwValue",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1186339
+             }
+            },
+            {
+             "name": "EnableTransform",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            }
+           ]
+          },
+          {
+           "id": "662E16ED-4524-4D13-AAE9-11DBA0C63E17",
+           "display": "AdjustColor",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "bEnableHSL",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            },
+            {
+             "name": "Red_satVal",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -17.0
+             }
+            },
+            {
+             "name": "Red_degreeMinVal",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 3.0
+             }
+            },
+            {
+             "name": "amount",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -30.0
+             }
+            },
+            {
+             "name": "u_blackLevel",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 7.0
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 10,
+        "offsetEnd": 15,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "pipBuf": "{\"Algorithm\":\"Bilinear\",\"BlendMode\":0,\"BlenderName\":\"video/blender/simple-pip\",\"Enable\":true,\"Opacity\":100.0}",
+       "humanseg_hair": {
+        "status": 0
+       },
+       "postTransition": {
+        "display": "Cut Slide Transition 03",
+        "id": "7DA29585-DDAB-4345-84C0-8F511FC7C17A",
+        "tlBegin": 44800000,
+        "tlEnd": 55199998,
+        "type": 5,
+        "thisUId": "tr-Cut Slide Transition 03-4.48",
+        "virtualTransitionId": "7DA29585-DDAB-4345-84C0-8F511FC7C17A"
+       }
+      },
+      {
+       "type": 1,
+       "tlBegin": 50000000,
+       "tlEnd": 119999999,
+       "inPoint": 200000000,
+       "outPoint": 269999999,
+       "filename": "file://FIXTURE/source/take-screen.mov",
+       "sourceUuid": "scr",
+       "thisUId": "uid-1-5-scr",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLU0yAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        },
+        {
+         "key": 50,
+         "data": "dGFrZS1zY3JlZW4=",
+         "size": 11
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "video/effect/transform",
+           "display": "transform",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "dwValue",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1186339
+             }
+            },
+            {
+             "name": "EnableTransform",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 20,
+        "offsetEnd": 27,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "pipBuf": "{\"Algorithm\":\"Bilinear\",\"BlendMode\":0,\"BlenderName\":\"video/blender/simple-pip\",\"Enable\":true,\"Opacity\":100.0}"
+      },
+      {
+       "type": 1,
+       "tlBegin": 120000000,
+       "tlEnd": 159999999,
+       "inPoint": 300000000,
+       "outPoint": 339999999,
+       "filename": "file://FIXTURE/source/take-camera.mov",
+       "sourceUuid": "cam",
+       "thisUId": "uid-1-12-cam",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLU0zAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        },
+        {
+         "key": 50,
+         "data": "dGFrZS1jYW1lcmE=",
+         "size": 11
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "video/effect/transform",
+           "display": "transform",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "dwValue",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1186339
+             }
+            },
+            {
+             "name": "EnableTransform",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            }
+           ]
+          },
+          {
+           "id": "662E16ED-4524-4D13-AAE9-11DBA0C63E17",
+           "display": "AdjustColor",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "bEnableHSL",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            },
+            {
+             "name": "Red_satVal",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -17.0
+             }
+            },
+            {
+             "name": "Red_degreeMinVal",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 3.0
+             }
+            },
+            {
+             "name": "amount",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -30.0
+             }
+            },
+            {
+             "name": "u_blackLevel",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 7.0
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 30,
+        "offsetEnd": 34,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "pipBuf": "{\"Algorithm\":\"Bilinear\",\"BlendMode\":0,\"BlenderName\":\"video/blender/simple-pip\",\"Enable\":true,\"Opacity\":100.0}",
+       "postTransition": {
+        "display": "fade_black",
+        "id": "3B49DBEE-9A15-4844-B613-E2C2497EA236",
+        "tlBegin": 150000000,
+        "tlEnd": 159999999,
+        "type": 5,
+        "thisUId": "tr-fade_black-15.0",
+        "virtualTransitionId": "3B49DBEE-9A15-4844-B613-E2C2497EA236"
+       }
+      },
+      {
+       "type": 1,
+       "tlBegin": 200000000,
+       "tlEnd": 219999999,
+       "inPoint": 250000000,
+       "outPoint": 269999999,
+       "filename": "file://FIXTURE/source/take-camera.mov",
+       "sourceUuid": "cam",
+       "thisUId": "uid-1-20-cam",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLU00AAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        },
+        {
+         "key": 50,
+         "data": "dGFrZS1jYW1lcmE=",
+         "size": 11
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "video/effect/transform",
+           "display": "transform",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "dwValue",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1186339
+             }
+            },
+            {
+             "name": "EnableTransform",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            }
+           ]
+          },
+          {
+           "id": "662E16ED-4524-4D13-AAE9-11DBA0C63E17",
+           "display": "AdjustColor",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "bEnableHSL",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            },
+            {
+             "name": "Red_satVal",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -17.0
+             }
+            },
+            {
+             "name": "Red_degreeMinVal",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 3.0
+             }
+            },
+            {
+             "name": "amount",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -30.0
+             }
+            },
+            {
+             "name": "u_blackLevel",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 7.0
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 50,
+        "offsetEnd": 54,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 2.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "pipBuf": "{\"Algorithm\":\"Bilinear\",\"BlendMode\":0,\"BlenderName\":\"video/blender/simple-pip\",\"Enable\":true,\"Opacity\":100.0}"
+      }
+     ]
+    },
+    {
+     "trackType": 2,
+     "uuid": "t4",
+     "trackTag": 5,
+     "userData": [
+      {
+       "key": 20,
+       "data": "BQAAAA==",
+       "size": 4
+      }
+     ],
+     "clipList": [
+      {
+       "type": 2,
+       "tlBegin": 50000000,
+       "tlEnd": 119999999,
+       "inPoint": 200000000,
+       "outPoint": 269999999,
+       "filename": "file://FIXTURE/source/take-camera.mov",
+       "sourceUuid": "cam",
+       "thisUId": "uid-2-5-cam",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLVAxAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "audio/effect/volume",
+           "display": "volume",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "LoudnessGainEnable",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": true
+             }
+            },
+            {
+             "name": "LoudnessGain",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 3.5
+             }
+            }
+           ]
+          },
+          {
+           "id": "audio/effect/fade",
+           "display": "fade",
+           "type": 3,
+           "paramList": []
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 20,
+        "offsetEnd": 27,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       }
+      }
+     ]
+    },
+    {
+     "trackType": 1,
+     "uuid": "t5",
+     "trackTag": 6,
+     "clipList": [
+      {
+       "type": 1,
+       "tlBegin": 50000000,
+       "tlEnd": 119999999,
+       "inPoint": 200000000,
+       "outPoint": 269999999,
+       "filename": "file://FIXTURE/source/take-camera.mov",
+       "sourceUuid": "cam",
+       "thisUId": "uid-1-5-cam",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLVAxAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        },
+        {
+         "key": 50,
+         "data": "dGFrZS1jYW1lcmE=",
+         "size": 11
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "video/effect/transform",
+           "display": "transform",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "dwValue",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1186339
+             }
+            },
+            {
+             "name": "EnableTransform",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            },
+            {
+             "name": "Scale_x",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 50.0
+             }
+            },
+            {
+             "name": "Scale_y",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 50.0
+             }
+            },
+            {
+             "name": "Position_x",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 0.8899
+             }
+            },
+            {
+             "name": "Position_y",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 0.8004
+             }
+            },
+            {
+             "name": "EnableShadow",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            },
+            {
+             "name": "nDistance",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 4
+             }
+            },
+            {
+             "name": "nBlur",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 5
+             }
+            },
+            {
+             "name": "nAlpha",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 60
+             }
+            }
+           ]
+          },
+          {
+           "id": "662E16ED-4524-4D13-AAE9-11DBA0C63E17",
+           "display": "AdjustColor",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "bEnableHSL",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            },
+            {
+             "name": "Red_satVal",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -17.0
+             }
+            },
+            {
+             "name": "Red_degreeMinVal",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 3.0
+             }
+            },
+            {
+             "name": "amount",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": -30.0
+             }
+            },
+            {
+             "name": "u_blackLevel",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 7.0
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 20,
+        "offsetEnd": 27,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "pipBuf": "{\"Algorithm\":\"Bilinear\",\"BlendMode\":0,\"BlenderName\":\"video/blender/simple-pip\",\"Enable\":true,\"Opacity\":100.0}",
+       "humanseg_hair": {
+        "status": 1,
+        "version": 1.0
+       }
+      },
+      {
+       "type": 7,
+       "tlBegin": 10000000,
+       "tlEnd": 39999999,
+       "inPoint": 0,
+       "outPoint": 29999999,
+       "timelineId": 2,
+       "thisUId": "uid-title",
+       "pipBuf": "{\"Algorithm\":\"Bilinear\",\"BlendMode\":0,\"BlenderName\":\"video/blender/simple-pip\",\"Enable\":true,\"Opacity\":100.0}",
+       "userData": [
+        {
+         "key": 50,
+         "data": "QmFzaWMgMQ==",
+         "size": 7
+        },
+        {
+         "key": 12,
+         "data": "eyJyZXNfdHlwZSI6IDEsICJpbmZvVHlwZSI6IDcsICJuYW1lIjogIkJhc2ljXzEifQ==",
+         "size": 49
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "video/effect/transform",
+           "display": "transform",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "dwValue",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1186339
+             }
+            },
+            {
+             "name": "EnableTransform",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "trackType": 1,
+     "uuid": "t6",
+     "trackTag": 8,
+     "locked": true,
+     "clipList": [
+      {
+       "type": 1,
+       "tlBegin": 60000000,
+       "tlEnd": 89999999,
+       "inPoint": 0,
+       "outPoint": 29999999,
+       "filename": "file://FIXTURE/graphics/chart.mp4",
+       "sourceUuid": "gfx",
+       "thisUId": "uid-1-6-gfx",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLUcxAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "video/effect/transform",
+           "display": "transform",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "dwValue",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1186339
+             }
+            },
+            {
+             "name": "EnableTransform",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 0,
+        "offsetEnd": 3,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "pipBuf": "{\"BlendMode\":0,\"Enable\":true,\"Opacity\":80.0}",
+       "preTransition": {
+        "display": "Push Down",
+        "id": "57EA5A5B-7EFA-4787-9199-31425E26AF00",
+        "tlBegin": 60000000,
+        "tlEnd": 65999999,
+        "type": 5,
+        "thisUId": "tr-Push Down-6.0",
+        "virtualTransitionId": "57EA5A5B-7EFA-4787-9199-31425E26AF00"
+       },
+       "postTransition": {
+        "display": "Push Up",
+        "id": "3D7538D5-471E-4839-B47A-3C108F2F4C9E",
+        "tlBegin": 82000000,
+        "tlEnd": 89999999,
+        "type": 5,
+        "thisUId": "tr-Push Up-8.2",
+        "virtualTransitionId": "3D7538D5-471E-4839-B47A-3C108F2F4C9E"
+       }
+      },
+      {
+       "type": 1,
+       "tlBegin": 100000000,
+       "tlEnd": 109999999,
+       "inPoint": 0,
+       "outPoint": 9999999,
+       "filename": "file://FIXTURE/library/Subscribe Element.webm",
+       "sourceUuid": "sticker",
+       "thisUId": "uid-1-10-sticker",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLVMxAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        },
+        {
+         "key": 50,
+         "data": "U3Vic2NyaWJlIEVsZW1lbnQ=",
+         "size": 17
+        }
+       ],
+       "effectChainList": [],
+       "speed": {
+        "offset": 0,
+        "offsetEnd": 1,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "pipBuf": "{\"Algorithm\":\"Bilinear\",\"BlendMode\":0,\"BlenderName\":\"video/blender/simple-pip\",\"Enable\":true,\"Opacity\":100.0}"
+      },
+      {
+       "type": 1,
+       "tlBegin": 120000000,
+       "tlEnd": 139999999,
+       "inPoint": 0,
+       "outPoint": 19999999,
+       "filename": "file://FIXTURE/gone/old-broll.mp4",
+       "sourceUuid": "gone",
+       "thisUId": "uid-1-12-gone",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLUIxAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        }
+       ],
+       "effectChainList": [],
+       "speed": {
+        "offset": 0,
+        "offsetEnd": 2,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "pipBuf": "{\"BlendMode\":\"Multiply\",\"Enable\":true,\"Opacity\":100.0}",
+       "preTransition": {
+        "display": "Sparkle Motion Transition 15",
+        "id": "F8A69A99-8CDD-42D3-9B38-9937F55EEEF5",
+        "tlBegin": 120000000,
+        "tlEnd": 124999999,
+        "type": 5,
+        "thisUId": "tr-Sparkle Motion Transition 15-12.0",
+        "virtualTransitionId": "F8A69A99-8CDD-42D3-9B38-9937F55EEEF5"
+       }
+      },
+      {
+       "type": 1,
+       "tlBegin": 145000000,
+       "tlEnd": 159999999,
+       "inPoint": 36000000000,
+       "outPoint": 36014999999,
+       "filename": "file://FIXTURE/images/logo.png",
+       "sourceUuid": "img",
+       "thisUId": "uid-1-14.5-img",
+       "userData": [
+        {
+         "key": 3,
+         "data": "TUFQLUkxAAAAAAAAAAAAAAAAAAAAAAA=",
+         "size": 23
+        }
+       ],
+       "effectChainList": [
+        {
+         "name": "Basic",
+         "effectList": [
+          {
+           "id": "video/effect/transform",
+           "display": "transform",
+           "type": 3,
+           "paramList": [
+            {
+             "name": "dwValue",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            },
+            {
+             "name": "EnableTransform",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 1
+             }
+            },
+            {
+             "name": "Scale_x",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 100.0
+             }
+            },
+            {
+             "name": "Scale_y",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 100.0
+             }
+            },
+            {
+             "name": "Rotation",
+             "fxParam": {
+              "paramType": 3,
+              "unValue": 15.0
+             }
+            }
+           ],
+           "paramMapList": [
+            {
+             "key": 3,
+             "name": "Scale_x",
+             "keyFrame": {
+              "parameter": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 3600.0, \"Interpolation\": 1, \"_value\": 100.0}, {\"_time\": 3601.0, \"Interpolation\": 1, \"_value\": 120.0}]}"
+             }
+            },
+            {
+             "key": 3,
+             "name": "Scale_y",
+             "keyFrame": {
+              "parameter": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 3600.0, \"Interpolation\": 1, \"_value\": 100.0}, {\"_time\": 3601.0, \"Interpolation\": 1, \"_value\": 120.0}]}"
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ],
+       "speed": {
+        "offset": 3600,
+        "offsetEnd": 3601.5,
+        "reverse": false,
+        "speedParam": "{\"Version\": 3, \"ParameterType\": 0, \"keyframeSets\": [{\"_time\": 0.0, \"Interpolation\": 6, \"_value\": 1.0}, {\"_time\": 671.4, \"Interpolation\": 6, \"_value\": 1.0}], \"MD5\": \"x\", \"_totalTime\": 671.4}"
+       },
+       "pipBuf": "{\"BlendMode\": 0, \"Enable\": true, \"Opacity\": 100.0, \"OpacityKeyFrame\": \"{\\\"Version\\\": 2, \\\"ParameterType\\\": 0, \\\"keyframeSets\\\": [{\\\"_time\\\": 36000000000.0, \\\"Interpolation\\\": 1, \\\"_value\\\": 0.0}, {\\\"_time\\\": 36005000000.0, \\\"Interpolation\\\": 1, \\\"_value\\\": 100.0}]}\"}"
+      }
+     ]
+    },
+    {
+     "trackType": 1,
+     "uuid": "t7",
+     "trackTag": 10,
+     "clipList": []
+    }
+   ]
+  },
+  {
+   "timelineId": 2,
+   "resolutionWidth": 3840,
+   "resolutionHeight": 2160,
+   "trackInfos": [
+    {
+     "trackType": 1,
+     "uuid": "n0",
+     "clipList": [
+      {
+       "type": 4,
+       "tlBegin": 0,
+       "tlEnd": 29999999,
+       "inPoint": 0,
+       "outPoint": 29999999,
+       "thisUId": "uid-title-layer",
+       "scriptBuf": "{\"Text\": \"Hello\\rTandem\", \"PosX\": 0.5, \"PosY\": 0.86, \"ScaleX\": 0.3, \"ScaleY\": 0.12, \"TextData\": [{\"Basic\": {\"FontName\": \"Arial Black\", \"FontSize\": 24.0, \"FontBold\": 0, \"TextAlpha\": 255, \"TextColor\": [{\"Color\": 16711680}]}, \"Border\": {\"Enable\": 1, \"Size\": 3, \"Color\": 0}, \"Shadow\": {\"Enable\": 1}}], \"Layout\": {\"TextAlign\": \"left\", \"Angle\": 0.0}}\u0000",
+       "pipBuf": "{\"Algorithm\":\"Bilinear\",\"BlendMode\":0,\"BlenderName\":\"video/blender/simple-pip\",\"Enable\":true,\"Opacity\":100.0}",
+       "userData": [
+        {
+         "key": 50,
+         "data": "TGF5ZXIgMDE=",
+         "size": 8
+        }
+       ],
+       "inAnimation": {
+        "name": "Typewriter Appears",
+        "duration": 5000000,
+        "type": 5,
+        "stringParam": "MG_2d_05"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
