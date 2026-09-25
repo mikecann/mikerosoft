@@ -389,3 +389,17 @@ final class PathTests: XCTestCase {
         XCTAssertNil(Paths.relative(URL(fileURLWithPath: "/x/d.wav"), to: root))
     }
 }
+
+final class EvictGeneratedTests: XCTestCase {
+    func testGeneratedAssetsAreNeverEvicted() async throws {
+        let transport = FixtureTransport()
+        transport.on("api.elevenlabs.io/v1/sound-generation", data: Data(count: 48_000))
+        let library = try makeLibrary(transport, secrets: ["elevenlabs": "k"])
+        let made = try await library.generate(GenerationRequest(kind: .sfx, prompt: "Tick", duration: 0.5))
+        var asset = made[0]
+        asset.updatedAt = Date(timeIntervalSinceNow: -365 * 24 * 3600)
+        try library.catalog.upsert(asset)
+        XCTAssertEqual(try library.evictUnpinnedFiles(olderThan: 1), [])
+        XCTAssertEqual(try library.asset(asset.id)?.state, .normalised)
+    }
+}
