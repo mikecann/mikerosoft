@@ -504,6 +504,14 @@ public final class TandemService: @unchecked Sendable {
         folder.url(forPath: path).standardizedFileURL
     }
 
+    /// Refuses to write a render over the project's media or a Tandem
+    /// project file (see `RenderOutputs`).
+    func checkOutput(_ output: URL, what: String) throws {
+        if let reason = RenderOutputs.protectedReason(output, project: coordinator.project, folder: folder) {
+            throw ServiceError(.invalid, "\(reason); save the \(what) somewhere else.")
+        }
+    }
+
     func renderContext(_ project: Project, format: String?) throws -> RenderContext {
         if let format, format != "main", !project.settings.alternateFormats.contains(where: { $0.id == format }) {
             let known = project.settings.alternateFormats.map(\.id)
@@ -530,6 +538,7 @@ public final class TandemService: @unchecked Sendable {
         case (nil, nil): maxSize = nil
         }
         let output = request.output.map(outputURL)
+        if let output { try checkOutput(output, what: "frame") }
         let renderer = self.renderer
         let time = request.time
         let frame = TimeRange(start: time, duration: project.settings.frameRate.frameDuration)
@@ -550,8 +559,10 @@ public final class TandemService: @unchecked Sendable {
         guard let provider = screenshotProvider else {
             throw ServiceError(.unavailable, "Screenshots capture the Tandem app's window, so they need the app open. Use `frame` for a rendered frame.")
         }
+        let output = output.map(outputURL)
+        if let output { try checkOutput(output, what: "screenshot") }
         let data = try await provider()
-        return try Self.deliver(data, to: output.map(outputURL), time: nil)
+        return try Self.deliver(data, to: output, time: nil)
     }
 
     static func deliver(_ data: Data, to output: URL?, time: Time?) throws -> ImageResult {
@@ -616,6 +627,8 @@ public final class TandemService: @unchecked Sendable {
     }
 
     private func prepareRender(preset: ExportPreset, output: URL, format: String?) throws -> @Sendable () async throws -> ExportOutcome {
+        // The exporter refuses these too; this says so before anything starts.
+        try checkOutput(output, what: "export")
         let project = coordinator.project
         let context = try renderContext(project, format: format)
         let renderer = self.renderer

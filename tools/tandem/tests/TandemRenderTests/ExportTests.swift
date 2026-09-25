@@ -256,7 +256,12 @@ final class ExportTests: XCTestCase {
         let clip = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
         let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_r", "red.mov", seconds: 1)])
         let context = RenderContext(project: project, folder: media.projectFolder)
-        for out in [source, media.folder.appendingPathComponent("Video")] {
+        var outputs = [source, media.folder.appendingPathComponent("Video")]
+        // The same file spelled differently, on a volume that ignores case
+        // (APFS's default): replacing it would delete the source.
+        let shouted = media.folder.appendingPathComponent("RED.MOV")
+        if FileManager.default.fileExists(atPath: shouted.path) { outputs.append(shouted) }
+        for out in outputs {
             do {
                 _ = try await Exporter(context: context, preset: preset(loudness: nil), output: out).run()
                 XCTFail("expected \(out.lastPathComponent) to be refused")

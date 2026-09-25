@@ -194,6 +194,40 @@ final class ServiceTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: h.folder.file("frames/f.png")), FakeRenderer.png)
     }
 
+    func testFramesAndScreenshotsNeverOverwriteTheProjectOrItsMedia() async throws {
+        let h = try ServiceHarness()
+        defer { h.close() }
+        h.service.screenshotProvider = { FakeRenderer.png }
+        try FileManager.default.createDirectory(at: h.folder.file("source"), withIntermediateDirectories: true)
+        let take = h.folder.file("source/take1-camera.mov")
+        try Data("camera take".utf8).write(to: take)
+        let projectBytes = try Data(contentsOf: h.url)
+
+        for output in ["source/take1-camera.mov", h.folder.file("source/take1-camera.mov").path, "Decision Models.tandem", "Other version.tandem"] {
+            do {
+                _ = try await FrameRequest(time: t(12), output: output).run(on: h.service, context: h.context)
+                XCTFail("a frame shouldn't be written to \(output)")
+            } catch {
+                XCTAssertEqual((error as? ServiceError)?.code, "invalid", "\(error)")
+            }
+            do {
+                _ = try await ScreenshotRequest(output: output).run(on: h.service, context: h.context)
+                XCTFail("a screenshot shouldn't be written to \(output)")
+            } catch {
+                XCTAssertEqual((error as? ServiceError)?.code, "invalid", "\(error)")
+            }
+        }
+        // Exports and review clips say so before they start, whatever renders them.
+        assertServiceError(.invalid) { _ = try h.service.prepareExport(ExportRequest(output: "source/take1-camera.mov")) }
+        assertServiceError(.invalid) { _ = try h.service.prepareClip(ClipRequest(start: t(0), end: t(1), output: take.path)) }
+        XCTAssertEqual(try Data(contentsOf: take), Data("camera take".utf8))
+        XCTAssertEqual(try Data(contentsOf: h.url), projectBytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: h.folder.file("Other version.tandem").path))
+        // Anywhere else is fine, including over an earlier frame.
+        _ = try await FrameRequest(time: t(12), output: "frames/f.png").run(on: h.service, context: h.context)
+        _ = try await FrameRequest(time: t(13), output: "frames/f.png").run(on: h.service, context: h.context)
+    }
+
     func testRenderWarningsAreTheOnesThatMatterHere() async throws {
         // The renderer warns about the whole project; a frame keeps the lines
         // about what plays at its time, once each.
