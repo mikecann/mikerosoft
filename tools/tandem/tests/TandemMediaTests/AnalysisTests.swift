@@ -217,6 +217,12 @@ final class AnalysisTests: TempFolderTestCase {
         let averages = try await firstFrameAverages(matte)
         XCTAssertEqual(averages.chroma, 128, accuracy: 2, "neutral chroma: a greyscale matte")
         XCTAssertNil(analysis.matteURL(for: camera, mode: .person), "a different mode is a different result")
+        var personOnly = analysis.settings
+        personOnly.matteMode = .person
+        let personState = await analysis.waitFor(.matte, for: camera, settings: personOnly)
+        XCTAssertEqual(personState, .ready)
+        XCTAssertNotNil(analysis.matteURL(for: camera, mode: .person))
+        XCTAssertNotEqual(analysis.matteURL(for: camera, mode: .person), analysis.matteURL(for: camera))
     }
 
     func testIsolatedVoiceKeepsTheLengthAtFortyEightKilohertz() async throws {

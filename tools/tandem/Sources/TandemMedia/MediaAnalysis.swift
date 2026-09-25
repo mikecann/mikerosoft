@@ -114,10 +114,14 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     /// Queues one analysis and returns its job ID, or nil when there's
     /// nothing to do (cached, not applicable or unreadable).
+    ///
+    /// - Parameter settings: make it with other settings than the current
+    ///   ones, for example a `.person` matte for a clip whose cutout mode
+    ///   asks for one (read it back with `matteURL(for:mode:)`).
     @discardableResult
-    public func submit(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .background) -> String? {
+    public func submit(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .background, settings: AnalysisSettings? = nil) -> String? {
         guard kind.applies(to: item), let fingerprint = fingerprint(for: item) else { return nil }
-        let settings = self.settings
+        let settings = settings ?? self.settings
         let canonical = settings.canonical(for: kind)
         let key = AnalysisCache.key(fingerprint: fingerprint, kind: kind, algorithmVersion: kind.algorithmVersion, settings: canonical)
         guard !cache.contains(kind: kind, key: key) else { return nil }
@@ -159,17 +163,17 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     /// Requests an analysis (if needed) and waits for it to finish.
     @discardableResult
-    public func waitFor(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .interactive) async -> ResultState {
-        if let id = submit(kind, for: item, priority: priority) {
+    public func waitFor(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .interactive, settings: AnalysisSettings? = nil) async -> ResultState {
+        if let id = submit(kind, for: item, priority: priority, settings: settings) {
             _ = await scheduler.wait(for: id)
         }
-        return state(kind, for: item)
+        return state(kind, for: item, settings: settings)
     }
 
     /// Where one analysis of one item stands.
-    public func state(_ kind: AnalysisKind, for item: MediaItem) -> ResultState {
+    public func state(_ kind: AnalysisKind, for item: MediaItem, settings: AnalysisSettings? = nil) -> ResultState {
         guard kind.applies(to: item) else { return .notApplicable }
-        guard let key = cacheKey(kind, for: item) else { return .unreadable }
+        guard let key = cacheKey(kind, for: item, settings: settings) else { return .unreadable }
         if cache.contains(kind: kind, key: key) { return .ready }
         guard let status = scheduler.status(id: Self.jobID(kind, key: key)) else { return .missing }
         switch status.state {
