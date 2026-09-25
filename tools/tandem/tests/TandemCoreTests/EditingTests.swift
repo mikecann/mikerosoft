@@ -336,6 +336,18 @@ final class TransitionTests: XCTestCase {
         }
     }
 
+    func testTransitionIntoAStillNeedsNoHandles() throws {
+        let (f, c) = try Fixture.edited()
+        try c.run("Still", .addMedia(item: MediaItem(id: "med_still", path: "images/slide.png", kind: .image, role: .image, width: 1920, height: 1080)))
+        try c.run("Place", .placeMedia(mediaIDs: ["med_still"], at: t(25), duration: t(4)))
+        let (a, b) = (c.clips("B-roll")[0].id, c.clips("B-roll")[1].id)
+        try c.run("Push", .addTransition(
+            trackID: f.track("B-roll").id,
+            transition: Transition(type: .push, direction: .left, duration: t(0.7), fromClipID: a, toClipID: b)
+        ))
+        XCTAssertEqual(c.project.track(named: "B-roll")!.transitions.count, 1)
+    }
+
     func testTailTransitionFollowsASplit() throws {
         let (f, c) = try Fixture.edited()
         let camera = f.clips("Camera")[0].id

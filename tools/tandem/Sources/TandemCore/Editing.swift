@@ -1030,7 +1030,9 @@ public enum Editing {
                     throw EditError.invalid("clip \(from.id) needs \(needed - limit) more media after its end for a \(t.duration) transition. Trim it shorter first or use a shorter transition.")
                 }
             }
-            if to.mediaID != nil, !to.freezeFrame {
+            // Stills can show any amount of themselves, so only moving
+            // media needs frames before the cut.
+            if let mediaID = to.mediaID, p.media(mediaID)?.kind != .image, !to.freezeFrame {
                 let needed = to.sourceStart - half.scaled(by: to.speed)
                 if needed < .zero {
                     throw EditError.invalid("clip \(to.id) needs \(-needed) more media before its start for a \(t.duration) transition. Trim its start later first or use a shorter transition.")
