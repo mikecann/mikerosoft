@@ -2,6 +2,7 @@ import AppKit
 import QuartzCore
 import TandemCore
 import TandemMedia
+import TandemRender
 
 extension NSPasteboard.PasteboardType {
     /// Media IDs dragged from the browser, comma separated.
@@ -31,6 +32,9 @@ final class TimelineLanesView: TimelineChildView {
     private var snapLine: Time?
     private var dragLabel: (text: String, point: CGPoint)?
     private var drop: (batch: EditBatch, laneID: String?)?
+    /// An asset library item on its way: placed at `time` once it's
+    /// downloaded and copied into the project.
+    private var assetDrop: (id: String, time: Time)?
     private var autoscrollTimer: Timer?
     private var lastDragEvent: NSEvent?
     private var trackingArea: NSTrackingArea?
@@ -635,15 +639,16 @@ final class TimelineLanesView: TimelineChildView {
         }
     }
 
-    // MARK: - Dropping media
+    // MARK: - Dropping media and library items
 
-    private func mediaIDs(from info: NSDraggingInfo) -> [String] {
+    /// What's being dragged in: project media, or an item from the asset,
+    /// title, transition or effect libraries.
+    private func libraryDrag(from info: NSDraggingInfo) -> LibraryDrag? {
         let pasteboard = info.draggingPasteboard
         let text = pasteboard.string(forType: .tandemMedia) ?? pasteboard.string(forType: .string) ?? ""
-        if text.hasPrefix(MediaDrag.prefix) {
-            return MediaDrag.ids(from: text)
-        }
-        return model?.draggedMediaIDs ?? []
+        if let drag = LibraryDrag.parse(text) { return drag }
+        if let ids = model?.draggedMediaIDs, !ids.isEmpty { return .media(ids) }
+        return nil
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -660,14 +665,32 @@ final class TimelineLanesView: TimelineChildView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         _ = updateDrop(sender)
-        guard let batch = drop?.batch, let model else {
+        guard let model else {
+            clearDrop()
+            return false
+        }
+        if let pending = assetDrop {
+            clearDrop()
+            let host = AssetLibraryHost.shared
+            let asset = host.dragged?.id == pending.id ? host.dragged : (try? host.library?.asset(pending.id)) ?? nil
+            host.dragged = nil
+            guard let asset else {
+                model.show(.info, host.library == nil ? "The asset library is still opening. Try again in a moment." : "That asset isn't in the library any more.")
+                return false
+            }
+            host.place(asset, at: pending.time, in: model, insert: NSEvent.modifierFlags.contains(.command))
+            window?.makeKeyAndOrderFront(nil)
+            return true
+        }
+        guard let batch = drop?.batch else {
             clearDrop()
             return false
         }
         clearDrop()
         let result = model.apply(batch)
         if let result {
-            model.selection = SelectionRules.pruned(Set(result.createdIDs), in: model.project)
+            let created = SelectionRules.pruned(Set(result.createdIDs), in: model.project)
+            if !created.isEmpty { model.selection = created }
         }
         model.draggedMediaIDs = []
         window?.makeKeyAndOrderFront(nil)
@@ -679,30 +702,65 @@ final class TimelineLanesView: TimelineChildView {
     }
 
     private func updateDrop(_ info: NSDraggingInfo) -> NSDragOperation {
-        guard let model, let container else { return [] }
-        let ids = mediaIDs(from: info)
-        guard !ids.isEmpty else { return [] }
+        guard let model, let container, let dragged = libraryDrag(from: info) else { return [] }
         let local = convert(info.draggingLocation, from: nil)
         let point = CGPoint(x: local.x, y: local.y + offset)
         var time = model.timeline.scale.time(atX: point.x, rate: model.frameRate)
+        snapLine = nil
         if model.snapping {
             let targets = SnapTargets.collect(in: model.project, playhead: model.playback.time, inPoint: model.inPoint, outPoint: model.outPoint)
             if let snapped = targets.nearest(to: time, within: model.timeline.scale.duration(forPixels: Theme.Metrics.snapDistance)) {
                 time = snapped
                 snapLine = snapped
-            } else {
-                snapLine = nil
             }
         }
         let lane = container.layoutCache.lane(atY: point.y)
-        let insert = NSEvent.modifierFlags.contains(.command)
-        guard let batch = TimelineEdits.placeMedia(model.project, mediaIDs: ids, at: time, trackID: lane?.trackID, insert: insert) else {
-            clearDrop()
+        let at = Timecode.string(time, rate: model.frameRate)
+        let batch: EditBatch?
+        var label: String
+        assetDrop = nil
+        switch dragged {
+        case .media(let ids):
+            let insert = NSEvent.modifierFlags.contains(.command)
+            batch = TimelineEdits.placeMedia(model.project, mediaIDs: ids, at: time, trackID: lane?.trackID, insert: insert)
+            label = (insert ? "Insert at " : "Place at ") + at
+        case .asset(let id):
+            // Placed once it's downloaded; the line shows where.
+            let name = AssetLibraryHost.shared.dragged.map { $0.id == id ? $0.name : "asset" } ?? "asset"
+            assetDrop = (id, time)
+            drop = nil
+            previewProject = nil
+            snapLine = time
+            dragLabel = ((NSEvent.modifierFlags.contains(.command) ? "Insert \(name) at " : "Add \(name) at ") + at, point)
+            container.relayoutLanes()
+            container.setAllNeedsDisplay()
+            return .copy
+        case .transition(let type):
+            batch = LibraryDrops.transition(type, at: time, trackID: lane?.trackID, in: model.project)
+            label = batch?.label ?? "Drop on a cut"
+        case .effect(let type):
+            let clipID = tester(for: model.project)?.hit(point).clipID
+            batch = LibraryDrops.effect(type, on: clipID, in: model.project)
+            let name = clipID.flatMap { model.project.clip($0) }.map { ClipRenderer(project: model.project, scale: model.timeline.scale, artwork: nil, visible: 0...0).name(of: $0) }
+            label = batch.map { "\($0.label) to \(name ?? "clip")" } ?? "Drop on a clip"
+        case .title(let id):
+            batch = TitlePresets.preset(id).flatMap { LibraryDrops.title($0, at: time, in: model.project) }
+            label = (batch?.label ?? "Add title") + " at " + at
+        case .template(let id):
+            batch = BuiltInTemplates.template(id).map { LibraryDrops.template($0, at: time) }
+            label = (batch?.label ?? "Add template") + " at " + at
+        }
+        guard let batch else {
+            drop = nil
+            previewProject = nil
+            dragLabel = (label, point)
+            container.relayoutLanes()
+            container.setAllNeedsDisplay()
             return []
         }
         drop = (batch, lane?.trackID)
         previewProject = EditPreview.apply(batch, to: model.project)
-        dragLabel = ((insert ? "Insert at " : "Place at ") + Timecode.string(time, rate: model.frameRate), point)
+        dragLabel = (label, point)
         container.relayoutLanes()
         container.setAllNeedsDisplay()
         return previewProject == nil ? [] : .copy
@@ -710,6 +768,7 @@ final class TimelineLanesView: TimelineChildView {
 
     private func clearDrop() {
         drop = nil
+        assetDrop = nil
         previewProject = nil
         snapLine = nil
         dragLabel = nil

@@ -322,8 +322,16 @@ struct ClipRenderer {
         case .adjustment:
             return clip.name ?? "Adjustment"
         case .media(let id):
-            if let name = clip.name, !name.isEmpty { return name }
-            return project.media(id).map { TextMetrics.baseName($0.path) } ?? "Missing media"
+            let item = project.media(id)
+            if let name = clip.name, !name.isEmpty {
+                // Placed clips are named after their file; a library
+                // copy's code isn't worth showing.
+                if let item, name == (((item.path as NSString).lastPathComponent as NSString).deletingPathExtension) {
+                    return TextMetrics.baseName(item.path)
+                }
+                return name
+            }
+            return item.map { TextMetrics.baseName($0.path) } ?? "Missing media"
         }
     }
 
@@ -490,7 +498,7 @@ enum TextMetrics {
     /// `broll/hf-decider.mp4` to `hf-decider`.
     static func baseName(_ path: String) -> String {
         if let cached = names[path] { return cached }
-        let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+        let name = MediaCatalog.displayName(forPath: path)
         names[path] = name
         return name
     }

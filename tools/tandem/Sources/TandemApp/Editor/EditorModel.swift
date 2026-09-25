@@ -278,9 +278,11 @@ final class EditorModel {
                 let host = try await TandemAPIHost.start(session: self.session)
                 // The window may have closed while the server started.
                 guard !self.apiStopped else { return host.stop() }
-                host.service.screenshotProvider = { [weak self] in
-                    await self?.agentLooked()
-                    return try await screenshot()
+                host.service.screenshotProvider = screenshot
+                // Every call an agent makes, reads included, so the chip
+                // knows who's connected.
+                host.service.onCall = { [weak self] _, author in
+                    Task { @MainActor in self?.agentCalled(author: author) }
                 }
                 self.apiHost = host
                 self.apiPort = host.port
@@ -300,12 +302,18 @@ final class EditorModel {
         apiPort = nil
     }
 
-    /// An agent asked for a screenshot: it's connected, even if it hasn't
-    /// edited anything.
-    private func agentLooked() {
-        var presence = agentPresence ?? AgentPresence(author: "agent", lastSeen: Date())
-        presence.lastSeen = Date()
+    /// An agent called the API. Edits also arrive through the coordinator,
+    /// which records where they landed.
+    private func agentCalled(author: String) {
+        var presence = agentPresence ?? AgentPresence(author: author, lastSeen: Date())
+        presence.looked(by: author, at: Date())
         agentPresence = presence
+    }
+
+    /// True while an agent keeps a watch stream open. Read by the agent
+    /// chip on its own clock, as the count isn't observable.
+    var agentsWatching: Bool {
+        (apiHost?.service.events.subscriberCount ?? 0) > 0
     }
 
     /// Pulls the latest project from the coordinator.

@@ -90,6 +90,8 @@ final class PlaybackController {
         playerLayers = players.map { AVPlayerLayer(player: $0) }
         for (index, player) in players.enumerated() {
             player.actionAtItemEnd = .pause
+            // For unattended test runs, so a screenshot session makes no sound.
+            player.isMuted = Self.muted
             // Local files: start at once rather than buffering first.
             player.automaticallyWaitsToMinimizeStalling = false
             let layer = playerLayers[index]
@@ -109,6 +111,9 @@ final class PlaybackController {
             }
         }
     }
+
+    /// `TANDEM_MUTED=1` silences playback and previews.
+    nonisolated static let muted = ProcessInfo.processInfo.environment["TANDEM_MUTED"] == "1"
 
     func invalidate() {
         clock?.invalidate()

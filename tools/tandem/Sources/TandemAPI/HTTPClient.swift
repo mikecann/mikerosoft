@@ -74,6 +74,8 @@ public final class TandemHTTPClient: @unchecked Sendable {
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/watch"))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        // So the app can show who's watching.
+        if let author { request.setValue(author, forHTTPHeaderField: "X-Tandem-Author") }
         if let seq { request.setValue(String(seq), forHTTPHeaderField: "Last-Event-ID") }
         request.timeoutInterval = 24 * 3600
         return AsyncThrowingStream { continuation in

@@ -2,13 +2,13 @@ import Foundation
 import TandemCore
 
 /// What the top bar's agent chip knows: who last reached the project over
-/// the API, when, and where their last edit landed.
-///
-/// The API doesn't report reads, so "connected" means an agent edited,
-/// undid, redid or took a screenshot in the last few minutes.
+/// the API, when, and where their last edit landed. The API reports every
+/// call (`TandemService.onCall`), reads included, and counts open watch
+/// streams, so "connected" means a call in the last few minutes or a
+/// stream still open.
 struct AgentPresence: Equatable {
     var author: String
-    /// The last edit, undo, redo or screenshot.
+    /// The last call of any kind.
     var lastSeen: Date
     /// The last edit, undo or redo.
     var lastEdit: Date?
@@ -19,6 +19,12 @@ struct AgentPresence: Equatable {
     static let connectedFor: TimeInterval = 300
     /// How long after an edit the chip says the agent is editing.
     static let editingFor: TimeInterval = 30
+
+    /// Records a call that didn't edit: a status read, a frame, a watch.
+    mutating func looked(by author: String, at date: Date) {
+        self.author = author
+        lastSeen = date
+    }
 
     /// Records an edit, undo or redo.
     mutating func edited(by author: String, section: String?, at date: Date) {
@@ -38,13 +44,15 @@ enum AgentChipState: Equatable {
     case connected(name: String)
     case edited(name: String, at: Date)
 
-    static func of(_ presence: AgentPresence?, serving: Bool, now: Date) -> AgentChipState {
-        guard let presence else { return .idle(serving: serving) }
+    /// - Parameter watching: an agent has a watch stream open, so it's
+    ///   connected however long ago it last called.
+    static func of(_ presence: AgentPresence?, serving: Bool, watching: Bool = false, now: Date) -> AgentChipState {
+        guard let presence else { return watching ? .connected(name: ActivityLog.displayName("agent")) : .idle(serving: serving) }
         let name = ActivityLog.displayName(presence.author)
         if let edit = presence.lastEdit, now.timeIntervalSince(edit) < AgentPresence.editingFor {
             return .editing(name: name, section: presence.section)
         }
-        if now.timeIntervalSince(presence.lastSeen) < AgentPresence.connectedFor {
+        if watching || now.timeIntervalSince(presence.lastSeen) < AgentPresence.connectedFor {
             return .connected(name: name)
         }
         if let edit = presence.lastEdit { return .edited(name: name, at: edit) }

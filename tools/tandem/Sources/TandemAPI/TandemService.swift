@@ -26,6 +26,21 @@ public final class TandemService: @unchecked Sendable {
     public let events = EventHub()
     /// Set by the app to capture its window for `screenshot`.
     public var screenshotProvider: (@Sendable () async throws -> Data)?
+    /// Called for every call a client makes, reads included, with the
+    /// operation's name (`status`, `apply`, `watch`...) and the author it's
+    /// credited to, so the app can show which agent is connected. Runs on
+    /// the server's threads; keep it quick.
+    public var onCall: (@Sendable (_ operation: String, _ author: String) -> Void)? {
+        get { hookLock.withLock { callHook } }
+        set { hookLock.withLock { callHook = newValue } }
+    }
+    private let hookLock = NSLock()
+    private var callHook: (@Sendable (_ operation: String, _ author: String) -> Void)?
+
+    /// Reports a call to `onCall`.
+    public func noteCall(_ operation: String, author: String) {
+        onCall?(operation, author)
+    }
 
     public var coordinator: ProjectCoordinator { session.coordinator }
     public var folder: ProjectFolder { session.folder }
@@ -94,7 +109,8 @@ public final class TandemService: @unchecked Sendable {
     /// Runs any call against this service with JSON in and out, for the
     /// HTTP server.
     public func handle(_ operation: ServiceOperation, body: Data, context: CallContext) async throws -> Data {
-        try await handle(operation.callType, body: body, context: context)
+        noteCall(operation.rawValue, author: context.author)
+        return try await handle(operation.callType, body: body, context: context)
     }
 
     private func handle<C: ServiceCall>(_ type: C.Type, body: Data, context: CallContext) async throws -> Data {

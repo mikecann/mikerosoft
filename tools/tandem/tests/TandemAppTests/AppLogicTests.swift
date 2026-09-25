@@ -134,6 +134,28 @@ final class MediaCatalogTests: XCTestCase {
         XCTAssertEqual(JobText.describe(JobStatus(id: "j3", kind: .waveform, mediaID: "m6", state: .running, progress: 0.5), in: project), "Waveform c3b · 50%")
     }
 
+    func testFilesFromTheAssetLibraryReadByTheirName() {
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "assets/sticker/rocket-x3iqg3mw.mov"), "rocket")
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "assets/music/c3b-pv9cnei3.mp3"), "c3b")
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "/Users/mike/videos/talk/assets/sfx/big-whoosh-abcdefgh.wav"), "big-whoosh")
+        // Only the library's own copies lose their code.
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "broll/servers-x3iqg3mw.mp4"), "servers-x3iqg3mw")
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "assets/sticker/x3iqg3mw.mov"), "x3iqg3mw", "nothing left but the code")
+        XCTAssertEqual(MediaCatalog.displayName(forPath: "music/c1a.mp3"), "c1a")
+    }
+
+    @MainActor
+    func testClipsFromTheLibraryShowTheAssetsName() {
+        var project = Project.standard(name: "Names")
+        project.media = [MediaItem(id: "med_r", path: "assets/sticker/rocket-x3iqg3mw.mov", kind: .video, role: .sticker, duration: t(1), hasVideo: true)]
+        let renderer = ClipRenderer(project: project, scale: TimelineScale(pixelsPerSecond: 10), artwork: nil, visible: 0...0)
+        // placeMedia names a clip after its file.
+        var clip = Clip(name: "rocket-x3iqg3mw", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        XCTAssertEqual(renderer.name(of: clip), "rocket")
+        clip.name = "Launch"
+        XCTAssertEqual(renderer.name(of: clip), "Launch", "a name someone chose stays")
+    }
+
     func testTimeOfDayFromRecordItNames() {
         XCTAssertEqual(MediaCatalog.timeOfDay(fromFileName: "2026-09-24_102826-camera.mov"), "10:28")
         XCTAssertNil(MediaCatalog.timeOfDay(fromFileName: "main-camera.mov"))
@@ -154,6 +176,9 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://new?folder=/videos/static-hosting")!), .newProject(folder: "/videos/static-hosting"))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://version?out=/videos/a/Video%20v2.tandem")!), .saveVersion(out: "/videos/a/Video v2.tandem"))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt")!), .debug(out: "/tmp/tree.txt"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=icons&search=rocket&online=1")!), .assets(section: .icons, search: "rocket", scope: nil, online: true))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=sfx&scope=recent")!), .assets(section: .sfx, search: nil, scope: .recent, online: false))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://assets?section=fonts")!))
     }
 
     func testRejectsNonsense() {
@@ -173,6 +198,11 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://new?folder=videos")!))
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://simulate?menu=10,10&out=/Users/mike/.zshrc")!))
         XCTAssertNotNil(AppURLCommand.parse(URL(string: "tandem://simulate?menu=10,10&out=/tmp/menu.txt")!))
+        XCTAssertEqual(
+            AppURLCommand.parse(URL(string: "tandem://simulate?drop=tandem-effect:vignette&at=600,700")!),
+            .simulate(InputSimulator.Gesture(kind: .drop(payload: "tandem-effect:vignette"), at: CGPoint(x: 600, y: 700), modifiers: []))
+        )
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://simulate?drop=hello&at=600,700")!), "only library payloads")
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/tmp/Shot.PNG")!), .screenshot(out: "/tmp/Shot.PNG"))
     }
 }
@@ -346,6 +376,21 @@ final class AgentPresenceTests: XCTestCase {
         let server = try XCTUnwrap((object["mcpServers"] as? [String: Any])?["tandem"] as? [String: Any])
         XCTAssertEqual(server["args"] as? [String], ["mcp", "--project", "/videos/a/Video v2.tandem"])
         XCTAssertEqual((server["command"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }, "tandem")
+    }
+
+    func testAnyCallOrOpenWatchCountsAsConnected() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        var presence = AgentPresence(author: "cli", lastSeen: now.addingTimeInterval(-3_600))
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, now: now), .idle(serving: true))
+        // A status read a moment ago.
+        presence.looked(by: "claude", at: now.addingTimeInterval(-2))
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, now: now), .connected(name: "Claude"))
+        // An hour later it's gone quiet, unless it keeps a watch stream open.
+        let later = now.addingTimeInterval(3_600)
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, now: later), .idle(serving: true))
+        XCTAssertEqual(AgentChipState.of(presence, serving: true, watching: true, now: later), .connected(name: "Claude"))
+        // Nobody has called yet, but something is watching.
+        XCTAssertEqual(AgentChipState.of(nil, serving: true, watching: true, now: now), .connected(name: "Agent"))
     }
 
     func testNamesForAgentsAndTools() {

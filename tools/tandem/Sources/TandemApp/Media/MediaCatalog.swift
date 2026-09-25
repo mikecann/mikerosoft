@@ -81,7 +81,20 @@ enum MediaCatalog {
     }
 
     static func baseName(_ item: MediaItem) -> String {
-        URL(fileURLWithPath: item.path).deletingPathExtension().lastPathComponent
+        displayName(forPath: item.path)
+    }
+
+    /// A file's name without its extension. Copies the asset library made
+    /// (`assets/<kind>/rocket-x3iqg3mw.mov`) lose their eight letter code.
+    static func displayName(forPath path: String) -> String {
+        let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        let folders = path.split(separator: "/").dropLast()
+        guard folders.count >= 2, folders[folders.count - 2] == "assets",
+              let dash = name.lastIndex(of: "-"), name.index(after: dash) < name.endIndex else { return name }
+        let code = name[name.index(after: dash)...]
+        let alphabet = Set("abcdefghijkmnpqrstuvwxyz23456789")
+        guard code.count == 8, code.allSatisfy(alphabet.contains) else { return name }
+        return String(name[..<dash])
     }
 
     /// A short name for status lines: record-it files read "camera 10:54",
