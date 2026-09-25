@@ -785,6 +785,26 @@ private struct EncoderSettingsView: View {
                 }
 
                 GridRow {
+                    settingsLabel("Screen quality")
+                    Picker("Screen quality", selection: $preferences.screenQuality) {
+                        ForEach(ScreenQuality.allCases) { quality in
+                            Text(quality.displayName).tag(quality)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .disabled(model.selectedEncoder?.supportsConstantQuality != true)
+                }
+
+                GridRow {
+                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                    Text(screenQualityExplanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                GridRow {
                     settingsLabel("Rate control")
                     Picker("Rate control", selection: $preferences.rateControl) {
                         ForEach(supportedRateControls) { mode in
@@ -854,6 +874,13 @@ private struct EncoderSettingsView: View {
                 )
             }
         }
+    }
+
+    private var screenQualityExplanation: String {
+        guard model.selectedEncoder?.supportsConstantQuality == true else {
+            return "This encoder has no constant-quality mode, so screen recordings use the rate control below."
+        }
+        return preferences.screenQuality.explanation
     }
 
     private var supportedRateControls: [RateControlMode] {

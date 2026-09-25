@@ -139,8 +139,24 @@ final class RecordingViewModel: ObservableObject {
         )
     }
 
+    var screenEncoderConfiguration: EncoderConfiguration? {
+        encoderConfiguration.map {
+            RecordItApp.screenEncoderConfiguration(base: $0, quality: preferences.screenQuality)
+        }
+    }
+
     var encoderSummary: String {
-        encoderConfiguration?.summary ?? "No compatible hardware encoder found"
+        guard let encoderConfiguration, let screenEncoderConfiguration else {
+            return "No compatible hardware encoder found"
+        }
+        return switch mode {
+        case .screen:
+            "Screen: \(screenEncoderConfiguration.summary)"
+        case .camera, .audio:
+            encoderConfiguration.summary
+        case .both:
+            "Screen: \(screenEncoderConfiguration.summary)\nCamera: \(encoderConfiguration.summary)"
+        }
     }
 
     var canRecord: Bool {
@@ -308,7 +324,7 @@ final class RecordingViewModel: ObservableObject {
                 guard
                     let captureTarget = selectedScreenCaptureTarget,
                     let outputURL = outputs[.screen],
-                    let encoderConfiguration
+                    let screenEncoderConfiguration
                 else {
                     throw RecordItError.message("Choose a display or window before recording.")
                 }
@@ -317,7 +333,7 @@ final class RecordingViewModel: ObservableObject {
                         target: captureTarget,
                         audioSource: screenAudioSource,
                         outputURL: outputURL,
-                        encoderConfiguration: encoderConfiguration,
+                        encoderConfiguration: screenEncoderConfiguration,
                         startGate: startGate,
                         onProblem: { [weak self] error in
                             Task { @MainActor [weak self] in

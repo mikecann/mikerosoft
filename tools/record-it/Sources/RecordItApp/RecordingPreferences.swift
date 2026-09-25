@@ -10,6 +10,7 @@ final class RecordingPreferences: ObservableObject {
         static let bitRateMbps = "bitRateMbps"
         static let maximumBitRateMbps = "maximumBitRateMbps"
         static let qualityParameter = "qualityParameter"
+        static let screenQuality = "screenQuality"
     }
 
     private let defaults: UserDefaults
@@ -62,6 +63,10 @@ final class RecordingPreferences: ObservableObject {
         }
     }
 
+    @Published var screenQuality: ScreenQuality {
+        didSet { defaults.set(screenQuality.rawValue, forKey: Key.screenQuality) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         recordingMode = defaults.string(forKey: Key.recordingMode)
@@ -78,6 +83,8 @@ final class RecordingPreferences: ObservableObject {
         qualityParameter = defaults.object(forKey: Key.qualityParameter) == nil
             ? 20
             : min(51, max(0, defaults.integer(forKey: Key.qualityParameter)))
+        screenQuality = defaults.string(forKey: Key.screenQuality)
+            .flatMap(ScreenQuality.init(rawValue:)) ?? .editMaster
         if defaults.object(forKey: Key.openFinderAfterRecording) == nil {
             openFinderAfterRecording = true
         } else {

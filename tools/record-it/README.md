@@ -45,6 +45,23 @@ shows modes supported by the selected encoder:
 The selected encoder, rate-control mode, bitrates, and CQP level are saved
 automatically and restored on the next launch.
 
+**Screen quality** applies to screen recordings only. The camera always uses
+the rate control above.
+
+- **Edit Master** (default) records the screen at 95% constant quality. Dark
+  gradients and text hold up to 3× punch-ins in the edit. Expect roughly 5 to
+  15 Mbps for typical UI work at 5K, more while video or animation fills
+  the screen
+- **High** uses 90% constant quality. Text stays sharp, but subtle dark
+  gradients can band when zoomed
+- **Standard** uses the shared rate control above, the same as the camera
+
+Constant quality spends bits only where the screen changes, so a static screen
+stays small. Fixed QP or bitrate settings tuned for a camera starve screen
+content: a CQP 30 screen recording averages under 1 Mbps and shows blocky
+gradients when zoomed. Encoders without a constant-quality mode fall back to
+Standard.
+
 The selected recording mode, **Screen**, **Camera**, **Both**, or **Audio**, is also saved
 immediately and restored the next time Record It opens.
 

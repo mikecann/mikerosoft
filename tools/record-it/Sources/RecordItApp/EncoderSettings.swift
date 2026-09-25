@@ -65,6 +65,46 @@ struct HardwareVideoEncoder: Identifiable, Hashable {
     let displayName: String
     let codec: VideoCodec
     let supportedRateControls: Set<RateControlMode>
+    var supportsConstantQuality = false
+}
+
+/// Screen-only quality preset. Screen content is mostly static UI with smooth
+/// gradients and fine text, which a fixed QP or bitrate either starves (blocky
+/// gradients when zoomed in the edit) or pads. Constant quality spends bits
+/// only where the picture changes.
+enum ScreenQuality: String, CaseIterable, Identifiable, Hashable {
+    case standard
+    case high
+    case editMaster
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .standard: "Standard"
+        case .high: "High"
+        case .editMaster: "Edit Master"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .standard:
+            "Uses the same encoder settings as the camera."
+        case .high:
+            "Constant quality 90%. Sharp text, but subtle dark gradients can band when zoomed."
+        case .editMaster:
+            "Constant quality 95%. Holds up to 3× punch-ins in the edit. Largest files."
+        }
+    }
+
+    var constantQuality: Double? {
+        switch self {
+        case .standard: nil
+        case .high: 0.9
+        case .editMaster: 0.95
+        }
+    }
 }
 
 struct EncoderConfiguration: Equatable {
@@ -73,9 +113,14 @@ struct EncoderConfiguration: Equatable {
     let bitRateMbps: Int
     let maximumBitRateMbps: Int
     let qualityParameter: Int
+    /// VideoToolbox quality from 0 to 1. When set, it replaces `rateControl`.
+    var constantQuality: Double?
 
     var summary: String {
-        switch rateControl {
+        if let constantQuality {
+            return "\(encoder.displayName) · Quality \(Int((constantQuality * 100).rounded()))%"
+        }
+        return switch rateControl {
         case .cbr:
             "\(encoder.displayName) · CBR \(bitRateMbps) Mbps"
         case .cqp:
@@ -86,6 +131,20 @@ struct EncoderConfiguration: Equatable {
     }
 }
 
+/// The screen recording configuration: the shared encoder settings, with the
+/// screen quality preset applied when the encoder supports constant quality.
+func screenEncoderConfiguration(
+    base: EncoderConfiguration,
+    quality: ScreenQuality
+) -> EncoderConfiguration {
+    guard let constantQuality = quality.constantQuality, base.encoder.supportsConstantQuality else {
+        return base
+    }
+    var configuration = base
+    configuration.constantQuality = constantQuality
+    return configuration
+}
+
 enum HardwareVideoEncoderCatalog {
     static func availableEncoders() -> [HardwareVideoEncoder] {
         var rawEncoderList: CFArray?
@@ -94,15 +153,24 @@ enum HardwareVideoEncoderCatalog {
             let entries = rawEncoderList as? [[CFString: Any]]
         else { return [] }
 
-        return hardwareVideoEncoders(from: entries) { encoderID, codecType in
-            supportedRateControls(encoderID: encoderID, codecType: codecType)
-        }
+        return hardwareVideoEncoders(
+            from: entries,
+            supportedRateControls: { encoderID, codecType in
+                supportedRateControls(in: supportedProperties(encoderID: encoderID, codecType: codecType))
+            },
+            supportsConstantQuality: { encoderID, codecType in
+                supportedProperties(encoderID: encoderID, codecType: codecType)[
+                    kVTCompressionPropertyKey_Quality as String
+                ] != nil
+            }
+        )
     }
 }
 
 func hardwareVideoEncoders(
     from entries: [[CFString: Any]],
-    supportedRateControls: (String, CMVideoCodecType) -> Set<RateControlMode>
+    supportedRateControls: (String, CMVideoCodecType) -> Set<RateControlMode>,
+    supportsConstantQuality: (String, CMVideoCodecType) -> Bool = { _, _ in false }
 ) -> [HardwareVideoEncoder] {
     entries.compactMap { entry in
         guard
@@ -121,7 +189,8 @@ func hardwareVideoEncoders(
             id: encoderID,
             displayName: displayName,
             codec: codec,
-            supportedRateControls: rateControls
+            supportedRateControls: rateControls,
+            supportsConstantQuality: supportsConstantQuality(encoderID, codecType)
         )
     }
 }
@@ -148,10 +217,10 @@ func preferredRateControl(
     return RateControlMode.allCases.first { supportedModes.contains($0) }
 }
 
-private func supportedRateControls(
+private func supportedProperties(
     encoderID: String,
     codecType: CMVideoCodecType
-) -> Set<RateControlMode> {
+) -> [String: Any] {
     var session: VTCompressionSession?
     let status = VTCompressionSessionCreate(
         allocator: nil,
@@ -167,7 +236,7 @@ private func supportedRateControls(
         refcon: nil,
         compressionSessionOut: &session
     )
-    guard status == noErr, let session else { return [] }
+    guard status == noErr, let session else { return [:] }
     defer { VTCompressionSessionInvalidate(session) }
 
     var rawProperties: CFDictionary?
@@ -177,8 +246,11 @@ private func supportedRateControls(
             supportedPropertyDictionaryOut: &rawProperties
         ) == noErr,
         let properties = rawProperties as? [String: Any]
-    else { return [] }
+    else { return [:] }
+    return properties
+}
 
+private func supportedRateControls(in properties: [String: Any]) -> Set<RateControlMode> {
     var modes: Set<RateControlMode> = []
     if properties[kVTCompressionPropertyKey_ConstantBitRate as String] != nil {
         modes.insert(.cbr)

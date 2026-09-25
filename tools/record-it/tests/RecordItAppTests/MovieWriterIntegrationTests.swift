@@ -148,6 +148,49 @@ final class MovieWriterIntegrationTests: XCTestCase {
         }
     }
 
+    func testWriterAcceptsEveryScreenQualityPresetOnEveryHardwareEncoder() async throws {
+        let encoders = HardwareVideoEncoderCatalog.availableEncoders()
+        XCTAssertTrue(
+            encoders.contains { $0.codec == .hevc && $0.supportsConstantQuality },
+            "The HEVC hardware encoder should support constant-quality screen recording."
+        )
+
+        for encoder in encoders {
+            for quality in ScreenQuality.allCases {
+                let outputURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("record-it-\(quality.rawValue)-\(UUID().uuidString).mov")
+                defer { try? FileManager.default.removeItem(at: outputURL) }
+                let base = EncoderConfiguration(
+                    encoder: encoder,
+                    rateControl: preferredRateControl(
+                        savedMode: .cqp,
+                        supportedModes: encoder.supportedRateControls
+                    ) ?? .cbr,
+                    bitRateMbps: 10,
+                    maximumBitRateMbps: 15,
+                    qualityParameter: 30
+                )
+                let writer = try MovieWriter(
+                    outputURL: outputURL,
+                    width: 128,
+                    height: 128,
+                    includesAudio: false,
+                    encoderConfiguration: screenEncoderConfiguration(base: base, quality: quality)
+                )
+
+                writer.appendVideo(try videoSampleBuffer(frame: 0, width: 128, height: 128))
+                writer.appendVideo(try videoSampleBuffer(frame: 1, width: 128, height: 128))
+                try await writer.finish()
+
+                XCTAssertGreaterThan(
+                    try FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int ?? 0,
+                    0,
+                    "\(encoder.displayName) with \(quality.displayName) should produce a non-empty movie."
+                )
+            }
+        }
+    }
+
     func testAnUnfinishedMovieIsStillPlayableUpToTheLastFragment() async throws {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("record-it-\(UUID().uuidString).mov")

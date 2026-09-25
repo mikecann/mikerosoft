@@ -111,6 +111,50 @@ final class RecordingOutputTests: XCTestCase {
         XCTAssertEqual(compression?[kVTCompressionPropertyKey_VariableBitRate as String] as? Int, 60_000_000)
         XCTAssertEqual(compression?[kVTCompressionPropertyKey_VBVMaxBitRate as String] as? Int, 80_000_000)
     }
+
+    func testConstantQualityReplacesTheSharedRateControl() {
+        let configuration = screenEncoderConfiguration(
+            base: encoderConfiguration(rateControl: .cqp),
+            quality: .editMaster
+        )
+        let settings = videoOutputSettings(width: 5120, height: 2880, configuration: configuration)
+        let compression = settings[AVVideoCompressionPropertiesKey] as? [String: Any]
+
+        XCTAssertEqual(compression?[kVTCompressionPropertyKey_Quality as String] as? Double, 0.95)
+        XCTAssertNil(compression?[kVTCompressionPropertyKey_MinAllowedFrameQP as String])
+        XCTAssertNil(compression?[kVTCompressionPropertyKey_MaxAllowedFrameQP as String])
+        XCTAssertNil(compression?[kVTCompressionPropertyKey_AverageBitRate as String])
+        XCTAssertNil(compression?[kVTCompressionPropertyKey_ConstantBitRate as String])
+    }
+
+    func testScreenQualityPresetsOnlyOverrideEncodersThatSupportConstantQuality() {
+        let base = encoderConfiguration(rateControl: .cqp)
+        XCTAssertNil(screenEncoderConfiguration(base: base, quality: .standard).constantQuality)
+        XCTAssertEqual(screenEncoderConfiguration(base: base, quality: .high).constantQuality, 0.9)
+        XCTAssertEqual(screenEncoderConfiguration(base: base, quality: .editMaster).constantQuality, 0.95)
+
+        let unsupported = EncoderConfiguration(
+            encoder: HardwareVideoEncoder(
+                id: "legacy",
+                displayName: "Legacy HEVC",
+                codec: .hevc,
+                supportedRateControls: [.cqp]
+            ),
+            rateControl: .cqp,
+            bitRateMbps: 60,
+            maximumBitRateMbps: 80,
+            qualityParameter: 30
+        )
+        XCTAssertEqual(screenEncoderConfiguration(base: unsupported, quality: .editMaster), unsupported)
+    }
+
+    func testConstantQualitySummaryNamesThePreset() {
+        let configuration = screenEncoderConfiguration(
+            base: encoderConfiguration(rateControl: .cqp),
+            quality: .editMaster
+        )
+        XCTAssertEqual(configuration.summary, "Apple HEVC (HW) · Quality 95%")
+    }
 }
 
 private func encoderConfiguration(rateControl: RateControlMode) -> EncoderConfiguration {
@@ -119,7 +163,8 @@ private func encoderConfiguration(rateControl: RateControlMode) -> EncoderConfig
             id: "com.apple.videotoolbox.videoencoder.ave.hevc",
             displayName: "Apple HEVC (HW)",
             codec: .hevc,
-            supportedRateControls: Set(RateControlMode.allCases)
+            supportedRateControls: Set(RateControlMode.allCases),
+            supportsConstantQuality: true
         ),
         rateControl: rateControl,
         bitRateMbps: 60,

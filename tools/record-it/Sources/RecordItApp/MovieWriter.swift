@@ -6,14 +6,35 @@ func videoOutputSettings(
     height: Int,
     configuration: EncoderConfiguration
 ) -> [String: Any] {
-    let bitRate = max(1, configuration.bitRateMbps) * 1_000_000
-    let maximumBitRate = max(configuration.bitRateMbps, configuration.maximumBitRateMbps) * 1_000_000
     var compressionProperties: [String: Any] = [
         AVVideoExpectedSourceFrameRateKey: 30,
         AVVideoMaxKeyFrameIntervalKey: 60,
         kVTCompressionPropertyKey_RealTime as String: true
     ]
 
+    if let constantQuality = configuration.constantQuality {
+        compressionProperties[kVTCompressionPropertyKey_Quality as String] = min(1, max(0, constantQuality))
+    } else {
+        applyRateControl(configuration, to: &compressionProperties)
+    }
+
+    return [
+        AVVideoCodecKey: configuration.encoder.codec.avVideoCodecType,
+        AVVideoWidthKey: width,
+        AVVideoHeightKey: height,
+        AVVideoEncoderSpecificationKey: [
+            kVTVideoEncoderSpecification_EncoderID as String: configuration.encoder.id
+        ],
+        AVVideoCompressionPropertiesKey: compressionProperties
+    ]
+}
+
+private func applyRateControl(
+    _ configuration: EncoderConfiguration,
+    to compressionProperties: inout [String: Any]
+) {
+    let bitRate = max(1, configuration.bitRateMbps) * 1_000_000
+    let maximumBitRate = max(configuration.bitRateMbps, configuration.maximumBitRateMbps) * 1_000_000
     switch configuration.rateControl {
     case .cbr:
         compressionProperties[kVTCompressionPropertyKey_ConstantBitRate as String] = bitRate
@@ -35,16 +56,6 @@ func videoOutputSettings(
             ]
         }
     }
-
-    return [
-        AVVideoCodecKey: configuration.encoder.codec.avVideoCodecType,
-        AVVideoWidthKey: width,
-        AVVideoHeightKey: height,
-        AVVideoEncoderSpecificationKey: [
-            kVTVideoEncoderSpecification_EncoderID as String: configuration.encoder.id
-        ],
-        AVVideoCompressionPropertiesKey: compressionProperties
-    ]
 }
 
 let movieFragmentInterval = CMTime(seconds: 5, preferredTimescale: 600)

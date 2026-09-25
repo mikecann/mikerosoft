@@ -20,6 +20,21 @@ final class EncoderSettingsTests: XCTestCase {
         XCTAssertEqual(encoders.map(\.codec), [.h264, .hevc])
     }
 
+    func testCatalogRecordsConstantQualitySupportPerEncoder() {
+        let entries: [[CFString: Any]] = [
+            encoderEntry(id: "hardware-h264", name: "Apple H.264 (HW)", codec: kCMVideoCodecType_H264, hardware: true),
+            encoderEntry(id: "hardware-hevc", name: "Apple HEVC (HW)", codec: kCMVideoCodecType_HEVC, hardware: true)
+        ]
+
+        let encoders = hardwareVideoEncoders(
+            from: entries,
+            supportedRateControls: { _, _ in [.cqp] },
+            supportsConstantQuality: { id, _ in id == "hardware-hevc" }
+        )
+
+        XCTAssertEqual(encoders.map(\.supportsConstantQuality), [false, true])
+    }
+
     func testCatalogOmitsAnEncoderThatCannotCreateARateControlledSession() {
         let entries = [
             encoderEntry(id: "unavailable", name: "Unavailable HEVC", codec: kCMVideoCodecType_HEVC, hardware: true)

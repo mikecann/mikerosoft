@@ -416,6 +416,11 @@ after every rebuild.
 - The encoder menu lists only available VideoToolbox H.264 and HEVC hardware
   encoders. CBR, CQP, and VBR controls are capability-filtered and persist in
   `UserDefaults` between launches.
+- Screen recordings use the **Screen quality** preset, default Edit Master
+  (VideoToolbox `kVTCompressionPropertyKey_Quality` 0.95). It replaces the
+  shared rate control for the screen only; the camera keeps CBR/CQP/VBR.
+  Do not route screen capture back through a fixed QP: CQP 30 produced
+  under 1 Mbps screen files with blocky gradients at 2-3× zoom.
 - Projects come from `~/dev/convex/convex-videos`, newest creation date first.
 - Project recordings go to `<project>/source`; No Project goes to
   `~/Movies/record-it-output`.

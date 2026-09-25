@@ -54,6 +54,18 @@ final class RecordingPreferencesTests: XCTestCase {
         XCTAssertEqual(restored.qualityParameter, 17)
     }
 
+    func testScreenQualityDefaultsToEditMasterAndPersists() {
+        let suiteName = "record-it-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let initial = RecordingPreferences(defaults: defaults)
+        XCTAssertEqual(initial.screenQuality, .editMaster)
+
+        initial.screenQuality = .standard
+        XCTAssertEqual(RecordingPreferences(defaults: defaults).screenQuality, .standard)
+    }
+
     func testEncoderNumericSettingsAreClampedBeforeTheyAreSaved() {
         let suiteName = "record-it-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
