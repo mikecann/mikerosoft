@@ -408,6 +408,8 @@ enum MCPTools {
                 "additionalProperties": .bool(false)
             ]
             if !required.isEmpty { schema["required"] = .array(required.map(JSONValue.string)) }
+            // The edit command schemas share model definitions by reference.
+            if operation == .apply { schema["$defs"] = .object(CommandSchema.definitions) }
             return .object([
                 "name": .string(name),
                 "title": .string(title),
@@ -433,8 +435,7 @@ enum MCPTools {
     }
 
     static var applyProperties: [String: JSONValue] {
-        guard case .object(let batch) = CommandSchema.batch, case .object(let properties)? = batch["properties"] else { return [:] }
-        return properties
+        CommandSchema.batchProperties
     }
 
     static let all: [Tool] = [

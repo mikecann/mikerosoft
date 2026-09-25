@@ -120,6 +120,32 @@ final class SchemaTests: XCTestCase {
         XCTAssertEqual(metadata, .updateProject(patch: .object(["metadata": .object(["time": .string("12")])])))
     }
 
+    func testEveryReferenceResolves() {
+        func refs(_ value: JSONValue) -> [String] {
+            switch value {
+            case .object(let fields):
+                var found: [String] = []
+                if case .string(let ref)? = fields["$ref"] { found.append(ref) }
+                for (_, child) in fields { found += refs(child) }
+                return found
+            case .array(let items):
+                return items.flatMap(refs)
+            default:
+                return []
+            }
+        }
+        let all = refs(CommandSchema.document) + CommandSchema.patchModels.values.flatMap(refs)
+        XCTAssertFalse(all.isEmpty)
+        for ref in Set(all) {
+            XCTAssertTrue(ref.hasPrefix("#/$defs/"), ref)
+            XCTAssertNotNil(CommandSchema.definitions[String(ref.dropFirst("#/$defs/".count))], "\(ref) isn't defined")
+        }
+        guard case .object(let root) = CommandSchema.document, case .object(let defs)? = root["$defs"] else {
+            return XCTFail("the document needs $defs at its root")
+        }
+        XCTAssertEqual(Set(defs.keys), Set(CommandSchema.definitions.keys))
+    }
+
     func testBatchSchemaDocument() throws {
         let data = try ServiceJSON.encoder(pretty: true).encode(CommandSchema.document)
         let text = String(decoding: data, as: UTF8.self)

@@ -31,16 +31,24 @@ public enum CommandSchema {
         S.object([entry.command.rawValue: entry.arguments], required: [entry.command.rawValue], entry.summary)
     }
 
-    /// Schema for `apply`'s input: a batch applied atomically as one undo step.
-    public static var batch: JSONValue {
-        S.object([
+    /// The properties of `apply`'s input.
+    static var batchProperties: [String: JSONValue] {
+        [
             "label": S.string("Shown in the undo menu and activity feed, like \"Tightened 14 pauses in section 4\". Defaults to a summary of the commands."),
             "author": S.string("Who made the edit, like \"claude\". Defaults to the connecting agent's name."),
             "commands": S.array(editCommand, "Edit commands, applied in order. If any fails, none are applied."),
             "expectedRevision": S.integer("Refuse the batch unless the project is at this revision (from status or timeline), so you never edit a timeline that changed under you."),
             "idempotencyKey": S.string("Retrying with the same key returns the first result instead of applying the batch twice."),
             "dryRun": S.boolean("Check the batch on a copy and report what it would do, without changing anything.")
-        ], required: ["commands"], "An edit batch.")
+        ]
+    }
+
+    /// Schema for `apply`'s input: a batch applied atomically as one undo
+    /// step, with the shared model schemas under `$defs`.
+    public static var batch: JSONValue {
+        guard case .object(var fields) = S.object(batchProperties, required: ["commands"], "An edit batch.") else { return .null }
+        fields["$defs"] = .object(definitions)
+        return .object(fields)
     }
 
     /// The whole schema as `tandem schema` prints it.
@@ -160,6 +168,11 @@ enum S {
         ])
     }
 
+    /// A reference to a shared definition in `$defs`.
+    static func ref(_ name: String) -> JSONValue {
+        .object(["$ref": .string("#/$defs/\(name)")])
+    }
+
     static func anyOf(_ options: [JSONValue], _ description: String? = nil) -> JSONValue {
         var fields: [String: JSONValue] = ["anyOf": .array(options)]
         if let description { fields["description"] = .string(description) }
@@ -182,55 +195,61 @@ enum S {
 // MARK: - Model schemas
 
 extension CommandSchema {
-    /// Schemas of the model types commands carry, by name. Patches name
-    /// their model with `x-tandem-patch`.
-    static let models: [String: JSONValue] = [
-        "Project": projectHeader,
-        "ProjectSettings": projectSettings,
-        "Track": track,
-        "MediaItem": mediaItem,
-        "Clip": clip,
-        "Transition": transition,
-        "Effect": effect,
-        "Marker": marker
+    /// Shared model schemas, published under `$defs` and referred to with
+    /// `{"$ref": "#/$defs/<Name>"}` so each is written out once.
+    public static let definitions: [String: JSONValue] = [
+        "Point": point, "Rect": rect, "Color": rgba, "FrameRate": frameRate, "ParamValue": paramValue,
+        "Effect": effect, "Keyframe": keyframe, "Transform": transform, "Crop": crop, "Mask": mask,
+        "Cutout": cutout, "FormatOverride": formatOverride, "VideoProperties": videoProperties,
+        "AudioProperties": audioProperties, "TextStyle": textStyle, "TimedWord": timedWord,
+        "TextContent": textContent, "GraphicContent": graphicContent, "ClipContent": clipContent,
+        "Clip": clip, "MediaItem": mediaItem, "Transition": transition, "Marker": marker,
+        "TemplateClip": templateClip, "Template": template, "TimeRange": timeRange
     ]
 
-    static let point = S.object(["x": S.number(), "y": S.number()], required: ["x", "y"], "A point in canvas units: (0, 0) top left, (1, 1) bottom right.")
+    /// Models only patches refer to, checked but not published.
+    static let patchModels: [String: JSONValue] = [
+        "Project": projectHeader,
+        "ProjectSettings": projectSettings,
+        "Track": track
+    ]
+
+    static let point = S.object(["x": S.number(), "y": S.number()], required: ["x", "y"], "Canvas units: (0, 0) top left, (1, 1) bottom right.")
 
     static let rect = S.object(
         ["x": S.number(), "y": S.number(), "width": S.number(), "height": S.number()],
         required: ["x", "y", "width", "height"],
-        "A rectangle in source units, 0...1 from the top left."
+        "Source units, 0...1 from the top left."
     )
 
     static let rgba = S.object(
-        ["r": S.number(minimum: 0, maximum: 1), "g": S.number(minimum: 0, maximum: 1), "b": S.number(minimum: 0, maximum: 1), "a": S.number("Alpha, default 1.", minimum: 0, maximum: 1)],
+        ["r": S.number(minimum: 0, maximum: 1), "g": S.number(minimum: 0, maximum: 1), "b": S.number(minimum: 0, maximum: 1), "a": S.number(minimum: 0, maximum: 1)],
         required: ["r", "g", "b"],
-        "A colour, 0...1 per channel."
+        "0...1 per channel; a defaults to 1."
     )
 
-    static let frameRate = S.object(["numerator": S.integer(), "denominator": S.integer()], required: ["numerator", "denominator"], "An exact frame rate, like 30/1.")
+    static let frameRate = S.object(["numerator": S.integer(), "denominator": S.integer()], required: ["numerator", "denominator"])
 
-    static let paramValue = S.anyOf([S.number(), S.boolean(), S.string(), rgba, point], "A number, true/false, a string, a colour {r,g,b,a} or a point {x,y}.")
+    static let paramValue = S.anyOf([S.number(), S.boolean(), S.string(), S.ref("Color"), S.ref("Point")])
 
     static let effect = S.object([
-        "id": S.string("Optional. Give one to refer to the effect in the same batch."),
-        "type": S.string("An effect type from `tandem effects`: colorAdjust, hsl, vignette, sharpen, lut, dropShadow, border, roundedCorners, blur, pixelate, pitchShift."),
+        "id": S.string("Optional; set one to refer to it in the same batch."),
+        "type": S.string("colorAdjust, hsl, vignette, sharpen, lut, dropShadow, border, roundedCorners, blur, pixelate or pitchShift (see `effects`)."),
         "enabled": S.boolean(),
-        "params": S.map(paramValue, "Parameter values by key. Missing ones use the effect's defaults.")
-    ], required: ["type"], "An effect instance.")
+        "params": S.map(S.ref("ParamValue"), "Missing ones use the defaults.")
+    ], required: ["type"])
 
     static let keyframe = S.object([
         "time": S.time("Seconds from the clip's start."),
-        "value": paramValue,
-        "interpolation": S.enumeration(["linear", "easeIn", "easeOut", "easeInOut", "hold"], "How the value moves to the next keyframe. Default easeInOut.")
+        "value": S.ref("ParamValue"),
+        "interpolation": S.enumeration(["linear", "easeIn", "easeOut", "easeInOut", "hold"], "Default easeInOut.")
     ], required: ["time", "value"])
 
     static let transform = S.object([
-        "position": point,
-        "scale": S.number("1 fits the canvas. Mike's PiP is 0.5."),
+        "position": S.ref("Point"),
+        "scale": S.number("1 fits the canvas; Mike's PiP is 0.5."),
         "rotation": S.number("Degrees clockwise.")
-    ], "Where the layer sits: its centre on the canvas, its scale and rotation.")
+    ])
 
     static let crop = S.object([
         "left": S.number(minimum: 0, maximum: 1), "top": S.number(minimum: 0, maximum: 1),
@@ -240,113 +259,113 @@ extension CommandSchema {
     static let mask = S.object([
         "shape": S.enumeration(["rectangle", "roundedRectangle", "ellipse"]),
         "mode": S.enumeration(["include", "exclude"]),
-        "rect": rect,
+        "rect": S.ref("Rect"),
         "cornerRadius": S.number(),
         "feather": S.number()
     ], required: ["rect"])
 
     static let cutout = S.object([
         "enabled": S.boolean(),
-        "mode": S.enumeration(["person", "personAndProps"], "personAndProps keeps a handheld mic."),
-        "edgeFeather": S.number("Pixels at 1080p."),
-        "choke": S.number("Shrinks (positive) or grows (negative) the matte, pixels at 1080p."),
-        "repairMasks": S.array(mask)
+        "mode": S.enumeration(["person", "personAndProps"]),
+        "edgeFeather": S.number(),
+        "choke": S.number(),
+        "repairMasks": S.array(S.ref("Mask"))
     ], "The AI portrait cutout.")
 
-    static let formatOverride = S.object(["transform": transform, "crop": crop, "hidden": S.boolean()])
+    static let formatOverride = S.object(["transform": S.ref("Transform"), "crop": S.ref("Crop"), "hidden": S.boolean()])
 
     static let videoProperties = S.object([
-        "transform": transform,
-        "crop": crop,
+        "transform": S.ref("Transform"),
+        "crop": S.ref("Crop"),
         "opacity": S.number(minimum: 0, maximum: 1),
-        "cutout": cutout,
-        "effects": S.array(effect, "Applied in order after the transform."),
-        "layoutPreset": S.string("The layout preset this clip was last set to."),
-        "formatOverrides": S.map(formatOverride, "Placement in alternate formats, by format ID (like portrait).")
-    ], "Picture settings.")
+        "cutout": S.ref("Cutout"),
+        "effects": S.array(S.ref("Effect")),
+        "layoutPreset": S.string(),
+        "formatOverrides": S.map(S.ref("FormatOverride"), "By format ID, like portrait.")
+    ])
 
     static let audioProperties = S.object([
-        "gainDB": S.number("Clip gain in dB, after normalisation."),
+        "gainDB": S.number(),
         "fadeIn": S.time(),
         "fadeOut": S.time(),
         "muted": S.boolean(),
-        "normalizeTo": S.number("Level the clip to this loudness in LUFS, using the file's measurement."),
-        "voiceIsolation": S.number("0 is the original sound, 1 is fully isolated voice.", minimum: 0, maximum: 1),
-        "effects": S.array(effect)
-    ], "Sound settings.")
+        "normalizeTo": S.number("Level to this loudness (LUFS)."),
+        "voiceIsolation": S.number("0 original, 1 fully isolated voice.", minimum: 0, maximum: 1),
+        "effects": S.array(S.ref("Effect"))
+    ])
 
     static let textStyle = S.object([
-        "font": S.string(), "size": S.number("Points at 1080p."), "weight": S.number("100 to 900."),
-        "color": rgba, "strokeColor": rgba, "strokeWidth": S.number(), "backgroundColor": rgba,
+        "font": S.string(), "size": S.number("Points at 1080p."), "weight": S.number(),
+        "color": S.ref("Color"), "strokeColor": S.ref("Color"), "strokeWidth": S.number(), "backgroundColor": S.ref("Color"),
         "alignment": S.enumeration(["left", "center", "right"]), "uppercase": S.boolean(), "shadow": S.boolean(),
-        "lineSpacing": S.number("Extra space between lines, as a multiple of the font size.")
-    ], "Overrides on top of the preset's style.")
+        "lineSpacing": S.number()
+    ])
 
     static let timedWord = S.object(["text": S.string(), "start": S.time(), "end": S.time()], required: ["text", "start", "end"])
 
     static let textContent = S.object([
         "text": S.string(),
         "preset": S.string("A title preset, like callout, label or sectionHeader."),
-        "style": textStyle,
+        "style": S.ref("TextStyle"),
         "animationIn": S.string("Like popIn or slideUp."),
         "animationOut": S.string(),
         "animationDuration": S.time(),
-        "words": S.array(timedWord, "Word timings for word-by-word captions, relative to the clip start.")
+        "words": S.array(S.ref("TimedWord"), "For word-by-word captions.")
     ])
 
     static let graphicContent = S.object([
-        "template": S.string("Template ID, like remotion:BarChart."),
-        "props": S.map(paramValue),
-        "propsJSON": S.string("Structured props as a JSON string.")
+        "template": S.string("Like remotion:BarChart."),
+        "props": S.map(S.ref("ParamValue")),
+        "propsJSON": S.string()
     ], required: ["template"])
 
     static let clipContent = S.oneOf([
-        S.object(["media": S.object(["mediaID": S.string()], required: ["mediaID"])], required: ["media"], "Part of a media file."),
-        S.object(["text": textContent], required: ["text"], "A text layer."),
-        S.object(["graphic": graphicContent], required: ["graphic"], "A rendered graphic template."),
-        S.object(["solid": S.object(["color": rgba])], required: ["solid"], "A solid colour."),
-        S.object(["adjustment": S.object([:])], required: ["adjustment"], "Applies its effects to the tracks below.")
-    ], "What the clip shows: {\"media\": {\"mediaID\": ...}}, {\"text\": {...}}, {\"graphic\": {...}}, {\"solid\": {\"color\": ...}} or {\"adjustment\": {}}.")
+        S.object(["media": S.object(["mediaID": S.string()], required: ["mediaID"])], required: ["media"]),
+        S.object(["text": S.ref("TextContent")], required: ["text"]),
+        S.object(["graphic": S.ref("GraphicContent")], required: ["graphic"]),
+        S.object(["solid": S.object(["color": S.ref("Color")])], required: ["solid"]),
+        S.object(["adjustment": S.object([:])], required: ["adjustment"])
+    ], "One key: media, text, graphic, solid or adjustment.")
 
-    static let clipProperties: [String: JSONValue] = [
-        "id": S.string("Optional. Give one to refer to the clip in the same batch."),
+    /// `content` is required everywhere except template clips that name
+    /// their file with `mediaPath`; Swift decoding reports it when missing.
+    static let clip = S.object([
+        "id": S.string("Optional; set one to refer to it in the same batch."),
         "name": S.string(),
-        "content": clipContent,
-        "start": S.time("Where the clip starts on the timeline."),
-        "duration": S.time("How long it lasts on the timeline."),
-        "sourceStart": S.time("Where playback starts inside the media, in media time."),
-        "speed": S.number("2 plays twice as fast."),
-        "freezeFrame": S.boolean("Hold the frame at sourceStart."),
+        "content": S.ref("ClipContent"),
+        "start": S.time("Timeline start."),
+        "duration": S.time("Timeline length."),
+        "sourceStart": S.time("Where playback starts in the media (media time)."),
+        "speed": S.number(),
+        "freezeFrame": S.boolean(),
         "enabled": S.boolean(),
         "linkGroup": S.string(),
-        "video": videoProperties,
-        "audio": audioProperties,
-        "keyframes": S.map(S.array(keyframe), "Animations by parameter path, like video.transform.scale."),
+        "video": S.ref("VideoProperties"),
+        "audio": S.ref("AudioProperties"),
+        "keyframes": S.map(S.array(S.ref("Keyframe")), "By parameter path, like video.transform.scale."),
         "tags": S.array(S.string())
-    ]
-
-    static let clip = S.object(clipProperties, required: ["content", "duration"], "A clip.")
+    ], required: ["duration"], "A clip. content is required (except in a template clip with mediaPath).")
 
     static let mediaItem = S.object([
-        "id": S.string("Optional. Give one to refer to it in the same batch."),
+        "id": S.string("Optional."),
         "path": S.string("Relative to the project folder, or absolute."),
         "kind": S.enumeration(MediaKind.allCases.map(\.rawValue)),
-        "role": S.enumeration(MediaRole.allCases.map(\.rawValue), "Decides the track it lands on."),
-        "takeID": S.string(), "takeOffset": S.time("How long after the take started this file starts."),
-        "duration": S.time(), "frameRate": frameRate, "width": S.integer(), "height": S.integer(),
+        "role": S.enumeration(MediaRole.allCases.map(\.rawValue)),
+        "takeID": S.string(), "takeOffset": S.time(),
+        "duration": S.time(), "frameRate": S.ref("FrameRate"), "width": S.integer(), "height": S.integer(),
         "hasVideo": S.boolean(), "hasAudio": S.boolean(), "hasAlpha": S.boolean(), "variableFrameRate": S.boolean(),
         "fingerprint": S.string(),
-        "look": S.array(effect, "The file's colour grade, applied to every clip of it.")
-    ], required: ["path"], "A media file.")
+        "look": S.array(S.ref("Effect"), "Colour grade for every clip of the file.")
+    ], required: ["path"])
 
     static let transition = S.object([
         "id": S.string("Optional."),
         "type": S.enumeration(TransitionType.allCases.map(\.rawValue)),
-        "direction": S.enumeration(["up", "down", "left", "right"], "For push, slide and wipe."),
+        "direction": S.enumeration(["up", "down", "left", "right"]),
         "duration": S.time("Defaults to the type's usual length."),
-        "fromClipID": S.string("The outgoing clip. Leave out for a transition at the head of toClipID."),
-        "toClipID": S.string("The incoming clip. Leave out for a transition at the tail of fromClipID.")
-    ], required: ["type"], "A transition on one track.")
+        "fromClipID": S.string("Outgoing clip; leave out for a head transition."),
+        "toClipID": S.string("Incoming clip; leave out for a tail transition.")
+    ], required: ["type"])
 
     static let marker = S.object([
         "id": S.string("Optional."),
@@ -355,14 +374,14 @@ extension CommandSchema {
         "name": S.string(),
         "kind": S.enumeration(["marker", "section", "chapter", "todo"]),
         "note": S.string()
-    ], required: ["time"], "A timeline marker.")
+    ], required: ["time"])
 
     static let templateClip = S.object([
         "track": S.string("Track name, created if missing."),
         "trackKind": S.enumeration(["video", "audio"]),
-        "offset": S.time("Start relative to where the template goes."),
-        "clip": S.object(clipProperties, required: ["duration"], "The clip to create. Text may use {{field}} placeholders."),
-        "mediaPath": S.string("For media clips: the path of a file already in the project.")
+        "offset": S.time("Start relative to the template."),
+        "clip": S.ref("Clip"),
+        "mediaPath": S.string("For media clips: the path of a file in the project.")
     ], required: ["track", "clip"])
 
     static let template = S.object([
@@ -370,26 +389,26 @@ extension CommandSchema {
         "name": S.string(),
         "duration": S.time(),
         "fields": S.array(S.object(["key": S.string(), "label": S.string(), "defaultValue": S.string()], required: ["key"])),
-        "clips": S.array(templateClip)
-    ], required: ["id", "duration", "clips"], "A reusable group of clips, from a pack.")
+        "clips": S.array(S.ref("TemplateClip"))
+    ], required: ["id", "duration", "clips"])
 
     static let timeRange = S.object([
         "start": S.time(),
         "duration": S.time(),
         "end": S.time("Instead of duration.")
-    ], required: ["start"], "A stretch of time: start plus duration (or end).")
+    ], required: ["start"], "start plus duration (or end), in seconds.")
 
     static let projectHeader = S.object(["name": S.string(), "metadata": S.map(S.string())])
 
     static let projectSettings = S.object([
-        "width": S.integer(), "height": S.integer(), "frameRate": frameRate, "sampleRate": S.integer(),
-        "loudnessTarget": S.number("LUFS."), "truePeakCeiling": S.number("dBTP."), "colorSpace": S.string(),
+        "width": S.integer(), "height": S.integer(), "frameRate": S.ref("FrameRate"), "sampleRate": S.integer(),
+        "loudnessTarget": S.number(), "truePeakCeiling": S.number(), "colorSpace": S.string(),
         "alternateFormats": S.array(S.object(["id": S.string(), "name": S.string(), "width": S.integer(), "height": S.integer()], required: ["id", "name", "width", "height"]))
     ])
 
     static let track = S.object([
         "id": S.string(), "kind": S.enumeration(["video", "audio"]), "name": S.string(),
-        "clips": S.array(clip), "transitions": S.array(transition),
+        "clips": S.array(S.ref("Clip")), "transitions": S.array(S.ref("Transition")),
         "muted": S.boolean(), "solo": S.boolean(), "locked": S.boolean(), "hidden": S.boolean(), "targeted": S.boolean(),
         "rippleMode": S.enumeration(RippleMode.allCases.map(\.rawValue))
     ])
@@ -446,7 +465,7 @@ extension CommandSchema {
         Entry(
             command: .addMedia,
             summary: "Adds a media file to the project (not the timeline). Usually `tandem media --refresh` does this for you.",
-            arguments: S.object(["item": mediaItem], required: ["item"]),
+            arguments: S.object(["item": S.ref("MediaItem")], required: ["item"]),
             example: #"{"addMedia": {"item": {"path": "broll/servers.mp4", "kind": "video", "role": "broll", "duration": 12.5, "hasVideo": true}}}"#
         ),
         Entry(
@@ -479,7 +498,7 @@ extension CommandSchema {
         Entry(
             command: .insertClip,
             summary: "Adds one clip to a track: a text title, a solid, a graphic, an adjustment layer or part of a media file.",
-            arguments: S.object(["trackID": S.string(), "clip": clip, "mode": insertMode], required: ["trackID", "clip"]),
+            arguments: S.object(["trackID": S.string(), "clip": S.ref("Clip"), "mode": insertMode], required: ["trackID", "clip"]),
             example: #"{"insertClip": {"trackID": "trk_text", "clip": {"content": {"text": {"text": "TIP 1", "preset": "callout"}}, "start": 12, "duration": 3}}}"#
         ),
         Entry(
@@ -491,7 +510,7 @@ extension CommandSchema {
         Entry(
             command: .rippleDeleteRange,
             summary: "Removes a stretch of time and closes it up: every cut track (screen, camera, voice) loses it and follow tracks (B-roll, music, titles) move with it. This is how pauses get tightened.",
-            arguments: S.object(["range": timeRange, "trackIDs": S.ids("Only cut these tracks (and ripple from them). Default: every cut track.")], required: ["range"]),
+            arguments: S.object(["range": S.ref("TimeRange"), "trackIDs": S.ids("Only cut these tracks (and ripple from them). Default: every cut track.")], required: ["range"]),
             example: #"{"rippleDeleteRange": {"range": {"start": 12.4, "duration": 0.8}}}"#
         ),
         Entry(
@@ -510,7 +529,7 @@ extension CommandSchema {
             command: .insertTemplate,
             summary: "Expands a template (a section card, Like and Subscribe) into linked clips, filling {{field}} placeholders from values. Media it uses must already be in the project.",
             arguments: S.object([
-                "template": template,
+                "template": S.ref("Template"),
                 "at": S.time(),
                 "values": S.map(S.string(), "Field values by key, like {\"title\": \"CURSOR DOCS\"}."),
                 "mode": insertMode
@@ -596,7 +615,7 @@ extension CommandSchema {
             command: .zoomToRegion,
             summary: "Zooms a video clip into a rectangle of its source. Without at the zoom is static; with at it animates there over duration (default 0.5 s). Zoom back out with {x: 0, y: 0, width: 1, height: 1}.",
             arguments: S.object([
-                "clipID": S.string(), "rect": rect,
+                "clipID": S.string(), "rect": S.ref("Rect"),
                 "at": S.time("Timeline time the zoom starts."), "duration": S.time("How long the zoom takes. Default 0.5.")
             ], required: ["clipID", "rect"]),
             example: #"{"zoomToRegion": {"clipID": "clip_scr1", "rect": {"x": 0.5, "y": 0.25, "width": 0.5, "height": 0.5}, "at": 42, "duration": 0.5}}"#
@@ -604,7 +623,7 @@ extension CommandSchema {
         Entry(
             command: .addTransition,
             summary: "Adds a transition between two touching clips (needs spare media on both sides) or at one clip's head or tail.",
-            arguments: S.object(["trackID": S.string(), "transition": transition], required: ["trackID", "transition"]),
+            arguments: S.object(["trackID": S.string(), "transition": S.ref("Transition")], required: ["trackID", "transition"]),
             example: #"{"addTransition": {"trackID": "trk_camera", "transition": {"type": "dissolve", "duration": 0.5, "fromClipID": "clip_a", "toClipID": "clip_b"}}}"#
         ),
         Entry(
@@ -622,7 +641,7 @@ extension CommandSchema {
         Entry(
             command: .addEffect,
             summary: "Adds an effect to a clip's video or audio effects (by the effect's kind).",
-            arguments: S.object(["clipID": S.string(), "effect": effect, "index": S.integer("Position in the effect list. Default: last.")], required: ["clipID", "effect"]),
+            arguments: S.object(["clipID": S.string(), "effect": S.ref("Effect"), "index": S.integer("Position in the effect list. Default: last.")], required: ["clipID", "effect"]),
             example: #"{"addEffect": {"clipID": "clip_cam1", "effect": {"type": "dropShadow", "params": {"opacity": 40}}}}"#
         ),
         Entry(
@@ -649,14 +668,14 @@ extension CommandSchema {
             arguments: S.object([
                 "clipID": S.string(),
                 "parameter": S.string("Parameter path. See `tandem effects` for the list."),
-                "keyframes": S.array(keyframe, "Times are seconds from the clip's start.")
+                "keyframes": S.array(S.ref("Keyframe"), "Times are seconds from the clip's start.")
             ], required: ["clipID", "parameter", "keyframes"]),
             example: #"{"setKeyframes": {"clipID": "clip_scr1", "parameter": "video.transform.scale", "keyframes": [{"time": 0, "value": 1, "interpolation": "linear"}, {"time": 2, "value": 1.5}]}}"#
         ),
         Entry(
             command: .addMarker,
             summary: "Adds a marker (marker, section, chapter or todo).",
-            arguments: S.object(["marker": marker], required: ["marker"]),
+            arguments: S.object(["marker": S.ref("Marker")], required: ["marker"]),
             example: #"{"addMarker": {"marker": {"time": 95, "name": "Section 2", "kind": "section"}}}"#
         ),
         Entry(
@@ -689,12 +708,20 @@ struct SchemaValidator {
 
         if patch, case .null = value { return }
 
+        if case .string(let reference)? = rules["$ref"] {
+            let name = reference.replacingOccurrences(of: "#/$defs/", with: "")
+            if let definition = CommandSchema.definitions[name] ?? CommandSchema.patchModels[name] {
+                validate(value, against: definition, path: path, into: &problems)
+            }
+            return
+        }
+
         if case .string(let model)? = rules["x-tandem-patch"] {
             guard case .object = value else {
                 problems.append("\(at)a patch must be a JSON object")
                 return
             }
-            if let modelSchema = CommandSchema.models[model] {
+            if let modelSchema = CommandSchema.definitions[model] ?? CommandSchema.patchModels[model] {
                 SchemaValidator(patch: true).validate(value, against: modelSchema, path: path, into: &problems)
             }
             return
