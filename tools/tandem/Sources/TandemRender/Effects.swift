@@ -69,9 +69,11 @@ enum EffectRenderer {
             let amount = number("amount") / 100
             if amount == 0 { return image }
             // Radii as fractions of the centre-to-corner distance: `size` is
-            // the clear middle, `feather` how gradually it falls off.
-            let inner = 0.2 + 0.6 * number("size") / 100
-            let feather = 0.1 + 0.9 * number("feather") / 100
+            // the clear middle, `feather` how gradually it falls off. At the
+            // defaults (50, 50) it starts at 0.7 and is full by 0.98, which
+            // matches Filmora's vignette measured on the v14 export.
+            let inner = 0.4 + 0.6 * number("size") / 100
+            let feather = 0.05 + 0.46 * number("feather") / 100
             let corner = extent.height / 2 * sqrt(2)
             guard let mask = CIFilter(name: "CIRadialGradient", parameters: [
                 "inputCenter": CIVector(x: 0, y: 0),

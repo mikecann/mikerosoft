@@ -44,8 +44,11 @@ final class EffectsTests: XCTestCase {
     }
 
     func testBlackLevelCrushesShadows() {
-        let crushed = run(Effect(type: "colorAdjust", params: ["blackLevel": .number(-40)]), on: grey(0.1))[32, 32]
-        XCTAssertLessThan(crushed[0], 15)
+        let crushed = run(Effect(type: "colorAdjust", params: ["blackLevel": .number(-100)]), on: grey(0.1))[32, 32]
+        XCTAssertLessThan(crushed[0], 8)
+        // Mike's usual small values are subtle: 7 lifts a dark grey slightly.
+        let lifted = run(Effect(type: "colorAdjust", params: ["blackLevel": .number(7)]), on: grey(0.2))[32, 32]
+        XCTAssertEqual(lifted[0], 52, accuracy: 1)
     }
 
     func testHSLRedSaturationOnlyTouchesReds() {

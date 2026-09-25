@@ -52,7 +52,8 @@ enum Kernels {
             float3 linear = pow(max(x, 0.0), 2.2) * exp2(a.x);
             x = pow(linear, 1.0 / 2.2);
         }
-        float blackPoint = -a.z * 0.25;
+        // Black level 7 lifts shadows by about 2%, as Filmora's does.
+        float blackPoint = -a.z * 0.1;
         x = (x - blackPoint) / (1.0 - blackPoint);
         x = (x - 0.5) * (1.0 + a.y * 0.5) + 0.5;
         float l = tandem::luma(x);
