@@ -60,6 +60,29 @@ final class ProjectSessionTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectFile.undoHistoryURL(for: url).path))
     }
 
+    func testSavesFollowTheFolderWhenItsRenamed() throws {
+        // Mike renames the video folder in Finder with the project open.
+        let before = folder.appendingPathComponent("working title", isDirectory: true)
+        let after = folder.appendingPathComponent("decision-models", isDirectory: true)
+        try FileManager.default.createDirectory(at: before, withIntermediateDirectories: true)
+        let session = try ProjectSession.create(at: before.appendingPathComponent("Video.tandem"), owner: .app)
+        session.autosaveDelay = 3600
+        try session.coordinator.apply(EditBatch(label: "Before", commands: [.addMarker(marker: Marker(id: "mk_1", time: t(1), name: "1"))]))
+        try FileManager.default.moveItem(at: before, to: after)
+        // Something recreates the old path (the analysis cache writing into
+        // .tandem/cache, say); the project still belongs in the renamed folder.
+        try FileManager.default.createDirectory(at: before.appendingPathComponent(".tandem/cache"), withIntermediateDirectories: true)
+        try session.coordinator.apply(EditBatch(label: "After", commands: [.addMarker(marker: Marker(id: "mk_2", time: t(2), name: "2"))]))
+        session.close()
+
+        let moved = after.appendingPathComponent("Video.tandem")
+        XCTAssertEqual(try ProjectFile.load(from: moved).project.markers.map(\.id), ["mk_1", "mk_2"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: before.appendingPathComponent("Video.tandem").path))
+        XCTAssertEqual(session.fileURL.lastPathComponent, "Video.tandem")
+        XCTAssertEqual(session.fileURL.deletingLastPathComponent().lastPathComponent, "decision-models")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectSession.lockURL(for: moved).path), "the lock goes with it")
+    }
+
     func testAnEditThatLandsDuringASaveIsStillJournaled() throws {
         let url = folder.appendingPathComponent("Race.tandem")
         let session = try ProjectSession.create(at: url, owner: .app)

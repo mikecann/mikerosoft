@@ -26,8 +26,14 @@ public final class ProjectSession: @unchecked Sendable {
         public var token: String?
     }
 
-    public let fileURL: URL
+    /// Where the project file is now. If Mike renames or moves the video
+    /// folder while it's open, saves follow it there. (`folder`, which
+    /// media paths resolve against, stays where it was opened until the
+    /// project is opened again.)
+    public var fileURL: URL { projectFolder.url.appendingPathComponent(fileName) }
     public let folder: ProjectFolder
+    private let projectFolder: FolderAnchor
+    private let fileName: String
     public let coordinator: ProjectCoordinator
     public let analysis: MediaAnalysis
     public let owner: Owner
@@ -45,7 +51,8 @@ public final class ProjectSession: @unchecked Sendable {
     public var autosaveDelay: TimeInterval = 1
 
     private init(fileURL: URL, project: Project, revision: Int, owner: Owner, recovered: Bool, journal: ProjectJournal, lock: LockHandle) {
-        self.fileURL = fileURL
+        self.projectFolder = FolderAnchor(fileURL.deletingLastPathComponent())
+        self.fileName = fileURL.lastPathComponent
         self.folder = ProjectFolder(projectFile: fileURL)
         self.journal = journal
         self.lockHandle = lock
@@ -362,17 +369,19 @@ final class LockHandle: @unchecked Sendable {
         self.lock = lock
     }
 
-    /// Removes the lock file (if it's still ours) and drops the lock.
+    /// Removes the lock file (if it's still ours) and drops the lock. The
+    /// file is found where it is now, in case the folder was renamed.
     func release() {
         mutex.lock()
         defer { mutex.unlock() }
         guard !released else { return }
         released = true
+        let path = FolderAnchor.path(of: fd) ?? url.path
         var opened = stat()
         var current = stat()
-        if fstat(fd, &opened) == 0, stat(url.path, &current) == 0,
+        if fstat(fd, &opened) == 0, stat(path, &current) == 0,
            opened.st_ino == current.st_ino, opened.st_dev == current.st_dev {
-            unlink(url.path)
+            unlink(path)
         }
         close(fd)
     }

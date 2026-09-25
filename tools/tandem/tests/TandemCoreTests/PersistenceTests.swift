@@ -106,6 +106,17 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(journal.entries(after: 0).map(\.revision), [1, 2], "the entries already there survive")
     }
 
+    func testTheJournalFollowsARenamedFolder() throws {
+        let before = folder.appendingPathComponent("working title/Video.tandem")
+        let after = folder.appendingPathComponent("decision-models/Video.tandem")
+        let journal = ProjectJournal.forProject(at: before)
+        journal.append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)
+        try FileManager.default.moveItem(at: before.deletingLastPathComponent(), to: after.deletingLastPathComponent())
+        journal.append(batch: marker("mk_2", at: 2), revision: 2, seed: 2)
+        XCTAssertEqual(ProjectJournal.forProject(at: after).entries(after: 0).map(\.revision), [1, 2])
+        XCTAssertEqual(journal.url.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent, "decision-models")
+    }
+
     func testTruncatingForASaveKeepsTheEditsItMissed() throws {
         let journal = journal()
         journal.append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)

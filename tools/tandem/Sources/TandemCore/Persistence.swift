@@ -122,11 +122,16 @@ public final class ProjectJournal: @unchecked Sendable {
         public var reason: String?
     }
 
-    public let url: URL
+    /// Where the journal is now. It follows its folder if the video folder
+    /// is renamed or moved while the project is open.
+    public var url: URL { folder.url.appendingPathComponent(fileName) }
+    private let folder: FolderAnchor
+    private let fileName: String
     private let queue = DispatchQueue(label: "com.mikerosoft.tandem.journal")
 
     public init(url: URL) {
-        self.url = url
+        folder = FolderAnchor(url.deletingLastPathComponent())
+        fileName = url.lastPathComponent
     }
 
     public static func forProject(at projectURL: URL) -> ProjectJournal {
@@ -242,6 +247,42 @@ public final class ProjectJournal: @unchecked Sendable {
             currentRevision = entry.revision
         }
         return (current, currentRevision)
+    }
+}
+
+/// A folder that can be renamed or moved while it's in use (Finder lets
+/// Mike rename a video folder with the project open). Holds a descriptor on
+/// the folder and asks the system where it is now, so files written into
+/// it keep landing in it rather than at the old path.
+public final class FolderAnchor: @unchecked Sendable {
+    private let original: URL
+    private let fd: Int32
+    /// Where the system put the folder when it was opened.
+    private let openedPath: String?
+
+    public init(_ folder: URL) {
+        original = folder
+        fd = open(folder.path, O_EVTONLY | O_CLOEXEC)
+        openedPath = Self.path(of: fd)
+    }
+
+    deinit {
+        if fd >= 0 { close(fd) }
+    }
+
+    /// The folder as it was given, unless it has moved since, then where
+    /// it is now.
+    public var url: URL {
+        guard let openedPath, let now = Self.path(of: fd), now != openedPath else { return original }
+        return URL(fileURLWithPath: now, isDirectory: true)
+    }
+
+    /// The path of whatever `fd` is open on, or nil.
+    public static func path(of fd: Int32) -> String? {
+        guard fd >= 0 else { return nil }
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard fcntl(fd, F_GETPATH, &buffer) != -1 else { return nil }
+        return String(cString: buffer)
     }
 }
 
