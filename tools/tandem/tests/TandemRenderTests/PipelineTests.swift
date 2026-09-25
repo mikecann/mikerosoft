@@ -186,6 +186,38 @@ final class PipelineTests: XCTestCase {
         XCTAssertTrue(valid)
     }
 
+    func testThePlayerItemPlaysThroughTheCompositor() async throws {
+        let media = try TestMedia()
+        try await media.movie("blue.mov", seconds: 2, draw: { TestMedia.fill($1, 0, 0, 1) }, sound: { _ in 0.05 })
+        let item = media.item("med_b", "blue.mov", seconds: 2, audio: true)
+        let picture = Clip(id: "clip_v", content: .media(mediaID: "med_b"), start: .zero, duration: t(2),
+                           video: VideoProperties(transform: Transform(position: Point(x: 0.25, y: 0.5), scale: 0.5)))
+        let sound = Clip(id: "clip_a", content: .media(mediaID: "med_b"), start: .zero, duration: t(2))
+        let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [picture])], audio: [Track(kind: .audio, name: "A1", clips: [sound])], media: [item])
+        let built = try await CompositionBuilder.build(RenderContext(project: project, folder: media.projectFolder))
+        let playerItem = built.makePlayerItem()
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        playerItem.add(output)
+        let player = AVPlayer(playerItem: playerItem)
+        player.isMuted = true
+        player.play()
+        var frame: CVPixelBuffer?
+        let deadline = Date().addingTimeInterval(5)
+        while frame == nil && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+            let now = output.itemTime(forHostTime: CACurrentMediaTime())
+            if now.seconds > 0.2, output.hasNewPixelBuffer(forItemTime: now) {
+                frame = output.copyPixelBuffer(forItemTime: now, itemTimeForDisplay: nil)
+            }
+        }
+        player.pause()
+        let pixels = try XCTUnwrap(frame, "the player produced no frames")
+        let bitmap = Bitmap(CIImage(cvPixelBuffer: pixels), size: CGSize(width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels)))
+        // Half-size layer centred a quarter across: blue on the left, black on the right.
+        assertColor(bitmap[80, 90], [0, 0, 255], tolerance: 10)
+        assertColor(bitmap[240, 90], [0, 0, 0], tolerance: 6)
+    }
+
     func testTitlesOnlyTimeline() async throws {
         let media = try TestMedia()
         let title = Clip(id: "clip_t", content: .text(TextContent(text: "v1.46.0", preset: "version")), start: .zero, duration: t(2))
