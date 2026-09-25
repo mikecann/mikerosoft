@@ -118,7 +118,7 @@ public final class TandemHTTPClient: @unchecked Sendable {
             case .cannotConnectToHost, .notConnectedToInternet:
                 return ServiceError(.unavailable, "Couldn't reach the Tandem API: \(error.localizedDescription)")
             case .networkConnectionLost, .timedOut, .badServerResponse, .cannotParseResponse, .zeroByteResource:
-                return ServiceError(.interrupted, "The Tandem API stopped answering before it replied (\(error.localizedDescription)), so this may have happened. Check `tandem history` before sending an edit again.")
+                return ServiceError(.interrupted, "The Tandem API stopped answering before it replied (\(error.localizedDescription)). If this was an edit, it may have been applied: check `tandem history` before sending it again.")
             case .cancelled:
                 return CancellationError()
             default:
