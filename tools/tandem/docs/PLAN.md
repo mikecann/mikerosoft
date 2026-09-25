@@ -71,15 +71,16 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 ## Milestone 6: real projects
 
-- [ ] Import the decision-models EDL into a .tandem project [importer]
-- [ ] Import Filmora .wfp projects (best effort) [importer]
-- [ ] Rebuild decision-models and compare against the v14 export [all]
+- [x] Import the decision-models EDL into a .tandem project [importer] (676.6 s vs v14 667.3 s: Mike's hand trims after the pipeline)
+- [x] Import Filmora .wfp projects [importer] (v14 487/487 clips and 34/34 transitions exact; 119-project corpus imports without failures)
+- [ ] Render the imported v14 and compare frames against Filmora's export [render]
+- [ ] `tandem import filmora|edl|compare` in the CLI [integration]
 
 ## Wave 2
 
-- [ ] Asset library: local index (SQLite FTS5), packs, browser with hover previews, copy into the project on use
+- [~] Asset library: catalogue (SQLite FTS5), providers, normalising, credits [assets]; browser UI after the app lands
 - [ ] Sources: Freesound (CC0), Pexels and Pixabay, ElevenLabs sound effects, LottieFiles, Google Fonts; paid libraries through a watched folder
-- [ ] Title and template pack: plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
+- [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
 - [ ] Stickers: Lottie and HEVC with alpha
 - [ ] Portrait short layout (screen top, camera bottom, captions between)
 - [ ] Segment render cache for fast re-exports

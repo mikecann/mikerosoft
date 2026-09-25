@@ -28,6 +28,9 @@ let package = Package(
         .target(name: "TandemRender", dependencies: ["TandemCore", "TandemMedia"], path: "Sources/TandemRender"),
         // Commands shared by the local server, the CLI and MCP.
         .target(name: "TandemAPI", dependencies: ["TandemCore", "TandemMedia", "TandemRender"], path: "Sources/TandemAPI"),
+        // Importers: Filmora .wfp projects and the JSON EDLs agents cut with.
+        // They build through the coordinator, so imports always validate.
+        .target(name: "TandemImport", dependencies: ["TandemCore", "TandemMedia"], path: "Sources/TandemImport"),
         // The macOS app. Its keymap and other defaults ship as resources.
         .executableTarget(
             name: "TandemApp",
@@ -40,6 +43,12 @@ let package = Package(
         .testTarget(name: "TandemMediaTests", dependencies: ["TandemMedia"], path: "tests/TandemMediaTests"),
         .testTarget(name: "TandemRenderTests", dependencies: ["TandemRender"], path: "tests/TandemRenderTests"),
         .testTarget(name: "TandemAPITests", dependencies: ["TandemAPI"], path: "tests/TandemAPITests"),
+        .testTarget(
+            name: "TandemImportTests",
+            dependencies: ["TandemImport"],
+            path: "tests/TandemImportTests",
+            resources: [.copy("Fixtures")]
+        ),
         // The app's pure logic: timeline maths, snapping, hit testing, the
         // keymap and how gestures become edit batches.
         .testTarget(name: "TandemAppTests", dependencies: ["TandemApp", "TandemCore"], path: "tests/TandemAppTests")

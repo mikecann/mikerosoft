@@ -1,0 +1,56 @@
+{
+  "name": "Mini",
+  "root": "/fixture/mini",
+  "edl": "edit/mini-edl.json",
+  "width": 3840,
+  "height": 2160,
+  "frameRate": 30,
+  "takes": [
+    {"start": 0, "camera": "source/take-a-camera.mov", "screen": "source/take-a-screen.mov"},
+    {"start": 100, "camera": "source/take-b-camera.mov", "screen": "source/take-b-screen.mov"}
+  ],
+  "voice": {"normalizeTo": -28.74},
+  "pip": {"x": 0.89, "y": 0.8, "scale": 0.5, "cutout": true},
+  "cameraLook": [
+    {"type": "hsl", "params": {"redSaturation": -17}},
+    {"type": "vignette", "params": {"amount": -30}}
+  ],
+  "intro": {"path": "intro.mp4", "replacesBefore": 10.0, "normalizeTo": -28.74},
+  "cutAdjustments": [
+    {"start": 10.0, "end": 14.0, "newStart": 9.8, "newEnd": 14.3}
+  ],
+  "layoutOverrides": [
+    {"from": 104.0, "to": 106.0, "layout": "screen"}
+  ],
+  "transitions": {
+    "layoutSwitch": {"type": "cutSlide", "duration": 1.0},
+    "topicPush": {"type": "push", "direction": "left", "duration": 0.8, "at": [30.0], "tolerance": 0.6},
+    "end": {"type": "fadeToBlack", "duration": 1.0},
+    "overlayIn": {"type": "push", "direction": "down", "duration": 0.6},
+    "overlayOut": {"type": "push", "direction": "up", "duration": 0.8}
+  },
+  "inserts": [
+    {"path": "graphics/chart.mp4", "at": 17.0, "duration": 3.0, "slideIn": true, "slideOut": true, "note": "the chart"},
+    {"path": "broll/a.mp4", "at": 107.0, "duration": 1.0, "slideIn": true},
+    {"path": "broll/b.mp4", "afterPrevious": true, "duration": 1.5, "slideOut": true}
+  ],
+  "sections": [
+    {"name": "Intro", "music": "music/intro.mp3"},
+    {"name": "Part one", "at": 15.0, "music": "music/one.mp3"},
+    {"name": "Part two", "at": 105.0, "music": "music/two.mp3"},
+    {"name": "Outro", "music": "music/outro.mp3", "outro": true}
+  ],
+  "music": {"crossfade": 1.0, "normalizeTo": -20, "gainDB": -27, "endFadeOut": 1.5, "outroTrim": 0.3},
+  "sfx": {
+    "minGap": 1.5,
+    "onTransitions": [
+      {"on": "layoutSwitch", "path": "sfx/swipe.wav", "peak": 0.2, "gainDB": -22, "priority": 2},
+      {"on": "topicPush", "path": "sfx/swipe.wav", "peak": 0.2, "gainDB": -22, "priority": 2},
+      {"on": "overlayIn", "path": "sfx/in.wav", "peak": 0.25, "gainDB": -20, "priority": 1},
+      {"on": "overlayOut", "path": "sfx/out.wav", "peak": 0.3, "gainDB": -23, "priority": 1}
+    ],
+    "events": [
+      {"path": "sfx/ding.mp3", "at": 32.0, "gainDB": -18, "note": "ding"}
+    ]
+  }
+}

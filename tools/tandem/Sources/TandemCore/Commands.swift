@@ -62,6 +62,10 @@ public enum EditCommand: Codable, Equatable, Sendable {
     case closeGap(trackID: String, at: Time)
     /// Opens up empty time at `at`, pushing everything later to the right.
     case insertTime(at: Time, duration: Time, trackIDs: [String]? = nil)
+    /// Expands a template (section card, call to action) into linked clips
+    /// at `at`, filling `{{field}}` placeholders from `values`. Media the
+    /// template uses must already be in the project (matched by path).
+    case insertTemplate(template: Template, at: Time, values: [String: String]? = nil, mode: InsertMode? = nil)
 
     // MARK: Cutting and trimming
 
