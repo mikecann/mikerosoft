@@ -248,14 +248,18 @@ public struct FetchedOriginal: Sendable {
 public struct ProviderEnvironment: Sendable {
     public var transport: HTTPTransport
     public var secrets: SecretStore
-    /// Where response caches live, one subfolder per provider.
+    /// Where response caches live, one subfolder per provider. Safe to delete.
     public var cacheFolder: URL
+    /// Where providers keep small state worth keeping, for example which
+    /// permissions a key was refused.
+    public var stateFolder: URL
     public var now: @Sendable () -> Date
 
-    public init(transport: HTTPTransport = URLSessionTransport(), secrets: SecretStore = KeychainSecretStore(), cacheFolder: URL, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(transport: HTTPTransport = URLSessionTransport(), secrets: SecretStore = KeychainSecretStore(), cacheFolder: URL, stateFolder: URL, now: @escaping @Sendable () -> Date = { Date() }) {
         self.transport = transport
         self.secrets = secrets
         self.cacheFolder = cacheFolder
+        self.stateFolder = stateFolder
         self.now = now
     }
 }

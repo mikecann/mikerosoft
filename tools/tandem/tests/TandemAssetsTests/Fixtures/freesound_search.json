@@ -1,0 +1,53 @@
+{
+ "count": 3,
+ "next": null,
+ "previous": null,
+ "results": [
+  {
+   "id": 60013,
+   "name": "Whoosh 1",
+   "tags": ["whoosh", "swish", "air", "fast"],
+   "description": "A fast <b>whoosh</b> recorded with a stick.",
+   "duration": 0.84,
+   "license": "http://creativecommons.org/publicdomain/zero/1.0/",
+   "username": "qubodup",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/60/60013_71257-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/60/60013_71257-lq.mp3",
+    "preview-hq-ogg": "https://cdn.freesound.org/previews/60/60013_71257-hq.ogg",
+    "preview-lq-ogg": "https://cdn.freesound.org/previews/60/60013_71257-lq.ogg"
+   },
+   "images": {"waveform_m": "https://cdn.freesound.org/displays/60/60013_71257_wave_M.png"},
+   "url": "https://freesound.org/people/qubodup/sounds/60013/",
+   "num_downloads": 51234
+  },
+  {
+   "id": 346373,
+   "name": "Whoosh Heavy Spear",
+   "tags": ["whoosh", "spear", "heavy"],
+   "description": "Heavy whoosh.",
+   "duration": 1.2,
+   "license": "https://creativecommons.org/licenses/by/4.0/",
+   "username": "denao270",
+   "previews": {
+    "preview-hq-mp3": "https://cdn.freesound.org/previews/346/346373_5121236-hq.mp3",
+    "preview-lq-mp3": "https://cdn.freesound.org/previews/346/346373_5121236-lq.mp3"
+   },
+   "images": {"waveform_m": "https://cdn.freesound.org/displays/346/346373_5121236_wave_M.png"},
+   "url": "https://freesound.org/people/denao270/sounds/346373/",
+   "num_downloads": 9001
+  },
+  {
+   "id": 77777,
+   "name": "Whoosh NC",
+   "tags": ["whoosh"],
+   "description": "Non-commercial only.",
+   "duration": 0.5,
+   "license": "http://creativecommons.org/licenses/by-nc/3.0/",
+   "username": "someone",
+   "previews": {"preview-hq-mp3": "https://cdn.freesound.org/previews/77/77777-hq.mp3"},
+   "url": "https://freesound.org/people/someone/sounds/77777/",
+   "num_downloads": 10
+  }
+ ]
+}

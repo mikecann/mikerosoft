@@ -1,0 +1,57 @@
+{
+ "icons": [
+  "mdi:rocket",
+  "twemoji:rocket",
+  "mdi:rocket-launch"
+ ],
+ "total": 3,
+ "limit": 32,
+ "start": 0,
+ "collections": {
+  "mdi": {
+   "name": "Material Design Icons",
+   "total": 7447,
+   "author": {
+    "name": "Pictogrammers",
+    "url": "https://github.com/Templarian/MaterialDesign"
+   },
+   "license": {
+    "title": "Apache 2.0",
+    "spdx": "Apache-2.0",
+    "url": "https://github.com/Templarian/MaterialDesign/blob/master/LICENSE"
+   },
+   "height": 24,
+   "category": "Material",
+   "tags": [
+    "Precise Shapes",
+    "Has Padding"
+   ],
+   "palette": false
+  },
+  "twemoji": {
+   "name": "Twitter Emoji",
+   "total": 3988,
+   "author": {
+    "name": "Twitter",
+    "url": "https://github.com/jdecked/twemoji"
+   },
+   "license": {
+    "title": "CC BY 4.0",
+    "spdx": "CC-BY-4.0",
+    "url": "https://creativecommons.org/licenses/by/4.0/"
+   },
+   "height": 36,
+   "displayHeight": 18,
+   "category": "Emoji",
+   "tags": [
+    "Precise Shapes"
+   ],
+   "palette": true
+  }
+ },
+ "request": {
+  "query": "rocket",
+  "prefixes": "twemoji,mdi",
+  "limit": "32"
+ }
+}
