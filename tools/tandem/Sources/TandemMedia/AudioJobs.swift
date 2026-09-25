@@ -32,23 +32,34 @@ enum WaveformJob {
     }
 
     static func measure(_ reader: AudioReader, rate: Int, rangeStart: Double, context: JobContext) throws -> [Float] {
-        let bucket = max(1, Int((reader.sampleRate / Double(rate)).rounded()))
-        let expected = Int((reader.duration * Double(rate)).rounded(.up))
+        let sampleRate = reader.sampleRate
+        let perSecond = Double(rate)
+        let expected = Int((reader.duration * perSecond).rounded(.up))
         var peaks = [Float](repeating: 0, count: max(0, expected))
         let channels = reader.channels
         var chunks = 0
+        var reached = 0
         while try reader.next({ samples, frames, start in
             // Place each chunk by its time stamp, so leading silence or a
             // late-starting audio track still lines up with media time.
-            var position = Int(((start.seconds - rangeStart) * reader.sampleRate).rounded())
+            var position = Int(((start.seconds - rangeStart) * sampleRate).rounded())
             var offset = 0
+            if position < 0 {
+                // Stamped before zero (encoder priming): not part of the media.
+                offset = min(frames, -position)
+                position += offset
+            }
             while offset < frames {
-                let index = max(0, position) / bucket
-                let count = min(frames - offset, bucket - max(0, position) % bucket)
+                // Bucket edges in floating point: 22.05 kHz has 220.5 samples
+                // per bucket, and rounding that would drift 0.2%.
+                let index = Int(Double(position) * perSecond / sampleRate)
+                let nextBucket = Int((Double(index + 1) * sampleRate / perSecond).rounded(.up))
+                let count = max(1, min(frames - offset, nextBucket - position))
                 var peak: Float = 0
                 vDSP_maxmgv(samples.baseAddress! + offset * channels, 1, &peak, vDSP_Length(count * channels))
                 if index >= peaks.count { peaks.append(contentsOf: repeatElement(0, count: index - peaks.count + 1)) }
                 peaks[index] = max(peaks[index], min(1, peak))
+                reached = max(reached, index + 1)
                 offset += count
                 position += count
             }
@@ -56,7 +67,7 @@ enum WaveformJob {
             chunks += 1
             if chunks % 64 == 0 {
                 try context.checkCancellation()
-                if reader.duration > 0 { context.progress(Double(peaks.count) / Double(max(1, expected))) }
+                context.progress(Double(reached) / Double(max(1, expected)))
             }
         }
         return peaks

@@ -127,6 +127,19 @@ final class AnalysisTests: TempFolderTestCase {
         XCTAssertEqual(try Data(contentsOf: entry.appendingPathComponent(WaveformJob.peaksFile)).count, 800)
     }
 
+    func testWaveformDoesNotDriftAtRatesWithFractionalBuckets() async throws {
+        // 22.05 kHz is 220.5 samples per bucket; a click at 18 s must land
+        // in bucket 1800.
+        try SyntheticMedia.writeAudioFile(to: file("old.wav"), segments: [(18, 0), (0.02, 0.8), (1.98, 0)], sampleRate: 22_050, channels: 1)
+        let old = try await item("old.wav")
+        let analysis = analysis()
+        await analysis.waitFor(.waveform, for: old)
+        let peaks = try XCTUnwrap(analysis.waveform(for: old)).peaks
+        XCTAssertEqual(peaks.count, 2000)
+        XCTAssertEqual(peaks.firstIndex { $0 > 0.5 }, 1800)
+        XCTAssertEqual(peaks.lastIndex { $0 > 0.5 }, 1801)
+    }
+
     func testLoudnessOfTheEBUReferenceTone() async throws {
         let amplitude = pow(10, -23.0 / 20)
         try SyntheticMedia.writeAudioFile(to: file("ref.wav"), segments: [(4, amplitude)])
