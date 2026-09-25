@@ -71,6 +71,27 @@ final class AnalysisTests: TempFolderTestCase {
         XCTAssertEqual(MediaAnalysis.defaultKinds(for: image), [.thumbnails])
     }
 
+    func testRequestDefaultsQueuesTimelineMediaFirst() async throws {
+        try SyntheticMedia.writeAudioFile(to: file("music/bed.wav"), segments: [(1, 0.2)])
+        try await SyntheticMedia.writeMovie(to: file("source/t-camera.mov"), .init(duration: 0.5))
+        let bed = try await item("music/bed.wav")
+        let camera = try await item("source/t-camera.mov")
+        let analysis = analysis()
+        // Hold everything in the queue so its order can be read.
+        var limits = JobScheduler.Limits.standard
+        limits.total = 0
+        analysis.scheduler.limits = limits
+        analysis.requestDefaults(for: [bed, camera], usedOnTimeline: [camera.id])
+        let queued = analysis.jobs.map { "\($0.mediaID == camera.id ? "camera" : "bed") \($0.kind.rawValue)" }
+        XCTAssertEqual(queued, [
+            "camera waveform", "camera loudness", "camera thumbnails", "camera transcript", "camera isolatedVoice", "camera matte",
+            "bed waveform", "bed loudness"
+        ])
+        XCTAssertEqual(analysis.state(.matte, for: camera), .queued)
+        analysis.cancelAll()
+        XCTAssertEqual(analysis.state(.matte, for: camera), .missing)
+    }
+
     func testFittedSizesKeepAspectAndNeverUpscale() {
         XCTAssertTrue(fittedSize(width: 3840, height: 2160, maxWidth: 1920, maxHeight: 1080) == (1920, 1080))
         XCTAssertTrue(fittedSize(width: 3200, height: 1800, maxWidth: 1920, maxHeight: 1080) == (1920, 1080))
