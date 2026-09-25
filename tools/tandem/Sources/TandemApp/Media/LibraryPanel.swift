@@ -58,7 +58,6 @@ struct MediaBrowser: View {
     let filter: Set<MediaGroupKind>?
     @State private var chip: MediaGroupKind?
     @State private var selectedEntry: String?
-    @State private var scanning = false
 
     var body: some View {
         let all = MediaCatalog.groups(for: model.project, search: model.mediaSearch)
@@ -71,7 +70,7 @@ struct MediaBrowser: View {
                     Button {
                         rescan()
                     } label: {
-                        Image(systemName: scanning ? "arrow.triangle.2.circlepath" : "plus")
+                        Image(systemName: "plus")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Theme.textMuted.color)
                             .frame(width: 18, height: 18)
@@ -137,18 +136,7 @@ struct MediaBrowser: View {
     }
 
     private func rescan() {
-        guard !scanning else { return }
-        scanning = true
-        Task { @MainActor in
-            do {
-                let found = try await model.session.refreshMedia()
-                model.refresh()
-                model.show(.info, found.isEmpty ? "No new files in \(model.folderName)/." : "Found \(found.count) new \(found.count == 1 ? "file" : "files").")
-            } catch {
-                model.show(.error, "Couldn't scan the folder: \(EditorModel.describe(error))")
-            }
-            scanning = false
-        }
+        model.rescanMedia(ifOlderThan: 0, announce: true)
     }
 }
 

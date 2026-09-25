@@ -36,10 +36,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
             let controller = present(EditorModel(session: session), frame: frame)
             noteRecent(url)
             // Pick up files added to the folder while Tandem was closed.
-            Task { @MainActor in
-                _ = try? await session.refreshMedia()
-                controller.model.refresh()
-            }
+            controller.model.rescanMedia(ifOlderThan: 0)
             return controller
         } catch {
             if (error as NSError).domain == NSCocoaErrorDomain, (error as NSError).code == NSFileReadNoSuchFileError {
@@ -96,10 +93,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
             let session = try ProjectSession.create(at: url, name: Self.projectName(forFolder: name), owner: .app)
             let controller = present(EditorModel(session: session), frame: nil)
             noteRecent(url)
-            Task { @MainActor in
-                _ = try? await session.refreshMedia()
-                controller.model.refresh()
-            }
+            controller.model.rescanMedia(ifOlderThan: 0)
         } catch {
             alert("Couldn't create the project", EditorModel.describe(error))
         }

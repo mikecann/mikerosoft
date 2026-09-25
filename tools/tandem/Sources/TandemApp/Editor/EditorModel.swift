@@ -107,6 +107,8 @@ final class EditorModel {
     /// it's committed.
     var videoPreview: [String: VideoProperties] = [:]
 
+    @ObservationIgnored private var lastScan: Date = .distantPast
+    @ObservationIgnored private var scanning = false
     @ObservationIgnored private var observerToken: UUID?
     @ObservationIgnored private var jobToken: UUID?
     @ObservationIgnored private var dirtyTimer: Timer?
@@ -256,6 +258,32 @@ final class EditorModel {
         if let id = selectedTransitionID, project.location(ofTransition: id) == nil { selectedTransitionID = nil }
         playback.projectChanged(duration: project.duration, frameRate: project.settings.frameRate)
         for callback in onProjectChange { callback() }
+    }
+
+    // MARK: - Media
+
+    /// Looks for files added to the project folder, at most every
+    /// `interval` seconds. Runs when the project opens and whenever its
+    /// window comes to the front, so files dropped in from Finder or
+    /// record-it show up without asking.
+    func rescanMedia(ifOlderThan interval: TimeInterval = 20, announce: Bool = false) {
+        guard !scanning, Date().timeIntervalSince(lastScan) > interval else { return }
+        scanning = true
+        lastScan = Date()
+        Task { @MainActor in
+            defer { self.scanning = false }
+            do {
+                let found = try await self.session.refreshMedia()
+                self.refresh()
+                if !found.isEmpty {
+                    self.show(.info, "Found \(found.count) new \(found.count == 1 ? "file" : "files") in \(self.folderName)/.")
+                } else if announce {
+                    self.show(.info, "No new files in \(self.folderName)/.")
+                }
+            } catch {
+                if announce { self.show(.error, "Couldn't scan the folder: \(Self.describe(error))") }
+            }
+        }
     }
 
     // MARK: - Status

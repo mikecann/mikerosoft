@@ -95,7 +95,17 @@ final class ViewerView: NSView, CaptureAware {
         context.setFillColor(Theme.viewer.cg)
         context.fill(bounds)
         let canvas = canvasRect
-        guard !model.playback.hasComposition || WindowSnapshot.isCapturing else { return }
+        if model.playback.hasComposition {
+            // The player layer draws the picture; a window capture can't see
+            // it, so draw the current frame into the capture instead.
+            guard WindowSnapshot.isCapturing, let frame = model.playback.currentFrame() else { return }
+            context.saveGState()
+            context.translateBy(x: canvas.minX, y: canvas.maxY)
+            context.scaleBy(x: 1, y: -1)
+            context.draw(frame, in: CGRect(origin: .zero, size: canvas.size))
+            context.restoreGState()
+            return
+        }
         context.setFillColor(Swatch(0x131518).cg)
         context.fill(canvas)
         context.saveGState()

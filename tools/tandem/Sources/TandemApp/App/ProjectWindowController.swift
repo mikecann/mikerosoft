@@ -120,6 +120,12 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func windowDidBecomeKey(_ notification: Notification) {
         (window as? EditorWindow)?.layoutTrafficLights()
+        model.rescanMedia()
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        // A held Z can't be released while another window has the keys.
+        model.zoomKeyHeld = false
     }
 
     func windowDidExitFullScreen(_ notification: Notification) {

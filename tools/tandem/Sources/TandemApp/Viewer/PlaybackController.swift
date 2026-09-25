@@ -1,5 +1,7 @@
 import AVFoundation
+import CoreImage
 import Foundation
+import QuartzCore
 import Observation
 import TandemCore
 import TandemMedia
@@ -43,6 +45,11 @@ final class PlaybackController {
     @ObservationIgnored private var pendingSeek: Time?
     @ObservationIgnored private var rebuildWork: DispatchWorkItem?
     @ObservationIgnored private var buildGeneration = 0
+    /// Reads decoded frames back, so a window capture can show the picture
+    /// the player layer is drawing.
+    @ObservationIgnored private var videoOutput: AVPlayerItemVideoOutput?
+    @ObservationIgnored private var lastFrame: CGImage?
+    @ObservationIgnored private lazy var imageContext = CIContext()
 
     init() {
         player.actionAtItemEnd = .pause
@@ -106,6 +113,10 @@ final class PlaybackController {
         case .success(let built):
             let resumeRate = rate
             let item = built.makePlayerItem()
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+            item.add(output)
+            videoOutput = output
+            lastFrame = nil
             player.replaceCurrentItem(with: item)
             if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
             endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { [weak self] _ in
@@ -127,6 +138,18 @@ final class PlaybackController {
             }
             if rate != 0 { startClock() }
         }
+    }
+
+    /// The frame the player is showing, for screenshots. Nil when there's
+    /// no composition or nothing has decoded yet.
+    func currentFrame() -> CGImage? {
+        guard hasComposition, let output = videoOutput else { return nil }
+        let itemTime = output.itemTime(forHostTime: CACurrentMediaTime())
+        if let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
+            let image = CIImage(cvPixelBuffer: buffer)
+            lastFrame = imageContext.createCGImage(image, from: image.extent)
+        }
+        return lastFrame
     }
 
     // MARK: - Transport
