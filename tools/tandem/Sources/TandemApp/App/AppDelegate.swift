@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
     private let documents = ProjectDocuments.shared
     private var launched = false
     private var pendingURLs: [URL] = []
+    private var terminationSignal: DispatchSourceSignal?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         documents.keymap = KeymapStore.load(report: { message in
@@ -19,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         launched = true
+        quitCleanlyOnSIGTERM()
         NSApp.setActivationPolicy(.regular)
         let arguments = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         let fromCommandLine = arguments.map { URL(fileURLWithPath: NSString(string: $0).expandingTildeInPath) }
@@ -52,6 +54,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         documents.isTerminating = true
         documents.closeAll()
         return .terminateNow
+    }
+
+    /// `kill` (and `kill.sh`) quits like Cmd-Q: projects save, the API
+    /// stops and locks are released, instead of the process just ending.
+    private func quitCleanlyOnSIGTERM() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler {
+            MainActor.assumeIsolated { NSApp.terminate(nil) }
+        }
+        source.resume()
+        terminationSignal = source
     }
 
     // MARK: - Opening and URL commands

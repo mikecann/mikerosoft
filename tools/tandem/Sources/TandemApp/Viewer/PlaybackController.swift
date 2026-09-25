@@ -81,6 +81,7 @@ final class PlaybackController {
     @ObservationIgnored private var stillTime: Time?
     @ObservationIgnored private var stillImage: CGImage?
     @ObservationIgnored private var lastFrame: CGImage?
+    @ObservationIgnored private var lastFrameTime: CMTime?
     @ObservationIgnored private lazy var imageContext = CIContext()
 
     init() {
@@ -276,6 +277,7 @@ final class PlaybackController {
             outputs[old] = nil
         }
         lastFrame = nil
+        lastFrameTime = nil
         hasComposition = true
         renderMessage = nil
         clock?.invalidate()
@@ -297,12 +299,17 @@ final class PlaybackController {
     func currentFrame() -> CGImage? {
         guard hasComposition else { return nil }
         if stillTime != nil, let stillImage { return stillImage }
-        guard let output = outputs[front] else { return lastFrame }
-        let itemTime = players[front].currentTime()
+        guard let output = outputs[front] else { return nil }
+        let player = players[front]
+        let itemTime = player.currentTime()
         if let buffer = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: nil) {
             let image = CIImage(cvPixelBuffer: buffer)
             lastFrame = imageContext.createCGImage(image, from: image.extent)
+            lastFrameTime = itemTime
         }
+        // A paused player hands each frame out once, so a second capture at
+        // the same time reuses it; a frame from another time never stands in.
+        if player.rate == 0, let lastFrameTime, lastFrameTime != itemTime { return nil }
         return lastFrame
     }
 
