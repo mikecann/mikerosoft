@@ -32,13 +32,21 @@ extension EditorModel {
             case .failure(let error):
                 self.show(.error, "Couldn't add the files: \(Self.describe(error))")
             case .success(let items):
-                // Built against the project as it is now: the folder watcher
-                // may have added some of the files meanwhile.
-                guard let batch = FileImport.batch(items, into: self.project, at: time, trackID: trackID) else {
+                // Worked out against the coordinator's project as it is when
+                // it's applied: the folder watcher may have added some of the
+                // files meanwhile, and this window may not have heard yet.
+                let committed: (batch: EditBatch, result: ProjectCoordinator.CommitResult)?
+                do {
+                    committed = try FileImport.commit(items, to: self.session.coordinator, folder: self.folder, at: time, trackID: trackID)
+                } catch {
+                    self.show(.error, "Couldn't add the files: \(Self.describe(error))")
+                    return
+                }
+                self.refresh()
+                guard let (batch, applied) = committed else {
                     self.show(.info, "Those files are already in the project.")
                     return
                 }
-                guard let applied = self.apply(batch) else { return }
                 let created = SelectionRules.pruned(Set(applied.createdIDs), in: self.project)
                 if !created.isEmpty { self.selection = created }
                 let used = Set(self.project.allTracks.flatMap(\.clips).compactMap(\.mediaID))

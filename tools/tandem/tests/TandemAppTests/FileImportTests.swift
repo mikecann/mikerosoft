@@ -109,8 +109,40 @@ final class FileImportTests: XCTestCase {
         assertValid(coordinator.project)
 
         let justAdd = try XCTUnwrap(FileImport.batch(items, into: project, at: nil, trackID: nil))
+        // Finder and the scanner can spell an accented name differently.
+        let decomposed = MediaItem(id: "med_nfd", path: "broll/cafe\u{301}.mov", kind: .video, role: .broll, duration: t(2), hasVideo: true)
+        let composed = MediaItem(id: "med_nfc", path: "broll/caf\u{e9}.mov", kind: .video, role: .broll, duration: t(2), hasVideo: true)
+        var accented = project
+        accented.media.append(decomposed)
+        XCTAssertNil(FileImport.batch([composed], into: accented, folder: folder, at: nil, trackID: nil), "the same file isn't added twice")
         XCTAssertEqual(justAdd.label, "Add 2 files to the media")
         XCTAssertFalse(justAdd.commands.contains { if case .placeMedia = $0 { return true } else { return false } })
         XCTAssertNil(FileImport.batch([items[1]], into: project, at: nil, trackID: nil), "nothing new to add")
+    }
+
+    func testADropIsWorkedOutAgainstTheProjectWhenItLands() throws {
+        let coordinator = ProjectCoordinator(project: Project.standard(name: "Import"))
+        let dropped = MediaItem(id: "med_drop", path: "broll/drone.mov", kind: .video, role: .broll, duration: t(4), hasVideo: true)
+        // The folder watcher's scan finds the copied file first, under its
+        // own ID, after the drop's edit was worked out.
+        let scanned = MediaItem(id: "med_scan", path: "broll/drone.mov", kind: .video, role: .broll, duration: t(4), hasVideo: true)
+        var landed = false
+        let committed = try XCTUnwrap(FileImport.commit([dropped], to: coordinator, folder: folder, at: t(2), trackID: nil) {
+            guard !landed else { return }
+            landed = true
+            _ = try? coordinator.apply(EditBatch(label: "Found new media", author: "system", commands: [.addMedia(item: scanned)]))
+        })
+        let project = coordinator.project
+        XCTAssertEqual(project.media.filter { $0.path == "broll/drone.mov" }.map(\.id), ["med_scan"], "added once, under the scan's ID")
+        XCTAssertEqual(project.allTracks.flatMap(\.clips).compactMap(\.mediaID), ["med_scan"], "and placed")
+        XCTAssertFalse(committed.batch.commands.contains { if case .addMedia = $0 { return true } else { return false } })
+        XCTAssertEqual(committed.batch.expectedRevision, 1, "sent against the revision it was worked out from")
+        assertValid(project)
+        // Dropped on the media browser again: nothing left to do.
+        XCTAssertNil(try FileImport.commit([dropped], to: coordinator, folder: folder, at: nil, trackID: nil))
+        // An edit that keeps landing first gives up rather than looping.
+        XCTAssertThrowsError(try FileImport.commit([MediaItem(id: "med_other", path: "broll/other.mov", kind: .video, role: .broll, duration: t(1), hasVideo: true)], to: coordinator, folder: folder, at: nil, trackID: nil, attempts: 3) {
+            _ = try? coordinator.apply(EditBatch(label: "Marker", commands: [.addMarker(marker: Marker(time: t(1), name: "Busy"))]))
+        })
     }
 }

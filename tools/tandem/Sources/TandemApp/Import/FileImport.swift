@@ -139,15 +139,22 @@ enum FileImport {
     }
 
     /// The edit for probed files: new media added (a file the project
-    /// already has keeps its media), and with `at`, each placed after the
-    /// one before, stills for 5 s. Dropping one file on a track uses that
-    /// track. Nil when there's nothing to do.
-    static func batch(_ items: [MediaItem], into project: Project, at time: Time?, trackID: String?) -> EditBatch? {
+    /// already has keeps its media, matched by ID or by where it is in the
+    /// folder), and with `at`, each placed after the one before, stills for
+    /// 5 s. Dropping one file on a track uses that track. Nil when there's
+    /// nothing to do.
+    static func batch(_ items: [MediaItem], into project: Project, folder: ProjectFolder? = nil, at time: Time?, trackID: String?) -> EditBatch? {
         var project = project
         var commands: [EditCommand] = []
         var ids: [String] = []
+        // Paths compared as the folder resolves them, the way the media
+        // scan does, and in one Unicode form (Finder names can differ).
+        func key(_ item: MediaItem) -> String {
+            let path = folder.map { $0.path(for: $0.url(for: item)) } ?? item.path
+            return path.precomposedStringWithCanonicalMapping
+        }
         for item in items {
-            if let existing = project.media.first(where: { $0.id == item.id || $0.path == item.path }) {
+            if let existing = project.media.first(where: { $0.id == item.id || key($0) == key(item) }) {
                 if !ids.contains(existing.id) { ids.append(existing.id) }
                 continue
             }
@@ -167,6 +174,29 @@ enum FileImport {
         }
         guard !commands.isEmpty else { return nil }
         return EditBatch(label: ids.count == 1 ? "Add \(name(of: ids[0], in: project))" : "Add \(ids.count) files", commands: commands)
+    }
+
+    /// Commits probed files to the project as it is at that moment, not
+    /// as the window last saw it: the folder watcher's media scan can add
+    /// the same files while they're copied and probed, and those are
+    /// reused rather than added twice. The edit carries the revision it was
+    /// worked out against, and is worked out again if another commit lands
+    /// first. `beforeApply` is for tests to land one. Nil when there's
+    /// nothing left to do.
+    static func commit(_ items: [MediaItem], to coordinator: ProjectCoordinator, folder: ProjectFolder, at time: Time?, trackID: String?, attempts: Int = 20, beforeApply: (() -> Void)? = nil) throws -> (batch: EditBatch, result: ProjectCoordinator.CommitResult)? {
+        var attempt = 0
+        while true {
+            attempt += 1
+            let (current, revision) = coordinator.snapshot()
+            guard var batch = batch(items, into: current, folder: folder, at: time, trackID: trackID) else { return nil }
+            batch.expectedRevision = revision
+            beforeApply?()
+            do {
+                return (batch, try coordinator.apply(batch))
+            } catch EditError.staleRevision where attempt < attempts {
+                continue
+            }
+        }
     }
 
     private static func name(of id: String, in project: Project) -> String {
