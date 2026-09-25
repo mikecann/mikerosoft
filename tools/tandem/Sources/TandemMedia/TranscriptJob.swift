@@ -119,6 +119,8 @@ final class AnalyzerFeed: @unchecked Sendable {
     private var pending: [Float] = []
     private var pendingStart: CMTime?
     private var finished = false
+    /// Media time the audio should start at (0, or a range's start).
+    private let origin: Double
     /// Loudness of the audio as it goes past, to tidy word edges afterwards.
     private(set) var envelope: SpeechEnvelope
 
@@ -130,6 +132,7 @@ final class AnalyzerFeed: @unchecked Sendable {
         self.format = format
         self.context = context
         chunkFrames = Int(format.sampleRate)
+        self.origin = origin
         envelope = SpeechEnvelope(origin: origin, sampleRate: reader.sampleRate)
     }
 
@@ -139,10 +142,17 @@ final class AnalyzerFeed: @unchecked Sendable {
             return nil
         }
         while !finished, pending.count < chunkFrames * reader.channels {
-            let more = try reader.next { samples, _, start in
-                if pendingStart == nil || pending.isEmpty { pendingStart = start }
-                pending.append(contentsOf: samples)
-                if reader.channels == 1 { envelope.add(samples, at: start.seconds) }
+            let more = try reader.next { samples, frames, start in
+                // Samples stamped before the start (encoder priming) are
+                // dropped so word times stay in media time.
+                let early = Int(((origin - start.seconds) * reader.sampleRate).rounded())
+                let dropped = min(frames, max(0, early))
+                guard dropped < frames else { return }
+                let kept = UnsafeBufferPointer(rebasing: samples[(dropped * reader.channels)...])
+                let keptStart = dropped > 0 ? CMTime(seconds: origin, preferredTimescale: CMTimeScale(reader.sampleRate)) : start
+                if pendingStart == nil || pending.isEmpty { pendingStart = keptStart }
+                pending.append(contentsOf: kept)
+                if reader.channels == 1 { envelope.add(kept, at: keptStart.seconds) }
             }
             if !more { finished = true }
         }
