@@ -129,9 +129,10 @@ public struct AVFoundationProbe: MediaProbing {
             let peak = minimum.isValid && minimum.seconds > 0 ? 1 / minimum.seconds : 0
             let average = Double(nominal)
             // Screen recordings write frames only when something changes:
-            // the average rate sits well under the peak rate.
-            result.variableFrameRate = peak > 0 && average > 0 && abs(peak - average) > 0.5
-            result.frameRate = Self.frameRate(result.variableFrameRate ? peak : (average > 0 ? average : peak))
+            // the average rate sits well under the peak rate, which is the
+            // rate they record at.
+            result.variableFrameRate = peak > 0 && average > 0 && peak - average > 0.5
+            result.frameRate = Self.frameRate(peak > 0 ? peak : average)
             result.hasAlpha = formats.contains { description in
                 (CMFormatDescriptionGetExtension(description, extensionKey: kCMFormatDescriptionExtension_ContainsAlphaChannel) as? Bool) ?? false
             }
