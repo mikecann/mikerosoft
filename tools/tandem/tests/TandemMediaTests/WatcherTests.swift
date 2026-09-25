@@ -80,6 +80,29 @@ final class FolderWatcherTests: TempFolderTestCase {
         XCTAssertGreaterThan(Date().timeIntervalSince(lastWrite), 0.55, "only once it stopped changing for the settle time")
     }
 
+    func testCacheAndExportFoldersNeverTriggerARescan() throws {
+        let collector = Collector()
+        let watcher = FolderWatcher(folder: ProjectFolder(root: temp), debounce: 0.05, settleTime: 0) { collector.add($0) }
+        try watcher.start()
+        defer { watcher.stop() }
+        for i in 0..<3 {
+            try FileManager.default.createDirectory(at: file(".tandem/cache/proxy/.tmp-\(i)"), withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: file(".tandem/cache/proxy/.tmp-\(i)"), to: file(".tandem/cache/proxy/key\(i)"))
+            try FileManager.default.createDirectory(at: file("exports/render\(i)"), withIntermediateDirectories: true)
+        }
+        try FileManager.default.createDirectory(at: file("exports"), withIntermediateDirectories: true)
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(watcher.rescans, 0)
+        XCTAssertTrue(collector.all.isEmpty)
+
+        // A new folder of media is looked at.
+        let next = collector.expectBatch(self, "new folder")
+        try FileManager.default.createDirectory(at: file("broll"), withIntermediateDirectories: true)
+        touch("broll/clip.mov")
+        wait(for: [next], timeout: 5)
+        XCTAssertEqual(collector.merged.added, ["broll/clip.mov"])
+    }
+
     func testStopEndsReporting() throws {
         let collector = Collector()
         let watcher = FolderWatcher(folder: ProjectFolder(root: temp), debounce: 0.05, settleTime: 0) { collector.add($0) }

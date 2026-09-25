@@ -38,6 +38,8 @@ public final class FolderWatcher: @unchecked Sendable {
     private var rescan = false
     private var check: DispatchWorkItem?
     private let roots: [String]
+    /// Full rescans so far, for tests.
+    private(set) var rescans = 0
     private let onQueue = DispatchSpecificKey<Bool>()
     /// What the FSEvents callback holds: a weak route back to the watcher,
     /// so a callback racing with deinit finds nil instead of a dead object.
@@ -136,22 +138,34 @@ public final class FolderWatcher: @unchecked Sendable {
 
     /// On the watcher queue.
     private func received(paths: [String], flags: [FSEventStreamEventFlags]) {
+        var relevant = false
         for (path, flag) in zip(paths, flags) {
             let flag = Int(flag)
             if flag & (kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged | kFSEventStreamEventFlagUserDropped | kFSEventStreamEventFlagKernelDropped) != 0 {
                 rescan = true
+                relevant = true
                 continue
             }
-            guard let relative = relativePath(path) else { continue }
+            guard let relative = relativePath(path), !MediaScanner.isSkippedPath(relative) else { continue }
             if flag & kFSEventStreamEventFlagItemIsDir != 0 {
                 // A folder moved or vanished: look at everything under it.
-                if flag & (kFSEventStreamEventFlagItemRenamed | kFSEventStreamEventFlagItemRemoved | kFSEventStreamEventFlagItemCreated) != 0 { rescan = true }
+                // Tandem's own cache and exports churn constantly and hold no
+                // media, so they never trigger that.
+                let name = (relative as NSString).lastPathComponent
+                if !MediaScanner.isSkippedFolder(name: name),
+                   flag & (kFSEventStreamEventFlagItemRenamed | kFSEventStreamEventFlagItemRemoved | kFSEventStreamEventFlagItemCreated) != 0 {
+                    rescan = true
+                    relevant = true
+                }
                 continue
             }
-            guard MediaScanner.mediaKind(forPath: relative) != nil, !MediaScanner.isSkippedPath(relative) else { continue }
+            guard MediaScanner.mediaKind(forPath: relative) != nil else { continue }
             pending.insert(relative)
+            relevant = true
         }
-        schedule(after: debounce)
+        // Unrelated churn (a log file, node_modules) mustn't keep pushing
+        // back reports that are due.
+        if relevant { schedule(after: debounce) }
     }
 
     private func relativePath(_ path: String) -> String? {
@@ -173,6 +187,7 @@ public final class FolderWatcher: @unchecked Sendable {
             candidates.formUnion(known.keys)
             candidates.formUnion(snapshot().keys)
             rescan = false
+            rescans += 1
         }
         pending = []
         var changes = Changes()
