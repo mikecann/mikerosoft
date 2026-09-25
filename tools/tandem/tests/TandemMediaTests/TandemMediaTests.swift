@@ -42,6 +42,53 @@ final class LoudnessMeterTests: XCTestCase {
         XCTAssertEqual(meter.integrated, -.infinity)
     }
 
+    func testMatchesThePerSampleReferenceInAnyChunkSize() {
+        // Speech-like material: two tones with a slow level swing, a quiet
+        // stretch and a loud burst, on two different channels.
+        let rate = 48_000.0
+        let frames = Int(rate * 4.5)
+        var samples = [Float](repeating: 0, count: frames * 2)
+        var noise: UInt64 = 0x1234_5678
+        for i in 0..<frames {
+            let t = Double(i) / rate
+            let envelope = t < 2 ? 0.3 + 0.2 * sin(2 * .pi * 0.7 * t) : (t < 2.8 ? 0.02 : (t < 3.2 ? 0.9 : 0.25))
+            noise = noise &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let hiss = Double(Int64(bitPattern: noise >> 11) % 1000) / 100_000
+            samples[2 * i] = Float(envelope * sin(2 * .pi * 220 * t) + hiss)
+            samples[2 * i + 1] = Float(envelope * 0.6 * sin(2 * .pi * 3100 * t + 1) - hiss)
+        }
+        var reference = ReferenceLoudnessMeter()
+        reference.process(interleaved: samples)
+
+        var meter = LoudnessMeter()
+        var offset = 0
+        let chunks = [1, 4095, 17, 48_000, 4800, 333]
+        var index = 0
+        while offset < frames {
+            let count = min(chunks[index % chunks.count], frames - offset)
+            samples.withUnsafeBufferPointer { all in
+                meter.process(interleaved: UnsafeBufferPointer(rebasing: all[(offset * 2)..<((offset + count) * 2)]), frames: count)
+            }
+            offset += count
+            index += 1
+        }
+        XCTAssertEqual(meter.integrated, reference.integrated, accuracy: 0.001)
+        XCTAssertEqual(meter.loudnessRange, reference.loudnessRange, accuracy: 0.001)
+        XCTAssertEqual(meter.truePeak, reference.truePeak, accuracy: 0.001)
+        XCTAssertEqual(meter.shortTerm, reference.shortTerm, accuracy: 0.001)
+    }
+
+    func testPlanarInputMatchesInterleaved() {
+        let stereo = sine(dbfs: -18, seconds: 2)
+        let left = stride(from: 0, to: stereo.count, by: 2).map { stereo[$0] }
+        var planar = LoudnessMeter()
+        left.withUnsafeBufferPointer { l in planar.process(planar: [l, l]) }
+        var interleaved = LoudnessMeter()
+        interleaved.process(interleaved: stereo)
+        XCTAssertEqual(planar.integrated, interleaved.integrated, accuracy: 0.0001)
+        XCTAssertEqual(planar.truePeak, interleaved.truePeak, accuracy: 0.0001)
+    }
+
     func testTruePeakCatchesIntersamplePeaks() {
         // A sine at a quarter of the sample rate, phase shifted 45 degrees,
         // never hits its peak on a sample: samples read -3 dB, true peak 0.
