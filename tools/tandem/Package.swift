@@ -33,7 +33,9 @@ let package = Package(
         .testTarget(name: "TandemCoreTests", dependencies: ["TandemCore"], path: "tests/TandemCoreTests"),
         .testTarget(name: "TandemMediaTests", dependencies: ["TandemMedia"], path: "tests/TandemMediaTests"),
         .testTarget(name: "TandemRenderTests", dependencies: ["TandemRender"], path: "tests/TandemRenderTests"),
-        .testTarget(name: "TandemAPITests", dependencies: ["TandemAPI"], path: "tests/TandemAPITests")
+        // Depends on the CLI so `swift test` builds the `tandem` binary that the
+        // end-to-end tests run.
+        .testTarget(name: "TandemAPITests", dependencies: ["TandemAPI", "TandemCLI"], path: "tests/TandemAPITests")
     ],
     swiftLanguageModes: [.v5]
 )

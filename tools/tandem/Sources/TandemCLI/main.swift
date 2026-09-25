@@ -1,4 +1,4 @@
 import Foundation
 import TandemAPI
 
-print("tandem \(TandemAPI.version)")
+print("tandem \(TandemAPI.version) probe")
