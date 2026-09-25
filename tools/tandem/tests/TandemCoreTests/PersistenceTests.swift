@@ -68,4 +68,17 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(recovered.project, coordinator.project)
         XCTAssertEqual(recovered.project.markers.map(\.id), ["mk_b", "mk_old"], "mk_a was replaced by the reload")
     }
+
+    func testTruncatingForASaveKeepsTheEditsItMissed() throws {
+        let journal = journal()
+        journal.append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)
+        journal.append(batch: marker("mk_2", at: 2), revision: 2, seed: 2)
+        journal.append(batch: marker("mk_3", at: 3), revision: 3, seed: 3)
+        // A save of revision 2: an edit committed while it was writing the
+        // file (revision 3) isn't in the file, so its entry must stay.
+        journal.truncate(through: 2)
+        XCTAssertEqual(journal.entries(after: 0).map(\.revision), [3])
+        journal.truncate(through: 3)
+        XCTAssertEqual(journal.entries(after: 0).map(\.revision), [])
+    }
 }

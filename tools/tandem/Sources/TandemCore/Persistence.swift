@@ -135,9 +135,28 @@ public final class ProjectJournal: @unchecked Sendable {
         }
     }
 
-    /// Starts a fresh journal, called after a successful save.
+    /// Starts a fresh journal, for a file whose journal belongs to
+    /// something else (a version saved over an old file of that name).
     public func truncate() {
         queue.sync { try? Data().write(to: url, options: .atomic) }
+    }
+
+    /// Drops the entries a save of `revision` includes, after the save.
+    /// An edit that committed while the file was being written is newer
+    /// than the save, so its entry stays for a crash before the next save.
+    public func truncate(through revision: Int) {
+        queue.sync {
+            guard let data = try? Data(contentsOf: url), !data.isEmpty else { return }
+            struct Header: Decodable { var revision: Int }
+            let decoder = JSONDecoder()
+            var kept = Data()
+            for line in data.split(separator: 0x0A) {
+                guard let header = try? decoder.decode(Header.self, from: Data(line)), header.revision > revision else { continue }
+                kept.append(contentsOf: line)
+                kept.append(0x0A)
+            }
+            try? kept.write(to: url, options: .atomic)
+        }
     }
 
     private func write(_ entry: Entry) {

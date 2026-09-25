@@ -99,13 +99,15 @@ public final class ProjectSession: @unchecked Sendable {
 
     public var isDirty: Bool { coordinator.revision != savedRevision }
 
-    /// Writes the project atomically and clears the journal.
+    /// Writes the project atomically and clears the journal up to what
+    /// was written. Edits keep committing while the file is written, and
+    /// their journal entries stay until the save that includes them.
     public func save() throws {
         try queue.sync {
             let (project, revision) = coordinator.snapshot()
             guard revision != savedRevision else { return }
             try ProjectFile.save(project, revision: revision, to: fileURL)
-            journal.truncate()
+            journal.truncate(through: revision)
             savedRevision = revision
         }
     }

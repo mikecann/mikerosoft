@@ -41,6 +41,25 @@ final class ProjectSessionTests: XCTestCase {
         reopened.close()
     }
 
+    func testAnEditThatLandsDuringASaveIsStillJournaled() throws {
+        let url = folder.appendingPathComponent("Race.tandem")
+        let session = try ProjectSession.create(at: url, owner: .app)
+        session.autosaveDelay = 3600
+        try session.coordinator.apply(EditBatch(label: "First", commands: [.addMarker(marker: Marker(id: "mk_1", time: t(1), name: "1"))]))
+        // What the journal holds when an agent's edit commits after the save
+        // has taken its snapshot but before it clears the journal: an entry
+        // for the next revision, which the file being written doesn't have.
+        let late = EditBatch(label: "Late", commands: [.addMarker(marker: Marker(id: "mk_2", time: t(2), name: "2"))])
+        ProjectJournal.forProject(at: url).append(batch: late, revision: session.coordinator.revision + 1, seed: 7)
+        try session.save()
+
+        // The app dies before the next autosave.
+        try FileManager.default.removeItem(at: ProjectSession.lockURL(for: url))
+        let reopened = try ProjectSession.open(url, owner: .app)
+        defer { reopened.close() }
+        XCTAssertEqual(reopened.coordinator.project.markers.map(\.id), ["mk_1", "mk_2"])
+    }
+
     func testAnUndoFromTheDiskHistorySurvivesACrash() throws {
         // A CLI edit, then the app opens the project and an agent undoes
         // that edit through the app's API (from the history kept on disk),
