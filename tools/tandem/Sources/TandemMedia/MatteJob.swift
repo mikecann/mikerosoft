@@ -18,7 +18,21 @@ enum MatteJob {
     /// (60 fps accurate on the M5 Pro); more only adds latency.
     static let workers = 3
 
-    static func run(source: URL, settings: AnalysisSettings, into folder: URL, context: JobContext, timeRange: CMTimeRange? = nil) async throws {
+    /// Knobs for measuring the pipeline; the app uses the defaults.
+    ///
+    /// The segmentation request is a VNStatefulRequest, so workers taking
+    /// frames in whatever order they finish looked risky. Measured on 20 s
+    /// of the camera (RealMediaTests.testMatteTemporalStateExperiment), the
+    /// mattes are identical to the byte whether three workers share frames,
+    /// every frame gets a fresh request, or one worker goes in order (at
+    /// half the speed), and identical from run to run.
+    struct Tuning {
+        var workers = MatteJob.workers
+        /// A fresh segmentation request for every frame: no temporal state.
+        var stateless = false
+    }
+
+    static func run(source: URL, settings: AnalysisSettings, into folder: URL, context: JobContext, timeRange: CMTimeRange? = nil, tuning: Tuning = Tuning()) async throws {
         let reader = try await VideoFrameReader(url: source, timeRange: timeRange)
         let size = fittedSize(width: Int(reader.size.width), height: Int(reader.size.height), maxWidth: settings.matteMaxWidth, maxHeight: settings.matteMaxHeight)
         let writer = try EncodedMovieWriter(url: folder.appendingPathComponent(file), settings: .init(
@@ -30,7 +44,7 @@ enum MatteJob {
             yCbCrMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
             timescale: reader.timescale, transform: reader.transform, expectedFrameRate: reader.nominalFrameRate > 0 ? reader.nominalFrameRate : nil
         ))
-        let pipeline = try MattePipeline(reader: reader, width: size.width, height: size.height, quality: settings.matteQuality, mode: settings.matteMode, workers: workers)
+        let pipeline = try MattePipeline(reader: reader, width: size.width, height: size.height, quality: settings.matteQuality, mode: settings.matteMode, workers: tuning.workers, stateless: tuning.stateless)
         pipeline.start()
         await context.acquireEncoder()
         do {
@@ -77,7 +91,10 @@ final class MattePipeline: @unchecked Sendable {
     private(set) var written = 0
     private(set) var failures = 0
 
-    init(reader: VideoFrameReader, width: Int, height: Int, quality: MatteQuality, mode: CutoutMode, workers: Int) throws {
+    private let stateless: Bool
+
+    init(reader: VideoFrameReader, width: Int, height: Int, quality: MatteQuality, mode: CutoutMode, workers: Int, stateless: Bool = false) throws {
+        self.stateless = stateless
         self.reader = reader
         self.width = width
         self.height = height
@@ -141,7 +158,7 @@ final class MattePipeline: @unchecked Sendable {
     }
 
     private func workLoop() {
-        let blender = MatteBlender(width: width, height: height, quality: quality, mode: mode)
+        let blender = MatteBlender(width: width, height: height, quality: quality, mode: mode, stateless: stateless)
         while true {
             condition.lock()
             while inbox.isEmpty, !endOfInput, !stopped { condition.wait() }
@@ -226,7 +243,9 @@ final class MatteBlender {
     let width: Int
     let height: Int
     let mode: CutoutMode
-    private let segmentation = VNGeneratePersonSegmentationRequest()
+    private var segmentation = VNGeneratePersonSegmentationRequest()
+    private let quality: MatteQuality
+    private let stateless: Bool
     private let instances = VNGeneratePersonInstanceMaskRequest()
     private let handler = VNSequenceRequestHandler()
     private var person: [UInt8]
@@ -242,25 +261,38 @@ final class MatteBlender {
     /// (a mic held in front of the chest) are filled from the instance mask.
     static let holeSize = 0.33
 
-    init(width: Int, height: Int, quality: MatteQuality, mode: CutoutMode) {
+    init(width: Int, height: Int, quality: MatteQuality, mode: CutoutMode, stateless: Bool = false) {
         self.width = width
         self.height = height
         self.mode = mode
-        switch quality {
-        case .fast: segmentation.qualityLevel = .fast
-        case .balanced: segmentation.qualityLevel = .balanced
-        case .accurate: segmentation.qualityLevel = .accurate
-        }
-        segmentation.outputPixelFormat = kCVPixelFormatType_OneComponent8
+        self.quality = quality
+        self.stateless = stateless
         person = [UInt8](repeating: 0, count: width * height)
         combined = [UInt8](repeating: 0, count: width * height)
+        segmentation = Self.segmentationRequest(quality)
+    }
+
+    static func segmentationRequest(_ quality: MatteQuality) -> VNGeneratePersonSegmentationRequest {
+        let request = VNGeneratePersonSegmentationRequest()
+        switch quality {
+        case .fast: request.qualityLevel = .fast
+        case .balanced: request.qualityLevel = .balanced
+        case .accurate: request.qualityLevel = .accurate
+        }
+        request.outputPixelFormat = kCVPixelFormatType_OneComponent8
+        return request
     }
 
     /// Writes the matte for `frame` into the luma of `output` (420f).
     func render(_ frame: CVPixelBuffer, into output: CVPixelBuffer) -> Bool {
+        if stateless { segmentation = Self.segmentationRequest(quality) }
         let requests: [VNRequest] = mode == .personAndProps ? [segmentation, instances] : [segmentation]
         do {
-            try handler.perform(requests, on: frame, orientation: .up)
+            if stateless {
+                try VNImageRequestHandler(cvPixelBuffer: frame, orientation: .up, options: [:]).perform(requests)
+            } else {
+                try handler.perform(requests, on: frame, orientation: .up)
+            }
         } catch {
             return false
         }

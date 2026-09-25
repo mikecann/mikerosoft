@@ -218,6 +218,64 @@ final class RealMediaTests: XCTestCase {
         }
     }
 
+    /// Luma planes of every frame of a matte, in order.
+    func matteFrames(_ url: URL) async throws -> [[UInt8]] {
+        let asset = AVURLAsset(url: url)
+        let track = try await asset.loadTracks(withMediaType: .video)[0]
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange])
+        reader.add(output)
+        reader.startReading()
+        var frames: [[UInt8]] = []
+        while let sample = output.copyNextSampleBuffer() {
+            guard let buffer = CMSampleBufferGetImageBuffer(sample) else { continue }
+            CVPixelBufferLockBaseAddress(buffer, .readOnly)
+            let width = CVPixelBufferGetWidthOfPlane(buffer, 0), height = CVPixelBufferGetHeightOfPlane(buffer, 0)
+            let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+            let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 0)!.assumingMemoryBound(to: UInt8.self)
+            // Every 4th pixel each way is plenty for comparing mattes.
+            var plane: [UInt8] = []
+            plane.reserveCapacity(width * height / 16)
+            for y in Swift.stride(from: 0, to: height, by: 4) { for x in Swift.stride(from: 0, to: width, by: 4) { plane.append(base[y * stride + x]) } }
+            CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
+            frames.append(plane)
+        }
+        return frames
+    }
+
+    func meanDifference(_ a: [UInt8], _ b: [UInt8]) -> Double {
+        var total = 0
+        for i in 0..<min(a.count, b.count) { total += abs(Int(a[i]) - Int(b[i])) }
+        return Double(total) / Double(max(1, min(a.count, b.count)))
+    }
+
+    /// Compares Vision's temporal state handling: several workers sharing
+    /// frames (each request sees every third frame), fresh requests every
+    /// frame, and one worker in order.
+    func testMatteTemporalStateExperiment() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_MATTE_EXPERIMENT"] == "1", "set TANDEM_MATTE_EXPERIMENT=1")
+        let range = CMTimeRange(start: CMTime(seconds: 1010, preferredTimescale: 600), duration: CMTime(seconds: 20, preferredTimescale: 600))
+        var results: [String: [[UInt8]]] = [:]
+        for (name, tuning) in [("shared-a", MatteJob.Tuning(workers: 3, stateless: false)), ("shared-b", MatteJob.Tuning(workers: 3, stateless: false)),
+                               ("stateless-a", MatteJob.Tuning(workers: 3, stateless: true)), ("stateless-b", MatteJob.Tuning(workers: 3, stateless: true)),
+                               ("in-order", MatteJob.Tuning(workers: 1, stateless: false))] {
+            let folder = try output("matte-\(name)")
+            let (_, seconds) = try await time {
+                try await MatteJob.run(source: Self.camera, settings: AnalysisSettings(), into: folder, context: context(.matte), timeRange: range, tuning: tuning)
+            }
+            let frames = try await matteFrames(folder.appendingPathComponent(MatteJob.file))
+            results[name] = frames
+            let flicker = zip(frames, frames.dropFirst()).map { meanDifference($0, $1) }.reduce(0, +) / Double(max(1, frames.count - 1))
+            report(String(format: "matte experiment %@: %d frames in %.1f s = %.1f fps, frame-to-frame change %.3f", name, frames.count, seconds, Double(frames.count) / seconds, flicker))
+        }
+        func compare(_ a: String, _ b: String) -> Double {
+            let x = results[a]!, y = results[b]!
+            return zip(x, y).map { meanDifference($0, $1) }.reduce(0, +) / Double(min(x.count, y.count))
+        }
+        report(String(format: "  run to run: shared %.3f, stateless %.3f", compare("shared-a", "shared-b"), compare("stateless-a", "stateless-b")))
+        report(String(format: "  against in-order: shared %.3f, stateless %.3f", compare("shared-a", "in-order"), compare("stateless-a", "in-order")))
+    }
+
     /// Composites the camera over blue through the matte at one time.
     func exportCutout(matte: URL, at seconds: Double, to url: URL) async throws {
         let time = CMTime(seconds: seconds, preferredTimescale: 600)
