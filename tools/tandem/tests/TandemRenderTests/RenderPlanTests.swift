@@ -9,11 +9,14 @@ func t(_ seconds: Double) -> Time { Time(seconds: seconds) }
 final class FakeAssets: RenderAssets, @unchecked Sendable {
     var proxies: [String: URL] = [:]
     var mattes: [String: URL] = [:]
+    /// Mattes made in the person-only mode, when a test needs both.
+    var personMattes: [String: URL] = [:]
     var voices: [String: URL] = [:]
     var loudnesses: [String: Loudness] = [:]
 
     func proxyURL(for item: MediaItem) -> URL? { proxies[item.id] }
     func matteURL(for item: MediaItem) -> URL? { mattes[item.id] }
+    func matteURL(for item: MediaItem, mode: CutoutMode) -> URL? { mode == .person ? personMattes[item.id] : mattes[item.id] }
     func isolatedVoiceURL(for item: MediaItem) -> URL? { voices[item.id] }
     func loudness(for item: MediaItem) -> Loudness? { loudnesses[item.id] }
 }

@@ -16,7 +16,7 @@ import VideoToolbox
 ///    them with the mastered audio (gain, true-peak limiter, AAC 48 kHz
 ///    stereo) into AVAssetWriter.
 /// 4. Write a snapshot of the project beside the file.
-final class ExportJob: @unchecked Sendable {
+final class ExportPipeline: @unchecked Sendable {
     let context: RenderContext
     let preset: ExportPreset
     let output: URL
@@ -24,7 +24,6 @@ final class ExportJob: @unchecked Sendable {
 
     private let lock = NSLock()
     private var cancelled = false
-    private var readers: [AVAssetReader] = []
     /// Seconds spent in each phase, for diagnostics and benchmarks.
     private(set) var timings: [(phase: String, seconds: Double)] = []
     /// Each loudness measurement: the gain it was made at and the result.
@@ -47,20 +46,16 @@ final class ExportJob: @unchecked Sendable {
 
     var isCancelled: Bool { lock.withLock { cancelled } }
 
+    /// Asks the export to stop. Only a flag: every thread reading a reader
+    /// checks it after each sample and stops, and the reader is cancelled
+    /// once nobody is inside it. Cancelling an AVAssetReader while another
+    /// thread is in `copyNextSampleBuffer` crashes AVFoundation.
     func cancel() {
-        let active: [AVAssetReader] = lock.withLock {
-            cancelled = true
-            return readers
-        }
-        active.forEach { $0.cancelReading() }
+        lock.withLock { cancelled = true }
     }
 
-    private func track(_ reader: AVAssetReader) throws {
-        let stop: Bool = lock.withLock {
-            readers.append(reader)
-            return cancelled
-        }
-        if stop { throw RenderError.cancelled }
+    private func throwIfCancelled() throws {
+        if isCancelled { throw RenderError.cancelled }
     }
 
     /// Refuses outputs that could destroy work: anything but a movie file
@@ -174,8 +169,8 @@ final class ExportJob: @unchecked Sendable {
         ceiling: Double?,
         progress: (Double) -> Void
     ) async throws -> [Loudness] {
+        try throwIfCancelled()
         let reader = try AVAssetReader(asset: built.composition)
-        try track(reader)
         reader.timeRange = range.cmTimeRange
         let output = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: AudioBuffers.readerSettings)
         output.audioMix = built.audioMix
@@ -223,7 +218,11 @@ final class ExportJob: @unchecked Sendable {
             progress(Double(frames) / max(total, 1))
             if isCancelled { break }
         }
-        if isCancelled { throw RenderError.cancelled }
+        if isCancelled {
+            // This thread was the only reader, so cancelling is safe here.
+            reader.cancelReading()
+            throw RenderError.cancelled
+        }
         if reader.status == .failed { throw reader.error ?? RenderError.export("couldn't read the mix") }
         let results = chains.map { $0.finish() }
         lock.withLock {
@@ -267,8 +266,8 @@ final class ExportJob: @unchecked Sendable {
         try? FileManager.default.removeItem(at: output)
         try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
 
+        try throwIfCancelled()
         let reader = try AVAssetReader(asset: built.composition)
-        try track(reader)
         reader.timeRange = range.cmTimeRange
         let pictures = AVAssetReaderVideoCompositionOutput(videoTracks: videoTracks, videoSettings: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
@@ -294,31 +293,45 @@ final class ExportJob: @unchecked Sendable {
         let frameDuration = CMTime(value: fps.denominator, timescale: CMTimeScale(fps.numerator))
         let base = 0.1
 
-        // Feed composed frames to the encoder on their own thread.
-        let source = Unchecked(pictures)
+        // Feed composed frames to the encoder on their own thread. It holds
+        // the reader too: an output read after its reader is gone crashes.
+        let source = Unchecked((reader: reader, output: pictures))
+        let stop = StopFlag()
+        let fed = DispatchGroup()
+        fed.enter()
         let feeder = Thread { [weak self] in
-            while let sample = source.value.copyNextSampleBuffer() {
-                if self?.isCancelled ?? true { break }
+            while !stop.isSet, !(self?.isCancelled ?? true), let sample = source.value.output.copyNextSampleBuffer() {
                 guard let pixels = CMSampleBufferGetImageBuffer(sample) else { continue }
                 encoder.encode(pixels, at: CMSampleBufferGetPresentationTimeStamp(sample), duration: frameDuration)
             }
             encoder.finish()
+            fed.leave()
         }
         feeder.name = "Tandem export encoder feed"
         feeder.qualityOfService = .userInitiated
         feeder.start()
+        // Every way out stops the feed and waits for it, then (if it didn't
+        // run to the end) cancels the reader, now that nothing is inside it.
+        func stopFeeding(cancel: Bool) async {
+            stop.set()
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                fed.notify(queue: .global()) { done.resume() }
+            }
+            if cancel { reader.cancelReading() }
+        }
 
         guard let hint = encoder.waitForFormat() else {
-            reader.cancelReading()
+            await stopFeeding(cancel: true)
             if isCancelled { throw RenderError.cancelled }
             throw encoder.error ?? reader.error ?? RenderError.export("the encoder produced nothing")
         }
-
-        // From here the feed thread is running: stop it on any failure.
         do {
-            return try await mux(reader: reader, encoder: encoder, hint: hint, mix: mix, range: range, gainDB: gainDB, ceiling: ceiling, progressBase: base)
+            let loudness = try await mux(reader: reader, encoder: encoder, hint: hint, mix: mix, range: range, gainDB: gainDB, ceiling: ceiling, progressBase: base)
+            // Finished: the feed has already run out.
+            await stopFeeding(cancel: false)
+            return loudness
         } catch {
-            reader.cancelReading()
+            await stopFeeding(cancel: true)
             throw error
         }
     }
@@ -394,10 +407,10 @@ final class ExportJob: @unchecked Sendable {
             group.notify(queue: .global()) { done.resume() }
         }
 
+        // The reader is cancelled by the caller once the feed has stopped.
         if isCancelled || writer.status != .writing {
             let failure = writer.error
             writer.cancelWriting()
-            reader.cancelReading()
             if isCancelled { throw RenderError.cancelled }
             throw failure ?? RenderError.export("writing stopped")
         }
@@ -432,6 +445,18 @@ final class ExportJob: @unchecked Sendable {
         }
         let data = try ProjectFile.encoder().encode(Snapshot(revision: 0, project: project))
         try data.write(to: URL(fileURLWithPath: output.path + ".tandem"), options: .atomic)
+    }
+}
+
+/// A flag set from one thread and read from another.
+final class StopFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var isSet: Bool { lock.withLock { value } }
+
+    func set() {
+        lock.withLock { value = true }
     }
 }
 

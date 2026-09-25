@@ -138,7 +138,7 @@ final class RealMediaTests: XCTestCase {
         let context = try v14()
         let out = scratch.appendingPathComponent("v14-minute-120s.mp4")
         let preset = ExportPreset(name: "YouTube 4K range", codec: .hevc, videoBitrate: 80_000_000, range: TimeRange(start: Time(seconds: 120), duration: Time(seconds: 60)))
-        let job = ExportJob(context: context, preset: preset, output: out, progress: { _ in })
+        let job = ExportPipeline(context: context, preset: preset, output: out, progress: { _ in })
         let result = try await job.run()
         print(String(format: "REAL v14 60 s range export: %.1f s = %.2fx real time, %.2f LUFS, %.2f dBTP",
                      result.elapsed, 60 / result.elapsed, result.integratedLUFS ?? -99, result.truePeakDBTP ?? -99))

@@ -111,6 +111,39 @@ final class PipelineTests: XCTestCase {
         assertColor(frame[260, 90], [255, 0, 0], tolerance: 8)
     }
 
+    func testCutoutUsesTheMatteMadeInItsMode() async throws {
+        let media = try TestMedia()
+        try await media.movie("red.mov", seconds: 1, draw: { TestMedia.fill($1, 1, 0, 0) })
+        try await media.movie("blue.mov", seconds: 1, draw: { TestMedia.fill($1, 0, 0, 1) })
+        func matte(_ name: String, leftHalf: Bool) async throws -> URL {
+            try await media.movie(name, seconds: 1, size: CGSize(width: 160, height: 90), draw: { _, c in
+                TestMedia.fill(c, 0, 0, 0, size: CGSize(width: 160, height: 90))
+                c.setFillColor(CGColor(gray: 1, alpha: 1))
+                c.fill(CGRect(x: leftHalf ? 0 : 80, y: 0, width: 80, height: 90))
+            })
+        }
+        let withProps = try await matte("props.mov", leftHalf: true)
+        let personOnly = try await matte("person.mov", leftHalf: false)
+        let screen = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        let camera = Clip(id: "clip_c", content: .media(mediaID: "med_b"), start: .zero, duration: t(1),
+                          video: VideoProperties(cutout: Cutout(mode: .person, edgeFeather: 0)))
+        let project = smallProject(
+            video: [Track(kind: .video, name: "Screen", clips: [screen]), Track(kind: .video, name: "Camera", clips: [camera])],
+            media: [media.item("med_r", "red.mov", seconds: 1), media.item("med_b", "blue.mov", seconds: 1)]
+        )
+        let assets = FakeAssets()
+        assets.mattes["med_b"] = withProps
+        assets.personMattes["med_b"] = personOnly
+        let frame = try await grab(RenderContext(project: project, folder: media.projectFolder, assets: assets), 0.5)
+        assertColor(frame[60, 90], [255, 0, 0], tolerance: 8)
+        assertColor(frame[260, 90], [0, 0, 255], tolerance: 8)
+        // Only the default matte made so far: use it rather than no cutout.
+        assets.personMattes = [:]
+        let fallback = try await grab(RenderContext(project: project, folder: media.projectFolder, assets: assets), 0.5)
+        assertColor(fallback[60, 90], [0, 0, 255], tolerance: 8)
+        assertColor(fallback[260, 90], [255, 0, 0], tolerance: 8)
+    }
+
     func testProxiesAreUsedForPlaybackOnly() async throws {
         let media = try TestMedia()
         try await media.movie("red.mov", seconds: 2, draw: { TestMedia.fill($1, 1, 0, 0) })

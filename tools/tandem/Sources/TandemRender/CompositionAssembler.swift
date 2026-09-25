@@ -130,6 +130,7 @@ enum CompositionAssembler {
         var warnings = RenderPlanner.Warnings()
         plan.warnings.forEach { warnings.add($0) }
         let media = Dictionary(project.media.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let clips = Dictionary(project.videoTracks.flatMap(\.clips).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let frameDuration = project.settings.frameRate.frameDuration
 
         // Which file each segment reads.
@@ -139,7 +140,9 @@ enum CompositionAssembler {
             case .picture:
                 if context.useProxies, let proxy = context.assets?.proxyURL(for: item) { return proxy }
                 return context.folder.url(for: item)
-            case .matte: return context.assets?.matteURL(for: item)
+            case .matte:
+                let cutout = clips[segment.clipID]?.video?.cutout ?? Cutout()
+                return context.assets?.matteURL(for: item, cutout: cutout)
             case .sound: return context.folder.url(for: item)
             case .isolatedVoice: return context.assets?.isolatedVoiceURL(for: item)
             }
@@ -226,13 +229,13 @@ enum CompositionAssembler {
         audioMix.inputParameters = mixParameters
 
         // The compositor's view of the clips.
-        var clips = RenderEngine.sceneClips(project, folder: context.folder)
-        for (id, transform) in pictureTransforms { clips[id]?.pictureTransform = transform }
-        for (id, transform) in matteTransforms { clips[id]?.matteTransform = transform }
+        var sceneClips = RenderEngine.sceneClips(project, folder: context.folder)
+        for (id, transform) in pictureTransforms { sceneClips[id]?.pictureTransform = transform }
+        for (id, transform) in matteTransforms { sceneClips[id]?.matteTransform = transform }
         let canvas = context.renderSize
         let scene = RenderScene(
             canvas: canvas, frameDuration: frameDuration, format: context.format,
-            clips: clips, registry: context.effects, folder: context.folder
+            clips: sceneClips, registry: context.effects, folder: context.folder
         )
         let trackIDs = videoTracks.map(\.trackID)
         let videoComposition = AVMutableVideoComposition()

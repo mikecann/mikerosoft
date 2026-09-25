@@ -282,7 +282,7 @@ public final class Exporter: @unchecked Sendable {
     public let preset: ExportPreset
     public let output: URL
     private let lock = NSLock()
-    private var job: ExportJob?
+    private var job: ExportPipeline?
     private var cancelRequested = false
 
     public init(context: RenderContext, preset: ExportPreset, output: URL) {
@@ -295,7 +295,7 @@ public final class Exporter: @unchecked Sendable {
     /// `RenderError.cancelled` after `cancel()` or task cancellation, and
     /// removes the partial file.
     public func run(progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> ExportResult {
-        let job = ExportJob(context: context, preset: preset, output: output, progress: progress)
+        let job = ExportPipeline(context: context, preset: preset, output: output, progress: progress)
         let cancelled = lock.withLock {
             self.job = job
             return cancelRequested
@@ -309,7 +309,7 @@ public final class Exporter: @unchecked Sendable {
     }
 
     public func cancel() {
-        let job: ExportJob? = lock.withLock {
+        let job: ExportPipeline? = lock.withLock {
             cancelRequested = true
             return self.job
         }

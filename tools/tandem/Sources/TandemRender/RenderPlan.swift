@@ -147,7 +147,7 @@ enum RenderPlanner {
                 )
                 videoSegments.append(picture)
                 if let cutout = clip.video?.cutout, cutout.enabled {
-                    if assets?.matteURL(for: item) != nil {
+                    if assets?.matteURL(for: item, cutout: cutout) != nil {
                         var matte = picture
                         matte.role = .matte
                         videoSegments.append(matte)

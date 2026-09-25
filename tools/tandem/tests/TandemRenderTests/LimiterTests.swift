@@ -84,11 +84,11 @@ final class LimiterTests: XCTestCase {
 
     func testGainForTargetInterpolatesAcrossTheLimiter() {
         let points = [(gain: 14.25, lufs: -15.13), (gain: 15.0, lufs: -14.6), (gain: 15.75, lufs: -14.1), (gain: 16.75, lufs: -13.5)]
-        XCTAssertEqual(ExportJob.gainForTarget(-14, points: points)!, 15.75 + 0.1 / 0.6, accuracy: 1e-9)
+        XCTAssertEqual(ExportPipeline.gainForTarget(-14, points: points)!, 15.75 + 0.1 / 0.6, accuracy: 1e-9)
         // Beyond the loudest candidate it follows the last slope (0.6 dB/dB).
-        XCTAssertEqual(ExportJob.gainForTarget(-13.2, points: points)!, 16.75 + 0.3 / 0.6, accuracy: 1e-9)
+        XCTAssertEqual(ExportPipeline.gainForTarget(-13.2, points: points)!, 16.75 + 0.3 / 0.6, accuracy: 1e-9)
         // One point: assume a dB per dB.
-        XCTAssertEqual(ExportJob.gainForTarget(-14, points: [(gain: 10, lufs: -16)])!, 12, accuracy: 1e-9)
-        XCTAssertNil(ExportJob.gainForTarget(-14, points: [(gain: 10, lufs: -Double.infinity)]))
+        XCTAssertEqual(ExportPipeline.gainForTarget(-14, points: [(gain: 10, lufs: -16)])!, 12, accuracy: 1e-9)
+        XCTAssertNil(ExportPipeline.gainForTarget(-14, points: [(gain: 10, lufs: -Double.infinity)]))
     }
 }

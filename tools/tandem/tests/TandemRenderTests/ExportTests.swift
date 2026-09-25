@@ -271,20 +271,27 @@ final class ExportTests: XCTestCase {
 
     func testCancellingStopsAndRemovesTheFile() async throws {
         let media = try TestMedia()
-        try await media.movie("long.mov", seconds: 6, draw: { TestMedia.drawIndex($0, $1) })
-        let clip = Clip(id: "clip_l", content: .media(mediaID: "med_l"), start: .zero, duration: t(6))
-        let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_l", "long.mov", seconds: 6)])
+        try await media.movie("long.mov", seconds: 4, draw: { TestMedia.drawIndex($0, $1) }, sound: { i in (i / 6_000) % 2 == 0 ? 0.3 : 0.01 })
+        let item = media.item("med_l", "long.mov", seconds: 4, audio: true)
+        let clip = Clip(id: "clip_l", content: .media(mediaID: "med_l"), start: .zero, duration: t(4))
+        let sound = Clip(id: "clip_s", content: .media(mediaID: "med_l"), start: .zero, duration: t(4))
+        let project = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], audio: [Track(kind: .audio, name: "A1", clips: [sound])], media: [item])
         let out = media.folder.appendingPathComponent("cancelled.mp4")
-        let exporter = Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: preset(loudness: nil), output: out)
-        do {
-            _ = try await exporter.run { progress in
-                if progress > 0.2 { exporter.cancel() }
+        // During the loudness pass, just after encoding starts, midway and
+        // near the end.
+        for threshold in [0.01, 0.12, 0.5, 0.9] {
+            let loudness: Double? = threshold < 0.1 ? -14 : nil
+            let exporter = Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: preset(loudness: loudness), output: out)
+            do {
+                _ = try await exporter.run { progress in
+                    if progress > threshold { exporter.cancel() }
+                }
+                XCTFail("expected cancellation at \(threshold)")
+            } catch {
+                XCTAssertEqual(error as? RenderError, .cancelled, "at \(threshold)")
             }
-            XCTFail("expected cancellation")
-        } catch {
-            XCTAssertEqual(error as? RenderError, .cancelled)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: out.path), "at \(threshold)")
         }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: out.path))
 
         // Cancelled before it starts: nothing happens.
         let early = Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: preset(loudness: nil), output: out)
