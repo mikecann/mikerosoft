@@ -48,6 +48,8 @@ public final class ProjectSession: @unchecked Sendable {
     private var observerToken: UUID?
     private var closed = false
     private var watcher: FolderWatcher?
+    private var analysisObserver: UUID?
+    private var analysisWork: DispatchWorkItem?
     private var _saveProblem: String?
     public var autosaveDelay: TimeInterval = 1
     /// How soon an autosave that failed tries again, so fixing the cause (a
@@ -199,18 +201,39 @@ public final class ProjectSession: @unchecked Sendable {
             return true
         }
         guard started else { return }
-        let project = coordinator.project
-        let used = Set(project.allTracks.flatMap(\.clips).compactMap(\.mediaID))
-        analysis.requestDefaults(for: project.media, usedOnTimeline: used)
+        analysis.requestNeeded(for: coordinator.project)
+        // Placing a take or turning on a cutout queues its analysis. A burst
+        // of edits (dragging, tightening) settles first.
+        let token = coordinator.observe { [weak self] _ in self?.scheduleAnalysisCheck() }
+        queue.sync { analysisObserver = token }
         Task { [weak self] in _ = try? await self?.refreshMedia() }
     }
 
+    private func scheduleAnalysisCheck() {
+        queue.async { [weak self] in
+            guard let self, !self.closed else { return }
+            self.analysisWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.analysis.requestNeeded(for: self.coordinator.project)
+            }
+            self.analysisWork = work
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.5, execute: work)
+        }
+    }
+
     public func stopWatching() {
-        let current: FolderWatcher? = queue.sync {
-            defer { watcher = nil }
-            return watcher
+        let (current, token): (FolderWatcher?, UUID?) = queue.sync {
+            defer {
+                watcher = nil
+                analysisObserver = nil
+                analysisWork?.cancel()
+                analysisWork = nil
+            }
+            return (watcher, analysisObserver)
         }
         current?.stop()
+        if let token { coordinator.removeObserver(token) }
     }
 
     public var isWatching: Bool { queue.sync { watcher != nil } }
@@ -238,8 +261,7 @@ public final class ProjectSession: @unchecked Sendable {
             } catch EditError.staleRevision where attempt < 20 {
                 continue
             }
-            let used = Set(coordinator.project.allTracks.flatMap(\.clips).compactMap(\.mediaID))
-            analysis.requestDefaults(for: coordinator.project.media, usedOnTimeline: used)
+            analysis.requestNeeded(for: coordinator.project)
             return added
         }
     }

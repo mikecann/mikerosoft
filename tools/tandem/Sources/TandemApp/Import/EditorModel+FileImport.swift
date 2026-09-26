@@ -49,9 +49,7 @@ extension EditorModel {
                 }
                 let created = SelectionRules.pruned(Set(applied.createdIDs), in: self.project)
                 if !created.isEmpty { self.selection = created }
-                let used = Set(self.project.allTracks.flatMap(\.clips).compactMap(\.mediaID))
-                let paths = Set(items.map(\.path))
-                self.session.analysis.requestDefaults(for: self.project.media.filter { paths.contains($0.path) }, usedOnTimeline: used)
+                self.session.analysis.requestNeeded(for: self.project)
                 self.show(.info, batch.label + ".")
             }
         }

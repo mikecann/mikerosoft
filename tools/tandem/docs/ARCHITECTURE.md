@@ -165,8 +165,17 @@ otherwise it uses file creation times.
 
 `MediaAnalysis` runs background jobs through one scheduler with priorities
 (`interactive`, `timeline`, `background`) and an encoder lock, so proxy builds
-and exports never fight over the hardware encoder. Media the timeline uses
-goes first. Results are cached under `.tandem/cache/<kind>/<key>/` where
+and exports never fight over the hardware encoder.
+
+What gets analysed follows the edit (`AnalysisNeeds`), because a video folder
+can hold hundreds of files that never go near the timeline. Everything gets
+the cheap ones (thumbnails, waveform, loudness) and every camera take gets a
+transcript, so you can search what you said before placing it. The expensive
+ones only run for what the edit uses: proxies for large video on the
+timeline, a cutout matte once a clip's cutout is on, isolated voice once a
+clip uses voice isolation, and a transcript for anything on a speech track.
+Long-lived sessions (the app, `tandem serve`) re-check after every burst of
+edits, so placing a take or pressing 2 for the PiP queues its work. Results are cached under `.tandem/cache/<kind>/<key>/` where
 `key = sha256(fingerprint, kind, algorithmVersion, settings)`.
 
 | Kind | Result | Notes |
