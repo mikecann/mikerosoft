@@ -90,15 +90,53 @@ private enum LauncherConfigurationTests {
             WorkerLauncherConfiguration.expectedVolumeUUID == "5CCB1D81-5A98-4C4A-9E2C-3E10B23F1B46",
             "CannMedia identity changed"
         )
+        try testRealPrivatePathIsNotRewritten()
         try testArchivePreflight()
         try testChildShutdown()
         print("Meeting Archive Worker launcher configuration tests passed")
     }
 
+    private static func testRealPrivatePathIsNotRewritten() throws {
+        // /tmp is a symlink to the real directory /private/tmp. The preflight
+        // must accept the real path as given and reject the symlinked alias.
+        // It walks the archive directory before asking for the volume UUID,
+        // so the provider only runs when that walk succeeded.
+        let real = WorkerLauncherConfiguration(
+            archiveDirectory: URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+        )
+        try require(real.archiveDirectory.path == "/private/tmp", "real archive path was rewritten")
+        var walkedRealPath = false
+        _ = try? ArchivePathPreflight.verify(real, mode: .worker) { _ in
+            walkedRealPath = true
+            return nil
+        }
+        try require(walkedRealPath, "real /private/tmp directory chain failed preflight")
+
+        let symlinked = WorkerLauncherConfiguration(
+            archiveDirectory: URL(fileURLWithPath: "/tmp", isDirectory: true)
+        )
+        var walkedSymlinkedPath = false
+        _ = try? ArchivePathPreflight.verify(symlinked, mode: .worker) { _ in
+            walkedSymlinkedPath = true
+            return nil
+        }
+        try require(!walkedSymlinkedPath, "symlinked /tmp directory passed preflight")
+    }
+
+    private static func realDirectory(containing file: String) throws -> URL {
+        let directory = URL(fileURLWithPath: file).deletingLastPathComponent().path
+        guard let resolved = realpath(directory, nil) else {
+            throw TestFailure(description: "could not resolve \(directory)")
+        }
+        defer { free(resolved) }
+        return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
+    }
+
     private static func testArchivePreflight() throws {
         let fileManager = FileManager.default
-        let root = URL(fileURLWithPath: CommandLine.arguments[0])
-            .deletingLastPathComponent()
+        // The build directory may be reached through a symlink such as /tmp,
+        // which preflight rightly rejects, so build the fixture on the real path.
+        let root = try realDirectory(containing: CommandLine.arguments[0])
             .appendingPathComponent("meeting-archive-launcher-tests-\(UUID().uuidString)", isDirectory: true)
         defer { try? fileManager.removeItem(at: root) }
         let archive = root.appendingPathComponent("CannMedia/MeetingArchive", isDirectory: true)
