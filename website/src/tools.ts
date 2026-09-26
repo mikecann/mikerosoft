@@ -195,6 +195,14 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
+    name: 'phone-mirror',
+    desc: 'Mirror and control several iPhones and iPads at once over USB, each in its own window: click to tap, drag to swipe, scroll to scroll, and type to type',
+    icon: `${base}/phone-mirror/icons/phone-mirror.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/phone-mirror',
+    platforms: ['macos'],
+  },
+  {
     name: 'token-stats',
     desc: 'Native SwiftUI dashboard for Codex, Claude, and OpenRouter token usage, API-equivalent costs, model breakdowns, and shareable graph exports',
     icon: `${base}/token-stats/icons/token-stats.png`,

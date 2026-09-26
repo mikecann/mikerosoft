@@ -452,6 +452,62 @@ later rebuilds keep the grant.
 
 ---
 
+## phone-mirror specifics
+
+AppKit app that mirrors every USB-connected iPhone or iPad in its own window and
+controls it through WebDriverAgent (WDA).
+
+### Dev workflow
+
+```bash
+swift test --package-path tools/phone-mirror
+bash tools/phone-mirror/restart.sh
+tail -f ~/Library/Logs/"Phone Mirror"/phone-mirror.log
+```
+
+- `open -g "phonemirror://tap?x=0.5&y=0.5"` (also `swipe?dy=-300`,
+  `type?text=hi`, `home`) drives the first phone without clicking. Use it for
+  smoke tests.
+- Each phone's xcodebuild output goes to
+  `~/Library/Logs/Phone Mirror/helper-<phone name>.log`. The line
+  `ServerURLHere->...<-ServerURLHere` means WDA is up.
+
+### Key behaviour
+
+- Video: setting `kCMIOHardwarePropertyAllowScreenCaptureDevices` makes phones
+  appear as `.external` muxed capture devices with model ID `iOS Device`. The same
+  phone also appears as a Continuity Camera; the filter skips it.
+- Control: `agent.sh` pins WebDriverAgent to a release, clones it into
+  `~/Library/Application Support/Phone Mirror/WebDriverAgent`, and rewrites the
+  runner bundle ID to `com.mikecann.phonemirror.WebDriverAgentRunner`. The stock
+  `com.facebook...` ID belongs to another team and can't be signed.
+- The team ID comes from `PHONE_MIRROR_TEAM_ID`, then `team-id` in the support
+  folder, then the OU of the keychain's Apple Development certificate.
+- `AgentRunner` runs `agent.sh run`, builds once per launch when the run fails
+  with a signing or provisioning error (new phone, expired signing), and
+  restarts the helper whenever a command fails.
+- The app reaches WDA at `http://[tunnelIPAddress]:8100`, the USB tunnel address
+  from `xcrun devicectl list devices`. No usbmux forwarding is needed.
+- Sessions use `shouldWaitForQuiescence: false` and `waitForIdleTimeout: 0`.
+  Without them each tap waits for the app to go idle, which takes seconds on
+  animated screens.
+- A Bluetooth HID approach was tried and dropped. macOS 26 never got a classic
+  Bluetooth link to the phone from a third-party app, and the iPhone only accepts
+  a mouse through AssistiveTouch.
+
+### Key files
+
+| Path | What it is |
+|---|---|
+| `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneScreenDevices.swift` | Screen capture opt-in and phone discovery |
+| `tools/phone-mirror/Sources/PhoneMirrorApp/MirrorWindowController.swift` | Per-phone window, input handling |
+| `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneGestures.swift` | Click/drag/scroll/key to gesture translation (pure) |
+| `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneAgent.swift` | WDA HTTP client with an ordered command queue |
+| `tools/phone-mirror/Sources/PhoneMirrorApp/AgentRunner.swift` | Builds, starts and restarts WDA per phone |
+| `tools/phone-mirror/agent.sh` | Fetches, signs, builds and runs WDA |
+
+---
+
 ## telemprompit specifics
 
 SwiftUI/AppKit teleprompter for the Elgato Prompter. Paste notes, step
