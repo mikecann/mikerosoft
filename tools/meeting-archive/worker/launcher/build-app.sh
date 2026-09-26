@@ -37,8 +37,9 @@ if [[ "${SIGNING_IDENTITY}" == "-" ]]; then
     # not disappear whenever the executable changes.
     SIGNING_REQUIREMENTS=(--requirements "=designated => identifier \"${BUNDLE_ID}\"")
 fi
+# The ${array[@]+...} form keeps bash 3.2 happy under `set -u` when the array is empty.
 codesign --force --timestamp=none --sign "${SIGNING_IDENTITY}" \
-    "${SIGNING_REQUIREMENTS[@]}" "${STAGING_APP}"
+    ${SIGNING_REQUIREMENTS[@]+"${SIGNING_REQUIREMENTS[@]}"} "${STAGING_APP}"
 codesign --verify --strict "${STAGING_APP}"
 if [[ "${SIGNING_IDENTITY}" == "-" ]]; then
     requirement="$(codesign -d -r- "${STAGING_APP}" 2>&1)"

@@ -82,9 +82,10 @@ fi
 # Nested code must be signed before the outer app so the app seal records the
 # helper's final signature. Applying the app's designated requirement through
 # --deep gives the helper an impossible identifier requirement.
+# The ${array[@]+...} form keeps bash 3.2 happy under `set -u` when the array is empty.
 codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
-  "${RECOVERY_SIGNING_REQUIREMENTS[@]}" "$RECOVERY_APP_BIN" >/dev/null
+  ${RECOVERY_SIGNING_REQUIREMENTS[@]+"${RECOVERY_SIGNING_REQUIREMENTS[@]}"} "$RECOVERY_APP_BIN" >/dev/null
 codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
-  "${APP_SIGNING_REQUIREMENTS[@]}" "$APP_DIR" >/dev/null
+  ${APP_SIGNING_REQUIREMENTS[@]+"${APP_SIGNING_REQUIREMENTS[@]}"} "$APP_DIR" >/dev/null
 
 echo "Built $APP_DIR"

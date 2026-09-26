@@ -65,7 +65,8 @@ if [[ "$SIGNING_IDENTITY" == "-" ]]; then
   SIGNING_REQUIREMENTS=(--requirements "=designated => identifier \"$BUNDLE_ID\"")
 fi
 
+# The ${array[@]+...} form keeps bash 3.2 happy under `set -u` when the array is empty.
 codesign --force --deep --timestamp=none --sign "$SIGNING_IDENTITY" \
-  "${SIGNING_REQUIREMENTS[@]}" "$APP_DIR" >/dev/null
+  ${SIGNING_REQUIREMENTS[@]+"${SIGNING_REQUIREMENTS[@]}"} "$APP_DIR" >/dev/null
 
 echo "Built $APP_DIR"

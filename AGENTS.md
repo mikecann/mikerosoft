@@ -379,10 +379,17 @@ bash tools/record-it/restart.sh
 Always launch the staged `~/Applications/Record It.app`. Do not run the raw
 SwiftPM executable for permission testing because macOS keys Screen Recording,
 Camera, and Microphone permissions to the signed app bundle.
-When no Apple Development identity exists, `build-app.sh` adds a stable explicit
-designated requirement to the ad-hoc signature. Do not remove it: the default
-ad-hoc requirement is the changing binary hash and invalidates TCC permissions
-after every rebuild.
+`build-app.sh` signs with the first `Apple Development` identity in the keychain.
+That certificate's default designated requirement (bundle ID plus certificate)
+stays the same across rebuilds, so TCC permissions persist without help.
+The stable-requirement workaround only applies when no Apple Development
+identity exists. Then `build-app.sh` falls back to an ad-hoc signature and adds
+an explicit `identifier "com.mikerosoft.record-it"` designated requirement.
+Do not remove it: the default ad-hoc requirement is the changing binary hash
+and invalidates TCC permissions after every rebuild. Grants made under that
+ad-hoc requirement carried over to the certificate-signed app on this Mac
+without a new prompt. If macOS does prompt once after switching, approve it and
+later rebuilds keep the grant.
 
 ### Key behaviour
 
