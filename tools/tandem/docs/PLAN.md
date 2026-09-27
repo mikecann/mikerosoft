@@ -32,6 +32,8 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] 1080p all-intra HEVC proxies [media]
 - [x] Transcripts with SpeechAnalyzer, word timings in media time [media]
 - [x] Person matte for the cutout (Vision), greyscale HEVC [media]
+- [x] Matte v2: accurate person mask plus the foreground subject mask (keeps the mic), smoothed only where the picture is still; about 9x less flicker, 41 fps [media]
+- [x] Analysis follows the edit: heavy jobs only for what the timeline uses [integration]
 - [x] Isolated voice (AUSoundIsolation), latency compensated [media]
 
 ## Milestone 3: render and export
