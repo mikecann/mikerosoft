@@ -209,13 +209,36 @@ final class RealMediaTests: XCTestCase {
         let matte = folder.appendingPathComponent(MatteJob.file)
         let frames = try await assertSameFrames(matte, as: Self.camera, "matte")
         let bytes = AnalysisCache.folderSize(folder)
-        report(String(format: "matte camera 60 s (accurate, person+props, %d workers): %d frames in %.2f s = %.1f fps (a 24 min take: %.1f min), %.1f MB",
+        report(String(format: "matte camera 60 s (version 2: accurate + subject, steadied, %d workers): %d frames in %.2f s = %.1f fps (a 24 min take: %.1f min), %.1f MB",
                       MatteJob.workers, frames, seconds, Double(frames) / seconds, 43_376 / (Double(frames) / seconds) / 60, Double(bytes) / 1e6))
 
         // Stills of the matte and a cutout over blue for looking at.
         for t in [1015.0, 1040.0, 1065.0] {
             try await exportCutout(matte: matte, at: t, to: Self.scratch.appendingPathComponent("matte/cutout_\(Int(t)).png"))
         }
+    }
+
+    /// Version 2 against version 1 on 20 s of the camera: the matte's
+    /// average frame-to-frame change (every 4th pixel), moving hands
+    /// included. docs/MEDIA.md has the finer score, where the picture is
+    /// still.
+    func testMatteIsSteadierThanVersion1() async throws {
+        let range = CMTimeRange(start: CMTime(seconds: 1010, preferredTimescale: 600), duration: CMTime(seconds: 20, preferredTimescale: 600))
+        var change: [String: Double] = [:]
+        for (name, settings) in [("version-1", AnalysisSettings(matteProps: .personInstances, matteSmoothing: .off)),
+                                 ("version-2-per-frame", AnalysisSettings(matteSmoothing: .off)),
+                                 ("version-2", AnalysisSettings())] {
+            let folder = try output("matte-\(name)")
+            let (_, seconds) = try await time {
+                try await MatteJob.run(source: Self.camera, settings: settings, into: folder, context: context(.matte), timeRange: range)
+            }
+            let frames = try await matteFrames(folder.appendingPathComponent(MatteJob.file))
+            let value = zip(frames, frames.dropFirst()).map { meanDifference($0, $1) }.reduce(0, +) / Double(max(1, frames.count - 1))
+            change[name] = value
+            report(String(format: "matte %@ 20 s: %.1f fps, frame-to-frame change %.3f", name, Double(frames.count) / seconds, value))
+        }
+        // Measured 1.65 against 3.41 (moving hands are most of what's left).
+        XCTAssertLessThan(try XCTUnwrap(change["version-2"]), try XCTUnwrap(change["version-1"]) * 0.6)
     }
 
     /// Luma planes of every frame of a matte, in order.
