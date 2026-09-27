@@ -23,6 +23,9 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
     public var matteQuality: MatteQuality
     /// `personAndProps` keeps a handheld mic; `person` is the plain person mask.
     public var matteMode: CutoutMode
+    /// Where `personAndProps` finds what the person holds.
+    public var matteProps: MatteProps
+    public var matteSmoothing: MatteSmoothing
     /// The matte fits inside this box, like proxies.
     public var matteMaxWidth: Int
     public var matteMaxHeight: Int
@@ -38,6 +41,8 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         transcriptLocale: String = "en-US",
         matteQuality: MatteQuality = .accurate,
         matteMode: CutoutMode = .personAndProps,
+        matteProps: MatteProps = .subject,
+        matteSmoothing: MatteSmoothing = .steady,
         matteMaxWidth: Int = 1920,
         matteMaxHeight: Int = 1080,
         voiceModel: VoiceIsolationModel = .voice
@@ -51,6 +56,8 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         self.transcriptLocale = transcriptLocale
         self.matteQuality = matteQuality
         self.matteMode = matteMode
+        self.matteProps = matteProps
+        self.matteSmoothing = matteSmoothing
         self.matteMaxWidth = matteMaxWidth
         self.matteMaxHeight = matteMaxHeight
         self.voiceModel = voiceModel
@@ -67,7 +74,11 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         case .loudness: values = [:]
         case .proxy: values = ["box": "\(proxyMaxWidth)x\(proxyMaxHeight)", "quality": "\(proxyQuality)"]
         case .transcript: values = ["locale": transcriptLocale]
-        case .matte: values = ["box": "\(matteMaxWidth)x\(matteMaxHeight)", "mode": matteMode.rawValue, "quality": matteQuality.rawValue]
+        case .matte:
+            var matte = ["box": "\(matteMaxWidth)x\(matteMaxHeight)", "mode": matteMode.rawValue, "quality": matteQuality.rawValue, "smoothing": matteSmoothing.rawValue]
+            // A person-only matte has no props to find.
+            if matteMode == .personAndProps { matte["props"] = matteProps.rawValue }
+            values = matte
         case .isolatedVoice: values = ["model": voiceModel.rawValue]
         }
         let body = values.keys.sorted().map { "\"\($0)\":\"\(values[$0]!)\"" }.joined(separator: ",")
@@ -76,9 +87,32 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
 }
 
 /// Vision person segmentation quality. Accurate is about 60 frames a second
-/// on the M5 Pro (12 minutes for a 24 minute take), fast about 240.
+/// on the M5 Pro on its own, fast about 240. Fast and balanced shimmer less
+/// where Mike sits still but lose hair and fingers and pop more when he
+/// moves; see docs/MEDIA.md.
 public enum MatteQuality: String, Codable, Sendable, CaseIterable {
     case fast, balanced, accurate
+}
+
+/// Where a `personAndProps` matte finds what the person holds.
+public enum MatteProps: String, Codable, Sendable, CaseIterable {
+    /// Vision's foreground subject mask ("lift subject"). It holds still
+    /// from frame to frame and keeps the mic; it misses a hand held away
+    /// from the body, which the person mask keeps. The default.
+    case subject
+    /// Vision's person instance mask, where the person mask has holes: the
+    /// version 1 cutout. The mic pops in and out from frame to frame.
+    case personInstances
+}
+
+/// How the matte is steadied over time.
+public enum MatteSmoothing: String, Codable, Sendable, CaseIterable {
+    /// Every frame as Vision made it.
+    case off
+    /// Medians and a gentle average over neighbouring frames, only where
+    /// the picture is still, so edges stop shimmering and one-frame pops go
+    /// while a moving hand leaves no trail. See `MatteSmoother`.
+    case steady
 }
 
 /// Which AUSoundIsolation model to run. `voice` has 3,665 samples of
@@ -92,7 +126,9 @@ extension AnalysisKind {
     /// Bump when a kind's output changes, so old cache entries are rebuilt.
     public var algorithmVersion: Int {
         switch self {
-        case .thumbnails, .waveform, .loudness, .proxy, .transcript, .matte, .isolatedVoice: return 1
+        case .thumbnails, .waveform, .loudness, .proxy, .transcript, .isolatedVoice: return 1
+        // 2: the subject mask for props and smoothing over time.
+        case .matte: return 2
         }
     }
 
