@@ -183,6 +183,14 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
+    name: 'mikey-mouse',
+    desc: 'Menu-bar helper that makes a normal mouse feel at home on macOS: side buttons go back and forward in Finder and Safari, and a notched scroll wheel glides smoothly',
+    icon: `${base}/mikey-mouse/icons/mikey-mouse.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/mikey-mouse',
+    platforms: ['macos'],
+  },
+  {
     name: 'record-it',
     desc: 'Native SwiftUI screen and camera recorder with 4K/30 capture, project-aware source folders, system audio, microphone audio, and separate full-resolution outputs',
     icon: `${base}/record-it/icons/record-it.png`,

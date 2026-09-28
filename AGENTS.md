@@ -534,6 +534,34 @@ bash tools/telemprompit/restart.sh
 
 ---
 
+## mikey-mouse specifics
+
+Menu-bar replacement for Mac Mouse Fix. Side buttons become back/forward
+navigation swipes in apps that ignore buttons 4 and 5, and the notched wheel
+scrolls smoothly.
+
+### Dev workflow
+
+```bash
+swift test --package-path tools/mikey-mouse
+bash tools/mikey-mouse/restart.sh
+tail -f ~/Library/Logs/mikey-mouse.log
+```
+
+- Always test the staged `~/Applications/Mikey Mouse.app` via `restart.sh`.
+  Accessibility permission is keyed to the signed bundle.
+- Verify side buttons with a real press over Finder. Each press logs the app
+  under the pointer and whether it became a swipe. A swipe posted straight to
+  Finder's pid with `CGEvent.postToPid` does not navigate, so it is no substitute.
+- The event tap sits at the HID level on its own thread. Anything slow in the
+  callback makes the whole mouse lag, and macOS turns a slow tap off.
+- Only apps in `BackForwardRouter.swipeApps` get swipes. Chrome, VS Code and
+  other apps that handle buttons 4 and 5 themselves must keep the raw click.
+- Scroll feel (pixels per notch, time constant, acceleration) is subjective.
+  Change it with Mike trying the real wheel, not from unit tests alone.
+
+---
+
 ## scale-monitor specifics
 
 - Monitor: HG584T05, "Display 4", AMD Radeon Graphics
