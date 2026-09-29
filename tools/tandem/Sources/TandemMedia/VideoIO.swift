@@ -7,6 +7,8 @@ import VideoToolbox
 /// Decodes a file's first video track frame by frame, in presentation
 /// order, in the track's own range (420f for full range sources, 420v for
 /// video range), with the track details the proxy and matte writers copy.
+/// Read `keepingAlpha`, video with alpha comes as BGRA instead, each frame
+/// tagged straight or premultiplied as the file is.
 final class VideoFrameReader: @unchecked Sendable {
     /// Encoded size, before the track's rotation.
     let size: CGSize
@@ -14,6 +16,9 @@ final class VideoFrameReader: @unchecked Sendable {
     let timescale: CMTimeScale
     let colors: ColorTags
     let pixelFormat: OSType
+    /// Whether the frames carry alpha (BGRA): read `keepingAlpha`, from a
+    /// track that has it.
+    let hasAlpha: Bool
     let nominalFrameRate: Double
     /// Where the last frame ends: the track's end, or the range's.
     let endTime: CMTime
@@ -28,7 +33,7 @@ final class VideoFrameReader: @unchecked Sendable {
     private let access = NSRecursiveLock()
     private var cancelled = false
 
-    init(url: URL, timeRange: CMTimeRange? = nil) async throws {
+    init(url: URL, timeRange: CMTimeRange? = nil, keepingAlpha: Bool = false) async throws {
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw MediaError.notApplicable("\(url.lastPathComponent) has no video")
@@ -40,7 +45,12 @@ final class VideoFrameReader: @unchecked Sendable {
         self.transform = transform
         self.timescale = timescale
         colors = ColorTags(formats.first)
-        pixelFormat = colors.fullRange ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        hasAlpha = keepingAlpha && formats.first.map(MediaProbe.containsAlpha) == true
+        if hasAlpha {
+            pixelFormat = kCVPixelFormatType_32BGRA
+        } else {
+            pixelFormat = colors.fullRange ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        }
         nominalFrameRate = Double(rate)
         let range = timeRange.map { $0.intersection(trackRange) } ?? trackRange
         endTime = range.end
@@ -146,15 +156,21 @@ func makePixelBufferPool(width: Int, height: Int, pixelFormat: OSType) throws ->
 /// that many frames. Every source frame keeps its exact presentation time
 /// and duration, so proxy time is source time even for variable frame rate
 /// screen recordings. Video only.
+///
+/// Video with alpha (overlays, stickers) gets HEVC with alpha, straight or
+/// premultiplied as the source is: the encoder takes that from the frames'
+/// tag. A plain HEVC proxy would show what's under the clear parts (black,
+/// or the colour straight alpha keeps there) over the track below.
 enum ProxyJob {
     static let file = "proxy.mov"
 
     static func run(source: URL, settings: AnalysisSettings, into folder: URL, context: JobContext, timeRange: CMTimeRange? = nil) async throws {
-        let reader = try await VideoFrameReader(url: source, timeRange: timeRange)
+        let reader = try await VideoFrameReader(url: source, timeRange: timeRange, keepingAlpha: true)
         let size = fittedSize(width: Int(reader.size.width), height: Int(reader.size.height), maxWidth: settings.proxyMaxWidth, maxHeight: settings.proxyMaxHeight)
         let scaler = try PixelScaler(width: size.width, height: size.height, pixelFormat: reader.pixelFormat)
         let writer = try EncodedMovieWriter(url: folder.appendingPathComponent(file), settings: .init(
-            width: size.width, height: size.height, keyFrameInterval: max(1, settings.proxyKeyFrameInterval), quality: settings.proxyQuality, prioritizeSpeed: true,
+            width: size.width, height: size.height, codec: reader.hasAlpha ? kCMVideoCodecType_HEVCWithAlpha : kCMVideoCodecType_HEVC,
+            keyFrameInterval: max(1, settings.proxyKeyFrameInterval), quality: settings.proxyQuality, prioritizeSpeed: true,
             colorPrimaries: reader.colors.primaries, transferFunction: reader.colors.transfer, yCbCrMatrix: reader.colors.matrix,
             timescale: reader.timescale, transform: reader.transform, expectedFrameRate: reader.nominalFrameRate > 0 ? reader.nominalFrameRate : nil
         ))

@@ -87,6 +87,7 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     /// 1080p HEVC with the source's exact frame times (video only): P-frames
     /// with a keyframe every `proxyKeyFrameInterval` frames, no reordering.
+    /// HEVC with alpha for video with alpha.
     public func proxyURL(for item: MediaItem) -> URL? {
         entryFolder(.proxy, for: item)?.appendingPathComponent(ProxyJob.file)
     }
@@ -138,7 +139,7 @@ public final class MediaAnalysis: @unchecked Sendable {
     public func cacheKey(_ kind: AnalysisKind, for item: MediaItem, settings: AnalysisSettings? = nil) -> String? {
         guard let fingerprint = fingerprint(for: item) else { return nil }
         let settings = settings ?? self.settings
-        return AnalysisCache.key(fingerprint: fingerprint, kind: kind, algorithmVersion: kind.algorithmVersion, settings: settings.canonical(for: kind))
+        return AnalysisCache.key(fingerprint: fingerprint, kind: kind, algorithmVersion: kind.algorithmVersion, settings: settings.canonical(for: kind, item: item))
     }
 
     // MARK: - Requests
@@ -163,7 +164,7 @@ public final class MediaAnalysis: @unchecked Sendable {
     public func submit(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .background, settings requested: AnalysisSettings? = nil) -> String? {
         guard kind.applies(to: item), let fingerprint = fingerprint(for: item) else { return nil }
         let settings = requested ?? self.settings
-        let canonical = settings.canonical(for: kind)
+        let canonical = settings.canonical(for: kind, item: item)
         let key = AnalysisCache.key(fingerprint: fingerprint, kind: kind, algorithmVersion: kind.algorithmVersion, settings: canonical)
         guard !cache.contains(kind: kind, key: key) || needsRebuild(kind, key: key, settings: settings) else { return nil }
         let source = folder.url(for: item)
@@ -316,7 +317,7 @@ public final class MediaAnalysis: @unchecked Sendable {
             guard expected.matchesStat(of: source) else { throw MediaError.fileChanged(item.path) }
             // Only a fallback matte due for a rebuild is still there.
             if cache.contains(kind: kind, key: key) { cache.remove(kind: kind, key: key) }
-            try cache.commit(pending, fingerprint: fingerprint, algorithmVersion: kind.algorithmVersion, settings: settings.canonical(for: kind), source: item.path)
+            try cache.commit(pending, fingerprint: fingerprint, algorithmVersion: kind.algorithmVersion, settings: settings.canonical(for: kind, item: item), source: item.path)
         } catch {
             cache.discard(pending)
             throw error

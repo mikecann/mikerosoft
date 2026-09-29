@@ -16,6 +16,7 @@ extension NSHostingView: NSHostingViewMarker {}
 ///     open -g "tandem://simulate?drop=tandem-effect:vignette&at=600,700"
 ///     open -g "tandem://simulate?scroll=900,1100,-12,0&steps=90&interval=16"
 ///     open -g "tandem://simulate?dragover=tandem-title:label&at=600,700&to=900,700&steps=60&interval=16"
+///     open -g "tandem://simulate?hover=900,400&hold=z"   (then tandem://debug says which cursor it set)
 ///
 /// A drop hands a library payload (see `LibraryDrag`) to the drop target
 /// under the point, as if it had been dragged there from a library tab. A
@@ -126,7 +127,7 @@ enum InputSimulator {
         }
         let hover = numbers(query["hover"])
         if hover.count == 2 {
-            return Gesture(kind: .hover, at: CGPoint(x: hover[0], y: hover[1]), modifiers: flags)
+            return Gesture(kind: .hover, at: CGPoint(x: hover[0], y: hover[1]), modifiers: flags, heldKey: query["hold"])
         }
         let at = numbers(query["at"])
         if let payload = query["drop"], at.count == 2, LibraryDrag.parse(payload) != nil {

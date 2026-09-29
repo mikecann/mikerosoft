@@ -89,6 +89,22 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
 
     /// The settings `kind` depends on, as canonical JSON (sorted keys).
     public func canonical(for kind: AnalysisKind) -> String {
+        Self.json(values(for: kind))
+    }
+
+    /// The settings part of one item's cache key: `canonical(for:)`, plus
+    /// `"alpha":"1"` for the proxy of video with alpha. Proxies of such
+    /// video keep the alpha since 2026-09-29; the opaque ones made before
+    /// showed black (or the colour straight alpha keeps under the clear
+    /// parts) over the track below. The extra value retires those, while
+    /// every other proxy keeps its key and its file.
+    public func canonical(for kind: AnalysisKind, item: MediaItem) -> String {
+        var values = values(for: kind)
+        if kind == .proxy && item.hasAlpha { values["alpha"] = "1" }
+        return Self.json(values)
+    }
+
+    private func values(for kind: AnalysisKind) -> [String: String] {
         let values: [String: String]
         switch kind {
         case .thumbnails: values = ["interval": "\(thumbnailInterval)", "width": "\(thumbnailWidth)"]
@@ -108,6 +124,10 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         case .isolatedVoice: values = ["model": voiceModel.rawValue]
         case .converted: values = [:]
         }
+        return values
+    }
+
+    private static func json(_ values: [String: String]) -> String {
         let body = values.keys.sorted().map { "\"\($0)\":\"\(values[$0]!)\"" }.joined(separator: ",")
         return "{\(body)}"
     }

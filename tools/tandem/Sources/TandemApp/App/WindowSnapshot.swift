@@ -61,12 +61,19 @@ enum WindowSnapshot {
         // commands (`open -g`) leave focus alone.
         var lines: [String] = [
             "app active: \(NSApp.isActive ? "yes" : "no"), window key: \(window.isKeyWindow ? "yes" : "no")",
-            "window frame: \(NSStringFromRect(window.frame)), resizable: \(window.styleMask.contains(.resizable) ? "yes" : "no")"
+            "window frame: \(NSStringFromRect(window.frame)), resizable: \(window.styleMask.contains(.resizable) ? "yes" : "no")",
+            // What the last hover set, so a simulated hover can be checked.
+            "cursor: \(CursorKind.describe(NSCursor.current))"
         ]
+        // Where each view is in the coordinates `tandem://simulate` takes:
+        // window points from the top left.
+        let windowHeight = (window.contentView?.superview ?? window.contentView)?.bounds.height ?? 0
         func visit(_ view: NSView, depth: Int) {
             let pad = String(repeating: "  ", count: depth)
             let layer = view.layer.map { " layer=\(type(of: $0)) sublayers=\($0.sublayers?.count ?? 0)" } ?? ""
-            lines.append("\(pad)\(type(of: view)) \(NSStringFromRect(view.frame))\(view.isHidden ? " hidden" : "")\(layer)")
+            let box = view.convert(view.bounds, to: nil)
+            let at = String(format: " at %.0f,%.0f %.0fx%.0f", box.minX, windowHeight - box.maxY, box.width, box.height)
+            lines.append("\(pad)\(type(of: view)) \(NSStringFromRect(view.frame))\(at)\(view.isHidden ? " hidden" : "")\(layer)")
             for subview in view.subviews { visit(subview, depth: depth + 1) }
         }
         if let root = window.contentView?.superview ?? window.contentView { visit(root, depth: 0) }

@@ -12,7 +12,8 @@ import Foundation
 /// decode, so it isn't used. For WebM the decoder matters: ffmpeg's built-in
 /// VP9 decoder drops the alpha channel, `libvpx-vp9` keeps it. RGB sources
 /// (Animation, PNG) are converted with the BT.709 matrix and tagged so, like
-/// every other sticker Tandem writes.
+/// every other sticker Tandem writes. WebM keeps its YUV and is tagged with
+/// what that YUV is (`webColour`).
 public enum HEVCTranscoder {
     /// Transcodes `input` into `output`, a QuickTime movie, and returns
     /// whether the copy has alpha.
@@ -55,6 +56,14 @@ public enum HEVCTranscoder {
         if pixelFormat.map(isRGB) ?? (codec != "vp9" && codec != "vp8") {
             arguments += ["-vf", "scale=out_color_matrix=bt709:out_range=tv,format=\(intermediateFormat),"
                 + "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"]
+        } else if codec == "vp9" || codec == "vp8" {
+            // WebM is YUV already and usually untagged, so the export
+            // guesses its colours wrong too: tag the frames with what the
+            // YUV is. A MOV can't mark ProRes full range, so full range is
+            // scaled to limited.
+            let colour = webColour(video)
+            arguments += ["-vf", "scale=in_range=\(colour.range):out_range=tv,format=\(intermediateFormat),"
+                + "setparams=color_primaries=\(colour.primaries):color_trc=\(colour.transfer):colorspace=\(colour.matrix):range=tv"]
         }
         arguments += ["-c:v", "prores_ks", "-profile:v", hasAlpha ? "4444" : "hq", "-pix_fmt", intermediateFormat]
         if hasAlpha { arguments += ["-alpha_bits", "16"] }
@@ -75,6 +84,27 @@ public enum HEVCTranscoder {
             throw MediaError.failed("Exporting \(input.lastPathComponent) to HEVC: \(error.localizedDescription)")
         }
         return hasAlpha
+    }
+
+    /// What a WebM's YUV holds, in ffmpeg's names. The tags ffprobe reports
+    /// are kept where AVFoundation reads them (the codes CoreVideo's
+    /// `CVYCbCrMatrixGetStringForIntegerCodePoint` and friends know).
+    /// Anything else is taken to be a web sticker: sRGB colours (BT.709
+    /// primaries and transfer) made into limited range YUV with the BT.601
+    /// matrix, the way ffmpeg and browsers convert untagged RGB. VP9's own
+    /// BT.601 flag, `bt470bg` to ffprobe, is that matrix too, and
+    /// AVFoundation only reads it as `smpte170m`.
+    static func webColour(_ stream: [String: Any]?) -> (primaries: String, transfer: String, matrix: String, range: String) {
+        func tag(_ key: String, _ readable: Set<String>, otherwise fallback: String) -> String {
+            (stream?[key] as? String).flatMap { readable.contains($0) ? $0 : nil } ?? fallback
+        }
+        return (
+            tag("color_primaries", ["bt709", "bt470bg", "smpte170m", "bt2020", "smpte431", "smpte432"], otherwise: "bt709"),
+            tag("color_transfer", ["bt709", "smpte170m", "smpte240m", "linear", "iec61966-2-1", "bt2020-10", "bt2020-12",
+                                   "smpte2084", "smpte428", "arib-std-b67"], otherwise: "bt709"),
+            tag("color_space", ["bt709", "smpte240m", "bt2020nc"], otherwise: "smpte170m"),
+            tag("color_range", ["pc"], otherwise: "tv")
+        )
     }
 
     /// ffmpeg pixel formats with an alpha channel. Palettes (`pal8`) count:

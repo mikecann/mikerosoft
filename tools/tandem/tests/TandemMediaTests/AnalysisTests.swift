@@ -225,8 +225,9 @@ final class AnalysisTests: TempFolderTestCase {
         let asset = AVURLAsset(url: proxy)
         let tracks = try await asset.load(.tracks)
         XCTAssertEqual(tracks.map(\.mediaType), [.video], "video only")
-        let size = try await tracks[0].load(.naturalSize)
+        let (size, formats) = try await tracks[0].load(.naturalSize, .formatDescriptions)
         XCTAssertEqual(size, CGSize(width: 1920, height: 1080))
+        XCTAssertEqual(formats.first.map(CMFormatDescriptionGetMediaSubType), kCMVideoCodecType_HEVC, "plain HEVC: the screen has no alpha")
 
         let sourceTimes = try await videoSampleTimes(file("source/demo-screen.mov"))
         let proxyTimes = try await videoSampleTimes(proxy)
@@ -250,6 +251,92 @@ final class AnalysisTests: TempFolderTestCase {
         let sourceEnd = try await AVURLAsset(url: file("source/demo-screen.mov")).loadTracks(withMediaType: .video)[0].load(.timeRange).end
         let proxyEnd = try await tracks[0].load(.timeRange).end
         XCTAssertEqual(proxyEnd.seconds, sourceEnd.seconds, accuracy: 0.001, "the last frame lasts as long as in the source")
+    }
+
+    /// Overlays and stickers bigger than 1080p get proxies too, and those
+    /// keep the alpha, straight or premultiplied as the source has it, so
+    /// the viewer shows the track below through them.
+    func testProxyOfVideoWithAlphaKeepsTheAlpha() async throws {
+        // ProRes 4444 from ffmpeg, straight alpha: the left third opaque,
+        // the middle third at half alpha, the right third clear.
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        try ffmpeg.run([
+            "-y", "-v", "error", "-f", "lavfi",
+            "-i", "color=c=white:s=2400x1350:d=1:r=30,format=rgba,geq=r='255':g='255':b='255':a='if(lt(X,W/3),255,if(lt(X,2*W/3),128,0))'",
+            "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", "-alpha_bits", "16", file("overlays/leak.mov").path
+        ])
+        // HEVC with alpha from AVAssetWriter, premultiplied.
+        try await SyntheticMedia.writeMovie(to: file("stickers/pop.mov"), .init(width: 2400, height: 1350, duration: 0.5, codec: .hevcWithAlpha, audio: nil))
+        let analysis = analysis()
+        let modes = ["overlays/leak.mov": kCMFormatDescriptionAlphaChannelMode_StraightAlpha, "stickers/pop.mov": kCMFormatDescriptionAlphaChannelMode_PremultipliedAlpha]
+        for (path, mode) in modes.sorted(by: { $0.key < $1.key }) {
+            let source = try await item(path)
+            XCTAssertTrue(source.hasAlpha, path)
+            let state = await analysis.waitFor(.proxy, for: source)
+            XCTAssertEqual(state, .ready, path)
+            let proxy = try XCTUnwrap(analysis.proxyURL(for: source))
+            let track = try await AVURLAsset(url: proxy).loadTracks(withMediaType: .video)[0]
+            let (size, formats) = try await track.load(.naturalSize, .formatDescriptions)
+            XCTAssertEqual(size, CGSize(width: 1920, height: 1080), path)
+            // HEVC with an alpha layer ("hvc1" with ContainsAlphaChannel).
+            let format = try XCTUnwrap(formats.first)
+            XCTAssertEqual(CMFormatDescriptionGetMediaSubType(format), kCMVideoCodecType_HEVC, path)
+            XCTAssertTrue(MediaProbe.containsAlpha(format), path)
+            let extensions = CMFormatDescriptionGetExtensions(format) as? [String: Any] ?? [:]
+            XCTAssertEqual(extensions[kCMFormatDescriptionExtension_AlphaChannelMode as String] as? String, mode as String, path)
+
+            // Keyframes and P-frames as every proxy has them.
+            let cursor = try XCTUnwrap(track.makeSampleCursorAtFirstSampleInDecodeOrder())
+            var keyframes: [Int] = []
+            var decodeOrder: [CMTime] = []
+            repeat {
+                if cursor.currentSampleSyncInfo.sampleIsFullSync.boolValue { keyframes.append(decodeOrder.count) }
+                decodeOrder.append(cursor.presentationTimeStamp)
+            } while cursor.stepInDecodeOrder(byCount: 1) == 1
+            let sourceTimes = try await videoSampleTimes(file(path))
+            XCTAssertEqual(decodeOrder, sourceTimes, "every frame at its source time, no reordering, \(path)")
+            XCTAssertEqual(keyframes, Array(stride(from: 0, to: sourceTimes.count, by: AnalysisSettings.standard.proxyKeyFrameInterval)), path)
+        }
+
+        let overlay = try await item("overlays/leak.mov")
+        let leak = try XCTUnwrap(analysis.proxyURL(for: overlay))
+        var alphas: [Int] = []
+        for x in [320, 960, 1600] { alphas.append(try await firstFramePixel(leak, x: x, y: 540).alpha) }
+        // HEVC's alpha layer brings opaque back as 251 to 253, the
+        // original HEVC stickers' included.
+        XCTAssertEqual(alphas[0], 255, accuracy: 4)
+        XCTAssertEqual(alphas[1], 128, accuracy: 4)
+        XCTAssertEqual(alphas[2], 0, accuracy: 2)
+    }
+
+    /// Proxies made before they kept alpha are rebuilt for video with
+    /// alpha, whose key now says so. Every other proxy keeps its key, and
+    /// the file it has.
+    func testOnlyProxiesOfVideoWithAlphaChangeTheirKey() throws {
+        let standard = AnalysisSettings.standard
+        let screen = MediaItem(path: "source/a-screen.mov", kind: .video, role: .screen, width: 3200, height: 1800, hasVideo: true)
+        let overlay = MediaItem(path: "overlays/leak.mov", kind: .video, role: .broll, width: 3840, height: 2160, hasVideo: true, hasAlpha: true)
+        for kind in AnalysisKind.allCases {
+            XCTAssertEqual(standard.canonical(for: kind, item: screen), standard.canonical(for: kind), "\(kind)")
+            if kind != .proxy { XCTAssertEqual(standard.canonical(for: kind, item: overlay), standard.canonical(for: kind), "\(kind)") }
+        }
+        XCTAssertEqual(standard.canonical(for: .proxy, item: overlay), "{\"alpha\":\"1\",\"box\":\"1920x1080\",\"keyframes\":\"15\",\"quality\":\"0.78\"}")
+
+        // Version 3 proxies as they were cached before, keyed without alpha.
+        touch(screen.path, contents: "screen")
+        touch(overlay.path, contents: "overlay")
+        let analysis = analysis()
+        for item in [screen, overlay] {
+            let fingerprint = try XCTUnwrap(analysis.fingerprint(for: item))
+            let settings = standard.canonical(for: .proxy)
+            let pending = try analysis.cache.begin(kind: .proxy, key: AnalysisCache.key(fingerprint: fingerprint, kind: .proxy, algorithmVersion: 3, settings: settings))
+            try Data([1]).write(to: pending.folder.appendingPathComponent(ProxyJob.file))
+            try analysis.cache.commit(pending, fingerprint: fingerprint, algorithmVersion: 3, settings: settings, source: item.path)
+        }
+        XCTAssertEqual(analysis.state(.proxy, for: screen), .ready, "the screen's proxy stays")
+        XCTAssertNotNil(analysis.proxyURL(for: screen))
+        XCTAssertEqual(analysis.state(.proxy, for: overlay), .missing, "the overlay's proxy lost its alpha, so it's made again")
+        XCTAssertNil(analysis.proxyURL(for: overlay))
     }
 
     func testMatteIsGreyscaleWithTheSourceFrameTimes() async throws {

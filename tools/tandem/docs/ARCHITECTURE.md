@@ -198,7 +198,7 @@ edits, so placing a take or pressing 2 for the PiP queues its work. Results are 
 | thumbnails | JPEG strip | for the timeline and browser |
 | waveform | peak envelope | drawn on audio clips |
 | loudness | integrated LUFS, true peak, LRA | per file; dialogue is levelled per take, not per cut |
-| proxy | 1080p HEVC, a keyframe every 15 frames | used for motion; paused frames decode the original |
+| proxy | 1080p HEVC, a keyframe every 15 frames; HEVC with alpha for video with alpha | used for motion; paused frames decode the original |
 | transcript | words with media times | SpeechAnalyzer first; Whisper medium.en as the careful pass |
 | matte | greyscale HEVC person matte | Vision person segmentation, blended with the instance mask to keep a handheld mic |
 | isolatedVoice | audio file | AUSoundIsolation, shifted back by its 3,665-sample latency |

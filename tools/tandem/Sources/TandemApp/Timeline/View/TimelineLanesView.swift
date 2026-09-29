@@ -526,27 +526,35 @@ final class TimelineLanesView: TimelineChildView {
     }
 
     private func updateCursor(_ event: NSEvent) {
+        updateCursor(at: event.locationInWindow, flags: event.modifierFlags)
+    }
+
+    /// Sets the cursor for where the pointer is now, when something else
+    /// changed what a press there would do (the tool, say).
+    func refreshCursor() {
+        guard let window, window.isKeyWindow else { return }
+        let location = window.mouseLocationOutsideOfEventStream
+        guard let under = window.contentView?.hitTest(location), under === self || under.isDescendant(of: self) else { return }
+        updateCursor(at: location, flags: NSEvent.modifierFlags)
+    }
+
+    /// The cursor for what a press here would do (`CursorKind.timeline`).
+    private func updateCursor(at windowPoint: CGPoint, flags: NSEvent.ModifierFlags) {
         guard let model, let tester = tester(for: model.project) else { return }
-        let point = lanePoint(event)
+        let local = convert(windowPoint, from: nil)
+        let point = CGPoint(x: local.x, y: local.y + offset)
         if model.tool != .blade, let found = tester.keyframe(at: point) {
             updateKeyframeToolTip(found.clipID, diamond: found.diamond, model: model)
-            NSCursor.pointingHand.set()
+            CursorKind.pointer.set()
             return
         }
         let hit = tester.hit(point)
         updateToolTip(hit, model: model)
-        switch model.tool {
-        case .blade:
-            if case .clip = hit { NSCursor.crosshair.set() } else { NSCursor.arrow.set() }
-        case .slip, .slide:
-            if case .clip = hit { NSCursor.openHand.set() } else { NSCursor.arrow.set() }
-        case .select, .rippleTrim, .roll:
-            if case .clip(_, _, let part) = hit, part != .body {
-                NSCursor.resizeLeftRight.set()
-            } else {
-                NSCursor.arrow.set()
-            }
-        }
+        // The selection only decides which clips a move takes, not the kind
+        // of drag, so it's left out here; the pointer moves a lot.
+        let press = DragKind.forPress(on: hit, tool: model.tool, project: model.project, selection: [],
+                                      rippleByDefault: model.rippleTrims, command: flags.contains(.command), option: flags.contains(.option))
+        CursorKind.timeline(hit: hit, tool: model.tool, overKeyframe: false, press: press, project: model.project).set()
     }
 
     /// "Camera · main-camera", its times and what's on it, for hovering.
@@ -695,6 +703,8 @@ final class TimelineLanesView: TimelineChildView {
                 rippleByDefault: model.rippleTrims, command: mods.command, option: mods.option
             ), let context = dragContext() else { return }
             session = DragSession(kind: kind, context: context)
+            // AppKit sends no cursor updates while the button is down.
+            CursorKind.dragging(kind).set()
         case .emptyTrack, .transcript, .nothing:
             if !(mods.shift || mods.command) {
                 model.selection = []
@@ -809,6 +819,7 @@ final class TimelineLanesView: TimelineChildView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        defer { updateCursor(event) }
         autoscrollTimer?.invalidate()
         autoscrollTimer = nil
         guard let model, let container else { return }
