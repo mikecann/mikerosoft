@@ -135,6 +135,10 @@ public enum CompositionBuilder {
 /// the timeline, golden-frame tests. It goes through the same composition
 /// and compositor as export, with RGBA output and zero time tolerance, so
 /// the frame is exactly the one at `time`.
+///
+/// It builds the composition once, from the project and the proxies and
+/// mattes that exist then. Make a new one when either changes: one kept
+/// past a finished matte renders that clip without its cutout.
 public final class FrameRenderer: @unchecked Sendable {
     public let context: RenderContext
     private let lock = NSLock()

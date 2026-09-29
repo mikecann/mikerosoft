@@ -342,10 +342,14 @@ final class PlaybackController {
 
     private func renderStill() {
         guard rate == 0, hasComposition, var context = makeContext?() else { return }
-        if renderer == nil || rendererVersion != projectVersion {
+        // A renderer keeps the composition it first built, so it's replaced
+        // on every rebuild: those follow finished mattes and proxies as well
+        // as edits, and a renderer from before a matte existed showed the
+        // full camera frame paused while the player showed the cutout.
+        if renderer == nil || rendererVersion != buildGeneration {
             context.useProxies = false
             renderer = FrameRenderer(context: context)
-            rendererVersion = projectVersion
+            rendererVersion = buildGeneration
         }
         guard let renderer else { return }
         let target = time
