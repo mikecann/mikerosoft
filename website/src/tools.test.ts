@@ -67,3 +67,23 @@ test('publishes Token Stats as a documented macOS tool', () => {
   assert.match(tool.header ?? '', /token-stats\/docs\/header\.png$/);
   assert.match(tool.url, /tools\/token-stats$/);
 });
+
+test('publishes Mikey Mouse as a macOS tool', () => {
+  const tool = tools.find(candidate => candidate.name === 'mikey-mouse');
+
+  assert.ok(tool);
+  assert.deepEqual(tool.platforms, ['macos']);
+  assert.match(tool.icon, /mikey-mouse\/icons\/mikey-mouse\.png$/);
+  assert.match(tool.header ?? '', /mikey-mouse\/docs\/header\.webp$/);
+  assert.match(tool.url, /tools\/mikey-mouse$/);
+});
+
+test('publishes Tandem as a documented macOS tool', () => {
+  const tool = tools.find(candidate => candidate.name === 'tandem');
+
+  assert.ok(tool);
+  assert.deepEqual(tool.platforms, ['macos']);
+  assert.match(tool.icon, /tandem\/icons\/tandem\.png$/);
+  assert.match(tool.header ?? '', /tandem\/docs\/header\.jpg$/);
+  assert.match(tool.url, /tools\/tandem$/);
+});

@@ -111,13 +111,15 @@ replaced: the new copy goes beside it.
 
 ## Decisions for Mike
 
-- Is he making these as a Convex employee or freelance? That decides Epidemic
-  Pro or Business and whether Remotion needs a Convex licence.
-- Convex's headcount and revenue decide other plan tiers (Epidemic Business
-  under $10M, Artlist and Envato Individual under 50 staff).
-- Turn on `sound_generation` for the ElevenLabs key.
-- Ask Freesound's operator (UPF) for written OK for commercial API use, or keep
-  Freesound off.
+- Decided 2026-09-29: Mike makes the Convex videos as a Convex employee, so
+  Convex videos need company-channel licences (Epidemic Sound Business, not
+  Pro; a Remotion company licence for Convex motion graphics). Tandem itself
+  is for any project, so personal projects can use personal licences; the
+  catalogue records each asset's licence so the credits and checks follow
+  the project.
+- The ElevenLabs key in the Keychain (`claude-code-music`) is restricted to
+  music; turning on Sound Effects for it makes Generate work for SFX.
+- Freesound stays off until its operator (UPF) agrees to commercial API use.
 - Optional: Envato Core at $16.50/mo is the cheapest broad library whose
   licence covers client work (import folder, no API).
 
