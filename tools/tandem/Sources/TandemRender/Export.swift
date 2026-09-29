@@ -7,7 +7,8 @@ import VideoToolbox
 
 /// The export pipeline behind `Exporter`.
 ///
-/// 1. Build the composition at the preset's size and format.
+/// 1. Plan the preset for the project (`ExportPreset.plan(for:)`: the frame,
+///    size and bitrate) and build the composition for it.
 /// 2. Measure the mix's loudness in a fast audio-only pass. When the limiter
 ///    will bite, a second pass tries a few gains through it at once and
 ///    picks the one that lands on the target.
@@ -18,7 +19,8 @@ import VideoToolbox
 /// 4. Write a snapshot of the project beside the file.
 final class ExportPipeline: @unchecked Sendable {
     let context: RenderContext
-    let preset: ExportPreset
+    /// As given until `run` plans it for the project, then the plan's.
+    private(set) var preset: ExportPreset
     let output: URL
     let progress: @Sendable (Double) -> Void
 
@@ -91,14 +93,24 @@ final class ExportPipeline: @unchecked Sendable {
         }
     }
 
+    /// AAC can overshoot the limited mix by a few tenths of a dB, which put
+    /// finished files over the ceiling when measured with ffmpeg, so the
+    /// limiter aims this much lower (on top of its own 0.1 dB).
+    static let aacPeakMargin = 0.5
+
     func run() async throws -> ExportResult {
         let started = Date()
         try checkOutput()
+        // The same plan the CLI and the Export dialog show. A preset that's
+        // already a plan comes back unchanged.
+        let sizesTheFrame = preset.width != nil || preset.resolution != nil
+        let plan = try preset.plan(for: context.project.settings, format: preset.format ?? context.format)
+        preset = plan.preset
         var renderContext = context
         renderContext.useProxies = false
-        if let format = preset.format { renderContext.format = format }
-        if let width = preset.width, let height = preset.height {
-            renderContext.sizeOverride = CGSize(width: width, height: height)
+        renderContext.format = plan.format
+        if sizesTheFrame {
+            renderContext.sizeOverride = CGSize(width: plan.width, height: plan.height)
         }
         let (ready, notes) = await timed("convert") { await ConvertedMedia.prepare(renderContext) }
         let built = try await timed("build") { try await CompositionAssembler.build(ready) }
@@ -111,7 +123,7 @@ final class ExportPipeline: @unchecked Sendable {
 
         // Loudness passes take the first tenth of the progress bar.
         var gainDB = 0.0
-        let ceiling = preset.truePeakCeiling
+        let ceiling = preset.truePeakCeiling.map { $0 - Self.aacPeakMargin }
         if let target = preset.loudnessTarget, !audioTracks.isEmpty {
             let first = try await timed("loudness") {
                 try await measure(built, tracks: audioTracks, range: range, gains: [0], ceiling: nil) { self.report(0.04 * $0) }[0]
@@ -537,7 +549,10 @@ final class ExportPipeline: @unchecked Sendable {
         project.metadata["export.preset"] = preset.name
         project.metadata["export.date"] = ISO8601DateFormatter().string(from: Date())
         project.metadata["export.range"] = "\(range.start.seconds)-\(range.end.seconds)"
-        if let format = preset.format { project.metadata["export.format"] = format }
+        if let format = preset.format, format != OutputFrames.main { project.metadata["export.format"] = format }
+        if let width = preset.width, let height = preset.height {
+            project.metadata["export.video"] = "\(width)x\(height) \(preset.codec.displayName) at \(ExportPlan.megabits(preset.videoBitrate))"
+        }
         if loudness.integratedLUFS.isFinite {
             project.metadata["export.loudness"] = String(format: "%.2f LUFS, %.2f dBTP", loudness.integratedLUFS, loudness.truePeakDBTP)
         }

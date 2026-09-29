@@ -181,7 +181,9 @@ struct FakeRenderer: RenderBackend {
 
     func export(context: RenderContext, preset: ExportPreset, output: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> RenderedExport {
         for step in 1...4 { progress(Double(step) / 4) }
-        try Data("fake movie \(preset.name)".utf8).write(to: output)
+        // What reached the renderer, for tests to read back.
+        let size = preset.width.map { "\($0)x\(preset.height ?? 0)" } ?? "canvas"
+        try Data("fake movie \(preset.name) \(size) \(preset.codec.rawValue) \(preset.videoBitrate) \(context.format ?? "main")".utf8).write(to: output)
         let duration = preset.range?.duration ?? context.project.duration
         let result = ExportResult(path: output.path, duration: duration, integratedLUFS: -14.1, truePeakDBTP: -1.2, elapsed: 0.01)
         return RenderedExport(result: result, warnings: warnings)

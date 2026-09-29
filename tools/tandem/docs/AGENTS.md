@@ -49,7 +49,7 @@ tandem short [--apply]             lay out a 9:16 short from the same edit
 tandem apply <batch.json | ->      [--dry-run] [--expect N] [--label L] [--key K]
 tandem undo [--expect N]    tandem redo    tandem history    tandem validate
 tandem frame <time> [-o out.png]   tandem clip <start> <end> [-o out.mp4]
-tandem export [--preset youtube4k] [-o out.mp4] [--from T] [--to T]
+tandem export [--preset <name>] [-o out.mp4] [--from T] [--to T] [--format <id>]
 tandem loudness    tandem effects    tandem schema    tandem watch [--once]
 tandem archive [<project>] [--to <folder>] [--with-cache] [--dry-run]
 tandem relink [--search <folder>]... [--dry-run]    find missing media
@@ -866,6 +866,12 @@ use about 0.85 for landscape. Run it again over the same range to redo them
 
 ### Make a short
 
+A short is 1080x1920, and there are two ways to make one.
+`tandem export --preset short` renders either.
+
+**Cut from a landscape video.** The short is an alternate output format
+of the same project (1080x1920):
+
 ```bash
 tandem short                                   # the plan, nothing changes
 tandem short --apply
@@ -874,11 +880,31 @@ tandem frame 0:30 --format portrait -o /tmp/short.png
 tandem export --preset short -o ~/Movies/short.mp4
 ```
 
-The short is an alternate output format of the same project (1080x1920):
-screen, B-roll and graphics fill the top half, the camera fills the bottom
+Screen, B-roll and graphics fill the top half, the camera fills the bottom
 half with its background, and full-frame camera moments fill the frame.
 Every edit to the project shows up in both videos. To cut the short down
-without touching the long one, save a version first and edit that.
+without touching the long one, save a version first and edit that. The
+landscape video still exports with plain `tandem export` (YouTube 4K for a
+4K canvas).
+
+**Made portrait from the start**, for a short that isn't cut from a long
+video (phone footage, photos). The canvas is the short, so there's no
+portrait format and no `tandem short` step (it refuses, as there's
+nothing to lay out):
+
+```bash
+tandem new "Workbench.tandem" --portrait       # a 1080x1920 canvas
+tandem captions --apply
+tandem frame 0:30 -o /tmp/short.png
+tandem export --preset short                   # exports/Workbench r<revision>.mp4
+```
+
+The `fill` layout makes a landscape photo or clip cover the frame. Presets
+keep the canvas's shape, so plain `tandem export` and `--preset
+youtube1080` make the same 1080x1920 H.264 at 20 Mbps as `--preset short`,
+and `--preset youtube4k` upscales to 2160x3840 with a warning. Every export
+prints the size, codec and bitrate it used; `tandem help export` has the
+presets.
 
 ### Cut a phrase
 
@@ -1073,8 +1099,14 @@ A single clip can still differ: `{"updateClip": {"clipID": "clip_voc7",
 ```bash
 tandem frame 2:14.5 -o /tmp/frame.png        # one frame
 tandem clip 2:00 2:30 -o /tmp/review.mp4     # 720p review render
-tandem export --preset youtube4k             # the full video, loudness matched
+tandem export                                # the full video, loudness matched
 ```
+
+Plain `export` picks the preset that fits the canvas: YouTube 1080p for a
+canvas 1080 pixels or less on its short side (1920x1080, 1080x1920),
+YouTube 4K for anything bigger. A preset sets the codec, bitrate and
+resolution class and keeps the canvas's shape, so `--preset youtube1080`
+of a 4K project is 1920x1080 and of a 9:16 one 1080x1920.
 
 `clip` defaults to `exports/review <start>-<end>.mp4` in the project folder
 and `export` to `exports/<name> r<revision>.mp4`. In MCP, `frame` returns
@@ -1272,6 +1304,10 @@ reach the project (through the app's API when it's open).
   open right now. Commands wait up to 15 seconds for it before giving up.
 - **"isn't built yet, so this doesn't work in this version of Tandem"**:
   rendering or media analysis isn't in this build.
+- **"has no 9:16 frame for the short"**: `--preset short` (or `--format
+  portrait`) on a project that isn't 9:16 and has no portrait format yet.
+  `tandem short --apply` lays one out; the landscape video exports with
+  plain `tandem export`.
 - **No pauses or search results**: check `tandem media`; transcripts are
   made in the background after files are added.
 - **"... is QuickTime Animation, which macOS can't decode"**: stock stickers

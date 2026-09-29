@@ -140,8 +140,6 @@ public enum PresetNames {
         return ExportPreset.all.first { slug($0.name) == wanted || slug($0.name).hasPrefix(wanted) }
     }
 
-    /// A short name for the CLI: `youtube4k`, `youtube1080p`, `review720p`, `short916`.
-    public static func short(_ preset: ExportPreset) -> String { slug(preset.name) }
 
     static func slug(_ text: String) -> String {
         String(text.lowercased().filter { $0.isLetter || $0.isNumber })

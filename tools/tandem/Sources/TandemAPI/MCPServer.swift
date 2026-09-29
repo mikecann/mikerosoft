@@ -631,10 +631,10 @@ enum MCPTools {
         ),
         Tool(
             name: "export", title: "Export the video",
-            description: "Renders the timeline (or a range) with an export preset, loudness-matched to the project target. Returns the file path and measured loudness.",
+            description: "Renders the timeline (or a range) with an export preset, loudness-matched to the project target. A preset sets the quality (codec, bitrate, resolution class) and the frame keeps the canvas's shape, so youtube1080 of a 1080x1920 project is 1080x1920. Returns the file path, the size, codec and bitrate used, and the measured loudness.",
             operation: .export,
             properties: [
-                "preset": S.string("youtube4k (default), youtube1080, review, short."),
+                "preset": S.string("youtube4k, youtube1080, review or short. Default: the one that fits the canvas, youtube1080 up to 1080 pixels on the short side (1920x1080, 1080x1920), youtube4k above. short renders the portrait format, or the canvas when it's 9:16."),
                 "output": S.string("Where to write the file. Default: exports/<name> r<revision>.mp4."),
                 "from": time("Start of the range."), "to": time("End of the range."),
                 "format": S.string("An alternate output format ID, like portrait.")

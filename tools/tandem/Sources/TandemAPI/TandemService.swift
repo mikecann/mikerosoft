@@ -522,14 +522,14 @@ public final class TandemService: @unchecked Sendable {
     }
 
     func renderContext(_ project: Project, format: String?) throws -> RenderContext {
-        if let format, format != "main", !project.settings.alternateFormats.contains(where: { $0.id == format }) {
-            let known = project.settings.alternateFormats.map(\.id)
-            throw ServiceError(.notFound, "No output format \"\(format)\". This project has: \((["main"] + known).joined(separator: ", ")).")
+        // "portrait" on a project whose canvas is 9:16 is the canvas.
+        let resolved: String?
+        do {
+            resolved = try OutputFrames.resolve(format, in: project.settings)
+        } catch {
+            throw ServiceError.wrap(error)
         }
-        return RenderContext(
-            project: project, folder: folder, analysis: session.analysis,
-            useProxies: false, format: format == "main" ? nil : format
-        )
+        return RenderContext(project: project, folder: folder, analysis: session.analysis, useProxies: false, format: resolved)
     }
 
     /// Takes what a frame grab needs from the open project and returns the
@@ -588,23 +588,25 @@ public final class TandemService: @unchecked Sendable {
             throw ServiceError(.badRequest, "The clip's end (\(request.end)) must be after its start (\(request.start)).")
         }
         guard request.start >= .zero else { throw ServiceError(.badRequest, "The clip can't start before 0.") }
-        var preset = try preset(named: request.preset, default: .review)
+        var preset = try preset(named: request.preset) ?? .review
         preset.range = TimeRange(start: request.start, end: request.end)
         let output = request.output.map(outputURL)
             ?? folder.exportsFolder.appendingPathComponent("review \(TimeText.fileSafe(request.start))-\(TimeText.fileSafe(request.end)).mp4")
-        return try prepareRender(preset: preset, output: output, format: preset.format)
+        return try prepareRender(plan: try exportPlan(preset, format: nil), output: output)
     }
 
     public func prepareExport(_ request: ExportRequest) throws -> @Sendable () async throws -> ExportOutcome {
-        var preset = try preset(named: request.preset, default: .youtube4K)
+        let project = coordinator.project
+        // Without a preset the frame decides: 1080p for 1080x1920, 4K for
+        // a 4K canvas.
+        var preset = try preset(named: request.preset) ?? .standard(for: project.settings, format: request.format)
         if request.from != nil || request.to != nil {
-            let project = coordinator.project
             let start = request.from ?? .zero
             let end = request.to ?? project.duration
             guard end > start else { throw ServiceError(.badRequest, "The export range is empty (\(start) to \(end)).") }
             preset.range = TimeRange(start: start, end: end)
         }
-        if let format = request.format { preset.format = format }
+        let plan = try exportPlan(preset, format: request.format)
         let output: URL
         if let path = request.output {
             output = outputURL(path)
@@ -612,16 +614,27 @@ public final class TandemService: @unchecked Sendable {
             let (project, revision) = coordinator.snapshot()
             output = uniqueURL(folder.exportsFolder.appendingPathComponent("\(project.name) r\(revision).mp4"))
         }
-        return try prepareRender(preset: preset, output: output, format: preset.format)
+        return try prepareRender(plan: plan, output: output)
     }
 
-    func preset(named name: String?, default fallback: ExportPreset) throws -> ExportPreset {
-        guard let name else { return fallback }
+    /// A preset by name, or nil for none.
+    func preset(named name: String?) throws -> ExportPreset? {
+        guard let name else { return nil }
         guard let preset = PresetNames.find(name) else {
-            let known = ExportPreset.all.map(PresetNames.short).joined(separator: ", ")
+            let known = ExportPreset.all.map(\.cliName).joined(separator: ", ")
             throw ServiceError(.notFound, "No export preset \"\(name)\". Presets: \(known).")
         }
         return preset
+    }
+
+    /// What the preset renders for the open project: the same plan the
+    /// app's Export dialog shows.
+    func exportPlan(_ preset: ExportPreset, format: String?) throws -> ExportPlan {
+        do {
+            return try preset.plan(for: coordinator.project.settings, format: format)
+        } catch {
+            throw ServiceError.wrap(error)
+        }
     }
 
     func uniqueURL(_ url: URL) -> URL {
@@ -635,11 +648,12 @@ public final class TandemService: @unchecked Sendable {
         return candidate
     }
 
-    private func prepareRender(preset: ExportPreset, output: URL, format: String?) throws -> @Sendable () async throws -> ExportOutcome {
+    private func prepareRender(plan: ExportPlan, output: URL) throws -> @Sendable () async throws -> ExportOutcome {
         // The exporter refuses these too; this says so before anything starts.
         try checkOutput(output, what: "export")
         let project = coordinator.project
-        let context = try renderContext(project, format: format)
+        let context = try renderContext(project, format: plan.format)
+        let preset = plan.preset
         let renderer = self.renderer
         let id = IDs.make("exp")
         let path = output.path
@@ -653,11 +667,18 @@ public final class TandemService: @unchecked Sendable {
                 let rendered = try await renderer.export(context: context, preset: preset, output: output) { reporter.report($0) }
                 self?.finish(ExportJob(id: id, output: path, preset: preset.name, progress: 1, state: .done))
                 let result = rendered.result
-                return ExportOutcome(
+                var outcome = ExportOutcome(
                     path: result.path, preset: preset.name, duration: result.duration,
                     integratedLUFS: result.integratedLUFS, truePeakDBTP: result.truePeakDBTP, elapsed: result.elapsed,
-                    warnings: RenderWarnings.relevant(rendered.warnings, in: project, range: preset.range)
+                    warnings: RenderWarnings.relevant(plan.warnings + rendered.warnings, in: project, range: preset.range)
                 )
+                outcome.width = plan.width
+                outcome.height = plan.height
+                outcome.codec = plan.codec
+                outcome.videoBitrate = plan.videoBitrate
+                outcome.audioBitrate = preset.audioBitrate
+                outcome.format = plan.format
+                return outcome
             } catch {
                 let wrapped = ServiceError.wrap(error)
                 self?.finish(ExportJob(id: id, output: path, preset: preset.name, state: .failed, message: wrapped.message))
