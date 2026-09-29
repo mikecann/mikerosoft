@@ -173,6 +173,11 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
     public var hasAlpha: Bool
     /// True when the source uses variable frame durations (screen recordings).
     public var variableFrameRate: Bool
+    /// The video codec's four-character code ("rle " for QuickTime
+    /// Animation, "png " for PNG) when macOS can't decode it, as with many
+    /// stock alpha stickers. Tandem converts the file to HEVC, keeping the
+    /// alpha, and plays, analyses and renders that copy (docs/MEDIA.md).
+    public var undecodableCodec: String?
     /// Cheap identity check: size, modification time and a hash of the first
     /// and last megabyte. Used for cache keys and relinking.
     public var fingerprint: String?
@@ -195,6 +200,7 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
         hasAudio: Bool = false,
         hasAlpha: Bool = false,
         variableFrameRate: Bool = false,
+        undecodableCodec: String? = nil,
         fingerprint: String? = nil,
         look: [Effect] = []
     ) {
@@ -212,6 +218,7 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
         self.hasAudio = hasAudio
         self.hasAlpha = hasAlpha
         self.variableFrameRate = variableFrameRate
+        self.undecodableCodec = undecodableCodec
         self.fingerprint = fingerprint
         self.look = look
     }
@@ -957,6 +964,7 @@ extension MediaItem {
         hasAudio = try c.decode(.hasAudio, or: kind == .audio)
         hasAlpha = try c.decode(.hasAlpha, or: false)
         variableFrameRate = try c.decode(.variableFrameRate, or: false)
+        undecodableCodec = try c.decodeIfPresent(String.self, forKey: .undecodableCodec)
         fingerprint = try c.decodeIfPresent(String.self, forKey: .fingerprint)
         look = try c.decode(.look, or: [])
     }

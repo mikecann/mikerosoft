@@ -84,10 +84,13 @@ public struct AnalysisState: Codable, Equatable, Sendable {
     /// `ready`, `queued`, `running`, `failed`, `cancelled` or `none`.
     public var state: String
     public var progress: Double?
+    /// Why it failed, when it did.
+    public var message: String?
 
-    public init(state: String, progress: Double? = nil) {
+    public init(state: String, progress: Double? = nil, message: String? = nil) {
         self.state = state
         self.progress = progress
+        self.message = message
     }
 }
 
@@ -102,6 +105,10 @@ public struct MediaInfo: Codable, Sendable {
     public var frameRate: Double?
     public var hasVideo: Bool
     public var hasAudio: Bool
+    /// The video codec macOS can't decode ("rle " for QuickTime Animation,
+    /// "png "), when it can't. The picture comes from a converted copy
+    /// (`analysis.converted`).
+    public var undecodableCodec: String?
     public var takeID: String?
     public var takeOffset: Time?
     /// How many timeline clips use this file.

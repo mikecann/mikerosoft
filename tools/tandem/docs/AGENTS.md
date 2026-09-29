@@ -1139,6 +1139,11 @@ reach the project (through the app's API when it's open).
   rendering or media analysis isn't in this build.
 - **No pauses or search results**: check `tandem media`; transcripts are
   made in the background after files are added.
+- **"... is QuickTime Animation, which macOS can't decode"**: stock stickers
+  often come as QuickTime Animation or PNG video. Tandem converts them to
+  HEVC with ffmpeg (frames and exports wait for it; `tandem media` shows
+  `converted`). If the warning says ffmpeg is missing, Mike installs it with
+  `brew install ffmpeg`.
 - **"Nothing to undo" after editing with the app closed**: headless undo
   history only lasts while nobody else edits the project. `tandem history`
   shows what can be undone.

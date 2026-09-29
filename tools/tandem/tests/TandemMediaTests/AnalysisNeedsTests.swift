@@ -47,6 +47,29 @@ final class AnalysisNeedsTests: XCTestCase {
         XCTAssertEqual(kinds(needs, "med_bed"), [.waveform, .loudness])
     }
 
+    func testFilesMacOSCantDecodeAreConvertedFirst() {
+        var p = project()
+        p.media += [
+            MediaItem(id: "med_pop", path: "stickers/pop.mov", kind: .video, role: .sticker, duration: t(2), width: 512, height: 512, hasVideo: true, hasAlpha: true, undecodableCodec: "rle "),
+            MediaItem(id: "med_spare", path: "stickers/spare.mov", kind: .video, role: .sticker, duration: t(2), width: 512, height: 512, hasVideo: true, hasAlpha: true, undecodableCodec: "png ")
+        ]
+        let graphics = p.location(ofTrack: p.track(named: "Graphics")!.id)!
+        p[graphics].clips = [Clip(id: "clip_pop", content: .media(mediaID: "med_pop"), start: .zero, duration: t(2))]
+        let needs = AnalysisNeeds.needs(for: p)
+
+        let placed = needs.filter { $0.mediaID == "med_pop" }
+        XCTAssertEqual(placed.map(\.kind), [.converted, .thumbnails])
+        XCTAssertEqual(placed.first?.priority, .timeline)
+        // Not on the timeline yet: converted in the background so the
+        // browser can show it.
+        let spare = needs.filter { $0.mediaID == "med_spare" }
+        XCTAssertEqual(spare.map(\.kind), [.converted, .thumbnails])
+        XCTAssertEqual(spare.first?.priority, .background)
+        XCTAssertFalse(kinds(needs, "med_cam").contains(.converted))
+
+        XCTAssertEqual(MediaAnalysis.defaultKinds(for: p.media.first { $0.id == "med_pop" }!), [.converted, .thumbnails])
+    }
+
     func testMatteFollowsTheCutoutMode() {
         var p = project()
         let camera = p.location(ofTrack: p.track(named: "Camera")!.id)!

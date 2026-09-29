@@ -81,6 +81,13 @@ replaced: the new copy goes beside it.
   convert to HEVC with alpha via `AVAssetExportPresetHEVCHighestQualityWithAlpha`
   (a 5 s sticker: 520 KB WebM, 23 MB ProRes 4444, 386 KB HEVC-alpha). Don't use
   ffmpeg's `hevc_videotoolbox` for alpha; its output fails to decode.
+- QuickTime Animation and PNG in a MOV (Storyblocks, Motion Array and older
+  VideoHive sticker packs): macOS 26 can't decode either, so they go the
+  WebM way through ffmpeg and ProRes 4444 to HEVC with alpha
+  (`HEVCTranscoder`, shared with project media). Animation and PNG frames
+  are RGB: they're converted with the BT.709 matrix and tagged, because
+  untagged, the export guessed SMPTE-C for a small picture and turned red
+  orange. Without ffmpeg the import fails and says to install it.
 - Animated WebP and GIF: ImageIO decodes both with alpha and frame delays.
 - Lottie: render offscreen with alpha (about 1.5 to 2.3 s for 140 frames at
   1024 square) into HEVC-alpha at import, so the renderer only sees video.

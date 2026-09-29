@@ -1,5 +1,6 @@
 import Foundation
 import TandemCore
+import TandemMedia
 
 // The render plan is a pure description of how a project maps onto
 // AVFoundation: which media plays on which composition track and when, what
@@ -140,6 +141,10 @@ enum RenderPlanner {
                 planned[trackIndex].append(PlannedClip(clip: clip, trackIndex: trackIndex, visible: visible))
 
                 guard let item, isMovingVideo else { continue }
+                if let codec = item.undecodableCodecName, assets?.convertedURL(for: item) == nil {
+                    warnings.add("\(item.path) is \(codec), which macOS can't decode, and it isn't converted yet, so it's left out.")
+                    continue
+                }
                 let sourceStart = clip.freezeFrame ? clip.sourceStart : clip.sourceStart - head.scaled(by: clip.speed)
                 let picture = PlannedSegment(
                     clipID: clip.id, mediaID: item.id, role: .picture, timeline: visible,

@@ -33,6 +33,10 @@ final class ExportPipeline: @unchecked Sendable {
     private(set) var timings: [(phase: String, seconds: Double)] = []
     /// Each loudness measurement: the gain it was made at and the result.
     private(set) var loudnessPasses: [(gainDB: Double, limited: Bool, lufs: Double)] = []
+    private var storedWarnings: [String] = []
+    /// What renders differently from the project, once the composition is
+    /// built: a matte not made yet, a file that couldn't be converted.
+    var warnings: [String] { lock.withLock { storedWarnings } }
 
     private func timed<T>(_ phase: String, _ work: () async throws -> T) async rethrows -> T {
         let started = Date()
@@ -96,7 +100,9 @@ final class ExportPipeline: @unchecked Sendable {
         if let width = preset.width, let height = preset.height {
             renderContext.sizeOverride = CGSize(width: width, height: height)
         }
-        let built = try await timed("build") { try await CompositionAssembler.build(renderContext) }
+        let (ready, notes) = await timed("convert") { await ConvertedMedia.prepare(renderContext) }
+        let built = try await timed("build") { try await CompositionAssembler.build(ready) }
+        lock.withLock { storedWarnings = notes + built.warnings }
         let range = exportRange(built.duration)
         guard range.duration > .zero else { throw RenderError.export("the export range is empty") }
         let audioTracks = try await built.composition.loadTracks(withMediaType: .audio)

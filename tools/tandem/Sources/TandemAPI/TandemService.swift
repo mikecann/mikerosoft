@@ -182,6 +182,7 @@ public final class TandemService: @unchecked Sendable {
                 frameRate: item.frameRate?.framesPerSecond,
                 hasVideo: item.hasVideo,
                 hasAudio: item.hasAudio,
+                undecodableCodec: item.undecodableCodec,
                 takeID: item.takeID,
                 takeOffset: item.takeOffset,
                 clips: usage[item.id] ?? 0,
@@ -195,6 +196,7 @@ public final class TandemService: @unchecked Sendable {
     /// The analyses that apply to a file, and how far along each is.
     func analysisStates(for item: MediaItem, jobs: [JobStatus]) -> [String: AnalysisState] {
         var kinds: [AnalysisKind] = []
+        if AnalysisKind.converted.applies(to: item) { kinds.append(.converted) }
         if item.hasVideo || item.kind == .image { kinds.append(.thumbnails) }
         if item.hasVideo && item.kind == .video { kinds.append(.proxy) }
         if item.hasAudio { kinds += [.waveform, .loudness, .transcript] }
@@ -207,7 +209,8 @@ public final class TandemService: @unchecked Sendable {
             if analysis.isReady(kind, for: item) {
                 states[kind.rawValue] = AnalysisState(state: "ready")
             } else if let job = jobs.last(where: { $0.mediaID == item.id && $0.kind == kind }) {
-                states[kind.rawValue] = AnalysisState(state: job.state.rawValue, progress: job.state == .running ? job.progress : nil)
+                states[kind.rawValue] = AnalysisState(state: job.state.rawValue, progress: job.state == .running ? job.progress : nil,
+                                                      message: job.state == .failed ? job.message : nil)
             } else {
                 states[kind.rawValue] = AnalysisState(state: "none")
             }

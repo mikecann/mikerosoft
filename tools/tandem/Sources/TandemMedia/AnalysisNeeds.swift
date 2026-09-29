@@ -5,10 +5,11 @@ import TandemCore
 ///
 /// Every file in the project folder shows up in the media browser, and a
 /// video folder can hold hundreds (old renders, drafts, B-roll that never
-/// made it in). So the cheap analyses (thumbnails, waveforms, loudness) run
-/// for everything, the transcript runs for every camera take so you can
-/// search what you said before placing it, and the expensive ones only run
-/// for what the edit uses:
+/// made it in). So the cheap analyses (thumbnails, waveforms, loudness, and
+/// the conversion of a file macOS can't decode) run for everything, the
+/// transcript runs for every camera take so you can search what you said
+/// before placing it, and the expensive ones only run for what the edit
+/// uses:
 ///
 /// - scrub proxies for large video on the timeline,
 /// - a cutout matte for media with a clip whose cutout is on (in any format),
@@ -58,7 +59,9 @@ public enum AnalysisNeeds {
         for item in ordered {
             let used = onTimeline.contains(item.id)
             let priority: JobPriority = used ? .timeline : .background
-            for kind in [AnalysisKind.thumbnails, .waveform, .loudness] where kind.applies(to: item) {
+            // A file macOS can't decode is converted first, used or not, so
+            // the browser can show it; its picture analyses follow the copy.
+            for kind in [AnalysisKind.converted, .thumbnails, .waveform, .loudness] where kind.applies(to: item) {
                 needs.append(Need(mediaID: item.id, kind: kind, priority: priority))
             }
             if AnalysisKind.transcript.applies(to: item) && (item.role == .camera || onSpeech.contains(item.id)) {

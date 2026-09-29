@@ -16,9 +16,10 @@ enum JobChanges {
         jobs.contains { [.thumbnails, .waveform, .transcript].contains($0.kind) }
     }
 
-    /// Files the composition reads: proxies, mattes, isolated voice, and
-    /// loudness for normalising.
+    /// Files the composition reads: proxies, mattes, isolated voice,
+    /// converted copies of files macOS can't decode, and loudness for
+    /// normalising.
     static func affectsPlayback(_ jobs: [JobStatus]) -> Bool {
-        jobs.contains { [.proxy, .matte, .isolatedVoice, .loudness].contains($0.kind) }
+        jobs.contains { [.proxy, .matte, .isolatedVoice, .converted, .loudness].contains($0.kind) }
     }
 }

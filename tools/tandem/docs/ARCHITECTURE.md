@@ -79,6 +79,10 @@ no forks or branches inside a project.
   its picture with a shared `linkGroup`.
 - A camera file's colour grade lives on the media (`MediaItem.look`), so every
   clip from that file gets it. Clip effects come after the look.
+- `MediaItem.undecodableCodec` marks video macOS can't decode (the scan sets
+  it); its picture comes from the `converted` analysis. An older build that
+  drops it only makes the next scan look again, so it didn't need a schema
+  version.
 - Keyframe times are relative to the clip start and move with the clip.
 - Adding a field that matters means bumping `Project.currentSchemaVersion`
   (with a `ProjectFile.migrate` step if old files need it). Lenient decoding
@@ -190,6 +194,7 @@ edits, so placing a take or pressing 2 for the PiP queues its work. Results are 
 | transcript | words with media times | SpeechAnalyzer first; Whisper medium.en as the careful pass |
 | matte | greyscale HEVC person matte | Vision person segmentation, blended with the instance mask to keep a handheld mic |
 | isolatedVoice | audio file | AUSoundIsolation, shifted back by its 3,665-sample latency |
+| converted | HEVC copy, alpha kept | only for video macOS can't decode (QuickTime Animation, PNG in a MOV); made with ffmpeg; the picture, thumbnails, proxy and matte come from it |
 
 ## Rendering
 

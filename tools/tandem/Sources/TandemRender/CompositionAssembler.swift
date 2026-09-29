@@ -14,6 +14,10 @@ struct LoadedSource: @unchecked Sendable {
     var preferredTransform: CGAffineTransform = .identity
     var audio: AVAssetTrack?
     var audioRange: CMTimeRange = .zero
+    /// Set, and `video` left nil, when AVFoundation can't decode the video
+    /// track (QuickTime Animation, PNG in a MOV): the codec's four
+    /// characters. One such track would fail the whole composition.
+    var undecodableCodec: String?
 }
 
 /// Loaded sources by file, reused across builds (the viewer rebuilds the
@@ -36,8 +40,12 @@ final class SourceCache: @unchecked Sendable {
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         var source = LoadedSource(asset: asset)
         if let video = try await asset.loadTracks(withMediaType: .video).first {
-            let (size, transform, range) = try await video.load(.naturalSize, .preferredTransform, .timeRange)
-            source.video = video
+            let (size, transform, range, decodable, formats) = try await video.load(.naturalSize, .preferredTransform, .timeRange, .isDecodable, .formatDescriptions)
+            if decodable {
+                source.video = video
+            } else {
+                source.undecodableCodec = formats.first.map { MediaItem.fourCharacterCode(CMFormatDescriptionGetMediaSubType($0)) } ?? "????"
+            }
             source.naturalSize = size
             source.preferredTransform = transform
             source.videoRange = range
@@ -139,6 +147,8 @@ enum CompositionAssembler {
             switch segment.role {
             case .picture:
                 if context.useProxies, let proxy = context.assets?.proxyURL(for: item) { return proxy }
+                // The planner leaves such a clip out until its copy exists.
+                if item.undecodableCodec != nil { return context.assets?.convertedURL(for: item) }
                 return context.folder.url(for: item)
             case .matte:
                 let cutout = clips[segment.clipID]?.video?.cutout ?? Cutout()
@@ -182,7 +192,15 @@ enum CompositionAssembler {
         var pictureRecovery: [String: TimeRange] = [:]
         var matteRecovery: [String: TimeRange] = [:]
         for segment in plan.videoSegments.sorted(by: { $0.timeline.start < $1.timeline.start }) {
-            guard let u = url(for: segment), let source = sources[u], let assetTrack = source.video else { continue }
+            guard let u = url(for: segment), let source = sources[u] else { continue }
+            guard let assetTrack = source.video else {
+                // Scanned before Tandem checked, so nothing converted it.
+                if let codec = source.undecodableCodec {
+                    let path = media[segment.mediaID]?.path ?? u.lastPathComponent
+                    warnings.add("Left out \(path): macOS can't decode its \(MediaItem.codecName(codec)). Rescan the folder (tandem media --refresh) and Tandem converts it.")
+                }
+                continue
+            }
             do {
                 let leading = LeadingFrameCache.shared.map(for: u)
                 let bad = leading.flatMap { Self.undecodableStart(of: segment, in: $0) }

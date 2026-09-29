@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import TandemCore
+import TandemMedia
 
 /// The right panel: the selected clip's Video, Colour, Audio and Info, and
 /// the activity feed.
@@ -572,9 +573,19 @@ struct ClipInfo: View {
                 if let fps = item.frameRate { InfoRow(label: "Frame rate", value: String(format: "%g fps%@", fps.framesPerSecond, item.variableFrameRate ? ", variable" : "")) }
                 if let duration = item.duration { InfoRow(label: "Length", value: Timecode.string(duration, rate: rate)) }
                 InfoRow(label: "Streams", value: [item.hasVideo ? "picture" : nil, item.hasAudio ? "sound" : nil, item.hasAlpha ? "alpha" : nil].compactMap { $0 }.joined(separator: ", "))
+                if let codec = item.undecodableCodecName { InfoRow(label: "Codec", value: conversionText(codec, item)) }
                 if let take = item.takeID { InfoRow(label: "Take", value: take + (item.takeOffset.map { " · starts \(String(format: "%.3f", $0.seconds)) s in" } ?? "")) }
             }
         }
+    }
+
+    /// macOS can't decode QuickTime Animation or PNG video, so Tandem plays
+    /// a converted copy; says how that's going.
+    private func conversionText(_ codec: String, _ item: MediaItem) -> String {
+        if model.session.analysis.convertedURL(for: item) != nil { return "\(codec) · plays from an HEVC copy" }
+        let job = model.jobs.last { $0.mediaID == item.id && $0.kind == .converted }
+        if job?.state == .failed { return "\(codec) · can't convert: \(job?.message ?? "unknown error")" }
+        return "\(codec) · converting to HEVC"
     }
 }
 

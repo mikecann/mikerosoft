@@ -32,7 +32,8 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
 | `TextRenderer.swift`, `TitlePresets.swift` | Core Text titles, presets, animations, word captions |
 | `Limiter.swift` | Lookahead true-peak limiter |
 | `Export.swift` | Loudness passes, VideoToolbox encoder, mastered audio, snapshot |
-| `RenderAssets.swift` | `RenderAssets`: proxies, mattes, isolated voice, loudness (from `MediaAnalysis`) |
+| `RenderAssets.swift` | `RenderAssets`: proxies, mattes, isolated voice, loudness, converted copies (from `MediaAnalysis`) |
+| `ConvertedMedia.swift` | Frame grabs and exports convert what macOS can't decode before they build |
 
 ## Timeline rules
 
@@ -52,6 +53,16 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
 - Instructions split at every visible clip edge and transition edge.
 - Graphic clips (`.graphic`) aren't rendered yet: there's no rendered-file
   contract. They produce a warning.
+- A file macOS can't decode (`MediaItem.undecodableCodec`: QuickTime
+  Animation or PNG stickers) plays from its `converted` HEVC copy
+  (docs/MEDIA.md). Frame grabs and exports make a missing copy before they
+  build (`ConvertedMedia`), about a quarter of a second for a sticker, so
+  the sticker is in the picture. The viewer doesn't wait: the clip is left
+  out, with a warning, until the background conversion lands. A file that
+  can't be converted (no ffmpeg) is left out with a warning saying why,
+  and a source that turns out undecodable anyway (scanned before Tandem
+  checked) is loaded without its video. One undecodable track used to fail
+  the whole composition with "Cannot Decode".
 
 ## Layer pipeline
 

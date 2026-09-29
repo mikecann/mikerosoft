@@ -19,6 +19,10 @@ public final class MediaAnalysis: @unchecked Sendable {
     private let lock = NSLock()
     private var storedSettings: AnalysisSettings
     private var storedRVMStore = RVMModelStore.standard
+    private var storedFFmpeg = FFmpeg.locate()
+    /// Requests for the picture of a file that's still being converted,
+    /// by media ID: submitted once its `converted` copy lands.
+    private var afterConversion: [String: [(kind: AnalysisKind, item: MediaItem, priority: JobPriority, settings: AnalysisSettings?)]] = [:]
     /// Fingerprints computed for items that didn't carry one, by path.
     private var fingerprints: [String: (stat: FileStat, value: String)] = [:]
     /// Decoded transcripts and waveforms, by cache key.
@@ -53,6 +57,12 @@ public final class MediaAnalysis: @unchecked Sendable {
     var rvmStore: RVMModelStore {
         get { lock.withLock { storedRVMStore } }
         set { lock.withLock { storedRVMStore = newValue } }
+    }
+
+    /// Converts video macOS can't decode; nil when it isn't installed.
+    var ffmpeg: FFmpeg? {
+        get { lock.withLock { storedFFmpeg } }
+        set { lock.withLock { storedFFmpeg = newValue } }
     }
 
     // MARK: - Cached results
@@ -100,6 +110,13 @@ public final class MediaAnalysis: @unchecked Sendable {
         entryFolder(.isolatedVoice, for: item)?.appendingPathComponent(IsolatedVoiceJob.file)
     }
 
+    /// For a file macOS can't decode (`undecodableCodec`): its HEVC copy,
+    /// alpha kept, at the original's size and frame times. Video only.
+    public func convertedURL(for item: MediaItem) -> URL? {
+        guard AnalysisKind.converted.applies(to: item) else { return nil }
+        return entryFolder(.converted, for: item)?.appendingPathComponent(ConvertJob.file)
+    }
+
     public func isCached(_ kind: AnalysisKind, for item: MediaItem) -> Bool {
         guard let key = cacheKey(kind, for: item) else { return false }
         return cache.contains(kind: kind, key: key) && !needsRebuild(kind, key: key, settings: settings)
@@ -137,20 +154,60 @@ public final class MediaAnalysis: @unchecked Sendable {
     /// - Parameter settings: make it with other settings than the current
     ///   ones, for example a `.person` matte for a clip whose cutout mode
     ///   asks for one (read it back with `matteURL(for:mode:)`).
+    ///
+    /// For a file macOS can't decode, the kinds that read the picture
+    /// (thumbnails, proxy, matte) are made from its converted copy: asking
+    /// for one before the copy exists queues the conversion, returns its job
+    /// ID, and queues the kind asked for once the copy lands.
     @discardableResult
-    public func submit(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .background, settings: AnalysisSettings? = nil) -> String? {
+    public func submit(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .background, settings requested: AnalysisSettings? = nil) -> String? {
         guard kind.applies(to: item), let fingerprint = fingerprint(for: item) else { return nil }
-        let settings = settings ?? self.settings
+        let settings = requested ?? self.settings
         let canonical = settings.canonical(for: kind)
         let key = AnalysisCache.key(fingerprint: fingerprint, kind: kind, algorithmVersion: kind.algorithmVersion, settings: canonical)
         guard !cache.contains(kind: kind, key: key) || needsRebuild(kind, key: key, settings: settings) else { return nil }
         let source = folder.url(for: item)
+        let input: URL
+        if kind.readsPicture, AnalysisKind.converted.applies(to: item) {
+            guard let converted = convertedURL(for: item) else {
+                lock.withLock {
+                    var waiting = afterConversion[item.id] ?? []
+                    if !waiting.contains(where: { $0.kind == kind && $0.settings == requested }) { waiting.append((kind, item, priority, requested)) }
+                    afterConversion[item.id] = waiting
+                }
+                if let id = submit(.converted, for: item, priority: priority) { return id }
+                // It was converted a moment ago, after the look above.
+                conversionFinished(item, succeeded: true)
+                return convertedURL(for: item) == nil ? nil : submit(kind, for: item, priority: priority, settings: requested)
+            }
+            input = converted
+        } else {
+            input = source
+        }
         let cache = self.cache
         let rvmStore = self.rvmStore
-        let job = JobScheduler.Job(id: Self.jobID(kind, key: key), kind: kind, mediaID: item.id, priority: priority) { context in
-            try await Self.make(kind, item: item, source: source, fingerprint: fingerprint, key: key, settings: settings, cache: cache, rvmStore: rvmStore, context: context)
+        let ffmpeg = self.ffmpeg
+        let job = JobScheduler.Job(id: Self.jobID(kind, key: key), kind: kind, mediaID: item.id, priority: priority) { [weak self] context in
+            do {
+                try await Self.make(kind, item: item, source: source, input: input, fingerprint: fingerprint, key: key, settings: settings, cache: cache,
+                                    rvmStore: rvmStore, ffmpeg: ffmpeg, context: context)
+            } catch {
+                if kind == .converted { self?.conversionFinished(item, succeeded: false) }
+                throw error
+            }
+            if kind == .converted { self?.conversionFinished(item, succeeded: true) }
         }
         return scheduler.submit(job)
+    }
+
+    /// Queues what waited for a file's converted copy, or drops it when
+    /// the conversion failed (its status says why).
+    private func conversionFinished(_ item: MediaItem, succeeded: Bool) {
+        let waiting = lock.withLock { afterConversion.removeValue(forKey: item.id) ?? [] }
+        guard succeeded else { return }
+        for request in waiting {
+            submit(request.kind, for: request.item, priority: request.priority, settings: request.settings)
+        }
     }
 
     /// Queues the usual analyses for a set of media, timeline media first:
@@ -170,7 +227,7 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     /// The analyses `requestDefaults` asks for.
     public static func defaultKinds(for item: MediaItem, settings: AnalysisSettings = .standard) -> [AnalysisKind] {
-        var kinds: [AnalysisKind] = [.thumbnails, .waveform, .loudness].filter { $0.applies(to: item) }
+        var kinds: [AnalysisKind] = [.converted, .thumbnails, .waveform, .loudness].filter { $0.applies(to: item) }
         if item.kind == .video, item.hasVideo, let width = item.width, let height = item.height {
             let fitted = fittedSize(width: width, height: height, maxWidth: settings.proxyMaxWidth, maxHeight: settings.proxyMaxHeight)
             if fitted.width < width || fitted.height < height { kinds.append(.proxy) }
@@ -181,9 +238,15 @@ public final class MediaAnalysis: @unchecked Sendable {
         return kinds
     }
 
-    /// Requests an analysis (if needed) and waits for it to finish.
+    /// Requests an analysis (if needed) and waits for it to finish. For a
+    /// kind made from a file's converted copy, a failed conversion is the
+    /// answer.
     @discardableResult
     public func waitFor(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .interactive, settings: AnalysisSettings? = nil) async -> ResultState {
+        if kind.readsPicture, kind.applies(to: item), AnalysisKind.converted.applies(to: item) {
+            let conversion = await waitFor(.converted, for: item, priority: priority)
+            guard conversion == .ready else { return conversion }
+        }
         if let id = submit(kind, for: item, priority: priority, settings: settings) {
             _ = await scheduler.wait(for: id)
         }
@@ -239,14 +302,16 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     /// Makes one analysis into a private folder and commits it, checking the
     /// file didn't change underneath.
-    static func make(_ kind: AnalysisKind, item: MediaItem, source: URL, fingerprint: String, key: String, settings: AnalysisSettings, cache: AnalysisCache,
-                     rvmStore: RVMModelStore = .standard, context: JobContext) async throws {
+    /// `input` is the file to read: the source, or for the picture of a
+    /// file macOS can't decode, its converted copy.
+    static func make(_ kind: AnalysisKind, item: MediaItem, source: URL, input: URL, fingerprint: String, key: String, settings: AnalysisSettings, cache: AnalysisCache,
+                     rvmStore: RVMModelStore = .standard, ffmpeg: FFmpeg?, context: JobContext) async throws {
         guard let expected = Fingerprint(fingerprint), expected.matchesStat(of: source) else {
             throw MediaError.fileChanged(item.path)
         }
         let pending = try cache.begin(kind: kind, key: key)
         do {
-            try await AnalysisJobs.run(kind, source: source, item: item, settings: settings, into: pending.folder, context: context, rvmStore: rvmStore)
+            try await AnalysisJobs.run(kind, source: input, item: item, settings: settings, into: pending.folder, context: context, rvmStore: rvmStore, ffmpeg: ffmpeg)
             try context.checkCancellation()
             guard expected.matchesStat(of: source) else { throw MediaError.fileChanged(item.path) }
             // Only a fallback matte due for a rebuild is still there.
@@ -310,7 +375,7 @@ private final class DecodedResult {
 /// Runs one kind of analysis into a folder.
 enum AnalysisJobs {
     static func run(_ kind: AnalysisKind, source: URL, item: MediaItem, settings: AnalysisSettings, into folder: URL, context: JobContext, timeRange: CMTimeRange? = nil,
-                    rvmStore: RVMModelStore = .standard) async throws {
+                    rvmStore: RVMModelStore = .standard, ffmpeg: FFmpeg?) async throws {
         switch kind {
         case .thumbnails:
             try await ThumbnailJob.run(source: source, kind: item.kind, interval: settings.thumbnailInterval, width: settings.thumbnailWidth, into: folder, context: context, timeRange: timeRange)
@@ -328,6 +393,8 @@ enum AnalysisJobs {
             try await MatteJob.run(source: source, settings: settings, into: folder, context: context, timeRange: timeRange, tuning: tuning)
         case .isolatedVoice:
             try await IsolatedVoiceJob.run(source: source, model: settings.voiceModel, into: folder, context: context, timeRange: timeRange)
+        case .converted:
+            try await ConvertJob.run(source: source, item: item, ffmpeg: ffmpeg, into: folder, context: context)
         }
     }
 }

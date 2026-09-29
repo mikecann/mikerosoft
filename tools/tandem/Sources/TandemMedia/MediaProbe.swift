@@ -17,6 +17,8 @@ struct MediaProbe: Sendable {
     var hasAudio = false
     var hasAlpha = false
     var variableFrameRate = false
+    /// The video codec, when AVFoundation can't decode it.
+    var undecodableCodec: String?
     /// The file's creation-date metadata, used to line up takes.
     var creationDate: Date?
     /// Number of video frames, when there's a video track.
@@ -32,6 +34,7 @@ struct MediaProbe: Sendable {
         item.hasAudio = hasAudio
         item.hasAlpha = hasAlpha
         item.variableFrameRate = variableFrameRate
+        item.undecodableCodec = undecodableCodec
     }
 
     static func probe(_ url: URL) async throws -> MediaProbe {
@@ -83,13 +86,19 @@ struct MediaProbe: Sendable {
         if let creation { probe.creationDate = try? await creation.load(.dateValue) }
 
         if let track = videoTracks.first {
-            let (size, transform, nominalRate, formats, timescale, canCursor) = try await track.load(
-                .naturalSize, .preferredTransform, .nominalFrameRate, .formatDescriptions, .naturalTimeScale, .canProvideSampleCursors
+            let (size, transform, nominalRate, formats, timescale, canCursor, decodable) = try await track.load(
+                .naturalSize, .preferredTransform, .nominalFrameRate, .formatDescriptions, .naturalTimeScale, .canProvideSampleCursors, .isDecodable
             )
             let display = size.applying(transform)
             probe.width = Int(abs(display.width).rounded())
             probe.height = Int(abs(display.height).rounded())
             probe.hasAlpha = formats.contains(where: containsAlpha)
+            // QuickTime Animation and PNG in a MOV, from stock sticker packs:
+            // the sample table reads fine, but there's no decoder, and one
+            // such clip fails a whole render with "Cannot Decode".
+            if !decodable {
+                probe.undecodableCodec = formats.first.map { MediaItem.fourCharacterCode(CMFormatDescriptionGetMediaSubType($0)) } ?? "????"
+            }
 
             var timing: FrameTiming?
             if canCursor, let times = presentationTimes(of: track) {
@@ -100,6 +109,22 @@ struct MediaProbe: Sendable {
             probe.frameRate = timing?.rate ?? FrameTiming.snap(framesPerSecond: Double(nominalRate))
         }
         return probe
+    }
+
+    /// False only when the file's video is there and AVFoundation can't
+    /// decode it. Reads the header, not the frames: under a millisecond,
+    /// except that asking about HEVC with alpha takes 5, so HEVC and ProRes,
+    /// which always decode here, aren't asked about.
+    static func isDecodable(_ url: URL) async -> Bool {
+        guard let track = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first,
+              let formats = try? await track.load(.formatDescriptions) else { return true }
+        let alwaysDecodes: Set<FourCharCode> = [
+            kCMVideoCodecType_HEVC, kCMVideoCodecType_HEVCWithAlpha, FourCharCode(0x6865_7631), // "hev1"
+            kCMVideoCodecType_AppleProRes4444, kCMVideoCodecType_AppleProRes4444XQ, kCMVideoCodecType_AppleProRes422HQ,
+            kCMVideoCodecType_AppleProRes422, kCMVideoCodecType_AppleProRes422LT, kCMVideoCodecType_AppleProRes422Proxy
+        ]
+        if formats.allSatisfy({ alwaysDecodes.contains(CMFormatDescriptionGetMediaSubType($0)) }) { return true }
+        return (try? await track.load(.isDecodable)) ?? true
     }
 
     /// Presentation time stamps of every sample, in the track's timescale,

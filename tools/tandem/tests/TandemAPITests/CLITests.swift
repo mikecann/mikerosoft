@@ -1,6 +1,8 @@
 import XCTest
 @testable import TandemAPI
 import TandemAssets
+import TandemMedia
+import ImageIO
 @testable import TandemCore
 
 /// Runs the built `tandem` binary, the way Mike and agents do.
@@ -423,5 +425,77 @@ final class NewProjectCLITests: XCTestCase {
         XCTAssertEqual(project.settings.height, 1920)
         let bad = try CLITests().tandem("new", "Odd.tandem", "--size", "big", in: folder.url)
         XCTAssertEqual(bad.status, 2)
+    }
+}
+
+/// Stock alpha stickers come as QuickTime Animation or PNG in a MOV, which
+/// AVFoundation can't decode. Rendering a project that uses them used to
+/// fail with "Cannot Decode"; now the render converts them first.
+final class UndecodableStickerCLITests: XCTestCase {
+    func testQuickTimeAnimationAndPNGStickersRender() throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        let cli = CLITests()
+        let folder = TempFolder()
+        try FileManager.default.createDirectory(at: folder.file("stickers"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder.file("source"), withIntermediateDirectories: true)
+        // A red disc on a clear square, in both codecs, and a screen take.
+        let disc = "color=c=red:s=256x256:d=2:r=30,format=rgba,geq=r='255':g='0':b='0':a='if(lt(hypot(X-128,Y-128),100),255,0)'"
+        try ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", disc, "-c:v", "qtrle", "-pix_fmt", "argb", folder.file("stickers/disc-qtrle.mov").path])
+        try ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", disc, "-c:v", "png", "-pix_fmt", "rgba", folder.file("stickers/disc-png.mov").path])
+        try ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x2040c0:s=1280x720:d=4:r=30", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                        folder.file("source/take1-screen.mp4").path])
+
+        let created = try cli.tandem("new", "Alpha.tandem", "--size", "1280x720", in: folder.url)
+        XCTAssertEqual(created.status, 0, created.stderr)
+        let listed = try cli.tandem("media", "--refresh", "--json", in: folder.url)
+        XCTAssertEqual(listed.status, 0, listed.stderr)
+        let media = try ServiceJSON.decoder().decode(MediaResult.self, from: Data(listed.stdout.utf8))
+        func id(_ path: String) throws -> String { try XCTUnwrap(media.items.first { $0.path == path }?.id, path) }
+        XCTAssertEqual(media.items.first { $0.path == "stickers/disc-qtrle.mov" }?.undecodableCodec, "rle ")
+        XCTAssertEqual(media.items.first { $0.path == "stickers/disc-png.mov" }?.undecodableCodec, "png ")
+        XCTAssertNil(media.items.first { $0.path == "source/take1-screen.mp4" }?.undecodableCodec)
+
+        let project = try ProjectFile.load(from: folder.file("Alpha.tandem")).project
+        let graphics = try XCTUnwrap(project.track(named: "Graphics")).id
+        let batch = """
+        {"commands": [
+          {"placeMedia": {"mediaIDs": ["\(try id("source/take1-screen.mp4"))"], "at": 0}},
+          {"placeMedia": {"mediaIDs": ["\(try id("stickers/disc-qtrle.mov"))"], "at": 0, "videoTrackID": "\(graphics)"}},
+          {"placeMedia": {"mediaIDs": ["\(try id("stickers/disc-png.mov"))"], "at": 2, "videoTrackID": "\(graphics)"}}
+        ]}
+        """
+        let applied = try cli.tandem("apply", "-", in: folder.url, stdin: batch)
+        XCTAssertEqual(applied.status, 0, applied.stderr)
+
+        for (time, name) in [("1", "qtrle"), ("3", "png")] {
+            let frame = try cli.tandem("frame", time, "-o", "frame-\(name).png", in: folder.url)
+            XCTAssertEqual(frame.status, 0, "\(name): \(frame.stderr)")
+            XCTAssertFalse(frame.stdout.contains("decode"), frame.stdout)
+            let image = try XCTUnwrap(CGImageSourceCreateWithURL(folder.file("frame-\(name).png") as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+            let centre = pixel(image, x: image.width / 2, y: image.height / 2)
+            let corner = pixel(image, x: 20, y: 20)
+            XCTAssertGreaterThan(centre[0], 220, "\(name): the disc is at the centre, \(centre)")
+            XCTAssertLessThan(centre[2], 40, "\(name): \(centre)")
+            XCTAssertGreaterThan(corner[2], 150, "\(name): the take shows around it, \(corner)")
+        }
+        let clip = try cli.tandem("clip", "0", "4", "-o", "exports/review.mp4", in: folder.url)
+        XCTAssertEqual(clip.status, 0, clip.stderr)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.file("exports/review.mp4").path))
+
+        let after = try cli.tandem("media", in: folder.url)
+        XCTAssertEqual(after.status, 0, after.stderr)
+        XCTAssertTrue(after.stdout.contains("stickers/disc-qtrle.mov  sticker"), after.stdout)
+        XCTAssertTrue(after.stdout.contains("QuickTime Animation"), after.stdout)
+        XCTAssertTrue(after.stdout.contains("converted ready"), after.stdout)
+    }
+
+    /// RGBA at (x, y), y down.
+    func pixel(_ image: CGImage, x: Int, y: Int) -> [Int] {
+        var data = [UInt8](repeating: 0, count: 4)
+        let context = CGContext(data: &data, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: -x, y: y - image.height + 1, width: image.width, height: image.height))
+        return data.map(Int.init)
     }
 }
