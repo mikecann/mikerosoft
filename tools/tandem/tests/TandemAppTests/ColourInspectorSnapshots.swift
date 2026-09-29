@@ -196,7 +196,7 @@ final class ColourEditorTests: XCTestCase {
     private var look: [Effect] { model.project.media("med_camera")?.look ?? [] }
 
     private func editor(_ target: ColourTarget) -> ColourEditor {
-        ColourEditor(model: model, clip: clip, item: model.media(for: clip), target: target)
+        ColourEditor(model: model, clipID: clip.id, target: target)
     }
 
     func testTheWholeTakeEditsTheLook() {
@@ -245,6 +245,36 @@ final class ColourEditorTests: XCTestCase {
         editor(.clip).reset(.mixer)
         XCTAssertTrue(clip.video?.effects.isEmpty ?? false)
         XCTAssertNil(clip.keyframes[path], "its animation goes with it")
+    }
+
+    func testAnEditorFromBeforeAnEditStartsFromTheProjectAsItIsNow() {
+        // A control that wasn't redrawn after the contrast change still
+        // holds the editor it was drawn with.
+        let stale = editor(.take)
+        editor(.take).set(.light, ["contrast": .number(25)], label: "Contrast")
+        stale.set(.colour, ["temperature": .number(-3)], label: "Temperature")
+        XCTAssertEqual(look.first?.params["contrast"], .number(25), "the contrast change is kept")
+        XCTAssertEqual(look.first?.params["temperature"], .number(-3))
+        XCTAssertEqual(stale, editor(.take), "the same editor, so the control needn't redraw")
+    }
+
+    func testDraggingPreviewsTheClipsGradeWithoutAnEdit() {
+        let revision = model.revision
+        editor(.clip).preview(.colour, ["temperature": .number(40)])
+        let preview = model.videoPreview[clip.id]
+        XCTAssertEqual(preview?.effects.first?.params["temperature"], .number(40))
+        XCTAssertEqual(model.revision, revision, "nothing's committed while dragging")
+        editor(.clip).preview(.colour, nil)
+        XCTAssertNil(model.videoPreview[clip.id])
+        // A drag that comes back to where it started shows the clip as it is.
+        editor(.clip).set(.colour, ["temperature": .number(10)], label: "Temperature")
+        editor(.clip).preview(.colour, ["temperature": .number(40)])
+        editor(.clip).preview(.colour, ["temperature": .number(10)])
+        XCTAssertEqual(model.videoPreview[clip.id]?.effects.first?.params["temperature"], .number(10))
+        editor(.clip).preview(.colour, nil)
+        // A look isn't previewed.
+        editor(.take).preview(.colour, ["temperature": .number(40)])
+        XCTAssertNil(model.videoPreview[clip.id])
     }
 
     func testTheTabOpensWhereTheGradeIs() {

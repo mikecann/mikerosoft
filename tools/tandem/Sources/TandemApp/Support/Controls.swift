@@ -163,7 +163,7 @@ struct ScrubbableNumber: View {
                     .onHover { hovering = $0 }
                     .pointerStyle(.columnResize)
                     .gesture(scrub)
-                    .help(help ?? "Drag left or right to change it, or click to type")
+                    .help(ifAny: help)
             }
         }
         .frame(width: width, alignment: alignment)
@@ -331,8 +331,9 @@ extension InspectorSection where Accessory == EmptyView {
 /// Label, slider and value, the inspector's standard row. Drags preview
 /// through `onPreview` and commit once through `onCommit`. The value can be
 /// dragged left and right too, or clicked to type; double-clicking the
-/// knob goes back to `defaultValue`. Labels are never cut short: a long
-/// one takes room from the slider.
+/// knob or the label goes back to `defaultValue`. Labels are never cut
+/// short: a long one takes room from the slider. Tooltips come from
+/// `help`; without it the row adds none, so one set around it shows.
 struct SliderRow: View {
     let label: String
     let value: Double
@@ -351,6 +352,9 @@ struct SliderRow: View {
     var help: String? = nil
     /// Committed values are multiples of this.
     var step: Double? = nil
+    /// Draws the value faint while it's at `defaultValue`, so the ones
+    /// that change something stand out.
+    var dimsDefault = false
     var onPreview: (Double?) -> Void = { _ in }
     /// Something after the value, like a keyframe diamond.
     var accessory: AnyView? = nil
@@ -377,7 +381,9 @@ struct SliderRow: View {
                 .foregroundStyle(Theme.textMuted.color)
                 .fixedSize()
                 .frame(minWidth: Self.labelWidth, alignment: .leading)
-                .help(help ?? "")
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { if let resetValue { commit(resetValue) } }
+                .help(ifAny: help.map { [$0, resetHint].compactMap { $0 }.joined(separator: " ") })
             GraphiteSlider(
                 value: Binding(get: { draft ?? value }, set: { draft = $0; onPreview($0) }),
                 range: range,
@@ -386,10 +392,12 @@ struct SliderRow: View {
                 defaultValue: resetValue,
                 onEditingChanged: { editing in if !editing { finish() } }
             )
-            .help(sliderHelp)
+            .help(ifAny: help.map { [$0, resetHint].compactMap { $0 }.joined(separator: " ") })
             ScrubbableNumber(
                 value: draft ?? value, range: range, width: valueWidth,
                 format: format, parse: parse,
+                help: help.map { "\($0) Drag the number left or right, or click it to type." },
+                dimmed: dimsDefault && draft == nil && resetValue == value,
                 onScrub: { draft = $0; onPreview($0) },
                 onScrubEnded: finish,
                 onType: { commit($0) }
@@ -398,9 +406,8 @@ struct SliderRow: View {
         }
     }
 
-    private var sliderHelp: String {
-        let reset = resetValue.map { "Double-click the knob to go back to \(format($0))." }
-        return [help, reset].compactMap { $0 }.joined(separator: " ")
+    private var resetHint: String? {
+        resetValue.map { "Double-click to go back to \(format($0))." }
     }
 
     private func finish() {
@@ -414,6 +421,15 @@ struct SliderRow: View {
         var v = min(max(raw, range.lowerBound), range.upperBound)
         if let step, step > 0 { v = min(max((v / step).rounded() * step, range.lowerBound), range.upperBound) }
         if v != value { onCommit(v) }
+    }
+}
+
+extension View {
+    /// A tooltip when there's something to say. With none, a tooltip set
+    /// around the view (a caller's `.help`) still shows.
+    @ViewBuilder
+    func help(ifAny text: String?) -> some View {
+        if let text { help(text) } else { self }
     }
 }
 

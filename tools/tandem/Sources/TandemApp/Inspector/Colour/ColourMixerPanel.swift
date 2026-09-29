@@ -3,17 +3,15 @@ import TandemCore
 
 /// The colour mixer, Lightroom style: a row of eight swatches, and the
 /// hue, saturation and luminance of the one picked. Swatches with changes
-/// get a dot.
+/// get a dot. It opens on the first colour with changes, else red.
 struct ColourMixerPanel: View {
     let values: [String: ParamValue]
-    let selected: String
-    let select: (String) -> Void
-    /// The diamond (or its gap) after a slider, by parameter key.
-    let accessory: (String) -> AnyView?
-    /// A parameter key, its new value and the undo menu's name for it.
-    let commit: (String, Double, String) -> Void
+    let diamond: ColourDiamond
+    let editor: ColourEditor
+    @State private var picked: String?
 
     var body: some View {
+        let selected = picked ?? ColourSection.mixerColours.first { ColourSummary.mixerChanged($0, values) } ?? "red"
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 0) {
                 ForEach(ColourSection.mixerColours, id: \.self) { colour in
@@ -22,14 +20,13 @@ struct ColourMixerPanel: View {
                         selected: colour == selected,
                         changed: ColourSummary.mixerChanged(colour, values),
                         help: help(colour)
-                    ) { select(colour) }
+                    ) { picked = colour }
                     .frame(maxWidth: .infinity)
                 }
             }
             ForEach(ColourSliderSpec.mixer(selected), id: \.key) { spec in
-                spec.row(section: .mixer, value: values[spec.key]?.number ?? 0, accessory: accessory(spec.key)) { value in
-                    commit(spec.key, value, spec.undo)
-                }
+                ColourSliderRow(spec: spec, section: .mixer, value: values[spec.key]?.number ?? 0, diamond: diamond, editor: editor)
+                    .equatable()
             }
         }
     }

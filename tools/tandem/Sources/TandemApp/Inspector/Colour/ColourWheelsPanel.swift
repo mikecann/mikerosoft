@@ -7,10 +7,8 @@ import TandemCore
 /// can be dragged or typed like any other value in the inspector.
 struct ColourWheelsPanel: View {
     let values: [String: ParamValue]
-    /// The keyframe diamond for a wheel, when its values can animate.
-    let diamond: (ColourWheels.Wheel) -> AnyView?
-    /// New values and the undo menu's name for them.
-    let commit: ([String: ParamValue], String) -> Void
+    let diamond: ColourDiamond
+    let editor: ColourEditor
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -20,25 +18,32 @@ struct ColourWheelsPanel: View {
                     hue: values[wheel.hueKey]?.number ?? 0,
                     amount: values[wheel.amountKey]?.number ?? 0,
                     brightness: values[wheel.brightnessKey]?.number ?? 0,
-                    diamond: diamond(wheel),
-                    commit: commit
+                    diamond: diamond,
+                    editor: editor
                 )
+                .equatable()
                 .frame(maxWidth: .infinity)
             }
         }
     }
 }
 
-/// One wheel: its name, the wheel, its brightness and its numbers.
-struct ColourWheelColumn: View {
+/// One wheel: its name, the wheel, its numbers and its brightness. Redrawn
+/// only when its own values change.
+struct ColourWheelColumn: View, Equatable {
     let wheel: ColourWheels.Wheel
     let hue: Double
     let amount: Double
     let brightness: Double
-    let diamond: AnyView?
-    let commit: ([String: ParamValue], String) -> Void
+    let diamond: ColourDiamond
+    let editor: ColourEditor
     @State private var colourDraft: (hue: Double, amount: Double)?
     @State private var brightnessDraft: Double?
+
+    nonisolated static func == (a: ColourWheelColumn, b: ColourWheelColumn) -> Bool {
+        a.wheel == b.wheel && a.hue == b.hue && a.amount == b.amount && a.brightness == b.brightness
+            && a.diamond == b.diamond && a.editor == b.editor
+    }
 
     /// What the wheel does to the picture, in the words an editor uses.
     private var role: String {
@@ -50,45 +55,56 @@ struct ColourWheelColumn: View {
     }
 
     var body: some View {
+        let shownHue = colourDraft?.hue ?? hue
+        let shownAmount = colourDraft?.amount ?? amount
         VStack(spacing: 6) {
             HStack(spacing: 0) {
                 Text(wheel.name)
                     .font(.ui(11.5))
                     .foregroundStyle(amount != 0 || brightness != 0 ? Theme.text.color : Theme.textMuted.color)
                     .fixedSize()
-                if let diamond { diamond }
+                if let diamond = editor.diamond(diamond, keys: wheel.keys, name: "\(wheel.name) wheel") { diamond }
             }
             .frame(height: 18)
             ColourWheelView(
-                hue: colourDraft?.hue ?? hue, amount: colourDraft?.amount ?? amount,
-                help: "Drag anywhere in the wheel to tint \(role) towards a colour; the further out, the stronger. Option-drag for fine moves, double-click to reset."
-            ) { newHue, newAmount in
-                setColour(hue: newHue, amount: newAmount)
-            }
+                hue: shownHue, amount: shownAmount,
+                help: "Drag anywhere in the wheel to tint \(role) towards a colour; the further out, the stronger. The colour moves at half the pointer's speed, slower still with Option. Double-click to reset.",
+                onPreview: { draft in previewColour(draft) },
+                commit: { newHue, newAmount in setColour(hue: newHue, amount: newAmount) }
+            )
             .frame(maxWidth: 96)
             HStack(spacing: 4) {
                 ScrubbableNumber(
-                    value: colourDraft?.amount ?? amount, range: 0...100, width: 34, alignment: .trailing, fontSize: 11,
+                    value: shownAmount, range: 0...100, width: 34, alignment: .trailing, fontSize: 11,
                     format: { "\(Int($0.rounded()))%" }, parse: SliderRow.plainNumber,
                     help: "How strong the \(wheel.name.lowercased()) colour is. Drag or click to type.",
-                    dimmed: (colourDraft?.amount ?? amount) == 0,
-                    onScrub: { colourDraft = (hue, $0) },
+                    dimmed: shownAmount == 0,
+                    onScrub: { value in
+                        colourDraft = (hue, value)
+                        previewColour(colourDraft)
+                    },
                     onScrubEnded: finishColour,
-                    onType: { value in setColour(hue: hue, amount: min(max(value, 0), 100)) }
+                    onType: { value in setColour(hue: hue, amount: value) }
                 )
                 ScrubbableNumber(
-                    value: colourDraft?.hue ?? hue, range: -3600...3600, width: 36, alignment: .leading, fontSize: 11, perPoint: 1,
+                    value: shownHue, range: -3600...3600, width: 36, alignment: .leading, fontSize: 11, perPoint: 1,
                     format: { "\(Int(ColourWheels.normalised($0.rounded())))°" }, parse: SliderRow.plainNumber,
                     help: "The \(wheel.name.lowercased()) colour's hue: 0° red, 60° yellow, 120° green, 180° cyan, 240° blue, 300° magenta. Drag or click to type.",
-                    dimmed: (colourDraft?.amount ?? amount) == 0,
-                    onScrub: { colourDraft = (ColourWheels.normalised($0), amount) },
+                    dimmed: shownAmount == 0,
+                    onScrub: { value in
+                        colourDraft = (ColourWheels.normalised(value), amount)
+                        previewColour(colourDraft)
+                    },
                     onScrubEnded: finishColour,
                     onType: { value in setColour(hue: value, amount: amount) }
                 )
             }
             HStack(spacing: 4) {
                 GraphiteSlider(
-                    value: Binding(get: { brightnessDraft ?? brightness }, set: { brightnessDraft = $0 }),
+                    value: Binding(get: { brightnessDraft ?? brightness }, set: { value in
+                        brightnessDraft = value
+                        editor.preview(.wheels, [wheel.brightnessKey: .number(value.rounded())])
+                    }),
                     range: -100...100,
                     bipolar: true,
                     gradient: ColourTracks.brightness,
@@ -101,7 +117,10 @@ struct ColourWheelColumn: View {
                     format: ColourWheelColumn.signed, parse: SliderRow.plainNumber,
                     help: "Brightness of \(role). Drag or click to type.",
                     dimmed: (brightnessDraft ?? brightness) == 0,
-                    onScrub: { brightnessDraft = $0 },
+                    onScrub: { value in
+                        brightnessDraft = value
+                        editor.preview(.wheels, [wheel.brightnessKey: .number(value.rounded())])
+                    },
                     onScrubEnded: finishBrightness,
                     onType: { setBrightness($0) }
                 )
@@ -114,6 +133,13 @@ struct ColourWheelColumn: View {
         return rounded == 0 ? "0" : (rounded < 0 ? "−\(-rounded)" : "+\(rounded)")
     }
 
+    private func previewColour(_ draft: (hue: Double, amount: Double)?) {
+        editor.preview(.wheels, draft.map { [
+            wheel.hueKey: .number(ColourWheels.normalised($0.hue.rounded())),
+            wheel.amountKey: .number(min(max($0.amount, 0), 100).rounded())
+        ] })
+    }
+
     private func finishColour() {
         guard let draft = colourDraft else { return }
         colourDraft = nil
@@ -121,10 +147,11 @@ struct ColourWheelColumn: View {
     }
 
     private func setColour(hue newHue: Double, amount newAmount: Double) {
+        editor.preview(.wheels, nil)
         let h = ColourWheels.normalised(newHue.rounded())
         let a = min(max(newAmount, 0), 100).rounded()
         guard h != hue || a != amount else { return }
-        commit([wheel.hueKey: .number(h), wheel.amountKey: .number(a)], "\(wheel.name) wheel")
+        editor.set(.wheels, [wheel.hueKey: .number(h), wheel.amountKey: .number(a)], label: "\(wheel.name) wheel")
     }
 
     private func finishBrightness() {
@@ -134,19 +161,23 @@ struct ColourWheelColumn: View {
     }
 
     private func setBrightness(_ value: Double) {
+        editor.preview(.wheels, nil)
         let clamped = min(max(value, -100), 100).rounded()
         guard clamped != brightness else { return }
-        commit([wheel.brightnessKey: .number(clamped)], "\(wheel.name) brightness")
+        editor.set(.wheels, [wheel.brightnessKey: .number(clamped)], label: "\(wheel.name) brightness")
     }
 }
 
 /// A colour wheel laid out like a vectorscope, with a puck for the colour.
-/// Dragging anywhere moves the puck from where it is, so small moves stay
-/// small; Option makes them finer. Double-click puts it back in the middle.
+/// Dragging anywhere moves the puck from where it is, at half the
+/// pointer's speed so a subtle grade is easy to hit (a quarter of that
+/// with Option). Double-click puts it back in the middle.
 struct ColourWheelView: View {
     let hue: Double
     let amount: Double
     let help: String
+    /// While dragging, the colour so far; nil when the drag ends.
+    var onPreview: ((hue: Double, amount: Double)?) -> Void = { _ in }
     let commit: (_ hue: Double, _ amount: Double) -> Void
     @State private var draft: (hue: Double, amount: Double)?
     @State private var puck: (x: Double, y: Double)?
@@ -154,6 +185,9 @@ struct ColourWheelView: View {
     @State private var lastClick: TimeInterval = 0
 
     static let ringWidth: CGFloat = 5
+    /// How far the puck moves for the pointer's travel.
+    static let speed = 0.5
+    static let fineSpeed = 0.125
 
     /// How far from the centre amount 100 sits.
     static func reach(_ side: CGFloat) -> CGFloat {
@@ -184,15 +218,16 @@ struct ColourWheelView: View {
                     last = gesture.startLocation
                 }
                 guard var position = puck else { return }
-                let fine = NSEvent.modifierFlags.contains(.option) ? 0.25 : 1
-                position.x += Double((gesture.location.x - last.x) / reach) * fine
-                position.y -= Double((gesture.location.y - last.y) / reach) * fine
+                let speed = NSEvent.modifierFlags.contains(.option) ? Self.fineSpeed : Self.speed
+                position.x += Double((gesture.location.x - last.x) / reach) * speed
+                position.y -= Double((gesture.location.y - last.y) / reach) * speed
                 last = gesture.location
                 let distance = (position.x * position.x + position.y * position.y).squareRoot()
                 if distance > 1 { position = (position.x / distance, position.y / distance) }
                 puck = position
                 if abs(gesture.translation.width) >= 1 || abs(gesture.translation.height) >= 1 {
                     draft = ColourWheels.hueAndAmount(x: position.x, y: position.y, keeping: hue)
+                    onPreview(draft)
                 }
             }
             .onEnded { gesture in
@@ -208,6 +243,7 @@ struct ColourWheelView: View {
                 } else if let draft {
                     let newAmount = draft.amount.rounded()
                     let newHue = newAmount == 0 ? hue : ColourWheels.normalised(draft.hue.rounded())
+                    onPreview(nil)
                     if newHue != hue || newAmount != amount { commit(newHue, newAmount) }
                 }
                 draft = nil

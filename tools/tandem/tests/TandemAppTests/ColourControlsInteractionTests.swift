@@ -154,6 +154,13 @@ final class ColourControlsInteractionTests: XCTestCase {
         XCTAssertEqual(log.values, [0], "one step back to the default, nothing else")
     }
 
+    func testDoubleClickingTheLabelResets() {
+        let log = Log()
+        let host = self.host(sliderRow(35, log: log), size: rowSize)
+        host.click(CGPoint(x: 20, y: 10), count: 2)
+        XCTAssertEqual(log.values, [0])
+    }
+
     func testDraggingTheValueScrubsIt() {
         let log = Log()
         let host = self.host(sliderRow(10, log: log), size: rowSize)
@@ -182,9 +189,10 @@ final class ColourControlsInteractionTests: XCTestCase {
             ColourWheelView(hue: 0, amount: 0, help: "") { log.colours.append(($0, $1)) },
             size: CGSize(width: 96, height: 96)
         )
-        // Right is towards 0 degrees on the wheel: between blue and magenta.
+        // Right is towards 0 degrees on the wheel: between blue and
+        // magenta. The puck moves at half the pointer's speed.
         let reach = ColourWheelView.reach(96)
-        host.drag(from: CGPoint(x: 40, y: 60), to: CGPoint(x: 40 + reach / 2, y: 60))
+        host.drag(from: CGPoint(x: 30, y: 60), to: CGPoint(x: 30 + reach, y: 60))
         XCTAssertEqual(log.colours.count, 1)
         let expected = ColourWheels.hue(wheelAngle: 0)
         XCTAssertEqual(log.colours.first?.hue ?? -1, expected.rounded(), accuracy: 1.5)
