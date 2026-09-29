@@ -211,6 +211,27 @@ Notes on each:
   stateful, but three workers sharing frames, a fresh request per frame
   and one worker in order give byte-identical mattes (measured on 20 s of
   the camera), so the workers take frames in any order.
+- **Matte with RVM (optional, `matteModel: .robustVideoMatting`).**
+  Robust Video Matting's own Core ML export of its MobileNetV3 model
+  (1280x720 input, downsample ratio 0.375 built in), run on the GPU one
+  frame at a time with its recurrent state carried from frame to frame,
+  frames letterboxed into the model's input and the alpha scaled up to the
+  matte box. The RVM repository is GPL-3.0 (the model file's metadata says
+  Apache 2.0; Tandem goes by the repository), so the 7.5 MB model is never
+  committed or bundled: `RVMModelStore` downloads it from the official
+  v1.0.0 release on first use into
+  `~/Library/Application Support/Tandem/Models/rvm/` and checks its
+  SHA-256. Both cutout modes share one RVM matte, and its cache key has
+  its own version (`RVMMatte.version`). On the same two ranges, through the
+  job: flicker 0.08 / 0.07 against version 2's 0.17 / 0.20, no pop frames
+  against 12 / 14, edge contrast 116 / 123 against 108 / 94, the mic kept
+  on 99.2% of B against 99.5%. It looks steadier and softer: moving hands
+  keep their motion blur, no sofa, desk or wedge beside a fast arm. The
+  price is a faint light rim of the wall around the cap and shoulders,
+  since the soft alpha is applied to the source's own colours (RVM's
+  foreground output would fix that; the renderer doesn't use it). The
+  1920x1080 export scored the same and looked the same at 1:1 but ran at
+  22 to 30 fps. Version 2 stays the default until Mike picks.
 - **Isolated voice.** AUSoundIsolation (voice model, 100% wet) in offline
   manual rendering. The unit's reported latency (3,665 samples in stereo,
   2,705 in mono) is dropped from the front and fed as silence at the end,
@@ -250,6 +271,7 @@ Real footage, release build (`report.txt` has the latest numbers):
 | Thumbnails, 24 min camera | 724 JPEGs in 3.4 to 4.2 s |
 | Proxy | 489 fps for 4K camera and VFR screen (about 1.5 min for a 24 min take), 5 Mbps camera, 7.4 Mbps screen |
 | Transcript | 65x realtime for a minute, whole take in 11 s (132x) |
+| Matte, RVM | 40 fps on a quiet machine, the same as version 2 (GPU, one frame at a time); 35 to 37 with other work running |
 | Matte | 41 fps with 4 workers (18 min for a 24 min take, 1.4x real time at 30 fps); the Neural Engine is the limit, the smoother (about 10 ms a frame) hides behind it. Version 1 was 49 to 52 fps |
 | Isolated voice | 38x realtime, within 1 sample of the original |
 | Every default for a 43 s take, background priority | 33 s, the matte last |

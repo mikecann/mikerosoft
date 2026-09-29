@@ -38,20 +38,18 @@ enum MatteJob {
         var workers = MatteJob.workers
         /// A fresh segmentation request for every frame: no temporal state.
         var stateless = false
+        /// Where an RVM matte gets its model.
+        var rvmStore = RVMModelStore.standard
     }
 
     static func run(source: URL, settings: AnalysisSettings, into folder: URL, context: JobContext, timeRange: CMTimeRange? = nil, tuning: Tuning = Tuning()) async throws {
+        if settings.matteModel == .robustVideoMatting {
+            try await RVMMatte.run(source: source, settings: settings, into: folder, context: context, timeRange: timeRange, store: tuning.rvmStore)
+            return
+        }
         let reader = try await VideoFrameReader(url: source, timeRange: timeRange)
         let size = fittedSize(width: Int(reader.size.width), height: Int(reader.size.height), maxWidth: settings.matteMaxWidth, maxHeight: settings.matteMaxHeight)
-        let writer = try EncodedMovieWriter(url: folder.appendingPathComponent(file), settings: .init(
-            width: size.width, height: size.height,
-            // Short GOPs without reordering keep random access cheap for
-            // scrubbing, and a mostly flat greyscale picture stays small.
-            keyFrameInterval: 10, quality: 0.6, prioritizeSpeed: true,
-            colorPrimaries: kCVImageBufferColorPrimaries_ITU_R_709_2, transferFunction: kCVImageBufferTransferFunction_ITU_R_709_2,
-            yCbCrMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
-            timescale: reader.timescale, transform: reader.transform, expectedFrameRate: reader.nominalFrameRate > 0 ? reader.nominalFrameRate : nil
-        ))
+        let writer = try makeWriter(reader: reader, width: size.width, height: size.height, folder: folder)
         let pipeline = try MattePipeline(reader: reader, width: size.width, height: size.height, settings: settings, workers: tuning.workers, stateless: tuning.stateless)
         pipeline.start()
         await context.acquireEncoder()
@@ -73,6 +71,19 @@ enum MatteJob {
             writer.cancel()
             throw error
         }
+    }
+
+    /// The matte movie's encoder, for either model.
+    static func makeWriter(reader: VideoFrameReader, width: Int, height: Int, folder: URL) throws -> EncodedMovieWriter {
+        try EncodedMovieWriter(url: folder.appendingPathComponent(file), settings: .init(
+            width: width, height: height,
+            // Short GOPs without reordering keep random access cheap for
+            // scrubbing, and a mostly flat greyscale picture stays small.
+            keyFrameInterval: 10, quality: 0.6, prioritizeSpeed: true,
+            colorPrimaries: kCVImageBufferColorPrimaries_ITU_R_709_2, transferFunction: kCVImageBufferTransferFunction_ITU_R_709_2,
+            yCbCrMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+            timescale: reader.timescale, transform: reader.transform, expectedFrameRate: reader.nominalFrameRate > 0 ? reader.nominalFrameRate : nil
+        ))
     }
 }
 
