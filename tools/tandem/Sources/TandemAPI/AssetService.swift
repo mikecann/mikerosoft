@@ -102,10 +102,24 @@ public final class AssetService: @unchecked Sendable {
             return try await library.fetch(id)
         } catch let error as AssetError {
             if case .notFound = error, (try? library.asset(id)) == nil {
+                // A missing-font warning names the font's Fontsource ID, so
+                // that works without a search first.
+                if await lookUpFontsource(id) { return try await fetched(id) }
                 throw ServiceError(.notFound, "No asset \(id) in the library. Search for it first (tandem assets search \"...\" --online), then use the ID the search gives.")
             }
             throw ServiceError.wrap(error)
         }
+    }
+
+    /// Asks Fontsource for a family from its ID alone (`fontsource:tilt-warp`
+    /// is "tilt warp"), which puts it in the catalogue. True when it's there
+    /// now.
+    func lookUpFontsource(_ id: String) async -> Bool {
+        let prefix = "fontsource:"
+        guard id.hasPrefix(prefix), id.count > prefix.count else { return false }
+        let words = id.dropFirst(prefix.count).replacingOccurrences(of: "-", with: " ")
+        _ = await library.searchProviders(ProviderQuery(text: words, kinds: [.font], perPage: 50), providerIDs: ["fontsource"])
+        return (try? library.asset(id)) != nil
     }
 
     // MARK: - use
@@ -127,6 +141,15 @@ public final class AssetService: @unchecked Sendable {
             fonts: (asset.remote["fonts"] ?? "").split(separator: "\n").map(String.init),
             licence: try? library.licence(for: asset.id)
         )
+        if asset.kind == .font, case .remote(_, let owner, _) = client.route {
+            // This process registered the font for itself. The app (or
+            // `tandem serve`) registers new files in assets/font/ when it's
+            // asked for the status, so it draws with the font straight away.
+            if let status = try? await client.call(StatusRequest()) {
+                result.fontsReached = owner
+                result.fontWarnings = status.warnings
+            }
+        }
         // The project can change between reading it and editing it (the
         // app's folder watcher may add the copied file itself), so a stale
         // revision means read again and rebuild the edit.

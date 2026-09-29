@@ -62,6 +62,9 @@ public struct StatusResult: Codable, Sendable {
     /// True when the project was recovered from the journal after a crash.
     public var recoveredEdits: Bool
     public var apiVersion: String
+    /// What won't look right, with the fix: titles in a font that isn't
+    /// installed. Optional so an older app's answer still reads.
+    public var warnings: [String]?
 }
 
 // MARK: - media
@@ -584,7 +587,7 @@ public struct FrameRequest: ServiceCall {
     }
 
     public func run(on service: TandemService, context: CallContext) async throws -> ImageResult {
-        try await service.prepareFrame(self)()
+        try await service.withPresetFonts(try service.prepareFrame(self))()
     }
 }
 
@@ -660,7 +663,7 @@ public struct ClipRequest: ServiceCall {
     }
 
     public func run(on service: TandemService, context: CallContext) async throws -> ExportOutcome {
-        try await service.prepareClip(self)()
+        try await service.withPresetFonts(try service.prepareClip(self))()
     }
 }
 
@@ -692,7 +695,7 @@ public struct ExportRequest: ServiceCall {
     }
 
     public func run(on service: TandemService, context: CallContext) async throws -> ExportOutcome {
-        try await service.prepareExport(self)()
+        try await service.withPresetFonts(try service.prepareExport(self))()
     }
 }
 

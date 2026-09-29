@@ -35,6 +35,7 @@ extension StatusResult: ReadableResult {
         for export in exports {
             lines.append("  exporting \((export.output as NSString).lastPathComponent) \(Int(export.progress * 100))%")
         }
+        for warning in warnings ?? [] { lines.append("Warning: \(warning)") }
         return lines.joined(separator: "\n")
     }
 }

@@ -243,6 +243,27 @@ Audio rules:
 Colour: sources are treated as BT.709 SDR, honouring each file's video range;
 exports are tagged TV-range BT.709.
 
+Text and fonts:
+
+- Core Text fonts are registered per process. Every composition build
+  first registers the files in the project's `assets/font/` that this
+  process hasn't seen (`ProjectFonts.registerNew`), and so do `status`,
+  `validate` and a media refresh; a new registration drops cached title
+  drawings, and the app's viewer builds again when any font arrives. So a
+  font `tandem assets use` copies in while the app has the project open
+  reaches the app's renders without a restart (the command also asks the
+  app for its status, which registers it at once).
+- A title whose font can't be drawn falls back to SF Pro with a warning
+  naming the font and the `tandem assets use` that installs it, in the
+  build's warnings (viewer, `frame`, `clip`, `export`) and in `captions`,
+  `status` and `validate`.
+- A built-in preset whose font doesn't come with macOS names its asset
+  (`TitlePreset.fontAsset`, the caption preset's `fontsource:tilt-warp`).
+  The first time a title needs it (captions applied, a render, the app
+  showing the project), `PresetFonts` installs it from the asset library
+  into `assets/font/`, once at a time and not again for two minutes after
+  a failure.
+
 ## API
 
 `ProjectSession` opens a project, replays the journal after a crash, takes the
@@ -286,8 +307,9 @@ data, not files, so there's nothing to collect for them.
 
 Where files go: `media/<the folder it was in>/<name>` (a take's files and
 sidecar stay together, and `music/` or `sfx/` still say what's inside),
-`assets/lut/<name>` and `assets/font/<name>`, which the app registers when it
-opens a project. A file keeps the name the project used, even when that was
+`assets/lut/<name>` and `assets/font/<name>`. Whatever renders the project
+(the app, `tandem serve`, a CLI command) registers new files in
+`assets/font/` before it draws (see Rendering). A file keeps the name the project used, even when that was
 a link to a file called something else.
 
 Two modes:

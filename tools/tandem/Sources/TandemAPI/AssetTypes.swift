@@ -244,6 +244,11 @@ public struct AssetUseResult: Codable, Sendable {
     /// For fonts: the PostScript names a title's style can use.
     public var fonts: [String]
     public var licence: AssetLicence?
+    /// For fonts, when the project is open elsewhere: who registered the
+    /// font too (`app` or `cli` for `tandem serve`).
+    public var fontsReached: String?
+    /// For fonts: titles whose font is still missing afterwards.
+    public var fontWarnings: [String]?
 }
 
 // MARK: - credits

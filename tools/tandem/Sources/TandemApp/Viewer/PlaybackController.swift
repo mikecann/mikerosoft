@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreImage
+import CoreText
 import Foundation
 import QuartzCore
 import Observation
@@ -71,6 +72,7 @@ final class PlaybackController {
     @ObservationIgnored private var front = 0
     @ObservationIgnored private var timeObservers: [Any] = []
     @ObservationIgnored private var endObserver: NSObjectProtocol?
+    @ObservationIgnored private var fontsObserver: NSObjectProtocol?
     @ObservationIgnored private var readyObservation: NSKeyValueObservation?
     @ObservationIgnored private var clock: Timer?
     @ObservationIgnored private var lastTick: TimeInterval = 0
@@ -119,6 +121,14 @@ final class PlaybackController {
                 self.reachedEnd()
             }
         }
+        // A font registered in this process (one a title was waiting for,
+        // installed or copied into assets/font while the project is open)
+        // changes how titles draw, so the viewer builds again with it.
+        fontsObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name(kCTFontManagerRegisteredFontsChangedNotification as String), object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleRebuild(delay: 0.2) }
+        }
     }
 
     /// `TANDEM_MUTED=1` silences playback and previews.
@@ -140,6 +150,8 @@ final class PlaybackController {
         timeObservers = []
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
+        if let fontsObserver { NotificationCenter.default.removeObserver(fontsObserver) }
+        fontsObserver = nil
     }
 
     // MARK: - Timeline changes

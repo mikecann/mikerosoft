@@ -735,7 +735,7 @@ private struct TextSection: View {
         }
     }
 
-    /// The font's name.
+    /// The font's name, with a warning when this Mac can't draw it.
     private var fontRow: some View {
         HStack(spacing: 10) {
             label("Font", marked: own.font != nil)
@@ -744,6 +744,12 @@ private struct TextSection: View {
                 .foregroundStyle(Theme.text.color)
                 .lineLimit(1)
                 .truncationMode(.tail)
+            if let missing = ProjectFonts.missing(for: text, clipID: clip.id) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.amber.color)
+                    .help("Not installed, so it's drawn in SF Pro. Pick a font in the Fonts tab, or run: tandem assets use \(missing.assetID)")
+            }
             Spacer()
             resetButton(["font"], own.font != nil, base.font)
         }

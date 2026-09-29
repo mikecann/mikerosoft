@@ -122,6 +122,10 @@ extension AssetUseResult: ReadableResult {
         if mediaID == nil {
             if !fonts.isEmpty {
                 lines.append("Installed the font \(asset.name) (\(fonts.joined(separator: ", "))). Use it in a title's style: {\"font\": \"\(fonts[0])\"}.")
+                if let owner = fontsReached {
+                    lines.append(owner == "app" ? "The Tandem app has it now too." : "tandem serve has it now too.")
+                }
+                for warning in fontWarnings ?? [] { lines.append("Warning: \(warning)") }
             } else {
                 lines.append("Copied \(asset.name) into the project: \(files.joined(separator: ", ")).")
             }

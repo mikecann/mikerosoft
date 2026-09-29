@@ -68,6 +68,16 @@ final class TextTests: XCTestCase {
         XCTAssertEqual(still.animationOut, .pop)
     }
 
+    func testCaptionsAskForTiltWarpWithAnOutline() {
+        let caption = ResolvedText(TextContent(text: "hi", preset: "caption"))
+        XCTAssertEqual(caption.style.font, "Tilt Warp")
+        XCTAssertEqual(caption.style.weight, 400)
+        XCTAssertTrue(caption.style.hasOutline)
+        XCTAssertEqual(TitlePresets.preset("caption")?.fontAsset, "fontsource:tilt-warp")
+        // Every other preset uses fonts that come with macOS.
+        XCTAssertEqual(TitlePresets.builtIn.filter { $0.fontAsset != nil }.map(\.id), ["caption"])
+    }
+
     func testTheInspectorsEffectiveAndPresetValues() {
         let own = TextContent(text: "x", preset: "callout", style: TextStyle(size: 120, shadow: false))
         let effective = TitlePresets.style(for: own)

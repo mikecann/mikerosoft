@@ -59,9 +59,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
         window.layoutTrafficLights()
         // Fonts the project carries in assets/font, so its titles look the
-        // same here as on the Mac that made them.
-        let folder = model.folder
-        Task.detached(priority: .utility) { await AssetLibrary.registerFonts(in: folder) }
+        // same here as on the Mac that made them, and the fonts its presets
+        // need that aren't here yet.
+        model.checkFonts()
         // A project opened without an icon gets one once it has settled.
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.window?.isVisible == true else { return }
@@ -191,6 +191,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func windowDidBecomeKey(_ notification: Notification) {
         (window as? EditorWindow)?.layoutTrafficLights()
         model.rescanMedia()
+        // A font dropped into assets/font while Tandem was in the background.
+        model.checkFonts()
         RelinkPrompt.windowBecameKey(self)
     }
 

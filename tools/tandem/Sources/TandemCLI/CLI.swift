@@ -253,7 +253,7 @@ struct CLI {
         let session = try ProjectSession.open(url, owner: .cli)
         let host: TandemAPIHost
         do {
-            host = try await TandemAPIHost.start(session: session, port: UInt16(port))
+            host = try await TandemAPIHost.start(session: session, fontInstaller: LibraryFontInstaller.shared, port: UInt16(port))
         } catch {
             session.close()
             throw error

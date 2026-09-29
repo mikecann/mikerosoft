@@ -9,6 +9,10 @@ public struct TitlePreset: Codable, Equatable, Sendable {
     public var name: String
     public var summary: String
     public var style: TextStyle
+    /// Where the preset's font comes from when this Mac doesn't have it, as
+    /// an asset library ID (`fontsource:tilt-warp`). Nil for fonts that come
+    /// with macOS.
+    public var fontAsset: String?
     public var animationIn: String?
     public var animationOut: String?
     public var animationDuration: Time
@@ -32,12 +36,14 @@ public struct TitlePreset: Codable, Equatable, Sendable {
         position: Point = Point(x: 0.5, y: 0.5),
         highlightColor: RGBA? = nil,
         firstLineScale: Double? = nil,
-        firstLineColor: RGBA? = nil
+        firstLineColor: RGBA? = nil,
+        fontAsset: String? = nil
     ) {
         self.id = id
         self.name = name
         self.summary = summary
         self.style = style
+        self.fontAsset = fontAsset
         self.animationIn = animationIn
         self.animationOut = animationOut
         self.animationDuration = animationDuration
@@ -103,7 +109,10 @@ public enum TitlePresets {
             animationOut: "fade",
             animationDuration: Time(seconds: 0.1),
             position: Point(x: 0.5, y: 0.42),
-            highlightColor: RGBA(r: 1.0, g: 0.84, b: 0.2)
+            highlightColor: RGBA(r: 1.0, g: 0.84, b: 0.2),
+            // Not a macOS font: Tandem installs it from Fontsource (Google
+            // Fonts, OFL) the first time captions need it.
+            fontAsset: "fontsource:tilt-warp"
         )
     ]
 
