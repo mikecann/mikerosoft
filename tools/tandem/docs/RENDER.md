@@ -250,6 +250,14 @@ paused stills, API frame grabs and export read the originals. Since proxy
 version 3 a proxy has a keyframe every 15 frames with P-frames between, no
 reordering, at quality 0.78.
 
+Overlays and stickers with alpha get HEVC-with-alpha proxies, straight or
+premultiplied as the source is, and the compositor reads them as BGRA like
+the originals. Before, the viewer showed a black box (or the colour hidden
+under straight alpha) behind any overlay bigger than 1080p while playing,
+then the right picture once paused. `AlphaVideoTests` checks a ProRes 4444,
+an HEVC and a QuickTime Animation overlay, each 2400x1350, through a frame
+grab from the original and from the proxy and through the viewer's player.
+
 Versions 1 and 2 were all keyframes, so every frame's compression noise was
 new and crawled over still walls and screen text while playing, gone the
 moment the player paused. A P-frame leaves a still area as it was. The costs

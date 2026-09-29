@@ -173,7 +173,7 @@ copies of a file share a job):
 | thumbnails | `strip.json`, `t00000.jpg`... | `ThumbnailStrip`; file i shows time i * interval (2 s), 320 px wide; images get one |
 | waveform | `waveform.json`, `peaks.f32` | header plus little-endian Float32 peaks, 100 a second, the loudest sample over all channels, placed by sample time |
 | loudness | `loudness.json` | `Loudness`; silence is `-inf` (written as the string "-inf") |
-| proxy | `proxy.mov` | 1080p box, aspect kept, HEVC with a keyframe every 15 frames and P-frames between (no reordering) at quality 0.78, video only, every frame at its exact source time and duration, source colour tags and rotation |
+| proxy | `proxy.mov` | 1080p box, aspect kept, HEVC with a keyframe every 15 frames and P-frames between (no reordering) at quality 0.78, video only, every frame at its exact source time and duration, source colour tags and rotation. Video with alpha gets HEVC with alpha, straight or premultiplied as the source is |
 | transcript | `transcript.json` | `Transcript`, engine "SpeechAnalyzer", en-US, word times in media time |
 | matte | `matte.mov` | 1080p box, HEVC, keyframe every 10 frames; luma of full-range (420f) frames is the alpha (0 background, 255 person), chroma neutral, BT.709 tags, source frame times and rotation |
 | isolatedVoice | `voice.caf` | 48 kHz ALAC, source channels (max 2), same length as the source, lined up to the sample |
@@ -192,6 +192,36 @@ Notes on each:
   crawled over still walls and screen text while playing; a P-frame leaves
   a still area as it was. The box, keyframe interval and quality are all in
   the cache key. docs/RENDER.md has the flicker, size and seek numbers.
+
+  Overlays and stickers bigger than 1080p get proxies too, and those keep
+  their alpha. Until 2026-09-29 every proxy was plain HEVC made from 4:2:0
+  frames, so with Proxy on the viewer played a black box behind an HEVC
+  overlay (premultiplied, so black under the clear parts), or the colour
+  straight alpha keeps there for ProRes 4444 and converted stickers, while
+  paused frames and exports, read from the original, were right. Now
+  `VideoFrameReader` reads video with alpha as BGRA (`keepingAlpha`), each
+  frame tagged `AlphaChannelMode` as the decoder found it: straight for
+  ProRes 4444 and converted copies, premultiplied for HEVC with alpha from
+  AVAssetWriter. The HEVC-with-alpha encoder takes the mode from the first
+  frame's tag (premultiplied when there's none, as Core Image assumes), so
+  the proxy blends like the original. The file says `hvc1` with the
+  ContainsAlphaChannel extension, not `muxa`.
+
+  Only those proxies changed, so the proxy version stays 3. Their cache key
+  adds `"alpha":"1"` (`AnalysisSettings.canonical(for:item:)`, from the
+  item's `hasAlpha`), which retires any opaque one made before; every other
+  proxy keeps its key and its file. HEVC's alpha layer brings opaque back as
+  251 to 253 (an HEVC sticker from AVAssetWriter decodes as 253 itself) and
+  `TargetQualityForAlpha` doesn't change that; half and clear come back
+  exact.
+
+  A 10 s 4K ProRes 4444 overlay with a moving soft edge proxies in 1.4 s to
+  15.5 MB, where an opaque proxy took 0.7 s and 14.4 MB, and the proxy
+  decodes at 1,135 fps against the original's 393 (BGRA, M5 Pro). The
+  alternative, playing big overlays from the original, costs most for
+  converted stickers: the export preset's 4K HEVC copy has a keyframe about
+  every 28 frames with reordering and decodes at 350 fps, so an exact seek
+  can decode 28 frames of 4K instead of at most 15 at 1080p.
 - **Transcript.** Audio streams from the file a second at a time as the
   analyzer pulls it (the whole 24 minute take peaks at 53 MB). The model
   works although AssetInventory says only "supported"; if analysis ever

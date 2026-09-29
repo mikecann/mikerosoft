@@ -30,6 +30,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Thumbnails and waveforms [media]
 - [x] Loudness (EBU R128 integrated, true peak, LRA) in Swift [media]
 - [x] 1080p HEVC proxies (all-intra, then a keyframe every 15 frames so still areas stop crawling) [media]
+- [x] Proxies of overlays and stickers with alpha keep it (HEVC with alpha), so the viewer shows the track below through them [media]
 - [x] Transcripts with SpeechAnalyzer, word timings in media time [media]
 - [x] Person matte for the cutout (Vision), greyscale HEVC [media]
 - [x] Matte v2: accurate person mask plus the foreground subject mask (keeps the mic), smoothed only where the picture is still; about 9x less flicker, 41 fps [media]
