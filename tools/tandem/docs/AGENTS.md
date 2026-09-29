@@ -52,7 +52,7 @@ tandem frame <time> [-o out.png]   tandem clip <start> <end> [-o out.mp4]
 tandem export [--preset youtube4k] [-o out.mp4] [--from T] [--to T]
 tandem loudness    tandem effects    tandem schema    tandem watch [--once]
 tandem new <path.tandem>           tandem serve    tandem mcp
-tandem import filmora <file.wfp> [--out DIR]     a Filmora project as a .tandem
+tandem import filmora <file.wfp> [--out DIR] [--keep-levels]   a Filmora project as a .tandem
 tandem import edl [edl.json] --recipe decision-models [--out DIR]
 tandem import compare <a.tandem> <b.tandem>      how two cuts of one take differ
 tandem assets providers                          asset sources and what to fix
@@ -68,7 +68,12 @@ Imports write `<out>/<name>/<name>.tandem` with a report beside it
 (`<name>.import.txt` for people, `.import.json` for agents) listing anything
 that couldn't be carried over. Filmora media paths saved on another Mac are
 fixed with `--rewrite /Users/old/=/Users/new/`, and moved files are found
-with `--search <folder>`.
+with `--search <folder>`. A Filmora import normalises speech (the camera's
+sound and the Voice tracks) to the project's speech level with no gain, the
+way placing does, instead of copying Filmora's gains; music and sound
+effects keep their Filmora volume. `--keep-levels` keeps Filmora's own
+levels: its Auto Normalization becomes `normalizeTo: -24` (where Filmora
+levels, on Tandem's meter) with the clip's gain on top.
 
 ### When the app is open
 
@@ -272,8 +277,8 @@ V2 Camera  trk_camera  cut
   clip_cam2  00:30.000-01:00.000    30.000s  take1-camera.mov [00:32.000-01:02.000]  linked #2  layout pipRight  scale 0.5 at 0.87,0.77  cutout  fx dropShadow
 
 A1 Voice  trk_voice  cut
-  clip_voc1  00:00.000-00:30.000    30.000s  take1-camera.mov [00:00.000-00:30.000]  linked #1  level -14 LUFS
-  clip_voc2  00:30.000-01:00.000    30.000s  take1-camera.mov [00:32.000-01:02.000]  linked #2  level -14 LUFS
+  clip_voc1  00:00.000-00:30.000    30.000s  take1-camera.mov [00:00.000-00:30.000]  linked #1  level -20 LUFS
+  clip_voc2  00:30.000-01:00.000    30.000s  take1-camera.mov [00:32.000-01:02.000]  linked #2  level -20 LUFS
 
 A2 Music  trk_music  follow
   clip_mus1  00:00.000-01:00.000  01:00.000  bed.m4a [00:00.000-01:00.000]  gain -31 dB  fade out 2.000s
@@ -388,8 +393,12 @@ Changes the project's name or metadata.
 
 #### updateSettings
 
-Changes the canvas size, frame rate, sample rate, loudness target or true
-peak ceiling, or adds alternate formats like the 9:16 short.
+Changes the canvas size, frame rate, sample rate, the master's loudness
+target (`loudnessTarget`, -14 LUFS) or true peak ceiling (-1 dBTP), the
+speech level (`speechLoudness`, -20 LUFS, between -40 and -10), or adds
+alternate formats like the 9:16 short. Changing the speech level moves every
+clip normalised to the old level to the new one; clips with a level of
+their own keep it.
 
 ```json
 {"updateSettings": {"patch": {"loudnessTarget": -14}}}
@@ -468,6 +477,11 @@ linked clip, and the files of one take are placed in sync and linked.
 `sourceStart` is measured from the start of the take (or the file) and
 `duration` defaults to all the media that's left. `mode` is `place` (fails
 if the range is taken), `overwrite` or `insert` (pushes later clips right).
+
+Sound gets Mike's levels: speech (a camera's sound, files with no clearer
+role such as a rendered intro, and anything placed on a take track like
+Voice) is normalised to the project's speech level with no gain, music gets
+-31 dB with a 2 s fade out, and sound effects -15 dB.
 
 ```json
 {"placeMedia": {"mediaIDs": ["med_camera", "med_screen"], "at": 0}}
@@ -607,6 +621,11 @@ Changes any clip setting: `video.transform` (position, scale, rotation),
 `video.crop`, `video.opacity`, `video.cutout`, `audio.gainDB`,
 `audio.fadeIn`, `audio.fadeOut`, `audio.normalizeTo`, `audio.voiceIsolation`,
 the text of a title, `enabled`, `name`, `tags`...
+
+`audio.normalizeTo` levels the clip from its file's measured loudness (the
+target minus the measurement, at most 30 dB either way) and `audio.gainDB`
+is added after it: normalised to -20 LUFS with `gainDB` 2, a clip plays at
+about -18. `null` stops normalising.
 
 ```json
 {"updateClip": {"clipID": "clip_k3f9x2mq", "patch": {"video": {"opacity": 0.5}}}}
@@ -757,6 +776,21 @@ animation.
 
 ```json
 {"setKeyframes": {"clipID": "clip_scr1", "parameter": "video.transform.scale", "keyframes": [{"time": 0, "value": 1, "interpolation": "linear"}, {"time": 2, "value": 1.5}]}}
+```
+
+### Sound
+
+#### normalizeSpeech
+
+Sets every speech clip to the project's speech level (`speechLoudness`,
+-20 LUFS unless changed) and clears its gain, as one undo step. Speech is a
+camera's sound, a file with no clearer role, or anything on a take track
+like Voice (an audio track whose ripple mode is `cut`, muted or not). Music
+and sound effects keep their gains; fades, voice isolation, effects and gain
+keyframes stay; locked tracks are left alone with a warning.
+
+```json
+{"normalizeSpeech": {}}
 ```
 
 ### Markers
@@ -948,6 +982,33 @@ Zoom the screen clip into the top-right quarter at 1:12 and back out at
   {"zoomToRegion": {"clipID": "clip_scr2", "rect": {"x": 0, "y": 0, "width": 1, "height": 1}, "at": 80, "duration": 0.5}}
 ]}
 ```
+
+### Level the voice
+
+Speech is levelled per take to the project's speech level, -20 LUFS, and
+export brings the whole mix to -14 LUFS with true peaks under -1 dBTP. So
+the speech level sets how the voice sits against the music and sound
+effects (and how loud the app plays), not how loud the video is. Placing
+media levels new speech by itself; a project imported with its own gains,
+or made before the speech level existed, gets there with one command:
+
+```bash
+tandem loudness                              # each file's loudness, each track's levels
+tandem apply - <<< '{"normalizeSpeech": {}}'
+tandem loudness                              # "Speech is levelled to -20.0 LUFS" and no stragglers
+```
+
+To move the voice for the whole video, change the level (clips normalised
+to the old level follow it), then check a review clip:
+
+```json
+{"label": "Voice a little louder", "commands": [
+  {"updateSettings": {"patch": {"speechLoudness": -18}}}
+]}
+```
+
+A single clip can still differ: `{"updateClip": {"clipID": "clip_voc7",
+"patch": {"audio": {"gainDB": 2}}}}` plays it 2 dB over the rest.
 
 ### Export a review clip
 

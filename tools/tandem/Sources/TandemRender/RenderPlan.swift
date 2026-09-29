@@ -227,10 +227,15 @@ enum RenderPlanner {
                 let seamlessIn = previous.map { isSeamless($0, clip) } ?? false
                 let seamlessOut = next.map { isSeamless(clip, $0) } ?? false
 
+                // Normalising is a constant gain from the file's measured
+                // loudness; the clip gain (and its keyframes) go on top in
+                // the envelope. The viewer, review clips and export all take
+                // their sound from this plan, so they level the same.
                 var constant = 1.0
                 if let target = audio.normalizeTo {
-                    if let measured = assets?.loudness(for: item)?.integratedLUFS, measured.isFinite {
-                        constant *= AudioEnvelope.gain(dB: min(max(target - measured, -30), 30))
+                    let measured = assets?.loudness(for: item)?.integratedLUFS
+                    if let gain = AudioLevels.normalizeGainDB(target: target, measuredLUFS: measured) {
+                        constant *= AudioEnvelope.gain(dB: gain)
                     } else {
                         warnings.add("No loudness measurement for \(item.path) yet, so it isn't normalised.")
                     }

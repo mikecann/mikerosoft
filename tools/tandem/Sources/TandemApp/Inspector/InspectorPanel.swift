@@ -491,63 +491,21 @@ struct AudioInspector: View {
         if let first = targets.first {
             let audio = first.audio ?? AudioProperties()
             let ids = targets.map(\.id)
-            let noun = targets.count == 1 ? "clip" : "\(targets.count) clips"
             AnimationSection(model: model, clip: first, domain: "audio.")
-            InspectorSection(title: "Level", icon: Icons.level) {
-                // Animated gain follows the playhead.
-                let gain = first.keyframes["audio.gainDB"] == nil ? audio.gainDB : first.resolvedAudio(at: model.clipTime(of: first)).gainDB
-                SliderRow(label: "Gain", value: gain, range: -60...12, bipolar: true, valueWidth: 62,
-                          format: { String(format: "%+.1f dB", $0).replacingOccurrences(of: "-", with: "−") },
-                          parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-+0123456789.".contains($0) }) },
-                          accessory: targets.count == 1 ? AnyView(KeyframeButton(model: model, clip: first, parameter: "audio.gainDB")) : nil,
-                          onCommit: { value in
-                              let db = (value * 10).rounded() / 10
-                              if targets.count == 1 {
-                                  model.setParameter("audio.gainDB", to: .number(db), in: first, label: "Gain") { InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain") }
-                              } else {
-                                  model.apply(InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain"))
-                              }
-                          })
-                HStack(spacing: 10) {
-                    Text("Muted")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.textMuted.color)
-                        .frame(width: 86, alignment: .leading)
-                    Text(audio.muted ? "Yes" : "No")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.text.color)
-                    Spacer()
-                    GraphiteSwitch(isOn: audio.muted) {
-                        model.apply(InspectorEdits.audio(ids, ["muted": .bool(!audio.muted)], label: audio.muted ? "Unmute \(noun)" : "Mute \(noun)"))
-                    }
-                }
-                HStack(spacing: 10) {
-                    Text("Normalise")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.textMuted.color)
-                        .frame(width: 86, alignment: .leading)
-                    Text(audio.normalizeTo.map { String(format: "to %.0f LUFS", $0).replacingOccurrences(of: "-", with: "−") } ?? "Off")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.text.color)
-                    Spacer()
-                    GraphiteSwitch(isOn: audio.normalizeTo != nil) {
-                        let value: JSONValue = audio.normalizeTo == nil ? .number(model.project.settings.loudnessTarget) : .null
-                        model.apply(InspectorEdits.audio(ids, ["normalizeTo": value], label: audio.normalizeTo == nil ? "Normalise" : "Stop normalising"))
-                    }
-                }
-                if let item = model.media(for: first), let loudness = model.session.analysis.loudness(for: item) {
-                    InfoRow(label: "Measured", value: String(format: "%.1f LUFS · peak %.1f dBTP", loudness.integratedLUFS, loudness.truePeakDBTP).replacingOccurrences(of: "-", with: "−"))
-                }
-            }
+            LevelSection(model: model, targets: targets)
+            SpeechLevelSection(model: model)
             InspectorSection(title: "Fades", icon: Icons.fades) {
                 SliderRow(label: "Fade in", value: audio.fadeIn.seconds, range: 0...min(5, first.duration.seconds), format: { String(format: "%.1f s", $0) },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["fadeIn": .number(value)], label: "Fade in")) })
+                    .help("How long the sound takes to come up from silence at the clip's start (an equal-power curve).")
                 SliderRow(label: "Fade out", value: audio.fadeOut.seconds, range: 0...min(5, first.duration.seconds), format: { String(format: "%.1f s", $0) },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["fadeOut": .number(value)], label: "Fade out")) })
+                    .help("How long the sound takes to go down to silence at the clip's end (an equal-power curve).")
             }
             InspectorSection(title: "Voice isolation", icon: Icons.voiceIsolation) {
                 SliderRow(label: "Amount", value: audio.voiceIsolation * 100, range: 0...100, format: { "\(Int($0.rounded()))%" },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["voiceIsolation": .number(value / 100)], label: "Voice isolation")) })
+                    .help("How much of the isolated voice (room noise and music taken out) replaces the original sound. 0% is the original.")
                 Text("Mixes in the isolated voice once the media module has made it.")
                     .font(.ui(11))
                     .foregroundStyle(Theme.textFaint.color)

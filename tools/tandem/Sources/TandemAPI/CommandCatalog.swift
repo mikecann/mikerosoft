@@ -13,6 +13,7 @@ public enum CommandCase: String, CaseIterable, Codable, Sendable {
     case moveClips, updateClip, link, unlink, applyLayout, zoomToRegion, setFormatLayout, addMotion
     case addTransition, updateTransition, removeTransition
     case addEffect, updateEffect, removeEffect, moveEffect, setKeyframes
+    case normalizeSpeech
     case addMarker, updateMarker, removeMarker
 }
 
@@ -57,6 +58,7 @@ extension EditCommand {
         case .removeEffect: return .removeEffect
         case .moveEffect: return .moveEffect
         case .setKeyframes: return .setKeyframes
+        case .normalizeSpeech: return .normalizeSpeech
         case .addMarker: return .addMarker
         case .updateMarker: return .updateMarker
         case .removeMarker: return .removeMarker
@@ -110,6 +112,7 @@ public enum CommandText {
         case .removeEffect: return "Remove effect"
         case .moveEffect: return "Reorder effects"
         case .setKeyframes(_, let parameter, let keyframes): return keyframes.isEmpty ? "Remove \(parameter) animation" : "Animate \(parameter)"
+        case .normalizeSpeech: return "Normalise speech clips"
         case .addMarker(let marker): return marker.name.isEmpty ? "Add marker" : "Add marker \(marker.name)"
         case .updateMarker: return "Update marker"
         case .removeMarker: return "Remove marker"

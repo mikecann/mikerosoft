@@ -752,16 +752,23 @@ public struct ClipLevel: Codable, Sendable {
     public var clipID: String
     public var mediaID: String
     public var track: String
+    /// Clip gain, added after normalisation.
     public var gainDB: Double
     public var normalizeTo: Double?
-    /// The gain normalisation adds (target minus measured), once the file's
-    /// loudness is known.
+    /// The gain normalisation adds (target minus measured, within ±30 dB;
+    /// 0 for a silent file), once the file's loudness is known.
     public var normalizeGainDB: Double?
+    /// Speech (camera or voice sound, or on a take track): what
+    /// `normalizeSpeech` levels.
+    public var speech: Bool
 }
 
 public struct LoudnessResult: Codable, Sendable {
+    /// The master's loudness target, in LUFS.
     public var target: Double
     public var truePeakCeiling: Double
+    /// The level speech clips are normalised to, in LUFS.
+    public var speechLoudness: Double
     public var media: [MediaLoudness]
     public var clips: [ClipLevel]
 }

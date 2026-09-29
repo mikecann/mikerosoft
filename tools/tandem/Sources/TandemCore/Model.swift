@@ -87,6 +87,13 @@ public struct ProjectSettings: Codable, Equatable, Sendable {
     public var loudnessTarget: Double
     /// True peak ceiling for the master limiter, in dBTP.
     public var truePeakCeiling: Double
+    /// The loudness speech is levelled to, in LUFS, before the master
+    /// brings the whole mix to `loudnessTarget`. Placed camera and voice
+    /// sound (and anything placed on a take track like Voice) is normalised
+    /// to it with no gain, and `normalizeSpeech` sets every speech clip to
+    /// it. Changing it moves the clips normalised to the old level. See
+    /// `AudioLevels` and docs/RENDER.md for why -20.
+    public var speechLoudness: Double
     /// Working colour space. V1 is SDR Rec.709 only.
     public var colorSpace: String
     /// Extra output formats cut from the same timeline, such as a 9:16
@@ -100,6 +107,7 @@ public struct ProjectSettings: Codable, Equatable, Sendable {
         sampleRate: Int = 48_000,
         loudnessTarget: Double = -14,
         truePeakCeiling: Double = -1,
+        speechLoudness: Double = AudioLevels.defaultSpeechLoudness,
         colorSpace: String = "rec709",
         alternateFormats: [OutputFormat] = []
     ) {
@@ -109,6 +117,7 @@ public struct ProjectSettings: Codable, Equatable, Sendable {
         self.sampleRate = sampleRate
         self.loudnessTarget = loudnessTarget
         self.truePeakCeiling = truePeakCeiling
+        self.speechLoudness = speechLoudness
         self.colorSpace = colorSpace
         self.alternateFormats = alternateFormats
     }
@@ -535,14 +544,17 @@ public struct Rect: Codable, Equatable, Sendable {
 }
 
 public struct AudioProperties: Codable, Equatable, Sendable {
-    /// Clip gain in dB, applied after normalisation.
+    /// Clip gain in dB, added after normalisation: a clip normalised to
+    /// -20 LUFS with +2 dB plays at about -18.
     public var gainDB: Double
     public var fadeIn: Time
     public var fadeOut: Time
     public var muted: Bool
     /// When set, the clip is levelled to this loudness (LUFS) using the
-    /// measurement made in the background. Dialogue from one take should be
-    /// levelled as a whole, not per cut, so this uses the take's loudness.
+    /// measurement made in the background: the target minus the file's
+    /// integrated loudness, within ±30 dB (`AudioLevels.normalizeGainDB`).
+    /// Dialogue from one take should be levelled as a whole, not per cut,
+    /// so this uses the take's loudness.
     public var normalizeTo: Double?
     /// 0 is the original audio, 1 is fully isolated voice. Mixed live from
     /// the cached isolated track.
@@ -921,6 +933,8 @@ extension ProjectSettings {
         sampleRate = try c.decode(.sampleRate, or: d.sampleRate)
         loudnessTarget = try c.decode(.loudnessTarget, or: d.loudnessTarget)
         truePeakCeiling = try c.decode(.truePeakCeiling, or: d.truePeakCeiling)
+        // Projects from before the speech level get the default.
+        speechLoudness = try c.decode(.speechLoudness, or: d.speechLoudness)
         colorSpace = try c.decode(.colorSpace, or: d.colorSpace)
         alternateFormats = try c.decode(.alternateFormats, or: [])
     }

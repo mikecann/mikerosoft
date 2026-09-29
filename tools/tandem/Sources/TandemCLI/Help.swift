@@ -45,10 +45,11 @@ enum Help {
         CommandHelp(name: "watch", usage: "tandem watch [--once] [--timeout <seconds>]", summary: "Print changes as they happen (or wait for the next one with --once).", options: ["once", "timeout"]),
         CommandHelp(name: "effects", usage: "tandem effects [<type>]", summary: "Effects with their parameters, transitions, layouts and animatable parameters.", options: []),
         CommandHelp(name: "schema", usage: "tandem schema", summary: "Print the JSON schema for edit batches.", options: []),
-        CommandHelp(name: "import", usage: "tandem import filmora <file.wfp> | edl [edl.json] --recipe <name|recipe.json> | compare <a.tandem> <b.tandem> [--out <folder>] [--name <name>] [--search <folder>]... [--rewrite <from>=<to>]...", summary: "Import a Filmora project or an agent EDL, or compare two cuts of the same footage.", options: ["out", "name", "search", "rewrite", "recipe"],
+        CommandHelp(name: "import", usage: "tandem import filmora <file.wfp> [--keep-levels] | edl [edl.json] --recipe <name|recipe.json> | compare <a.tandem> <b.tandem> [--out <folder>] [--name <name>] [--search <folder>]... [--rewrite <from>=<to>]...", summary: "Import a Filmora project or an agent EDL, or compare two cuts of the same footage.", options: ["out", "name", "search", "rewrite", "recipe", "keep-levels"],
                     details: """
                     Writes <out>/<name>/<name>.tandem with a report beside it (<name>.import.txt and .json). --out defaults to this folder.
                     Filmora media that moved is looked for in the project's folder and every --search folder; --rewrite from=to fixes paths saved on another Mac.
+                    Speech (the camera's sound, the Voice tracks) is normalised to the project's speech level, -20 LUFS, with no gain. --keep-levels keeps Filmora's own levels instead: Auto Normalization becomes normalise to -24 LUFS plus the clip's gain.
                     Built-in EDL recipes: decision-models. Exit code 1 if anything failed to import.
                     """),
         CommandHelp(name: "assets", usage: "tandem assets providers | search \"<text>\" [--kind sfx|music|sticker|...] [--provider <id>] [--online] [--limit <n>] | fetch <id> | use <id> [--at <time>] [--duration <time>] | credits [--optional] | generate sfx|music \"<prompt>\" [--duration <s>] [--variations <n>] | install-starter",

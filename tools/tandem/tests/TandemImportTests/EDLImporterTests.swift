@@ -60,7 +60,7 @@ final class EDLImporterTests: XCTestCase {
 
         let voice = p.clips(on: "Voice")
         XCTAssertEqual(voice.map(\.start), camera.map(\.start))
-        XCTAssertEqual(voice[3].audio?.normalizeTo, -28.74)
+        XCTAssertEqual(voice[3].audio?.normalizeTo, -28.74, "a recipe's own voice level wins")
         XCTAssertEqual(voice[0].audio?.normalizeTo, -28.74, "the intro is levelled like the voice")
         XCTAssertEqual(voice.last?.audio?.fadeOut, t(1), "the voice fades with the picture at the end")
 
@@ -258,6 +258,9 @@ final class DecisionModelsRecipeTests: XCTestCase {
         XCTAssertTrue(recipe.resolve("edit/edl-v2.json").hasSuffix("/dev/convex/convex-videos/decision-models/edit/edl-v2.json"))
         XCTAssertEqual(try EDLRecipe.builtIn("decision-models"), recipe)
         XCTAssertNil(try EDLRecipe.builtIn("nope"))
+        // Voice and intro play at the project's speech level, where v14 had them.
+        XCTAssertNil(recipe.voice)
+        XCTAssertNil(recipe.intro?.normalizeTo)
         // Every adjustment only ever moves a segment's edges a little.
         for adjustment in recipe.cutAdjustments ?? [] {
             XCTAssertLessThan(abs(adjustment.newStart - adjustment.start), 1.1)
@@ -277,6 +280,17 @@ extension EDLImporterTests {
         recipe.sfx = nil
         edit(&recipe)
         return try await EDLImporter(recipe: recipe, locating: MediaLocating(prober: FakeProbe(media: Self.media))).importEDL(edl, source: "inline")
+    }
+
+    func testWithoutARecipeLevelTheVoiceAndIntroGetTheSpeechLevel() async throws {
+        let result = try await importMini { recipe in
+            recipe.voice = nil
+            recipe.intro?.normalizeTo = nil
+        }
+        let voice = result.project.clips(on: "Voice")
+        XCTAssertEqual(voice.map(\.audio?.normalizeTo), Array(repeating: -20, count: voice.count), "the intro and every voice clip")
+        XCTAssertTrue(voice.allSatisfy { $0.audio?.gainDB == 0 })
+        XCTAssertEqual(result.project.clips(on: "Music").first?.audio?.gainDB, -27, "music keeps the recipe's own level")
     }
 
     func testTopLevelOverlaysAndScreenOffsets() async throws {
