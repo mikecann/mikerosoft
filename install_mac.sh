@@ -96,7 +96,7 @@ link_tool taskbar tools/taskbar/taskbar
 link_tool last-window-quits tools/last-window-quits/last-window-quits
 link_tool mikey-mouse tools/mikey-mouse/mikey-mouse
 link_tool record-it tools/record-it/record-it
-link_tool phone-mirror tools/phone-mirror/phone-mirror
+link_tool phonebooth tools/phonebooth/phonebooth
 link_tool token-stats tools/token-stats/token-stats
 link_tool record-meeting tools/record-meeting/record-meeting
 link_tool meeting-archive tools/meeting-archive/meeting-archive

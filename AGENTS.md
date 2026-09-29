@@ -452,7 +452,7 @@ later rebuilds keep the grant.
 
 ---
 
-## phone-mirror specifics
+## phonebooth specifics
 
 AppKit app that mirrors every USB-connected iPhone or iPad in its own window and
 controls it through WebDriverAgent (WDA).
@@ -460,16 +460,16 @@ controls it through WebDriverAgent (WDA).
 ### Dev workflow
 
 ```bash
-swift test --package-path tools/phone-mirror
-bash tools/phone-mirror/restart.sh
-tail -f ~/Library/Logs/"Phone Mirror"/phone-mirror.log
+swift test --package-path tools/phonebooth
+bash tools/phonebooth/restart.sh
+tail -f ~/Library/Logs/"Phonebooth"/phonebooth.log
 ```
 
-- `open -g "phonemirror://tap?x=0.5&y=0.5"` (also `swipe?dy=-300`,
+- `open -g "phonebooth://tap?x=0.5&y=0.5"` (also `swipe?dy=-300`,
   `type?text=hi`, `home`) drives the first phone without clicking. Use it for
   smoke tests.
 - Each phone's xcodebuild output goes to
-  `~/Library/Logs/Phone Mirror/helper-<phone name>.log`. The line
+  `~/Library/Logs/Phonebooth/helper-<phone name>.log`. The line
   `ServerURLHere->...<-ServerURLHere` means WDA is up.
 
 ### Key behaviour
@@ -478,32 +478,32 @@ tail -f ~/Library/Logs/"Phone Mirror"/phone-mirror.log
   appear as `.external` muxed capture devices with model ID `iOS Device`. The same
   phone also appears as a Continuity Camera; the filter skips it.
 - Control: `agent.sh` pins WebDriverAgent to a release, clones it into
-  `~/Library/Application Support/Phone Mirror/WebDriverAgent`, and rewrites the
-  runner bundle ID to `com.mikecann.phonemirror.WebDriverAgentRunner`. The stock
+  `~/Library/Application Support/Phonebooth/WebDriverAgent`, and rewrites the
+  runner bundle ID to `com.mikecann.phonebooth.WebDriverAgentRunner`. The stock
   `com.facebook...` ID belongs to another team and can't be signed.
-- The team ID comes from `PHONE_MIRROR_TEAM_ID`, then `team-id` in the support
+- The team ID comes from `PHONEBOOTH_TEAM_ID`, then `team-id` in the support
   folder, then the OU of the keychain's Apple Development certificate.
 - `AgentRunner` runs `agent.sh run`, builds once per launch when the run fails
   with a signing or provisioning error (new phone, expired signing), and
   restarts the helper whenever a command fails.
 - The app reaches WDA at `http://[tunnelIPAddress]:8100`, the USB tunnel address
   from `xcrun devicectl list devices`. No usbmux forwarding is needed.
-- Touches go through `POST /phonemirror/touch`, a route in
-  `tools/phone-mirror/wda/PMFastInputCommands.m`. `agent.sh` copies it into
+- Touches go through `POST /phonebooth/touch`, a route in
+  `tools/phonebooth/wda/PBFastInputCommands.m`. `agent.sh` copies it into
   WDA's `Commands/` folder and `#include`s it from `FBCustomCommands.m`, so the
   Xcode project isn't edited. WDA registers any `FBCommandHandler` class
   automatically. Do not move taps back to `/wda/tap`, `/wda/touchAndHold` or
   `/actions`: they snapshot the app's accessibility tree around every gesture,
   and a single tap took over 3 seconds on an iPhone XS Max.
 - `agent.sh build` writes the route file's SHA to
-  `DerivedData/phone-mirror-routes.sha`. `agent.sh run` exits 3 when it doesn't
+  `DerivedData/phonebooth-routes.sha`. `agent.sh run` exits 3 when it doesn't
   match, which makes `AgentRunner` rebuild. Edit the `.m` file and the next
   launch rebuilds the helper by itself.
-- `GET /phonemirror/orientation` returns the raw UIInterfaceOrientation.
+- `GET /phonebooth/orientation` returns the raw UIInterfaceOrientation.
   WDA's `/orientation` reports both landscapes as `LANDSCAPE`, which isn't
   enough to place touches. It snapshots the app, so it's only called on connect
   and rotation.
-- `POST /phonemirror/nudge` presses and releases Shift. `AgentRunner` sends it
+- `POST /phonebooth/nudge` presses and releases Shift. `AgentRunner` sends it
   every 20 seconds while the phone is unlocked (`KeepAwake`), which stops
   auto-lock. Tested on an iPhone XS Max with 30-second Auto-Lock: it stayed
   unlocked through 93 idle seconds, with nothing typed or opened. Never nudge a
@@ -518,13 +518,13 @@ tail -f ~/Library/Logs/"Phone Mirror"/phone-mirror.log
 
 | Path | What it is |
 |---|---|
-| `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneScreenDevices.swift` | Screen capture opt-in and phone discovery |
-| `tools/phone-mirror/Sources/PhoneMirrorApp/MirrorWindowController.swift` | Per-phone window, input handling |
-| `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneGestures.swift` | Click/drag/scroll/key to gesture translation (pure) |
-| `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneAgent.swift` | WDA HTTP client with an ordered command queue |
-| `tools/phone-mirror/Sources/PhoneMirrorApp/AgentRunner.swift` | Builds, starts and restarts WDA per phone |
-| `tools/phone-mirror/agent.sh` | Fetches, patches, signs, builds and runs WDA |
-| `tools/phone-mirror/wda/PMFastInputCommands.m` | Fast touch and orientation routes compiled into WDA |
+| `tools/phonebooth/Sources/PhoneboothApp/PhoneScreenDevices.swift` | Screen capture opt-in and phone discovery |
+| `tools/phonebooth/Sources/PhoneboothApp/MirrorWindowController.swift` | Per-phone window, input handling |
+| `tools/phonebooth/Sources/PhoneboothApp/PhoneGestures.swift` | Click/drag/scroll/key to gesture translation (pure) |
+| `tools/phonebooth/Sources/PhoneboothApp/PhoneAgent.swift` | WDA HTTP client with an ordered command queue |
+| `tools/phonebooth/Sources/PhoneboothApp/AgentRunner.swift` | Builds, starts and restarts WDA per phone |
+| `tools/phonebooth/agent.sh` | Fetches, patches, signs, builds and runs WDA |
+| `tools/phonebooth/wda/PBFastInputCommands.m` | Fast touch and orientation routes compiled into WDA |
 
 ---
 

@@ -204,12 +204,12 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
-    name: 'phone-mirror',
+    name: 'phonebooth',
     desc: 'Mirror and control several iPhones and iPads at once over USB, each in its own window: click to tap, drag to swipe, scroll to scroll, and type to type',
-    icon: `${base}/phone-mirror/icons/phone-mirror.png`,
-    header: `${base}/phone-mirror/docs/header.webp`,
+    icon: `${base}/phonebooth/icons/phonebooth.png`,
+    header: `${base}/phonebooth/docs/header.webp`,
     screenshots: [],
-    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/phone-mirror',
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/phonebooth',
     platforms: ['macos'],
   },
   {
