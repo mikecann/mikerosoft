@@ -17,6 +17,10 @@ public enum AssetOperation: String, CaseIterable, Codable, Sendable {
     case credits
     case generate
     case installStarter = "install-starter"
+    /// Saved segments in the shared library (`tandem segments ...`).
+    case segments
+    case saveSegment = "save-segment"
+    case insertSegment = "insert-segment"
 
     /// The request type that carries this operation's parameters.
     public var callType: any AssetCall.Type {
@@ -28,6 +32,9 @@ public enum AssetOperation: String, CaseIterable, Codable, Sendable {
         case .credits: return AssetCreditsRequest.self
         case .generate: return AssetGenerateRequest.self
         case .installStarter: return AssetInstallStarterRequest.self
+        case .segments: return SegmentListRequest.self
+        case .saveSegment: return SegmentSaveRequest.self
+        case .insertSegment: return SegmentInsertRequest.self
         }
     }
 }
@@ -231,8 +238,12 @@ public struct AssetUseResult: Codable, Sendable {
     public var asset: Asset
     /// The media item it is in the project. Nil for fonts and LUTs.
     public var mediaID: String?
-    /// Files copied into the project, relative to its folder.
+    /// The files the project uses: copies relative to its folder, or with
+    /// `referencedInPlace` the shared library's files where they are.
     public var files: [String]
+    /// True for a shared library asset: the project refers to the library's
+    /// file instead of a copy, and archiving copies it in.
+    public var referencedInPlace: Bool?
     public var role: MediaRole
     /// The track it lands on in Mike's layout.
     public var trackName: String?

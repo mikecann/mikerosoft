@@ -48,7 +48,7 @@ enum Help {
                     Copies are APFS clones where they can be, checked by SHA-256 otherwise, and never replace a different file (they go beside it as "name 2"). archive.json records where each file came from. Missing files are listed and left as they are. A run that stops part way can be run again.
                     --dry-run lists what would be copied and the sizes.
                     """),
-        CommandHelp(name: "relink", usage: "tandem relink [--search <folder>]... [--dry-run]", summary: "Find missing media files by name (and content) in the project folder and any --search folders, and point the project at them.", options: ["search", "dry-run", "label"]),
+        CommandHelp(name: "relink", usage: "tandem relink [--search <folder>]... [--dry-run]", summary: "Find missing media files by name (and content) in the project folder, any --search folders and then the shared library, and point the project at them.", options: ["search", "dry-run", "label"]),
         CommandHelp(name: "loudness", usage: "tandem loudness [<media id>]", summary: "Measured loudness per file and the levelling each clip gets.", options: []),
         CommandHelp(name: "watch", usage: "tandem watch [--once] [--timeout <seconds>]", summary: "Print changes as they happen (or wait for the next one with --once).", options: ["once", "timeout"]),
         CommandHelp(name: "effects", usage: "tandem effects [<type>]", summary: "Effects with their parameters, transitions, layouts and animatable parameters.", options: []),
@@ -67,11 +67,20 @@ enum Help {
                     providers        which sources work now, and what to fix (a key, a permission)
                     search           the library's catalogue; --online asks the providers too
                     fetch <id>       download and normalise an asset
-                    use <id>         copy it into the project and add it to the media; --at places it on its track
+                    use <id>         copy it into the project and add it to the media; --at places it on its track. Shared library assets (shared:...) are used where they are, not copied
                     credits          the credits block for the video description, and anything to sort out first
                     generate         make a sound effect or music cue with ElevenLabs (paid, one request per take)
                     install-starter  add the starter emoji, icons and logos to the catalogue
-                    The library is per user, at ~/Library/Application Support/Tandem/Assets.
+                    The library is per user, at ~/Library/Application Support/Tandem/Assets. The shared library folder, ~/Movies/Tandem Library, is the "shared" source.
+                    """),
+        CommandHelp(name: "segments", usage: "tandem segments list | save \"<name>\" (--clips <id,id> | --from <time> --to <time>) [--field <clip id>[=<label>]]... [--replace] | insert \"<name>\" --at <time> [--value <key>=<text>]... [--mode place|overwrite|insert]",
+                    summary: "Reusable bits of timeline (intro, outro, like and subscribe) saved in the shared library: list them, save clips as one, put one on the timeline.",
+                    options: ["clips", "from", "to", "field", "replace", "at", "value", "mode", "label"],
+                    details: """
+                    list     the segments in ~/Movies/Tandem Library/Segments, with their fields
+                    save     save clips as a segment, with copies of the files they play beside it. --clips takes exactly those clips (linked ones aren't added); --from and --to take every clip wholly between them. --field clip_x=Title makes a title's words a field asked for on insert. --replace saves over one of the same name (the old one goes to the Trash)
+                    insert   put a segment on the timeline at --at, one undo step. Its files are used where they are in the library; archiving the project copies them in. --value key=text fills a field; --mode overwrite replaces what's in the way
+                    The shared library's place is in Tandem's settings; $TANDEM_LIBRARY moves it for one command.
                     """),
         CommandHelp(name: "serve", usage: "tandem serve [--port <n>]", summary: "Open the project and serve the API until stopped (for agents, with the app closed).", options: ["port"]),
         CommandHelp(name: "mcp", usage: "tandem mcp", summary: "Run the MCP server on stdin and stdout.", options: [],

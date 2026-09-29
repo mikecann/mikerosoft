@@ -503,7 +503,7 @@ final class ArchiveTests: XCTestCase {
     }
 
     func testFontsFoundOnThisMac() {
-        let fonts = InstalledFonts(libraryRoot: nil)
+        let fonts = InstalledFonts(libraryRoot: nil, sharedLibrary: nil)
         XCTAssertEqual(fonts.locate("SF Pro Display"), .system)
         XCTAssertEqual(fonts.locate("Helvetica"), .system)
         XCTAssertEqual(fonts.locate("Helvetica-Bold"), .system, "PostScript names work too")
@@ -557,6 +557,7 @@ final class ArchiveTests: XCTestCase {
         let session = try ProjectSession.open(f.projectURL, owner: .cli)
         session.autosaveDelay = 3600
         let service = TandemService(session: session, mode: .headless, analysis: FakeAnalysis(), renderer: FakeRenderer())
+        service.locateSharedLibrary = { nil }
         defer {
             service.shutdown()
             session.close()
@@ -641,6 +642,8 @@ final class RelinkTests: XCTestCase {
         let session = try ProjectSession.open(f.projectURL, owner: .cli)
         session.autosaveDelay = 3600
         let service = TandemService(session: session, mode: .hosted, analysis: FakeAnalysis(), renderer: FakeRenderer())
+        // Mike's real shared library stays out of it.
+        service.locateSharedLibrary = { nil }
         defer {
             service.shutdown()
             session.close()

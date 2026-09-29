@@ -692,7 +692,7 @@ enum MCPTools {
         ),
         Tool(
             name: "assets_use", title: "Use an asset",
-            description: "Downloads and normalises an asset if needed, copies it into the project's assets folder, records the use for the credits and adds it to the project's media. With at it's also placed on the track for its kind (sound effects on SFX at -15 dB, music on Music at -31 dB with a fade out, stickers and logos on Graphics). One undo step, credited to you.",
+            description: "Downloads and normalises an asset if needed, copies it into the project's assets folder (a shared library asset, shared:..., is used where it is instead, and archiving copies it in), records the use for the credits and adds it to the project's media. With at it's also placed on the track for its kind (sound effects on SFX at -15 dB, music on Music at -31 dB with a fade out, stickers and logos on Graphics). One undo step, credited to you.",
             asset: .use,
             properties: [
                 "id": S.string("An asset ID from assets_search, like noto:1f680 or import:..."),
@@ -723,6 +723,38 @@ enum MCPTools {
                 "vocals": S.boolean("Music: allow vocals (instrumental by default).")
             ],
             required: ["kind", "prompt"], readOnly: false, openWorld: true
+        ),
+        Tool(
+            name: "segments_list", title: "List saved segments",
+            description: "Mike's saved segments (an intro, an outro, like and subscribe, comment below) in the shared library's Segments folder: each one's name, length, clips, the tracks it goes on and the fields it asks for.",
+            asset: .segments, properties: [:], readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "segments_save", title: "Save clips as a segment",
+            description: "Saves clips from the timeline as a reusable segment in the shared library (Segments/<name>/), with copies of the files they play beside it so it stands on its own. Name the clips exactly (clipIDs, linked partners aren't added) or give a range (from and to: every clip wholly inside). fields turns titles into words asked for on insert, each {\"clipID\": ..., \"label\": ...}. Doesn't change the project.",
+            asset: .saveSegment,
+            properties: [
+                "name": S.string("What it's called in the library, like Intro."),
+                "clipIDs": S.array(S.string(), "The clips to save."),
+                "from": time("Or: every clip wholly after this time..."),
+                "to": time("...and before this one."),
+                "fields": S.array(S.object(["clipID": S.string(), "key": S.string(), "label": S.string()], required: ["clipID"]), "Titles whose words are asked for on insert; the words now are the default."),
+                "replace": S.boolean("Replace a segment already called that (the old one goes to the Trash).")
+            ],
+            required: ["name"], readOnly: false
+        ),
+        Tool(
+            name: "segments_insert", title: "Insert a segment",
+            description: "Puts a saved segment on the timeline at a time: its clips go on tracks of the same names (made if missing), linked, as one undo step credited to you. Its files are used where they are in the library, added to the project's media as needed; archiving the project copies them in. values fills its fields.",
+            asset: .insertSegment,
+            properties: [
+                "name": S.string("The segment's name, from segments_list."),
+                "at": time("Where it starts."),
+                "values": S.map(S.string(), "Words for its fields, by key."),
+                "mode": S.enumeration(["place", "overwrite", "insert"], "place (default) fails where a track is taken; overwrite replaces what's there; insert pushes later clips right."),
+                "label": S.string("Undo label.")
+            ],
+            required: ["name", "at"], readOnly: false
         ),
         Tool(
             name: "assets_providers", title: "Asset sources",

@@ -17,10 +17,15 @@ final class CLITests: XCTestCase {
         var stderr: String
     }
 
+    /// A shared library nothing makes, so commands run here never look in
+    /// the real ~/Movies/Tandem Library.
+    static let noSharedLibrary = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-tests-no-shared-library-\(UUID().uuidString)").path
+
     static func environment(_ extra: [String: String] = [:]) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment.removeValue(forKey: "TANDEM_PROJECT")
         environment.removeValue(forKey: "TANDEM_AUTHOR")
+        environment["TANDEM_LIBRARY"] = noSharedLibrary
         environment.merge(extra) { $1 }
         return environment
     }

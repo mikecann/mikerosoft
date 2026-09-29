@@ -12,7 +12,9 @@ public struct AssetPlacement: Codable, Sendable {
     /// Its ID is the same every time this asset is used, so using an asset
     /// twice in one project doesn't add it twice.
     public var mediaItem: MediaItem?
-    /// Files copied into the project, relative to the project folder.
+    /// The files the project uses, as it refers to them: copies relative to
+    /// the project folder, or (`referencedInPlace`) the shared library's
+    /// files where they are.
     public var files: [String]
     public var role: MediaRole
     /// The track it belongs on in Mike's standard layout.
@@ -20,6 +22,10 @@ public struct AssetPlacement: Codable, Sendable {
     /// Suggested clip audio: music at -31 dB with a 2 s fade out, sound
     /// effects at -15 dB (from the Filmora audit of 51 projects).
     public var audio: AudioProperties?
+    /// True for a shared library asset: nothing was copied, and the project
+    /// refers to the library's file, so changing it there changes it in
+    /// every project. Archiving copies it in.
+    public var referencedInPlace = false
 
     /// The suggested clip gain, in dB.
     public var gainDB: Double? { audio?.gainDB }
@@ -106,10 +112,18 @@ extension AssetLibrary {
     /// `<project>/assets/<kind>/`, records the use and returns a media item
     /// with suggested role, track and gain. Fonts are copied and registered
     /// but get no media item.
+    ///
+    /// A shared library asset isn't copied: the project refers to the file
+    /// where it is (`referencedInPlace`), the library's own file, or for
+    /// one a project can't play as it is (WebM, Lottie, SVG) the library's
+    /// converted copy, which is made again when the file changes.
     public func use(_ id: String, in project: ProjectFolder, projectID: String, projectFile: URL? = nil) async throws -> AssetPlacement {
         let asset = try await fetch(id)
         guard let source = playableURL(for: asset), FileManager.default.fileExists(atPath: source.path) else {
             throw AssetError.notFound("the file for \(asset.name)")
+        }
+        if asset.provider == SharedLibraryProvider.providerID {
+            return try await reference(asset, file: source, in: project, projectID: projectID, projectFile: projectFile)
         }
         let destinationFolder = Self.projectFolder(for: asset.kind, in: project)
         try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
@@ -165,6 +179,30 @@ extension AssetLibrary {
             mediaPath: mediaPath
         ))
         return AssetPlacement(asset: asset, mediaItem: item, files: copied.map(project.path(for:)), role: role, trackName: track, audio: audio)
+    }
+
+    /// Uses a shared library asset where it is: no copy, the path to the
+    /// file as the project stores it (absolute, unless the library is in
+    /// the project's folder), and the use recorded for the credits.
+    private func reference(_ asset: Asset, file: URL, in project: ProjectFolder, projectID: String, projectFile: URL?) async throws -> AssetPlacement {
+        var files = [file]
+        if asset.kind == .font {
+            let folder = self.folder(for: asset)
+            files += (asset.remote["extraFiles"] ?? "").split(separator: "\n").map { folder.appendingPathComponent(String($0)) }
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+            await FontInstaller.register(files)
+        }
+        let (role, track, audio) = Self.suggestions(for: asset.kind)
+        let mediaPath = project.path(for: file)
+        let item = mediaItem(for: asset, path: mediaPath, role: role)
+        try catalog.recordUsage(AssetUsage(
+            assetID: asset.id,
+            projectID: projectID,
+            projectPath: (projectFile ?? project.root).path,
+            mediaID: item?.id,
+            mediaPath: mediaPath
+        ))
+        return AssetPlacement(asset: asset, mediaItem: item, files: files.map(project.path(for:)), role: role, trackName: track, audio: audio, referencedInPlace: true)
     }
 
     /// The media item for an asset's copy in a project.

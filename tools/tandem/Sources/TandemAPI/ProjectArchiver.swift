@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import TandemAssets
 import TandemCore
 import TandemMedia
 
@@ -490,7 +491,7 @@ public final class ProjectArchiver: @unchecked Sendable {
             return
         }
         guard let info = FileCopier.fileInfo(URL(fileURLWithPath: real)) else { return }
-        let preferred = kind == .lut ? "assets/lut/\(url.lastPathComponent)" : Self.mediaDestination(for: url)
+        let preferred = destination(for: url, real: real, kind: kind)
         let job = Job(kind: kind, source: URL(fileURLWithPath: real), original: real, preferred: preferred, bytes: info.size, modified: info.modified)
         job.destination = plan.claim(preferred, source: real, bytes: info.size)
         job.usedBy = usedBy
@@ -1058,6 +1059,28 @@ public final class ProjectArchiver: @unchecked Sendable {
     static func isPlainRelative(_ path: String) -> Bool {
         guard !path.isEmpty, !path.hasPrefix("/"), !path.hasPrefix("~") else { return false }
         return !path.split(separator: "/", omittingEmptySubsequences: false).contains { $0.isEmpty || $0 == "." || $0 == ".." }
+    }
+
+    /// Where a file from outside the folder goes: a LUT in `assets/lut/`,
+    /// a shared library file in `media/Tandem Library/` where it was in the
+    /// library (`media/Tandem Library/Stickers/star.mov`), the library's
+    /// converted copy of one beside where its original would go, named
+    /// after it, and any other media in `media/<the folder it was in>/`.
+    func destination(for url: URL, real: String, kind: ArchivedKind) -> String {
+        if kind == .lut { return "assets/lut/\(url.lastPathComponent)" }
+        if let shared = options.sharedLibrary {
+            var library = shared.root.lastPathComponent
+            while library.hasPrefix(".") { library.removeFirst() }
+            if library.isEmpty { library = SharedLibrary.defaultName }
+            if let relative = shared.relativePath(of: url) ?? shared.relativePath(of: URL(fileURLWithPath: real)) {
+                return "media/\(library)/\(relative)"
+            }
+            if let assetsRoot = options.assetsRoot, let original = AssetLibrary.sharedOriginal(of: URL(fileURLWithPath: real), assetsRoot: assetsRoot) {
+                let stem = (original as NSString).deletingPathExtension
+                return "media/\(library)/\(stem).\(URL(fileURLWithPath: real).pathExtension)"
+            }
+        }
+        return Self.mediaDestination(for: url)
     }
 
     /// Where an outside media file goes: `media/<the folder it was in>/<its

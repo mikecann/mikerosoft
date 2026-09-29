@@ -22,18 +22,21 @@ public final class AssetService: @unchecked Sendable {
 
     /// The per-user library. `$TANDEM_ASSETS_ROOT` moves it (for tests),
     /// and `$TANDEM_ASSETS_OFFLINE=1` keeps it off the network and out of
-    /// the Keychain: providers fail as if offline and have no keys.
+    /// the Keychain: providers fail as if offline and have no keys. The
+    /// shared library is where `SharedLibrary.locate` says
+    /// (`$TANDEM_LIBRARY`, the settings, or `~/Movies/Tandem Library`).
     public static func standard(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> AssetService {
         let offline = environment["TANDEM_ASSETS_OFFLINE"] == "1"
         let transport: HTTPTransport = offline ? OfflineTransport() : URLSessionTransport()
         let secrets: SecretStore = offline ? StaticSecretStore() : KeychainSecretStore()
+        let shared = SharedLibrary.locate(environment: environment).root
         let library: AssetLibrary
         do {
             if let root = environment["TANDEM_ASSETS_ROOT"], !root.isEmpty {
                 let url = URL(fileURLWithPath: NSString(string: root).expandingTildeInPath, isDirectory: true)
-                library = try AssetLibrary(root: url, previewFolder: url.appendingPathComponent("previews", isDirectory: true), transport: transport, secrets: secrets)
+                library = try AssetLibrary(root: url, previewFolder: url.appendingPathComponent("previews", isDirectory: true), transport: transport, secrets: secrets, sharedLibrary: shared)
             } else {
-                library = try AssetLibrary(transport: transport, secrets: secrets)
+                library = try AssetLibrary(transport: transport, secrets: secrets, sharedLibrary: shared)
             }
         } catch {
             throw ServiceError.wrap(error)
@@ -122,7 +125,8 @@ public final class AssetService: @unchecked Sendable {
         }
         let asset = placement.asset
         var result = AssetUseResult(
-            asset: asset, mediaID: nil, files: placement.files, role: placement.role, trackName: placement.trackName,
+            asset: asset, mediaID: nil, files: placement.files, referencedInPlace: placement.referencedInPlace ? true : nil,
+            role: placement.role, trackName: placement.trackName,
             gainDB: placement.gainDB, at: request.at, applied: nil,
             fonts: (asset.remote["fonts"] ?? "").split(separator: "\n").map(String.init),
             licence: try? library.licence(for: asset.id)

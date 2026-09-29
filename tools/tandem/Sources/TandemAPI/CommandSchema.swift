@@ -390,7 +390,8 @@ extension CommandSchema {
         "trackKind": S.enumeration(["video", "audio"]),
         "offset": S.time("Start relative to the template."),
         "clip": S.ref("Clip"),
-        "mediaPath": S.string("For media clips: the path of a file in the project.")
+        "mediaPath": S.string("For media clips: the path of the file, as the project has it. A clip may carry the item to add under media (saved segments do) when the project has nothing there yet."),
+        "media": S.ref("MediaItem")
     ], required: ["track", "clip"])
 
     static let template = S.object([
@@ -542,7 +543,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .insertTemplate,
-            summary: "Expands a template (a section card, Like and Subscribe) into linked clips, filling {{field}} placeholders from values. Media it uses must already be in the project.",
+            summary: "Expands a template (a section card, Like and Subscribe, a saved segment) into linked clips, filling {{field}} placeholders from values. Media it uses is matched by path; a clip carrying its media item adds it when the project doesn't have it.",
             arguments: S.object([
                 "template": S.ref("Template"),
                 "at": S.time(),

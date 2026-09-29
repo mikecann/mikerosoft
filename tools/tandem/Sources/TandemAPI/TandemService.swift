@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import TandemAssets
 import TandemCore
 import TandemMedia
 import TandemRender
@@ -41,6 +42,16 @@ public final class TandemService: @unchecked Sendable {
     public func noteCall(_ operation: String, author: String) {
         onCall?(operation, author)
     }
+
+    /// Finds the shared library (`~/Movies/Tandem Library`), which relink
+    /// searches for what the given folders don't have and archive names
+    /// its files by. Asked each time, so a library moved in Settings is
+    /// found where it is now; tests point it at a temp folder.
+    public var locateSharedLibrary: @Sendable () -> SharedLibrary? {
+        get { hookLock.withLock { sharedLocator } }
+        set { hookLock.withLock { sharedLocator = newValue } }
+    }
+    private var sharedLocator: @Sendable () -> SharedLibrary? = { SharedLibrary.locate() }
 
     public var coordinator: ProjectCoordinator { session.coordinator }
     public var folder: ProjectFolder { session.folder }

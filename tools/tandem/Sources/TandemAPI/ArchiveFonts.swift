@@ -20,21 +20,23 @@ public protocol FontLocating: Sendable {
     func locate(_ family: String) -> FontLookup
 }
 
-/// Fonts installed on this Mac (Core Text), then the asset library's
-/// downloaded fonts, which only the app registers (the CLI doesn't).
+/// Fonts installed on this Mac (Core Text), then the shared library's
+/// `Fonts/` and the asset library's downloaded fonts, which only the app
+/// registers (the CLI doesn't).
 public struct InstalledFonts: FontLocating {
     public var libraryRoot: URL?
+    /// The shared library (`~/Movies/Tandem Library`), whose `Fonts/`
+    /// folder is looked in.
+    public var sharedLibrary: URL?
 
-    public init(libraryRoot: URL? = InstalledFonts.defaultLibraryRoot()) {
+    public init(libraryRoot: URL? = InstalledFonts.defaultLibraryRoot(), sharedLibrary: URL? = SharedLibrary.locate().root) {
         self.libraryRoot = libraryRoot
+        self.sharedLibrary = sharedLibrary
     }
 
     /// `$TANDEM_ASSETS_ROOT`, or the per-user library.
     public static func defaultLibraryRoot(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
-        if let root = environment["TANDEM_ASSETS_ROOT"], !root.isEmpty {
-            return URL(fileURLWithPath: NSString(string: root).expandingTildeInPath, isDirectory: true)
-        }
-        return AssetLibrary.defaultRoot
+        AssetLibrary.root(environment: environment)
     }
 
     public func locate(_ family: String) -> FontLookup {
@@ -42,6 +44,10 @@ public struct InstalledFonts: FontLocating {
         let found = Self.installed(family)
         if found.contains(where: { $0.path.hasPrefix("/System/") }) { return .system }
         if !found.isEmpty { return .files(found) }
+        if let sharedLibrary {
+            let files = ArchiveFonts.files(of: family, under: SharedLibrary(root: sharedLibrary).url(.fonts), skipping: [])
+            if !files.isEmpty { return .files(files) }
+        }
         if let libraryRoot {
             let files = ArchiveFonts.files(of: family, under: libraryRoot, skipping: ["cache", "staging", "previews", "providers"])
             if !files.isEmpty { return .files(files) }

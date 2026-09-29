@@ -64,7 +64,8 @@ public enum EditCommand: Codable, Equatable, Sendable {
     case insertTime(at: Time, duration: Time, trackIDs: [String]? = nil)
     /// Expands a template (section card, call to action) into linked clips
     /// at `at`, filling `{{field}}` placeholders from `values`. Media the
-    /// template uses must already be in the project (matched by path).
+    /// template uses is matched by path; a clip that carries its media item
+    /// (a saved segment's do) adds it when the project doesn't have it.
     case insertTemplate(template: Template, at: Time, values: [String: String]? = nil, mode: InsertMode? = nil)
 
     // MARK: Cutting and trimming

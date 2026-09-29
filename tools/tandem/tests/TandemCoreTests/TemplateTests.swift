@@ -44,4 +44,42 @@ final class TemplateTests: XCTestCase {
         let (_, c) = try Fixture.edited()
         XCTAssertThrowsError(try c.run("Card", .insertTemplate(template: try sectionCard(), at: t(30))))
     }
+
+    /// A saved segment's clips carry the media items for their files, so
+    /// inserting it adds them, once, keeping their IDs when they're free.
+    func testCarriedMediaIsAddedOnceWhenTheProjectLacksIt() throws {
+        let (_, c) = try Fixture.edited()
+        let path = "/Users/mike/Movies/Tandem Library/Segments/Intro/sting.wav"
+        let sting = MediaItem(id: "med_sting", path: "sting.wav", kind: .audio, role: .sfx, duration: t(2), hasAudio: true)
+        let json = #"""
+        {"id": "segment:Intro", "name": "Intro", "duration": 2, "clips": [
+          {"track": "SFX", "trackKind": "audio", "clip": {"duration": 1, "audio": {"gainDB": -15}}, "mediaPath": "PATH", "media": {"id": "med_sting", "path": "sting.wav", "kind": "audio", "role": "sfx", "duration": 2, "hasAudio": true}},
+          {"track": "SFX", "trackKind": "audio", "offset": 1, "clip": {"duration": 1, "sourceStart": 1}, "mediaPath": "PATH", "media": {"id": "med_sting", "path": "sting.wav", "kind": "audio", "role": "sfx", "duration": 2, "hasAudio": true}}
+        ]}
+        """#.replacingOccurrences(of: "PATH", with: path)
+        let template = try JSONDecoder().decode(Template.self, from: Data(json.utf8))
+        XCTAssertEqual(template.clips[0].media?.id, sting.id)
+        XCTAssertEqual(try JSONDecoder().decode(Template.self, from: try JSONEncoder().encode(template)), template, "round trips")
+
+        try c.run("Intro", .insertTemplate(template: template, at: t(40), mode: .overwrite))
+        let added = c.project.media.filter { $0.path == path }
+        XCTAssertEqual(added.map(\.id), ["med_sting"], "added once, with its own ID")
+        XCTAssertEqual(c.clips("SFX").map(\.mediaID), ["med_sting", "med_sting"])
+        assertValid(c.project)
+
+        // Again: the file is in the project now, so nothing more is added.
+        try c.run("Intro again", .insertTemplate(template: template, at: t(50), mode: .overwrite))
+        XCTAssertEqual(c.project.media.filter { $0.path == path }.count, 1)
+        XCTAssertEqual(c.clips("SFX").count, 4)
+
+        // A project already using the ID for another file gets a new one.
+        var other = template
+        other.clips = [other.clips[0]]
+        other.clips[0].mediaPath = "/elsewhere/Segments/Outro/sting.wav"
+        try c.run("Outro", .insertTemplate(template: other, at: t(55), mode: .overwrite))
+        let second = try XCTUnwrap(c.project.media.first { $0.path == "/elsewhere/Segments/Outro/sting.wav" })
+        XCTAssertNotEqual(second.id, "med_sting")
+        XCTAssertTrue(second.id.hasPrefix("med_"))
+        assertValid(c.project)
+    }
 }

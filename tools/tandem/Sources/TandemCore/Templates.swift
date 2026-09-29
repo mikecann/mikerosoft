@@ -59,17 +59,23 @@ public struct TemplateClip: Codable, Equatable, Sendable {
     /// The clip to create. Its `start` and `id` are replaced. Text may use
     /// `{{field}}` placeholders.
     public var clip: Clip
-    /// For media clips: the path of a file already added to the project.
-    /// The clip's `mediaID` is looked up from it, so a template doesn't need
-    /// to know the project's media IDs.
+    /// For media clips: the path of the file, as the project has it. The
+    /// clip's `mediaID` is looked up from it, so a template doesn't need to
+    /// know the project's media IDs.
     public var mediaPath: String?
+    /// For media clips: the media item to add when the project has nothing
+    /// at `mediaPath` yet (its path becomes `mediaPath`). A saved segment
+    /// carries the items for its files, so inserting it adds them; without
+    /// one, the file must already be in the project.
+    public var media: MediaItem?
 
-    public init(track: String, trackKind: TrackKind = .video, offset: Time = .zero, clip: Clip, mediaPath: String? = nil) {
+    public init(track: String, trackKind: TrackKind = .video, offset: Time = .zero, clip: Clip, mediaPath: String? = nil, media: MediaItem? = nil) {
         self.track = track
         self.trackKind = trackKind
         self.offset = offset
         self.clip = clip
         self.mediaPath = mediaPath
+        self.media = media
     }
 
     public init(from decoder: Decoder) throws {
@@ -78,6 +84,7 @@ public struct TemplateClip: Codable, Equatable, Sendable {
         trackKind = try c.decode(.trackKind, or: .video)
         offset = try c.decode(.offset, or: .zero)
         mediaPath = try c.decodeIfPresent(String.self, forKey: .mediaPath)
+        media = try c.decodeIfPresent(MediaItem.self, forKey: .media)
         // Media clips name their file with `mediaPath`, so let them leave
         // `content` out.
         var raw = try c.decode(JSONValue.self, forKey: .clip)
@@ -109,6 +116,20 @@ extension Template {
 }
 
 extension Editing {
+    /// The media at `path`, adding the item a template clip carries when the
+    /// project has nothing there yet. The carried item keeps its ID unless
+    /// the project already uses it.
+    static func mediaID(for path: String, carried: MediaItem?, in p: inout Project, template: String, _ context: inout EditContext) throws -> String {
+        if let media = p.media.first(where: { $0.path == path }) { return media.id }
+        guard var item = carried else {
+            throw EditError.notFound("media \(path) for template \(template); add it to the project first")
+        }
+        item.path = path
+        if item.id.isEmpty || p.allIDs.contains(item.id) { item.id = context.makeID("med") }
+        try addMedia(&p, item)
+        return item.id
+    }
+
     static func insertTemplate(_ p: inout Project, _ template: Template, at: Time, values: [String: String], mode: InsertMode, _ context: inout EditContext) throws {
         guard at >= .zero else { throw EditError.invalid("templates can't start before 0") }
         guard !template.clips.isEmpty else { throw EditError.invalid("template \(template.id) has no clips") }
@@ -129,10 +150,7 @@ extension Editing {
             clip.linkGroup = group
             if !clip.tags.contains("template:\(template.id)") { clip.tags.append("template:\(template.id)") }
             if let path = item.mediaPath {
-                guard let media = p.media.first(where: { $0.path == path }) else {
-                    throw EditError.notFound("media \(path) for template \(template.id); add it to the project first")
-                }
-                clip.content = .media(mediaID: media.id)
+                clip.content = .media(mediaID: try mediaID(for: path, carried: item.media, in: &p, template: template.id, &context))
             }
             try requireUnlocked(p[location])
             try checkContent(clip, fits: p[location], in: p)

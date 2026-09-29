@@ -83,6 +83,8 @@ struct CLI {
             return try await ImportCommand(directory: directory).run(args)
         case "assets":
             return try await AssetsCommand(directory: directory, environment: environment).run(args, author: author(args)) { try project(args) }
+        case "segments":
+            return try await SegmentsCommand(directory: directory, environment: environment).run(args, author: author(args)) { try project(args) }
         case "archive":
             try args.expectPositionals(atMost: 1, command: name)
             if args.has("with-cache"), args.options["to"] == nil {

@@ -19,17 +19,30 @@ import TandemMedia
 ///     staging/                 generations on their way in, emptied after
 ///
 /// Previews live in `~/Library/Caches/Tandem/AssetPreviews/`, size capped.
+///
+/// The shared library (`SharedLibrary`, `~/Movies/Tandem Library`) is a
+/// source of its own, `shared`: its files are indexed like an import
+/// folder's, and a project that uses one refers to it where it is.
 public final class AssetLibrary: @unchecked Sendable {
     public let root: URL
     public let catalog: AssetCatalog
     public let normaliser: AssetNormaliser
-    public let settings: AssetSettings
     public let previews: PreviewCache
     public let environment: ProviderEnvironment
     private var registry: [String: AssetProvider] = [:]
     private var order: [String] = []
     private let lock = NSLock()
     private let fetches = FetchQueue()
+    private var currentSettings: AssetSettings
+    /// Where the shared library is when no shared provider is registered.
+    private var fallbackShared = SharedLibrary(root: SharedLibrary.standardRoot)
+
+    /// Library settings Mike might change, in `<root>/settings.json`.
+    public var settings: AssetSettings {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentSettings
+    }
 
     /// `~/Library/Application Support/Tandem/Assets/`.
     public static var defaultRoot: URL {
@@ -48,6 +61,9 @@ public final class AssetLibrary: @unchecked Sendable {
     /// Opens the library at `root`, creating it if needed. With no
     /// `providers`, every built-in provider is registered (see
     /// `defaultProviders`); tests pass their own transport and secrets.
+    /// `sharedLibrary` overrides where the shared library is; otherwise
+    /// it's where the settings say (`SharedLibrary.root(for:assetsRoot:)`).
+    /// Opening never creates the shared library's folder.
     public init(
         root: URL = AssetLibrary.defaultRoot,
         previewFolder: URL? = nil,
@@ -55,6 +71,7 @@ public final class AssetLibrary: @unchecked Sendable {
         secrets: SecretStore = KeychainSecretStore(),
         normaliser: AssetNormaliser = AssetNormaliser(),
         settings: AssetSettings? = nil,
+        sharedLibrary: URL? = nil,
         providers: [AssetProvider]? = nil
     ) throws {
         // Create the folder before standardising: standardizedFileURL only
@@ -64,7 +81,8 @@ public final class AssetLibrary: @unchecked Sendable {
         catalog = try AssetCatalog(url: self.root.appendingPathComponent("catalog.sqlite"))
         self.normaliser = normaliser
         let settings = settings ?? AssetSettings.load(from: self.root)
-        self.settings = settings
+        currentSettings = settings
+        let shared = SharedLibrary(root: sharedLibrary ?? SharedLibrary.root(for: settings, assetsRoot: self.root))
         environment = ProviderEnvironment(
             transport: transport,
             secrets: secrets,
@@ -72,14 +90,16 @@ public final class AssetLibrary: @unchecked Sendable {
             stateFolder: self.root.appendingPathComponent("providers", isDirectory: true)
         )
         previews = PreviewCache(folder: previewFolder ?? Self.defaultPreviewFolder, limit: settings.previewCacheLimit, transport: transport)
-        for provider in providers ?? Self.defaultProviders(catalog: catalog, environment: environment, settings: settings) {
+        for provider in providers ?? Self.defaultProviders(catalog: catalog, environment: environment, settings: settings, sharedLibrary: shared) {
             register(provider)
         }
+        fallbackShared = shared
     }
 
     /// Every built-in provider, in the order the browser shows them.
-    public static func defaultProviders(catalog: AssetCatalog, environment: ProviderEnvironment, settings: AssetSettings) -> [AssetProvider] {
+    public static func defaultProviders(catalog: AssetCatalog, environment: ProviderEnvironment, settings: AssetSettings, sharedLibrary: SharedLibrary = SharedLibrary(root: SharedLibrary.standardRoot)) -> [AssetProvider] {
         [
+            SharedLibraryProvider(catalog: catalog, library: sharedLibrary),
             ImportFolderProvider(catalog: catalog),
             ElevenLabsProvider(environment: environment),
             NotoEmojiProvider(environment: environment),
@@ -357,7 +377,9 @@ public final class AssetLibrary: @unchecked Sendable {
 
         let result: NormalisedAsset
         do {
-            result = try await normaliser.normalise(original, into: folder, fallbacks: extras)
+            // Shared files are used where they are, so audio a project plays
+            // as it is gets no copy.
+            result = try await normaliser.normalise(original, into: folder, fallbacks: extras, keepingPlayableAudio: provider is SharedLibraryProvider)
         } catch {
             // Keep what was downloaded, so the next fetch retries the
             // normalising without downloading again.
@@ -563,6 +585,106 @@ public final class AssetLibrary: @unchecked Sendable {
         return provider
     }
 
+    // MARK: - The shared library
+
+    /// The shared library's provider, when it's registered.
+    public var sharedProvider: SharedLibraryProvider? {
+        provider(SharedLibraryProvider.providerID) as? SharedLibraryProvider
+    }
+
+    /// Where the shared library is.
+    public var sharedLibrary: SharedLibrary {
+        if let provider = sharedProvider { return provider.library }
+        lock.lock()
+        defer { lock.unlock() }
+        return fallbackShared
+    }
+
+    /// Makes the shared library's folders and READMEs where they're
+    /// missing (the app does this when it opens). Returns what it made.
+    @discardableResult
+    public func createSharedLibrary() throws -> [URL] {
+        try sharedLibrary.create()
+    }
+
+    /// Moves the shared library to `folder` (nil for the default), saving
+    /// the choice in the settings, and scans it there. The folder is made
+    /// with its subfolders if it isn't there. Rows for files only the old
+    /// folder had go (used ones stay, marked missing, for their credits).
+    @discardableResult
+    public func moveSharedLibrary(to folder: URL?) async throws -> ImportScanReport? {
+        var settings = self.settings
+        settings.sharedLibrary = folder.map { $0.standardizedFileURL.path }
+        let library = SharedLibrary(root: SharedLibrary.root(for: settings, assetsRoot: root))
+        try library.create()
+        try settings.save(to: root)
+        lock.withLock {
+            currentSettings = settings
+            fallbackShared = library
+        }
+        sharedProvider?.move(to: library)
+        return try await rescanSharedLibrary()
+    }
+
+    /// Indexes the shared library's files. Nil when its folder isn't there
+    /// (nothing is removed from the index then).
+    @discardableResult
+    public func rescanSharedLibrary() async throws -> ImportScanReport? {
+        guard let provider = sharedProvider, provider.library.exists else { return nil }
+        let report = try await provider.scanLibrary()
+        deleteFolders(of: report.removedIDs)
+        return report
+    }
+
+    /// Watches the shared library and rescans it when anything in it
+    /// changes, calling back with the report. Keep the watcher; dropping it
+    /// stops watching. Nil when the folder isn't there.
+    public func watchSharedLibrary(onChange: @escaping @Sendable (ImportScanReport) -> Void) -> ImportFolderWatcher? {
+        guard let provider = sharedProvider, provider.library.exists else { return nil }
+        let handled = HandledScans()
+        return ImportFolderWatcher(paths: [provider.library.root.path]) { _ in
+            Task {
+                guard let report = try? await provider.scanLibrary(), handled.claim(report.scanID) else { return }
+                self.deleteFolders(of: report.removedIDs)
+                onChange(report)
+            }
+        }
+    }
+
+    /// Normalises again the shared files a scan found changed that some
+    /// project uses. A project playing the library's converted copy of one
+    /// (a WebM or Lottie sticker, an SVG) then shows the new version, and
+    /// every one gets a fresh thumbnail, waveform and loudness; files used
+    /// where they are would show the change anyway. Returns the assets it
+    /// normalised.
+    @discardableResult
+    public func refreshChangedSharedFiles(_ report: ImportScanReport) async -> [String] {
+        guard !report.updatedIDs.isEmpty, let pinned = try? catalog.pinnedIDs() else { return [] }
+        var refreshed: [String] = []
+        for id in report.updatedIDs where pinned.contains(id) && id.hasPrefix(SharedLibraryProvider.providerID + ":") {
+            if (try? await fetch(id)) != nil { refreshed.append(id) }
+        }
+        return refreshed
+    }
+
+    /// Registers the fonts in the shared library's `Fonts/` folder with
+    /// Core Text for this process, so titles can use them.
+    @discardableResult
+    public func registerSharedFonts() async -> [URL: String] {
+        await FontInstaller.register(sharedFontFiles())
+    }
+
+    /// The font files in the shared library's `Fonts/` folder.
+    public func sharedFontFiles() -> [URL] {
+        let folder = sharedLibrary.url(.fonts)
+        guard let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
+        var files: [URL] = []
+        for case let url as URL in enumerator where FormatSniffer.fromExtension(url.pathExtension).isFont {
+            files.append(url)
+        }
+        return files.sorted { $0.path < $1.path }
+    }
+
     // MARK: - Fonts
 
     /// Registers every downloaded font with Core Text for this process. The
@@ -635,7 +757,7 @@ extension AssetLibrary {
             guard let provider = provider(asset.provider), !provider.capabilities.generate else { continue }
             let folder = self.folder(for: asset)
             var updated = asset
-            if asset.provider == "import" {
+            if provider is ImportFolderProvider {
                 // The original is Mike's file in his folder; keep it.
                 updated.state = .original
                 let original = asset.files.original
@@ -689,8 +811,9 @@ extension AssetLibrary {
     /// those from the folder instead; the next scan notices).
     public func remove(_ id: String) throws {
         guard let asset = try catalog.asset(id: id) else { throw AssetError.notFound("asset \(id)") }
-        guard asset.provider != "import" else {
-            throw AssetError.invalid("\(asset.name) lives in an import folder; delete the file there and the library will notice")
+        guard !(provider(asset.provider) is ImportFolderProvider) else {
+            let place = asset.provider == SharedLibraryProvider.providerID ? "the shared library" : "an import folder"
+            throw AssetError.invalid("\(asset.name) lives in \(place); delete the file there and the library will notice")
         }
         guard try catalog.usage(forAsset: id).isEmpty else {
             throw AssetError.invalid("\(asset.name) is used in a project, so its record stays for the credits")

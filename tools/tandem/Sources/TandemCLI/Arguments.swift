@@ -20,10 +20,10 @@ struct Arguments {
         "project", "author", "from", "to", "min", "keep", "limit", "label", "key", "expect",
         "output", "preset", "width", "height", "port", "timeout", "name", "format",
         "out", "search", "rewrite", "recipe", "max-words", "y", "track", "size",
-        "kind", "provider", "at", "duration", "variations"
+        "kind", "provider", "at", "duration", "variations", "clips", "field", "value", "mode"
     ]
     /// Options that are on or off.
-    static let flagOptions: Set<String> = ["json", "refresh", "words", "summary", "apply", "dry-run", "help", "version", "once", "portrait", "online", "optional", "keep-levels", "with-cache"]
+    static let flagOptions: Set<String> = ["json", "refresh", "words", "summary", "apply", "dry-run", "help", "version", "once", "portrait", "online", "optional", "keep-levels", "with-cache", "replace"]
     static let shortOptions: [String: String] = ["o": "output", "h": "help", "v": "version"]
 
     static func parse(_ arguments: [String]) throws -> Arguments {

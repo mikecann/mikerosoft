@@ -85,23 +85,29 @@ public struct AssetNormaliser: Sendable {
     /// are other copies of the same asset to try when the original can't
     /// be handled, for example the animated WebP fetched next to a Lottie
     /// file.
-    public func normalise(_ original: URL, into folder: URL, fallbacks: [URL] = []) async throws -> NormalisedAsset {
+    ///
+    /// `keepingPlayableAudio` measures audio a project plays as it is (WAV,
+    /// AIFF, MP3, M4A, CAF) without writing a 48 kHz copy: the shared
+    /// library's files are used where they are, so a copy would only take
+    /// room.
+    public func normalise(_ original: URL, into folder: URL, fallbacks: [URL] = [], keepingPlayableAudio: Bool = false) async throws -> NormalisedAsset {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         do {
-            return try await normaliseOne(original, into: folder)
+            return try await normaliseOne(original, into: folder, keepingPlayableAudio: keepingPlayableAudio)
         } catch {
             for fallback in fallbacks {
-                if let result = try? await normaliseOne(fallback, into: folder) { return result }
+                if let result = try? await normaliseOne(fallback, into: folder, keepingPlayableAudio: keepingPlayableAudio) { return result }
             }
             throw error
         }
     }
 
-    private func normaliseOne(_ original: URL, into folder: URL) async throws -> NormalisedAsset {
+    private func normaliseOne(_ original: URL, into folder: URL, keepingPlayableAudio: Bool) async throws -> NormalisedAsset {
         let format = FormatSniffer.format(of: original)
         switch format {
         case .wav, .aiff, .mp3, .m4a, .caf, .flac, .ogg:
-            return try await audio(original, format: format, into: folder)
+            let keep = keepingPlayableAudio && MediaScanner.audioExtensions.contains(original.pathExtension.lowercased())
+            return try await audio(original, format: format, keep: keep, into: folder)
         case .gif, .webp, .png:
             if let info = MediaProbe.image(original), info.frames > 1 {
                 return try await animated(original, format: format, into: folder)
@@ -138,10 +144,10 @@ public struct AssetNormaliser: Sendable {
 
     // MARK: - Kinds
 
-    private func audio(_ original: URL, format: AssetFormat, into folder: URL) async throws -> NormalisedAsset {
+    private func audio(_ original: URL, format: AssetFormat, keep: Bool = false, into folder: URL) async throws -> NormalisedAsset {
         let output = folder.appendingPathComponent("normalised.wav")
         let ffmpeg = self.ffmpeg
-        let rewrite = !AudioNormaliser.canUseAsIs(original, format: format)
+        let rewrite = !keep && !AudioNormaliser.canUseAsIs(original, format: format)
         if !rewrite { try? FileManager.default.removeItem(at: output) }
         let analysis = try await Self.offload { try AudioNormaliser.normalise(input: original, output: rewrite ? output : nil, ffmpeg: ffmpeg) }
         let peaks = folder.appendingPathComponent("peaks.bin")

@@ -56,6 +56,20 @@ public enum MediaRelinker {
         return (found, ambiguous)
     }
 
+    /// Looks in `folders` first, then in `fallback` (the shared library) for
+    /// what they didn't have. A file with several candidates in the first
+    /// folders stays undecided rather than being settled by the fallback.
+    public static func search(for items: [MediaItem], in folders: [URL], then fallback: [URL], folder: ProjectFolder, control: ArchiveControl? = nil) -> (found: [Match], ambiguous: [String]) {
+        var (found, ambiguous) = search(for: items, in: folders, folder: folder, control: control)
+        let settled = Set(found.map(\.mediaID))
+        let rest = items.filter { !settled.contains($0.id) && !ambiguous.contains($0.path) }
+        guard !rest.isEmpty, !fallback.isEmpty else { return (found, ambiguous) }
+        let more = search(for: rest, in: fallback, folder: folder, control: control)
+        found += more.found
+        ambiguous += more.ambiguous
+        return (found, ambiguous)
+    }
+
     /// The path to store for a file: relative when it's in the project
     /// folder, however the folder is spelled (`/var` or `/private/var`).
     static func storedPath(for file: URL, in folder: ProjectFolder) -> String {
@@ -152,8 +166,17 @@ extension TandemService {
         let (project, revision) = coordinator.snapshot()
         let missing = MediaRelinker.missing(in: project, folder: folder)
         let control = ArchiveControl()
+        // The shared library last: a project from another Mac finds its
+        // stickers and sounds in this Mac's library.
+        let fallback: [URL]
+        if let shared = locateSharedLibrary(), shared.exists,
+           !roots.contains(where: { $0.standardizedFileURL.path == shared.root.path }) {
+            fallback = [shared.root]
+        } else {
+            fallback = []
+        }
         let (found, ambiguous) = try await withTaskCancellationHandler {
-            try await ProjectArchiver.onBackgroundThread { MediaRelinker.search(for: missing, in: roots, folder: folder, control: control) }
+            try await ProjectArchiver.onBackgroundThread { MediaRelinker.search(for: missing, in: roots, then: fallback, folder: folder, control: control) }
         } onCancel: {
             control.cancel()
         }
@@ -165,7 +188,7 @@ extension TandemService {
         var result = RelinkResult(
             revision: revision,
             dryRun: request.dryRun == true,
-            searched: roots.map(\.path),
+            searched: (roots + (missing.isEmpty ? [] : fallback)).map(\.path),
             relinked: found.map { RelinkedMedia(mediaID: $0.mediaID, from: $0.from, to: $0.to) },
             missing: missing.filter { !relinkedIDs.contains($0.id) }.map {
                 StillMissing(mediaID: $0.id, path: $0.path, clips: clipCounts[$0.id] ?? 0, ambiguous: ambiguous.contains($0.path))

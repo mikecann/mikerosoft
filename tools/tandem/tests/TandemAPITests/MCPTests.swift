@@ -213,9 +213,13 @@ final class MCPTests: XCTestCase {
         let list = try await mcp.call(1, "tools/list")
         let tools = try XCTUnwrap(list[json: "result"]?[json: "tools"]?.testArray)
         func tool(_ name: String) -> JSONValue? { tools.first { $0[json: "name"] == .string(name) } }
-        for name in ["assets_search", "assets_use", "assets_credits", "assets_generate", "assets_providers"] {
+        for name in ["assets_search", "assets_use", "assets_credits", "assets_generate", "assets_providers", "segments_list", "segments_save", "segments_insert"] {
             XCTAssertNotNil(tool(name), name)
         }
+        XCTAssertNil(tool("segments_list")?[json: "inputSchema"]?[json: "properties"]?[json: "project"], "listing needs no project")
+        XCTAssertNotNil(tool("segments_insert")?[json: "inputSchema"]?[json: "properties"]?[json: "project"])
+        let segments = try await mcp.tool(6, "segments_list")
+        XCTAssertTrue(segments[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString?.hasPrefix("There's no shared library at") ?? false, "\(segments)")
         XCTAssertNil(tool("assets_search")?[json: "inputSchema"]?[json: "properties"]?[json: "project"], "searching needs no project")
         XCTAssertNotNil(tool("assets_use")?[json: "inputSchema"]?[json: "properties"]?[json: "project"])
         XCTAssertEqual(tool("assets_generate")?[json: "annotations"]?[json: "openWorldHint"], .bool(true))

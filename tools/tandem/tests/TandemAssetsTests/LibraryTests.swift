@@ -24,8 +24,9 @@ final class LibraryTests: XCTestCase {
     func testDefaultProvidersAndTheirStatus() async throws {
         let library = try makeLibrary(secrets: ["elevenlabs": "k"])
         let info = await library.providerInfo()
-        XCTAssertEqual(info.map(\.id), ["import", "elevenlabs", "noto", "iconify", "svgl", "fontsource", "pexels", "pixabay", "freesound", "epidemic", "lordicon"])
+        XCTAssertEqual(info.map(\.id), ["shared", "import", "elevenlabs", "noto", "iconify", "svgl", "fontsource", "pexels", "pixabay", "freesound", "epidemic", "lordicon"])
         func state(_ id: String) -> ProviderStatus.State? { info.first { $0.id == id }?.status.state }
+        XCTAssertEqual(state("shared"), .ready)
         XCTAssertEqual(state("noto"), .ready)
         XCTAssertEqual(state("elevenlabs"), .ready)
         XCTAssertEqual(state("pexels"), .needsKey)

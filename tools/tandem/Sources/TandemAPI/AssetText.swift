@@ -122,6 +122,8 @@ extension AssetUseResult: ReadableResult {
         if mediaID == nil {
             if !fonts.isEmpty {
                 lines.append("Installed the font \(asset.name) (\(fonts.joined(separator: ", "))). Use it in a title's style: {\"font\": \"\(fonts[0])\"}.")
+            } else if referencedInPlace == true {
+                lines.append("\(asset.name) is used where it is in the shared library: \(files.joined(separator: ", ")).")
             } else {
                 lines.append("Copied \(asset.name) into the project: \(files.joined(separator: ", ")).")
             }
@@ -136,6 +138,9 @@ extension AssetUseResult: ReadableResult {
             lines.append("Place it with placeMedia {\"mediaIDs\": [\"\(mediaID ?? "")\"], \"at\": <seconds>}, or use the asset again with at.")
         } else {
             lines.append("\(asset.name) is already in the project as \(mediaID ?? ""): \(files.joined(separator: ", ")).")
+        }
+        if referencedInPlace == true, mediaID != nil {
+            lines.append("It's the shared library's file, not a copy: changing it there changes it here, and archiving the project copies it in.")
         }
         if let licence, licence.licenceClass == .creditNeeded || licence.licenceClass == .unknown {
             lines.append("It needs a credit in the description; assets credits has the line.")
