@@ -251,11 +251,18 @@ public enum MediaScanner {
     }
 
     static func examine(_ url: URL, path: String, known: MediaItem?, folder: ProjectFolder) async -> FileOutcome {
-        // Unchanged known files keep everything they had.
+        // Unchanged known files keep everything they had. Scans from before
+        // Tandem checked for codecs macOS can't decode didn't mark them;
+        // stock stickers are where they turn up, so unmarked alpha video gets
+        // a quick look at its header and a full probe if it needs one.
         if let known, let stamp = known.fingerprint.flatMap(Fingerprint.init), stamp.matchesStat(of: url), known.hasProbeData {
-            var item = known
-            item.path = path
-            return .unchanged(ProbedFile(item: item, fingerprint: stamp, creationDate: nil, known: known))
+            var keep = !(known.kind == .video && known.hasAlpha && known.undecodableCodec == nil)
+            if !keep { keep = await MediaProbe.isDecodable(url) }
+            if keep {
+                var item = known
+                item.path = path
+                return .unchanged(ProbedFile(item: item, fingerprint: stamp, creationDate: nil, known: known))
+            }
         }
         do {
             let fingerprint = try Fingerprint.compute(for: url)
@@ -296,6 +303,7 @@ public enum MediaScanner {
         item.hasAudio = file.item.hasAudio
         item.hasAlpha = file.item.hasAlpha
         item.variableFrameRate = file.item.variableFrameRate
+        item.undecodableCodec = file.item.undecodableCodec
         item.fingerprint = file.item.fingerprint
         return item
     }

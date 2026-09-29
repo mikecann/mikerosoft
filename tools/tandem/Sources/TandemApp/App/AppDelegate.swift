@@ -11,6 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
     private var terminationSignal: DispatchSourceSignal?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Tooltips name every button and its shortcut; half a second (the
+        // system waits about a second and a half) so they come up while
+        // you're still looking.
+        UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 500])
         documents.keymap = KeymapStore.load(report: { message in
             NSLog("Tandem keymap: %@", message)
         })

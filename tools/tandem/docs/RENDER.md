@@ -32,7 +32,8 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
 | `TextRenderer.swift`, `TitlePresets.swift` | Core Text titles, presets, animations, word captions |
 | `Limiter.swift` | Lookahead true-peak limiter |
 | `Export.swift` | Loudness passes, VideoToolbox encoder, mastered audio, snapshot |
-| `RenderAssets.swift` | `RenderAssets`: proxies, mattes, isolated voice, loudness (from `MediaAnalysis`) |
+| `RenderAssets.swift` | `RenderAssets`: proxies, mattes, isolated voice, loudness, converted copies (from `MediaAnalysis`) |
+| `ConvertedMedia.swift` | Frame grabs and exports convert what macOS can't decode before they build |
 
 ## Timeline rules
 
@@ -52,6 +53,16 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
 - Instructions split at every visible clip edge and transition edge.
 - Graphic clips (`.graphic`) aren't rendered yet: there's no rendered-file
   contract. They produce a warning.
+- A file macOS can't decode (`MediaItem.undecodableCodec`: QuickTime
+  Animation or PNG stickers) plays from its `converted` HEVC copy
+  (docs/MEDIA.md). Frame grabs and exports make a missing copy before they
+  build (`ConvertedMedia`), about a quarter of a second for a sticker, so
+  the sticker is in the picture. The viewer doesn't wait: the clip is left
+  out, with a warning, until the background conversion lands. A file that
+  can't be converted (no ffmpeg) is left out with a warning saying why,
+  and a source that turns out undecodable anyway (scanned before Tandem
+  checked) is loaded without its video. One undecodable track used to fail
+  the whole composition with "Cannot Decode".
 
 ## Layer pipeline
 
@@ -135,11 +146,12 @@ aliases (`popIn`, `fadeOut`...).
 ## Audio
 
 - Clip gain (dB, -96 or lower is silence), `normalizeTo` (target minus the
-  file's measured loudness, capped at ±30 dB), `audio.gainDB` keyframes,
-  fades (equal power), transitions, and voice isolation (original times
-  1 - v plus the isolated file times v) all multiply into one envelope per
-  segment, sampled finely enough that AVAudioMix's linear ramps sound
-  smooth. AVAudioMix volumes above 1 work, so boosts are real.
+  file's measured loudness, capped at ±30 dB, nothing for a silent file),
+  `audio.gainDB` keyframes, fades (equal power), transitions, and voice
+  isolation (original times 1 - v plus the isolated file times v) all
+  multiply into one envelope per segment, sampled finely enough that
+  AVAudioMix's linear ramps sound smooth. AVAudioMix volumes above 1 work,
+  so boosts are real. Levels below has how normalise and gain combine.
 - Every hard cut gets a 3 ms fade each side. Joins that continue the same
   media seamlessly (same file, contiguous source, same speed and gain) don't.
 - Speed changes keep their pitch (spectral time-pitch).
@@ -149,6 +161,63 @@ aliases (`popIn`, `fadeOut`...).
   for keyframes, the timing), and the composition plays the copy. The unit
   adds no delay offline, so sync is untouched; a speed change on the same
   clip still keeps the shifted pitch.
+
+## Levels
+
+Speech is levelled per take, then export masters the whole mix.
+
+- A clip with `normalizeTo` gets a constant gain: the target minus its
+  file's integrated loudness (BS.1770, measured in the background), at most
+  30 dB either way, and none for a silent file. The clip gain (`gainDB`, or
+  its keyframes) is added on top, then fades. A -32.2 LUFS take normalised
+  to -20 with +2 dB plays at about -18. The maths is in `AudioLevels`; the
+  render plan, `tandem loudness` and the Audio tab share it, and the viewer,
+  review clips and export all take their sound from the same plan
+  (`LevelRenderTests` checks the viewer's mix against the export's). Stills
+  have no sound.
+- Speech is a camera's sound, a file with no clearer role (a rendered
+  intro), or anything on a `cut` audio track like Voice, muted or not.
+  Placing it normalises it to `settings.speechLoudness` with no gain, and
+  `normalizeSpeech` (Normalise speech clips in the Audio tab) sets every
+  speech clip to it and clears its gain, as one undo step. Changing the
+  setting moves the clips normalised to the old level. Music (-31 dB with a
+  2 s fade out) and sound effects (-15 dB) keep plain gains.
+- Export then brings the mix to -14 LUFS under -1 dBTP, so the speech level
+  decides the balance against music and sound effects, and how loud the
+  viewer plays (it plays the mix before the master), not how loud the video
+  is.
+
+The speech level is -20 LUFS because:
+
+- It's where Mike's voice played in Filmora. Filmora's Auto Normalization,
+  on for the voice in every Filmora project in convex-videos (24 files
+  from five videos), levels a file to about -24 LUFS on Tandem's meter
+  (Filmora says -23), and his LoudnessGain of +1.9 to +4.1 dB goes on top.
+  On the v14 export, 62 voice clips from three takes played at -24.1 LUFS
+  plus their LoudnessGain (spread 0.7 dB) and the music at its plain
+  VolumeGain; the voice sits at -20.4 LUFS and the whole export at -20.1.
+  The -31 and -15 dB music and SFX gains come from those projects, so they
+  keep the balance Mike mixed by ear.
+- It's the quiet end of the -16 to -20 LUFS that AES recommends for speech
+  streams (TD1004, TD1008), and leaves the master about 6 dB to add.
+- The viewer has no limiter. Levelled to -20, the demo's 635 s of voice
+  goes over 0 dBFS in 4 clips by at most 2 dB; at -18 in 22 clips by up to
+  4 dB, at -16 in 58 by up to 6 dB, which would crackle in the app and not
+  in the export.
+
+On the v14 demo, Normalise speech clips moves its 230 speech clips (Voice,
+Voice 2 and the intro) to -20 LUFS. The export still measures -14.0 LUFS
+with true peaks at -1.1 dBTP before the AAC encode (ffmpeg reads -0.8 from
+the file, and -0.9 before the change: the codec's overshoot). The voice
+now sits 23.7 dB over the music in the pauses, against 25.9 dB in
+Filmora's own export and 18.0 dB with the gains the Filmora import copied.
+
+A Filmora import normalises speech to the speech level, the way placing
+does. It used to copy LoudnessGain as a plain gain, which put the voice
+8 dB lower against the music than Filmora played it. `--keep-levels`
+keeps Filmora's own levels instead, as `normalizeTo: -24` plus the clip's
+gain. The decision-models EDL recipe's -28.74 LUFS voice came from the same
+reading of LoudnessGain; it now uses the speech level.
 
 ## Export
 

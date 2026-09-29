@@ -101,11 +101,9 @@ public struct DefaultRenderBackend: RenderBackend {
         output: URL,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> RenderedExport {
-        // The exporter builds its own composition and keeps its warnings to
-        // itself, so build one alongside it just to read them.
-        async let warnings = (try? await CompositionBuilder.build(context).warnings) ?? []
-        let result = try await Exporter(context: context, preset: preset, output: output).run(progress: progress)
-        return RenderedExport(result: result, warnings: await warnings)
+        let exporter = Exporter(context: context, preset: preset, output: output)
+        let result = try await exporter.run(progress: progress)
+        return RenderedExport(result: result, warnings: exporter.warnings)
     }
 }
 

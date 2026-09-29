@@ -20,6 +20,10 @@ public enum AnalysisKind: String, Codable, Sendable, CaseIterable {
     case matte
     /// Voice with the room removed (AUSoundIsolation), latency compensated.
     case isolatedVoice
+    /// HEVC copy, alpha kept, of video macOS can't decode (QuickTime
+    /// Animation, PNG in a MOV), made with ffmpeg. The picture plays, and
+    /// thumbnails, proxies and mattes are made, from this copy.
+    case converted
 }
 
 public struct TranscriptWord: Codable, Equatable, Sendable {

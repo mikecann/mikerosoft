@@ -74,6 +74,9 @@ public struct ImportRequest: Sendable {
     public var searchFolders: [URL]
     public var pathRewrites: [MediaLocating.PathRewrite]
     public var prober: any MediaProbing
+    /// How a Filmora import levels speech: normalised to the speech level
+    /// (the default) or Filmora's own levels.
+    public var speechLevels: FilmoraImporter.SpeechLevels
 
     public init(
         source: Source,
@@ -81,7 +84,8 @@ public struct ImportRequest: Sendable {
         name: String? = nil,
         searchFolders: [URL] = [],
         pathRewrites: [MediaLocating.PathRewrite] = [MediaLocating.tinkerDeskHome],
-        prober: any MediaProbing = AVFoundationProbe()
+        prober: any MediaProbing = AVFoundationProbe(),
+        speechLevels: FilmoraImporter.SpeechLevels = .normalize
     ) {
         self.source = source
         self.output = output
@@ -89,6 +93,7 @@ public struct ImportRequest: Sendable {
         self.searchFolders = searchFolders
         self.pathRewrites = pathRewrites
         self.prober = prober
+        self.speechLevels = speechLevels
     }
 
     /// Runs the import and writes it. Returns where the project went.
@@ -102,7 +107,7 @@ public struct ImportRequest: Sendable {
                 searchFolders: [url.deletingLastPathComponent()] + searchFolders,
                 aliasFolder: ImportWriter.linkFolder(in: output, name: name)
             )
-            let result = try await FilmoraImporter(locating: locating).importProject(at: url)
+            let result = try await FilmoraImporter(locating: locating, speechLevels: speechLevels).importProject(at: url)
             return (try ImportWriter.write(result, into: output, name: name), result)
         case .edl(let url, let recipe):
             let name = Self.fileName(self.name ?? recipe.name)

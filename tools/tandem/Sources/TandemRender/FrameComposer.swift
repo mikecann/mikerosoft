@@ -35,6 +35,26 @@ struct SceneClip {
     }
 }
 
+/// Video properties the viewer is dragging, standing in for clips' own
+/// until the edit is committed. The player reads them on every frame, so a
+/// picture-in-picture moves under the pointer instead of only its outline.
+public final class LiveVideoOverrides: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: VideoProperties] = [:]
+
+    public init() {}
+
+    public func set(_ overrides: [String: VideoProperties]) {
+        lock.withLock { values = overrides }
+    }
+
+    public var isEmpty: Bool { lock.withLock { values.isEmpty } }
+
+    public func video(for clipID: String) -> VideoProperties? {
+        lock.withLock { values[clipID] }
+    }
+}
+
 /// The fixed half of rendering: canvas, clips and effect definitions. Each
 /// frame supplies the time, the stack and the decoded source frames.
 final class RenderScene: @unchecked Sendable {
@@ -46,8 +66,10 @@ final class RenderScene: @unchecked Sendable {
     let folder: ProjectFolder
     /// Decodes frames AVFoundation couldn't; nil turns that off.
     let recovery: FrameRecovery?
+    /// Properties being dragged in the viewer, used over the clips' own.
+    let overrides: LiveVideoOverrides?
 
-    init(canvas: CGSize, frameDuration: Time, format: String?, clips: [String: SceneClip], registry: EffectRegistry, folder: ProjectFolder, recovery: FrameRecovery? = nil) {
+    init(canvas: CGSize, frameDuration: Time, format: String?, clips: [String: SceneClip], registry: EffectRegistry, folder: ProjectFolder, recovery: FrameRecovery? = nil, overrides: LiveVideoOverrides? = nil) {
         self.canvas = canvas
         self.frameDuration = frameDuration
         self.format = format
@@ -55,6 +77,7 @@ final class RenderScene: @unchecked Sendable {
         self.registry = registry
         self.folder = folder
         self.recovery = recovery
+        self.overrides = overrides
     }
 
     var pixelScale: CGFloat { LayerMath.pixelScale(canvas: canvas) }
@@ -107,6 +130,7 @@ struct FrameComposer {
         let clip = sceneClip.clip
         let clipTime = time - clip.start
         guard var video = clip.resolvedVideo(at: clipTime, format: scene.format) else { return nil }
+        if let live = scene.overrides?.video(for: ref.clipID) { video = live }
         let canvas = scene.canvas
         let rect = CGRect(origin: .zero, size: canvas)
 

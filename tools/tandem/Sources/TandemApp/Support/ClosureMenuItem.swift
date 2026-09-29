@@ -21,17 +21,23 @@ final class ClosureMenuItem: NSMenuItem {
 }
 
 extension NSMenu {
+    /// Adds an item that runs `handler`, with an icon (an SF Symbol from
+    /// `Icons`) and, when it does what a keymap command does, that
+    /// command's key shown beside it, so menus teach the shortcuts.
     @discardableResult
-    func add(_ title: String, enabled: Bool = true, checked: Bool = false, _ handler: @escaping () -> Void) -> NSMenuItem {
+    func add(_ title: String, icon: String? = nil, command: EditorCommand? = nil, enabled: Bool = true, checked: Bool = false, _ handler: @escaping () -> Void) -> NSMenuItem {
         let item = ClosureMenuItem(title, enabled: enabled, state: checked ? .on : .off, handler: handler)
+        if let icon = icon ?? command.flatMap(Icons.command) { item.image = Icons.menuImage(icon) }
+        if let command { MainActor.assumeIsolated { Shortcuts.show(command, on: item) } }
         addItem(item)
         return item
     }
 
-    func addSubmenu(_ title: String, build: (NSMenu) -> Void) {
+    func addSubmenu(_ title: String, icon: String? = nil, build: (NSMenu) -> Void) {
         let menu = NSMenu(title: title)
         build(menu)
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        if let icon { item.image = Icons.menuImage(icon) }
         item.submenu = menu
         addItem(item)
     }

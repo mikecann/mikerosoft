@@ -52,12 +52,14 @@ public struct NormalisedAsset: Codable, Equatable, Sendable {
 ///   waveform peaks (`peaks.bin`). 48 kHz PCM files and beds over 20
 ///   minutes are measured but used as they are.
 /// - Animated GIF, WebP and APNG: HEVC with alpha, via ImageIO.
-/// - WebM: HEVC with alpha, via ffmpeg's `libvpx-vp9` and ProRes 4444.
+/// - WebM, and MOVs macOS can't decode (QuickTime Animation and PNG, as
+///   stock sticker packs ship): HEVC with alpha, via ffmpeg and ProRes 4444
+///   (`HEVCTranscoder`).
 /// - Lottie: rendered offscreen with alpha into HEVC with alpha.
 /// - SVG: PNG at twice the size it's likely to be shown.
 /// - Fonts: registered with Core Text.
 /// - LUTs: checked and given a before and after preview.
-/// - MOV, MP4, PNG, JPEG and HEIC are used as they are.
+/// - Other MOV and MP4, PNG, JPEG and HEIC are used as they are.
 ///
 /// Every asset gets a thumbnail.
 public struct AssetNormaliser: Sendable {
@@ -116,12 +118,12 @@ public struct AssetNormaliser: Sendable {
             let info = try await LottieRenderer.render(original, to: output, longSide: lottieLongSide)
             return try await video(output, format: format, info: info, file: output.lastPathComponent, into: folder)
         case .webm:
-            guard let ffmpeg else { throw AssetError.normaliseFailed("WebM needs ffmpeg; install it or set TANDEM_FFMPEG") }
-            let output = folder.appendingPathComponent("normalised.mov")
-            let info = try await WebMConverter.convert(original, to: output, ffmpeg: ffmpeg)
-            return try await video(output, format: format, info: info, file: output.lastPathComponent, into: folder)
+            return try await transcoded(original, format: format, codec: "WebM", into: folder)
         case .mov, .mp4:
             let info = try await MediaProbe.video(original)
+            if let codec = info.undecodableCodec {
+                return try await transcoded(original, format: format, codec: MediaItem.codecName(codec), alphaHint: info.hasAlpha, into: folder)
+            }
             return try await video(original, format: format, info: info, file: nil, into: folder)
         case .ttf, .otf, .ttc, .woff, .woff2:
             return try await font(original, format: format, into: folder)
@@ -151,6 +153,19 @@ public struct AssetNormaliser: Sendable {
             format: format, file: analysis.wroteOutput ? output.lastPathComponent : nil, thumbnail: thumbnail, peaks: peaks.lastPathComponent,
             loudness: loudness, mediaKind: .audio, duration: analysis.duration, hasAudio: true
         )
+    }
+
+    /// Video AVFoundation can't decode, through ffmpeg to HEVC with alpha.
+    private func transcoded(_ original: URL, format: AssetFormat, codec: String, alphaHint: Bool? = nil, into folder: URL) async throws -> NormalisedAsset {
+        guard let ffmpeg else { throw AssetError.normaliseFailed("macOS can't decode \(codec), and converting it needs ffmpeg: \(FFmpeg.installHint)") }
+        let output = folder.appendingPathComponent("normalised.mov")
+        do {
+            try await HEVCTranscoder.transcode(original, to: output, ffmpeg: ffmpeg, alphaHint: alphaHint)
+        } catch let error as MediaError {
+            throw AssetError.normaliseFailed("converting \(original.lastPathComponent) (\(codec)): \(error.localizedDescription)")
+        }
+        let info = try await MediaProbe.video(output)
+        return try await video(output, format: format, info: info, file: output.lastPathComponent, into: folder)
     }
 
     private func animated(_ original: URL, format: AssetFormat, into folder: URL) async throws -> NormalisedAsset {

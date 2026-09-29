@@ -14,7 +14,8 @@ folder. `ARCHITECTURE.md` is the contract; this is the detail behind it.
 | `JobScheduler.swift` | Priorities, limits, dedupe, preemption, cancellation |
 | `MediaAnalysis.swift` | The public face: cached reads, requests, state |
 | `AnalysisSettings.swift` | Per-kind settings and algorithm versions |
-| `AudioJobs.swift`, `ThumbnailJob.swift`, `VideoIO.swift` (proxy), `TranscriptJob.swift`, `MatteJob.swift`, `IsolatedVoiceJob.swift` | The analyses |
+| `AudioJobs.swift`, `ThumbnailJob.swift`, `VideoIO.swift` (proxy), `TranscriptJob.swift`, `MatteJob.swift`, `IsolatedVoiceJob.swift`, `ConvertJob.swift` | The analyses |
+| `FFmpeg.swift`, `HEVCTranscoder.swift` | ffmpeg, and video macOS can't decode to HEVC with alpha (shared with the asset library) |
 | `EncodedMovieWriter.swift` | VideoToolbox into AVAssetWriter, exact frame times |
 | `LoudnessMeter.swift`, `EncoderLock.swift` | BS.1770 meter (Accelerate), shared encoder lock |
 
@@ -48,6 +49,41 @@ usual one: the screen recording (6% irregular, gaps up to 20 s) is VFR,
 the camera with 7 dropped frames isn't. Alpha: HEVC with alpha (`muxa` or
 the ContainsAlphaChannel extension), 32-bit ProRes 4444, Animation and PNG,
 or an image with an alpha channel. Sizes have the track rotation applied.
+
+### Files macOS can't decode
+
+Stock alpha stickers (Storyblocks, Motion Array, older VideoHive packs)
+often come as QuickTime Animation (`rle `) or PNG (`png `) in a MOV, and
+macOS 26 has no decoder for either. Their sample tables read fine, so they
+scan like any video, but one such clip on the timeline failed every render
+with "Cannot Decode".
+
+- The probe asks the video track whether AVFoundation can decode it
+  (`isDecodable`, no frames read). When it can't, the item's
+  `undecodableCodec` holds the codec's four characters.
+- A `converted` analysis makes a copy that does decode: ffmpeg writes ProRes
+  4444 (422 HQ without alpha) and AVFoundation's HEVC-with-alpha export
+  preset encodes that (`HEVCTranscoder`, which the asset library uses for
+  WebM too). Animation and PNG frames are RGB, so they're converted with the
+  BT.709 matrix and the frames tagged BT.709: ffmpeg ignores `-colorspace`
+  here, and untagged, the export guessed SMPTE-C for a small picture and
+  turned red (255, 0, 0) into (223, 29, 0). The copy is video only, at the
+  original's size and frame times, with straight alpha; the sound plays
+  from the original.
+- `AnalysisNeeds` asks for the conversion first, for every such file in the
+  folder, so the browser can show it. Thumbnails, proxies and mattes of the
+  file are made from the copy: asking for one before the copy exists queues
+  the conversion and then that job.
+- Frame grabs and exports wait for any conversion they need (docs/RENDER.md);
+  the viewer leaves the clip out until the copy lands.
+- ffmpeg is found through `TANDEM_FFMPEG`, the PATH, `~/.local/bin`, then
+  Homebrew. Without it the conversion fails, saying to install it, and the
+  file is left out of renders with that warning.
+- Scans before Tandem checked this didn't mark such files. A rescan gives
+  alpha video without the mark a quick look (its header, under a
+  millisecond; HEVC and ProRes are skipped, since asking about HEVC with
+  alpha takes 5) and probes it again if macOS can't decode it, and renders
+  check the files they show.
 
 Roles, in order: `-camera` / `-screen` record-it names, the nearest folder
 that says what it holds (`music`, `sfx`, `broll`, `graphics`,
@@ -114,8 +150,9 @@ and bumping `AnalysisKind.algorithmVersion` rebuilds that kind.
 copies of a file share a job):
 
 - Order: priority (`interactive` > `timeline` > `background`), then kind
-  (waveform, loudness, thumbnails, transcript, proxy, isolated voice,
-  matte), then first come.
+  (conversion, waveform, loudness, thumbnails, transcript, proxy, isolated
+  voice, matte), then first come. Conversions go first because a file's
+  other picture analyses wait for them.
 - Limits: two each of thumbnails, waveform and loudness, one of each other
   kind, one encoder job (proxy or matte) at a time, four in total.
 - Asking again with a higher priority moves a job up.
@@ -140,6 +177,7 @@ copies of a file share a job):
 | transcript | `transcript.json` | `Transcript`, engine "SpeechAnalyzer", en-US, word times in media time |
 | matte | `matte.mov` | 1080p box, HEVC, keyframe every 10 frames; luma of full-range (420f) frames is the alpha (0 background, 255 person), chroma neutral, BT.709 tags, source frame times and rotation |
 | isolatedVoice | `voice.caf` | 48 kHz ALAC, source channels (max 2), same length as the source, lined up to the sample |
+| converted | `video.mov` | Only for `undecodableCodec` files: HEVC, with alpha when the source has it, BT.709 tags, the source's size and frame times, video only |
 
 Notes on each:
 
@@ -265,6 +303,10 @@ Notes on each:
   stops at the source's length (resampled sources are padded to it). Both
   layouts line up within a sample on the real footage. The render module mixes it with the original by
   `voiceIsolation`.
+- **Converted.** A 2 s 512x512 Animation or PNG sticker converts in about a
+  quarter of a second; 10 s of 1080p30 Animation (118 MB) takes 3.9 s and
+  makes an 11 MB copy. The ProRes intermediate sits in the job's folder and
+  is gone before the result is committed.
 
 ## Wiring it up
 

@@ -84,10 +84,13 @@ public struct AnalysisState: Codable, Equatable, Sendable {
     /// `ready`, `queued`, `running`, `failed`, `cancelled` or `none`.
     public var state: String
     public var progress: Double?
+    /// Why it failed, when it did.
+    public var message: String?
 
-    public init(state: String, progress: Double? = nil) {
+    public init(state: String, progress: Double? = nil, message: String? = nil) {
         self.state = state
         self.progress = progress
+        self.message = message
     }
 }
 
@@ -102,6 +105,10 @@ public struct MediaInfo: Codable, Sendable {
     public var frameRate: Double?
     public var hasVideo: Bool
     public var hasAudio: Bool
+    /// The video codec macOS can't decode ("rle " for QuickTime Animation,
+    /// "png "), when it can't. The picture comes from a converted copy
+    /// (`analysis.converted`).
+    public var undecodableCodec: String?
     public var takeID: String?
     public var takeOffset: Time?
     /// How many timeline clips use this file.
@@ -752,16 +759,23 @@ public struct ClipLevel: Codable, Sendable {
     public var clipID: String
     public var mediaID: String
     public var track: String
+    /// Clip gain, added after normalisation.
     public var gainDB: Double
     public var normalizeTo: Double?
-    /// The gain normalisation adds (target minus measured), once the file's
-    /// loudness is known.
+    /// The gain normalisation adds (target minus measured, within ±30 dB;
+    /// 0 for a silent file), once the file's loudness is known.
     public var normalizeGainDB: Double?
+    /// Speech (camera or voice sound, or on a take track): what
+    /// `normalizeSpeech` levels.
+    public var speech: Bool
 }
 
 public struct LoudnessResult: Codable, Sendable {
+    /// The master's loudness target, in LUFS.
     public var target: Double
     public var truePeakCeiling: Double
+    /// The level speech clips are normalised to, in LUFS.
+    public var speechLoudness: Double
     public var media: [MediaLoudness]
     public var clips: [ClipLevel]
 }

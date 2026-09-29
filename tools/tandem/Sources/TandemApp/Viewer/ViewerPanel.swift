@@ -9,7 +9,7 @@ struct ViewerPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ViewerRepresentable(model: model, zoom: viewerZoom)
+            ViewerRepresentable(model: model, zoom: $viewerZoom)
             TransportBar(model: model, actions: actions, zoom: $viewerZoom)
         }
         .background(Theme.viewer.color)
@@ -18,17 +18,22 @@ struct ViewerPanel: View {
 
 struct ViewerRepresentable: NSViewRepresentable {
     let model: EditorModel
-    let zoom: CGFloat
+    /// The transport bar's zoom menu and the viewer's pinch and wheel both
+    /// change it.
+    @Binding var zoom: CGFloat
 
     func makeNSView(context: Context) -> ViewerView {
-        ViewerView(model: model)
+        let view = ViewerView(model: model)
+        let binding = $zoom
+        view.onZoomChange = { value in
+            DispatchQueue.main.async { if binding.wrappedValue != value { binding.wrappedValue = value } }
+        }
+        return view
     }
 
     func updateNSView(_ view: ViewerView, context: Context) {
-        if view.zoom != zoom {
-            view.zoom = zoom
-            if zoom == 1 { view.pan = .zero }
-        }
+        guard abs(view.zoom - zoom) > 0.0001 else { return }
+        if zoom == 1 { view.zoomToFit() } else { view.setZoom(zoom) }
     }
 }
 
@@ -57,7 +62,7 @@ struct TransportBar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 18) {
-                TransportIcon(name: "backward.end.fill", help: "Previous edit (↑)") { actions.perform(.previousEdit) }
+                TransportIcon(name: "backward.end.fill", help: Shortcuts.help("Previous edit", .previousEdit)) { actions.perform(.previousEdit) }
                 Button {
                     actions.perform(.playPause)
                 } label: {
@@ -69,8 +74,8 @@ struct TransportBar: View {
                         .background(Circle().fill(Theme.text.color))
                 }
                 .buttonStyle(.plain)
-                .help("Play or pause (Space). J, K and L shuttle.")
-                TransportIcon(name: "forward.end.fill", help: "Next edit (↓)") { actions.perform(.nextEdit) }
+                .help(Shortcuts.help("Play or pause", .playPause) + ". J, K and L shuttle backwards, stop and forwards.")
+                TransportIcon(name: "forward.end.fill", help: Shortcuts.help("Next edit", .nextEdit)) { actions.perform(.nextEdit) }
             }
 
             HStack(spacing: 12) {
@@ -82,11 +87,13 @@ struct TransportBar: View {
                         .foregroundStyle(model.showSafeMargins ? Theme.text.color : Theme.textMuted.color)
                 }
                 .buttonStyle(.plain)
-                .help("Safe margins")
-                ToggleText(title: "Proxy", on: playback.useProxies, help: "Play from 1080p proxies where they're ready. Off plays the original files.") {
+                .help(Shortcuts.help("Safe margins: show the title-safe and action-safe areas", .toggleSafeMargins))
+                ToggleText(title: "Proxy", on: playback.useProxies, help: Shortcuts.help("Proxies: play from 1080p copies where they're ready; off plays the original files", .toggleProxy)) {
                     playback.useProxies.toggle()
                 }
                 Menu {
+                    Button("25%") { zoom = 0.25 }
+                    Button("50%") { zoom = 0.5 }
                     Button("Fit") { zoom = 1 }
                     Button("150%") { zoom = 1.5 }
                     Button("200%") { zoom = 2 }
@@ -102,6 +109,7 @@ struct TransportBar: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .help("Viewer zoom, relative to fitting the frame. Pinch, or scroll with ⌘ or ⌥, to zoom about the pointer; scroll to move around; double-click the picture to fit.")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }

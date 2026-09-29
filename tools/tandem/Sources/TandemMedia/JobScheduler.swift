@@ -23,7 +23,7 @@ final class JobScheduler: @unchecked Sendable {
         var total: Int
 
         static let standard = Limits(
-            perKind: [.thumbnails: 2, .waveform: 2, .loudness: 2, .transcript: 1, .proxy: 1, .matte: 1, .isolatedVoice: 1],
+            perKind: [.thumbnails: 2, .waveform: 2, .loudness: 2, .transcript: 1, .proxy: 1, .matte: 1, .isolatedVoice: 1, .converted: 1],
             encoder: 1,
             total: 4
         )
@@ -39,9 +39,11 @@ final class JobScheduler: @unchecked Sendable {
         var work: @Sendable (JobContext) async throws -> Void
     }
 
-    /// Cheap and widely needed kinds go first within a priority.
+    /// Cheap and widely needed kinds go first within a priority. A
+    /// conversion goes before everything, since the file's thumbnails,
+    /// proxy and matte wait for it.
     static let kindOrder: [AnalysisKind: Int] = [
-        .waveform: 0, .loudness: 1, .thumbnails: 2, .transcript: 3, .proxy: 4, .isolatedVoice: 5, .matte: 6
+        .converted: -1, .waveform: 0, .loudness: 1, .thumbnails: 2, .transcript: 3, .proxy: 4, .isolatedVoice: 5, .matte: 6
     ]
 
     static func usesEncoder(_ kind: AnalysisKind) -> Bool { kind == .proxy || kind == .matte }

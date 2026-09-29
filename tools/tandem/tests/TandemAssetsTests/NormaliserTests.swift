@@ -160,6 +160,55 @@ final class NormaliserTests: XCTestCase {
         XCTAssertLessThan(clear, 10)
     }
 
+    /// Stock sticker packs (Storyblocks, Motion Array, older VideoHive)
+    /// ship QuickTime Animation and PNG-in-MOV files, which AVFoundation
+    /// can't decode. They go the WebM way: ffmpeg, ProRes 4444, HEVC with
+    /// alpha.
+    func testMOVsMacOSCantDecodeBecomeHEVCWithAlpha() async throws {
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        for codec in ["qtrle", "png"] {
+            let folder = tempFolder("undecodable-\(codec)")
+            let input = folder.appendingPathComponent("original.mov")
+            try Generated.undecodableSticker(at: input, codec: codec, ffmpeg: ffmpeg)
+
+            let result = try await AssetNormaliser(ffmpeg: ffmpeg).normalise(input, into: folder)
+
+            XCTAssertEqual(result.format, .mov, codec)
+            XCTAssertEqual(result.file, "normalised.mov", codec)
+            XCTAssertEqual(result.mediaKind, .video, codec)
+            XCTAssertTrue(result.hasAlpha, codec)
+            XCTAssertEqual(result.width, 64, codec)
+            XCTAssertEqual(result.height, 64, codec)
+            XCTAssertEqual(try XCTUnwrap(result.duration), 0.5, accuracy: 0.05, codec)
+            XCTAssertEqual(try XCTUnwrap(result.frameRate), 30, accuracy: 0.1, codec)
+            // A PNG thumbnail, to keep the alpha.
+            XCTAssertEqual(result.thumbnail, "thumbnail.png", codec)
+            let movie = folder.appendingPathComponent("normalised.mov")
+            let track = try await AVURLAsset(url: movie).loadTracks(withMediaType: .video)[0]
+            let decodable = try await track.load(.isDecodable)
+            XCTAssertTrue(decodable, codec)
+            let solid = try await Generated.alpha(of: movie, x: 8, y: 32)
+            let clear = try await Generated.alpha(of: movie, x: 56, y: 32)
+            XCTAssertGreaterThan(solid, 240, codec)
+            XCTAssertLessThan(clear, 10, codec)
+        }
+    }
+
+    func testUndecodableMOVWithoutFFmpegSaysWhatToInstall() async throws {
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        let folder = tempFolder("undecodable-no-ffmpeg")
+        let input = folder.appendingPathComponent("original.mov")
+        try Generated.undecodableSticker(at: input, codec: "qtrle", ffmpeg: ffmpeg)
+        do {
+            _ = try await AssetNormaliser(ffmpeg: nil).normalise(input, into: folder)
+            XCTFail("expected an error")
+        } catch let error as AssetError {
+            guard case .normaliseFailed(let message) = error else { return XCTFail("wrong error \(error)") }
+            XCTAssertTrue(message.contains("QuickTime Animation"), message)
+            XCTAssertTrue(message.contains("ffmpeg"), message)
+        }
+    }
+
     func testOggAudioFallsBackToFFmpeg() async throws {
         guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
         let folder = tempFolder("ogg")

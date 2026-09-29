@@ -1,7 +1,8 @@
 import Foundation
 
-/// The ffmpeg command line tool, for the formats AVFoundation can't read
-/// (WebM with alpha, Ogg audio).
+/// The ffmpeg command line tool, for what AVFoundation can't read: WebM,
+/// QuickTime Animation and PNG video (stock alpha stickers), Ogg audio.
+/// Optional: without it those files can't be used, and Tandem says so.
 public struct FFmpeg: Sendable {
     public let url: URL
 
@@ -26,6 +27,9 @@ public struct FFmpeg: Sendable {
         return nil
     }
 
+    /// What to tell Mike when a file needs ffmpeg and it isn't there.
+    public static let installHint = "install ffmpeg (brew install ffmpeg) or point TANDEM_FFMPEG at it"
+
     /// ffprobe from the same folder, if it's there.
     public var ffprobe: URL? {
         let url = self.url.deletingLastPathComponent().appendingPathComponent("ffprobe")
@@ -37,8 +41,8 @@ public struct FFmpeg: Sendable {
         _ = try Self.execute(url, arguments)
     }
 
-    /// The streams of a file as ffprobe reports them.
-    func probeStreams(_ file: URL) throws -> [[String: Any]] {
+    /// The streams of a file as ffprobe reports them; empty without ffprobe.
+    public func probeStreams(_ file: URL) throws -> [[String: Any]] {
         guard let ffprobe else { return [] }
         let output = try Self.execute(ffprobe, ["-v", "error", "-show_streams", "-of", "json", file.path])
         let json = try JSONSerialization.jsonObject(with: output) as? [String: Any]
@@ -69,7 +73,7 @@ public struct FFmpeg: Sendable {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             let message = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            throw AssetError.normaliseFailed("\(tool.lastPathComponent) failed (\(process.terminationStatus)): \(message.suffix(500))")
+            throw MediaError.failed("\(tool.lastPathComponent) failed (\(process.terminationStatus)): \(message.suffix(500))")
         }
         return outputData
     }

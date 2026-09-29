@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import TandemCore
+import TandemMedia
 
 /// The right panel: the selected clip's Video, Colour, Audio and Info, and
 /// the activity feed.
@@ -8,15 +9,24 @@ struct InspectorPanel: View {
     let model: EditorModel
     let actions: EditorActions
 
+    /// Whether the clip tabs have a clip to show. Without one (nothing
+    /// selected, or a transition) they're dimmed and don't switch, since
+    /// the panel shows the project or the transition whichever is chosen.
+    private var hasClip: Bool {
+        model.primaryClipID.flatMap { model.project.clip($0) } != nil
+    }
+
     var body: some View {
+        let hasClip = hasClip
         VStack(spacing: 0) {
-            HStack(spacing: 18) {
-                ForEach(InspectorTab.allCases) { tab in
-                    InspectorTabButton(tab: tab, selected: model.inspectorTab == tab) { model.inspectorTab = tab }
-                }
-                Spacer(minLength: 0)
+            // Icons and titles when they fit, icons alone (and the chosen
+            // tab's title) in a narrow inspector.
+            ViewThatFits(in: .horizontal) {
+                tabRow(hasClip: hasClip, compact: false)
+                tabRow(hasClip: hasClip, compact: true)
             }
             .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 40)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
 
@@ -30,6 +40,20 @@ struct InspectorPanel: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.panel.color)
+    }
+
+    private func tabRow(hasClip: Bool, compact: Bool) -> some View {
+        HStack(spacing: compact ? 14 : 16) {
+            ForEach(InspectorTab.allCases) { tab in
+                let available = tab == .activity || hasClip
+                InspectorTabButton(
+                    tab: tab, selected: available && model.inspectorTab == tab, available: available,
+                    showsTitle: !compact || (available && model.inspectorTab == tab)
+                ) { model.inspectorTab = tab }
+            }
+            Spacer(minLength: 0)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     @ViewBuilder private var content: some View {
@@ -56,20 +80,44 @@ struct InspectorPanel: View {
 private struct InspectorTabButton: View {
     let tab: InspectorTab
     let selected: Bool
+    /// False for the clip tabs while there's no clip to show.
+    let available: Bool
+    let showsTitle: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text(tab.title)
-                .font(.ui(12, selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Theme.text.color : Theme.textFaint.color)
-                .padding(.bottom, 2)
-                .overlay(alignment: .bottom) {
-                    if selected { Rectangle().fill(Theme.amber.color).frame(height: 2).offset(y: 2) }
+            HStack(spacing: 5) {
+                Image(systemName: Icons.tab(tab))
+                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                if showsTitle {
+                    Text(tab.title)
+                        .font(.ui(12, selected ? .semibold : .regular))
+                        .lineLimit(1)
                 }
-                .contentShape(Rectangle())
+            }
+            .foregroundStyle(selected ? Theme.text.color : Theme.textFaint.color)
+            .opacity(available ? 1 : 0.4)
+            .padding(.bottom, 2)
+            .overlay(alignment: .bottom) {
+                if selected { Rectangle().fill(Theme.amber.color).frame(height: 2).offset(y: 2) }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!available)
+        .help(help)
+    }
+
+    private var help: String {
+        guard available else { return "Select a clip on the timeline to see its \(tab.title.lowercased()) settings" }
+        switch tab {
+        case .video: return "Video: layout, position, cutout, crop and effects"
+        case .colour: return "Colour: the take's look and this clip's colour"
+        case .audio: return "Audio: level, fades, voice isolation and effects"
+        case .info: return "Info: the clip's times and its media file"
+        case .activity: return "Activity: every edit, yours and agents'"
+        }
     }
 }
 
@@ -130,21 +178,26 @@ private struct NothingSelected: View {
                 Text(model.project.name)
                     .font(.ui(13, .bold))
                     .foregroundStyle(Theme.text.color)
-                Text("Select a clip to see its settings.")
-                    .font(.ui(11.5))
-                    .foregroundStyle(Theme.textMuted.color)
+                HStack(spacing: 6) {
+                    PanelIcon(name: Icons.selectAClip, color: Theme.amber.color)
+                    Text("Select a clip on the timeline to edit its video, colour, audio and info.")
+                        .font(.ui(11.5))
+                        .foregroundStyle(Theme.textMuted.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
-            InspectorSection(title: "Project") {
+            InspectorSection(title: "Project", icon: Icons.project) {
                 InfoRow(label: "Canvas", value: "\(settings.width) × \(settings.height)")
                 InfoRow(label: "Frame rate", value: String(format: "%g fps", settings.frameRate.framesPerSecond))
                 InfoRow(label: "Loudness", value: String(format: "%.0f LUFS, peaks under %.0f dBTP", settings.loudnessTarget, settings.truePeakCeiling).replacingOccurrences(of: "-", with: "−"))
                 InfoRow(label: "Length", value: Timecode.string(model.project.duration, rate: model.frameRate))
                 InfoRow(label: "Media", value: "\(model.project.media.count) files")
             }
-            InspectorSection(title: "Keys") {
+            InspectorSection(title: "Keys", icon: Icons.keys) {
                 ForEach(Self.hints, id: \.0) { hint in
                     InfoRow(label: hint.0, value: hint.1)
                 }
@@ -196,17 +249,27 @@ struct VideoInspector: View {
     }
 
     private var layoutSection: some View {
-        InspectorSection(title: "Layout") {
+        InspectorSection(title: "Layout", icon: Icons.layoutSection) {
             GraphiteSegmented(
                 options: LayoutPreset.allCases,
                 selected: video.layoutPreset.flatMap(LayoutPreset.init(rawValue:)),
                 title: { preset in
                     switch preset {
                     case .full: return "Full"
-                    case .pipRight: return "PiP ↘"
-                    case .pipLeft: return "PiP ↙"
+                    case .pipRight: return "PiP right"
+                    case .pipLeft: return "PiP left"
                     case .split: return "Split"
                     case .fill: return "Fill"
+                    }
+                },
+                icon: Icons.layout,
+                help: { preset in
+                    switch preset {
+                    case .full: return "Full: the picture fills the frame (1)"
+                    case .pipRight: return "Picture in picture, bottom right, with the cutout (2)"
+                    case .pipLeft: return "Picture in picture, bottom left, with the cutout (3)"
+                    case .split: return "Split: side by side (4)"
+                    case .fill: return "Fill: scaled up to fill the frame, edges cropped"
                     }
                 },
                 action: { preset in
@@ -252,7 +315,7 @@ struct VideoInspector: View {
         let cutout = video.cutout
         let enabled = cutout?.enabled == true
         let shadow = video.effects.first { $0.type == "dropShadow" }
-        return InspectorSection(title: "Portrait cutout", accessory: {
+        return InspectorSection(title: "Portrait cutout", icon: Icons.cutout, accessory: {
             GraphiteSwitch(isOn: enabled) {
                 model.apply(InspectorEdits.video(clip.id, ["cutout": .object(["enabled": .bool(!enabled)])], label: enabled ? "Cutout off" : "Cutout on"))
             }
@@ -280,7 +343,7 @@ struct VideoInspector: View {
     }
 
     private var cropSection: some View {
-        InspectorSection(title: "Crop") {
+        InspectorSection(title: "Crop", icon: Icons.crop) {
             ForEach(["left", "top", "right", "bottom"], id: \.self) { edge in
                 SliderRow(label: edge.capitalized, value: value(of: edge) * 100, range: 0...50, format: { "\(Int($0.rounded()))%" },
                           onPreview: { value in
@@ -429,63 +492,21 @@ struct AudioInspector: View {
         if let first = targets.first {
             let audio = first.audio ?? AudioProperties()
             let ids = targets.map(\.id)
-            let noun = targets.count == 1 ? "clip" : "\(targets.count) clips"
             AnimationSection(model: model, clip: first, domain: "audio.")
-            InspectorSection(title: "Level") {
-                // Animated gain follows the playhead.
-                let gain = first.keyframes["audio.gainDB"] == nil ? audio.gainDB : first.resolvedAudio(at: model.clipTime(of: first)).gainDB
-                SliderRow(label: "Gain", value: gain, range: -60...12, bipolar: true, valueWidth: 62,
-                          format: { String(format: "%+.1f dB", $0).replacingOccurrences(of: "-", with: "−") },
-                          parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-+0123456789.".contains($0) }) },
-                          accessory: targets.count == 1 ? AnyView(KeyframeButton(model: model, clip: first, parameter: "audio.gainDB")) : nil,
-                          onCommit: { value in
-                              let db = (value * 10).rounded() / 10
-                              if targets.count == 1 {
-                                  model.setParameter("audio.gainDB", to: .number(db), in: first, label: "Gain") { InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain") }
-                              } else {
-                                  model.apply(InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain"))
-                              }
-                          })
-                HStack(spacing: 10) {
-                    Text("Muted")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.textMuted.color)
-                        .frame(width: 86, alignment: .leading)
-                    Text(audio.muted ? "Yes" : "No")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.text.color)
-                    Spacer()
-                    GraphiteSwitch(isOn: audio.muted) {
-                        model.apply(InspectorEdits.audio(ids, ["muted": .bool(!audio.muted)], label: audio.muted ? "Unmute \(noun)" : "Mute \(noun)"))
-                    }
-                }
-                HStack(spacing: 10) {
-                    Text("Normalise")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.textMuted.color)
-                        .frame(width: 86, alignment: .leading)
-                    Text(audio.normalizeTo.map { String(format: "to %.0f LUFS", $0).replacingOccurrences(of: "-", with: "−") } ?? "Off")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.text.color)
-                    Spacer()
-                    GraphiteSwitch(isOn: audio.normalizeTo != nil) {
-                        let value: JSONValue = audio.normalizeTo == nil ? .number(model.project.settings.loudnessTarget) : .null
-                        model.apply(InspectorEdits.audio(ids, ["normalizeTo": value], label: audio.normalizeTo == nil ? "Normalise" : "Stop normalising"))
-                    }
-                }
-                if let item = model.media(for: first), let loudness = model.session.analysis.loudness(for: item) {
-                    InfoRow(label: "Measured", value: String(format: "%.1f LUFS · peak %.1f dBTP", loudness.integratedLUFS, loudness.truePeakDBTP).replacingOccurrences(of: "-", with: "−"))
-                }
-            }
-            InspectorSection(title: "Fades") {
+            LevelSection(model: model, targets: targets)
+            SpeechLevelSection(model: model)
+            InspectorSection(title: "Fades", icon: Icons.fades) {
                 SliderRow(label: "Fade in", value: audio.fadeIn.seconds, range: 0...min(5, first.duration.seconds), format: { String(format: "%.1f s", $0) },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["fadeIn": .number(value)], label: "Fade in")) })
+                    .help("How long the sound takes to come up from silence at the clip's start (an equal-power curve).")
                 SliderRow(label: "Fade out", value: audio.fadeOut.seconds, range: 0...min(5, first.duration.seconds), format: { String(format: "%.1f s", $0) },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["fadeOut": .number(value)], label: "Fade out")) })
+                    .help("How long the sound takes to go down to silence at the clip's end (an equal-power curve).")
             }
-            InspectorSection(title: "Voice isolation") {
+            InspectorSection(title: "Voice isolation", icon: Icons.voiceIsolation) {
                 SliderRow(label: "Amount", value: audio.voiceIsolation * 100, range: 0...100, format: { "\(Int($0.rounded()))%" },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["voiceIsolation": .number(value / 100)], label: "Voice isolation")) })
+                    .help("How much of the isolated voice (room noise and music taken out) replaces the original sound. 0% is the original.")
                 Text("Mixes in the isolated voice once the media module has made it.")
                     .font(.ui(11))
                     .foregroundStyle(Theme.textFaint.color)
@@ -509,7 +530,7 @@ struct ClipInfo: View {
     var body: some View {
         let rate = model.frameRate
         let item = model.media(for: clip)
-        InspectorSection(title: "Clip") {
+        InspectorSection(title: "Clip", icon: Icons.clip) {
             InfoRow(label: "ID", value: clip.id)
             InfoRow(label: "Starts", value: Timecode.string(clip.start, rate: rate))
             InfoRow(label: "Length", value: Timecode.string(clip.duration, rate: rate))
@@ -541,7 +562,7 @@ struct ClipInfo: View {
             }
         }
         if let item {
-            InspectorSection(title: "Media", accessory: {
+            InspectorSection(title: "Media", icon: Icons.media, accessory: {
                 OutlineButton(title: "Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([model.folder.url(for: item)])
                 }
@@ -552,9 +573,19 @@ struct ClipInfo: View {
                 if let fps = item.frameRate { InfoRow(label: "Frame rate", value: String(format: "%g fps%@", fps.framesPerSecond, item.variableFrameRate ? ", variable" : "")) }
                 if let duration = item.duration { InfoRow(label: "Length", value: Timecode.string(duration, rate: rate)) }
                 InfoRow(label: "Streams", value: [item.hasVideo ? "picture" : nil, item.hasAudio ? "sound" : nil, item.hasAlpha ? "alpha" : nil].compactMap { $0 }.joined(separator: ", "))
+                if let codec = item.undecodableCodecName { InfoRow(label: "Codec", value: conversionText(codec, item)) }
                 if let take = item.takeID { InfoRow(label: "Take", value: take + (item.takeOffset.map { " · starts \(String(format: "%.3f", $0.seconds)) s in" } ?? "")) }
             }
         }
+    }
+
+    /// macOS can't decode QuickTime Animation or PNG video, so Tandem plays
+    /// a converted copy; says how that's going.
+    private func conversionText(_ codec: String, _ item: MediaItem) -> String {
+        if model.session.analysis.convertedURL(for: item) != nil { return "\(codec) · plays from an HEVC copy" }
+        let job = model.jobs.last { $0.mediaID == item.id && $0.kind == .converted }
+        if job?.state == .failed { return "\(codec) · can't convert: \(job?.message ?? "unknown error")" }
+        return "\(codec) · converting to HEVC"
     }
 }
 
@@ -578,7 +609,7 @@ struct TransitionInspector: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
-        InspectorSection(title: "Transition") {
+        InspectorSection(title: "Transition", icon: Icons.transition) {
             HStack(spacing: 10) {
                 Text("Type")
                     .font(.ui(12))
@@ -632,7 +663,7 @@ private struct TextSection: View {
     @FocusState private var editing: Bool
 
     var body: some View {
-        InspectorSection(title: "Text") {
+        InspectorSection(title: "Text", icon: Icons.text) {
             TextEditor(text: $draft)
                 .font(.ui(12.5))
                 .foregroundStyle(Theme.text.color)

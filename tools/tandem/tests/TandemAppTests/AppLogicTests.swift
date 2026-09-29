@@ -337,7 +337,7 @@ final class SmallPieceTests: XCTestCase {
         XCTAssertEqual(f.clip("Camera").video?.effects.first?.params["opacity"], .number(70))
         try f.apply(InspectorEdits.audio([f.clip("Voice").id], ["gainDB": .number(-3)], label: "Gain"))
         XCTAssertEqual(f.clip("Voice").audio?.gainDB, -3)
-        XCTAssertEqual(f.clip("Voice").audio?.normalizeTo, -14, "untouched fields stay")
+        XCTAssertEqual(f.clip("Voice").audio?.normalizeTo, -20, "untouched fields stay")
         let look = [Effect(id: "fx_look", type: "colorAdjust", params: ["contrast": .number(8)])]
         try f.apply(InspectorEdits.look("med_camera", look, label: "Look"))
         let item = try XCTUnwrap(f.project.media("med_camera"))
@@ -500,5 +500,22 @@ final class PreviewSizeTests: XCTestCase {
         // Already small enough: the project's own size.
         XCTAssertNil(PlaybackController.previewSize(for: CGSize(width: 1920, height: 1080)))
         XCTAssertNil(PlaybackController.previewSize(for: CGSize(width: 1080, height: 1920)))
+    }
+}
+
+final class ViewerZoomTests: XCTestCase {
+    /// Zooming about the pointer keeps the spot under it where it was, in
+    /// and out of fit.
+    func testZoomKeepsThePointOverTheSamePartOfThePicture() {
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 600)
+        let point = CGPoint(x: 700, y: 200)
+        for (from, to) in [(1.0, 2.0), (1.0, 0.5), (2.0, 0.25), (0.5, 3.0)] as [(CGFloat, CGFloat)] {
+            let before = CanvasGeometry.canvasRect(in: bounds, width: 3840, height: 2160, zoom: from, pan: CGPoint(x: 30, y: -10))
+            let spot = CGPoint(x: (point.x - before.minX) / before.width, y: (point.y - before.minY) / before.height)
+            let pan = CanvasGeometry.pan(keeping: point, in: bounds, width: 3840, height: 2160, from: from, to: to, pan: CGPoint(x: 30, y: -10))
+            let after = CanvasGeometry.canvasRect(in: bounds, width: 3840, height: 2160, zoom: to, pan: pan)
+            XCTAssertEqual(after.minX + spot.x * after.width, point.x, accuracy: 1.5, "\(from) to \(to)")
+            XCTAssertEqual(after.minY + spot.y * after.height, point.y, accuracy: 1.5, "\(from) to \(to)")
+        }
     }
 }

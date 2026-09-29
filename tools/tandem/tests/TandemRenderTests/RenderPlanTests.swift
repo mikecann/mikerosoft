@@ -346,6 +346,24 @@ final class RenderPlanTests: XCTestCase {
         XCTAssertTrue(unmeasured.warnings.contains { $0.contains("loudness") })
     }
 
+    func testNormalisingASilentOrVeryQuietFile() {
+        var voiceClip = mediaClip("clip_v", "med_cam", start: 0, duration: 4)
+        voiceClip.audio = AudioProperties(gainDB: 2, normalizeTo: -20)
+        let voice = [Track(kind: .audio, name: "Voice", clips: [voiceClip])]
+        // A screen recording with no sound measures -inf: nothing to level,
+        // and nothing to warn about.
+        let silent = FakeAssets()
+        silent.loudnesses["med_cam"] = Loudness(integratedLUFS: -.infinity, truePeakDBTP: -.infinity, loudnessRange: 0)
+        let quiet = RenderPlanner.plan(project(video: [], audio: voice), format: nil, assets: silent)
+        XCTAssertEqual(gainAt(quiet.audioSegments[0].envelope, t(2)), pow(10, 2.0 / 20), accuracy: 1e-6)
+        XCTAssertEqual(quiet.warnings, [])
+        // Very quiet sound gets at most +30 dB, then the clip gain.
+        let faint = FakeAssets()
+        faint.loudnesses["med_cam"] = Loudness(integratedLUFS: -70, truePeakDBTP: -50, loudnessRange: 0)
+        let capped = RenderPlanner.plan(project(video: [], audio: voice), format: nil, assets: faint)
+        XCTAssertEqual(gainAt(capped.audioSegments[0].envelope, t(2)), pow(10, 32.0 / 20), accuracy: 1e-6)
+    }
+
     func testVoiceIsolationMixesTheCachedVoice() {
         var voiceClip = mediaClip("clip_v", "med_cam", start: 0, duration: 4)
         voiceClip.audio = AudioProperties(voiceIsolation: 0.75)

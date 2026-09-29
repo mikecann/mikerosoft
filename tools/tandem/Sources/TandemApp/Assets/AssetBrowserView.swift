@@ -481,20 +481,20 @@ private struct AssetActions: ViewModifier {
                 return NSItemProvider(object: LibraryDrag.asset(asset.id).payload as NSString)
             }
             .contextMenu {
-                Button(useTitle) { host.use(asset, in: model) }
-                Button("Preview") { host.previewing = asset }
-                Button(asset.isFavourite ? "Remove from favourites" : "Add to favourites") { host.setFavourite(asset, !asset.isFavourite) }
+                Button(useTitle, systemImage: "plus.rectangle.on.rectangle") { host.use(asset, in: model) }
+                Button("Preview", systemImage: "eye") { host.previewing = asset }
+                Button(asset.isFavourite ? "Remove from favourites" : "Add to favourites", systemImage: asset.isFavourite ? "star.slash" : "star") { host.setFavourite(asset, !asset.isFavourite) }
                 if asset.state < .original {
-                    Button("Download") { host.download(asset) { model.show(.info, $0) } }
+                    Button("Download", systemImage: "arrow.down.circle") { host.download(asset) { model.show(.info, $0) } }
                 }
                 Divider()
-                Button("Copy asset ID") {
+                Button("Copy asset ID", systemImage: "doc.on.clipboard") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(asset.id, forType: .string)
                     model.show(.info, "Copied \(asset.id) for tandem assets use.")
                 }
                 if let page = asset.pageURL {
-                    Button("Open its page") { NSWorkspace.shared.open(page) }
+                    Button("Open its page", systemImage: "safari") { NSWorkspace.shared.open(page) }
                 }
             }
             .help(tooltip)

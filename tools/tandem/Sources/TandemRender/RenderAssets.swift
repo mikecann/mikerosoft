@@ -8,7 +8,8 @@ import TandemMedia
 /// all of it; tests and tools can supply files directly. Every method may
 /// return nil (not analysed yet), and rendering degrades gracefully: no
 /// proxy means the original, no matte means no cutout, no isolated voice
-/// means the original sound, no loudness means no normalisation.
+/// means the original sound, no loudness means no normalisation, and no
+/// converted copy of a file macOS can't decode leaves that file out.
 public protocol RenderAssets: Sendable {
     func proxyURL(for item: MediaItem) -> URL?
     /// The matte made with the analysis's default settings.
@@ -17,9 +18,14 @@ public protocol RenderAssets: Sendable {
     func matteURL(for item: MediaItem, mode: CutoutMode) -> URL?
     func isolatedVoiceURL(for item: MediaItem) -> URL?
     func loudness(for item: MediaItem) -> Loudness?
+    /// The HEVC copy of a file macOS can't decode (`undecodableCodec`),
+    /// which plays in its place.
+    func convertedURL(for item: MediaItem) -> URL?
 }
 
 extension RenderAssets {
+    public func convertedURL(for item: MediaItem) -> URL? { nil }
+
     /// Providers without per-mode mattes have one matte for every mode.
     public func matteURL(for item: MediaItem, mode: CutoutMode) -> URL? {
         matteURL(for: item)

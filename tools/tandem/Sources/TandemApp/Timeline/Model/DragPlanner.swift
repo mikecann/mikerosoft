@@ -27,6 +27,30 @@ enum TimelineTool: String, CaseIterable, Codable {
         case .slide: return "Slide"
         }
     }
+
+    /// What it does, for its tooltip.
+    var summary: String {
+        switch self {
+        case .select: return "select, move and trim clips"
+        case .blade: return "click a clip to cut it there"
+        case .rippleTrim: return "trim an edge and close up the rest of the track"
+        case .roll: return "move the cut between two touching clips"
+        case .slip: return "change which part of the media a clip shows"
+        case .slide: return "move a clip between its neighbours, trimming them"
+        }
+    }
+
+    /// The keymap command that picks it.
+    var command: EditorCommand {
+        switch self {
+        case .select: return .toolSelect
+        case .blade: return .toolBlade
+        case .rippleTrim: return .toolRippleTrim
+        case .roll: return .toolRoll
+        case .slip: return .toolSlip
+        case .slide: return .toolSlide
+        }
+    }
 }
 
 /// What a drag started on the timeline will do.

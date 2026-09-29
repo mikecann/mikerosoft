@@ -234,6 +234,8 @@ extension FilmoraRun {
         builder.apply("Add markers", markers.sorted { $0.time < $1.time }.map {
             ProjectBuilder.Step(.addMarker(marker: $0), "marker \($0.name)", at: $0.time)
         })
+        // Before tracks are locked, which normalizeSpeech leaves alone.
+        levelSpeech(builder)
 
         var settingsSteps: [ProjectBuilder.Step] = []
         for track in ordered {
@@ -267,6 +269,25 @@ extension FilmoraRun {
         builder.report.stats = stats
         report = builder.report
         return result
+    }
+
+    /// Speech is normalised to the project's speech level, as clips placed
+    /// in Tandem are, unless the import keeps Filmora's levels. Either way
+    /// the report says what happened to Filmora's gains.
+    func levelSpeech(_ builder: ProjectBuilder) {
+        let speech = AudioLevels.speechClips(in: builder.project)
+        if speechLevels == .normalize, !speech.isEmpty {
+            let gains = speech.map { $0.clip.audio?.gainDB ?? 0 }
+            let low = gains.min() ?? 0, high = gains.max() ?? 0
+            let filmora = low == high ? String(format: "%+.1f dB", low) : String(format: "%+.1f to %+.1f dB", low, high)
+            let level = AudioLevels.number(builder.project.settings.speechLoudness)
+            builder.apply("Level speech", [ProjectBuilder.Step(.normalizeSpeech, "speech clips")])
+            builder.report.add(.note, "audio", "\(speech.count) speech clips were normalised to \(level) LUFS, the project's speech level, with no gain instead of Filmora's \(filmora). Import with --keep-levels to keep Filmora's.")
+        }
+        let autoNormalized = builder.project.audioTracks.flatMap(\.clips).filter { $0.audio?.normalizeTo == Self.autoNormalizationLUFS }
+        if !autoNormalized.isEmpty {
+            builder.report.add(.note, "audio", "Filmora's Auto Normalization became normalise to -24 LUFS (where Filmora levels, on Tandem's meter) with the clip's loudness gain on top, on \(autoNormalized.count) clip(s).")
+        }
     }
 
     /// Links each picture with its sound (Filmora gives the pair one map

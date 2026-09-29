@@ -41,14 +41,23 @@ enum Help {
         CommandHelp(name: "screenshot", usage: "tandem screenshot [-o out.png]", summary: "Save a picture of the app window (needs the app to have the project open).", options: ["output"]),
         CommandHelp(name: "clip", usage: "tandem clip <start> <end> [-o out.mp4] [--preset review]", summary: "Render part of the timeline to a review MP4.", options: ["output", "preset"]),
         CommandHelp(name: "export", usage: "tandem export [--preset youtube4k] [-o out.mp4] [--from <time>] [--to <time>]", summary: "Export the video (presets: youtube4k, youtube1080, review, short).", options: ["output", "preset", "from", "to", "format"]),
+        CommandHelp(name: "archive", usage: "tandem archive [<project>] [--to <folder>] [--with-cache] [--dry-run]", summary: "Make the project standalone: copy what it uses from outside its folder into it, or with --to write a standalone copy of the whole folder somewhere else.", options: ["to", "with-cache", "dry-run", "label"],
+                    details: """
+                    Without --to, media, LUTs and fonts the project uses from outside its folder are copied into media/<folder they were in>/, assets/lut/ and assets/font/, and the project points at the copies (one undo step). Other .tandem files in the folder are pointed at them too.
+                    With --to <folder>, the whole project folder is copied to <folder>/<project folder name>, with those files brought in and every path relative; the original is left as it was. Proxies, mattes, thumbnails and isolated voice are left out (Tandem makes them again) unless --with-cache; transcripts, waveforms and loudness always go. npm packages are left out.
+                    Copies are APFS clones where they can be, checked by SHA-256 otherwise, and never replace a different file (they go beside it as "name 2"). archive.json records where each file came from. Missing files are listed and left as they are. A run that stops part way can be run again.
+                    --dry-run lists what would be copied and the sizes.
+                    """),
+        CommandHelp(name: "relink", usage: "tandem relink [--search <folder>]... [--dry-run]", summary: "Find missing media files by name (and content) in the project folder and any --search folders, and point the project at them.", options: ["search", "dry-run", "label"]),
         CommandHelp(name: "loudness", usage: "tandem loudness [<media id>]", summary: "Measured loudness per file and the levelling each clip gets.", options: []),
         CommandHelp(name: "watch", usage: "tandem watch [--once] [--timeout <seconds>]", summary: "Print changes as they happen (or wait for the next one with --once).", options: ["once", "timeout"]),
         CommandHelp(name: "effects", usage: "tandem effects [<type>]", summary: "Effects with their parameters, transitions, layouts and animatable parameters.", options: []),
         CommandHelp(name: "schema", usage: "tandem schema", summary: "Print the JSON schema for edit batches.", options: []),
-        CommandHelp(name: "import", usage: "tandem import filmora <file.wfp> | edl [edl.json] --recipe <name|recipe.json> | compare <a.tandem> <b.tandem> [--out <folder>] [--name <name>] [--search <folder>]... [--rewrite <from>=<to>]...", summary: "Import a Filmora project or an agent EDL, or compare two cuts of the same footage.", options: ["out", "name", "search", "rewrite", "recipe"],
+        CommandHelp(name: "import", usage: "tandem import filmora <file.wfp> [--keep-levels] | edl [edl.json] --recipe <name|recipe.json> | compare <a.tandem> <b.tandem> [--out <folder>] [--name <name>] [--search <folder>]... [--rewrite <from>=<to>]...", summary: "Import a Filmora project or an agent EDL, or compare two cuts of the same footage.", options: ["out", "name", "search", "rewrite", "recipe", "keep-levels"],
                     details: """
                     Writes <out>/<name>/<name>.tandem with a report beside it (<name>.import.txt and .json). --out defaults to this folder.
                     Filmora media that moved is looked for in the project's folder and every --search folder; --rewrite from=to fixes paths saved on another Mac.
+                    Speech (the camera's sound, the Voice tracks) is normalised to the project's speech level, -20 LUFS, with no gain. --keep-levels keeps Filmora's own levels instead: Auto Normalization becomes normalise to -24 LUFS plus the clip's gain.
                     Built-in EDL recipes: decision-models. Exit code 1 if anything failed to import.
                     """),
         CommandHelp(name: "assets", usage: "tandem assets providers | search \"<text>\" [--kind sfx|music|sticker|...] [--provider <id>] [--online] [--limit <n>] | fetch <id> | use <id> [--at <time>] [--duration <time>] | credits [--optional] | generate sfx|music \"<prompt>\" [--duration <s>] [--variations <n>] | install-starter",

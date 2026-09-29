@@ -53,7 +53,11 @@ enum AudioNormaliser {
             }
             let temporary = output.deletingLastPathComponent().appendingPathComponent("decoded-\(UUID().uuidString).wav")
             defer { try? FileManager.default.removeItem(at: temporary) }
-            try ffmpeg.run(["-y", "-v", "error", "-i", input.path, "-vn", "-ar", "48000", "-c:a", "pcm_f32le", temporary.path])
+            do {
+                try ffmpeg.run(["-y", "-v", "error", "-i", input.path, "-vn", "-ar", "48000", "-c:a", "pcm_f32le", temporary.path])
+            } catch let error as MediaError {
+                throw AssetError.normaliseFailed("can't decode \(input.lastPathComponent): \(error.localizedDescription)")
+            }
             return try convert(input: temporary, output: output)
         }
     }

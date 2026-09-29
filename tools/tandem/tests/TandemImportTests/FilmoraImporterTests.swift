@@ -21,9 +21,9 @@ final class FilmoraImporterTests: XCTestCase {
         "logo.png": .image(width: 800, height: 400, alpha: true)
     ]
 
-    func importMini(from url: URL = Fixtures.url("wfp/Mini")) async throws -> ImportResult {
+    func importMini(from url: URL = Fixtures.url("wfp/Mini"), speechLevels: FilmoraImporter.SpeechLevels = .normalize) async throws -> ImportResult {
         let probe = FakeProbe(media: Self.media, undecodable: ["Subscribe Element.webm"])
-        let importer = FilmoraImporter(locating: MediaLocating(prober: probe))
+        let importer = FilmoraImporter(locating: MediaLocating(prober: probe), speechLevels: speechLevels)
         return try await importer.importProject(at: url)
     }
 
@@ -116,10 +116,16 @@ final class FilmoraImporterTests: XCTestCase {
     }
 
     func testAudioLevelsAndFades() async throws {
-        let p = try await importMini().project
-        XCTAssertEqual(p.clips(on: "Voice")[0].audio?.gainDB, 3)
+        let result = try await importMini()
+        let p = result.project
+        // Speech is normalised to the speech level, as placing it would be,
+        // instead of Filmora's +3 and +3.5 dB.
+        for clip in p.clips(on: "Voice") + p.clips(on: "Voice 2") {
+            XCTAssertEqual(clip.audio?.normalizeTo, -20, clip.name ?? clip.id)
+            XCTAssertEqual(clip.audio?.gainDB, 0, clip.name ?? clip.id)
+        }
+        XCTAssertTrue(result.report.items(.note).contains { $0.message.hasPrefix("5 speech clips were normalised to -20 LUFS") && $0.message.contains("+0.0 to +3.5 dB") }, result.report.text)
         XCTAssertEqual(p.clips(on: "Voice")[2].audio?.fadeOut, t(1))
-        XCTAssertEqual(p.clips(on: "Voice 2")[0].audio?.gainDB, 3.5)
         let music = p.clips(on: "Music")[0]
         XCTAssertEqual(music.audio?.gainDB ?? 0, -30.6, accuracy: 1e-9)
         XCTAssertEqual(music.audio?.fadeIn, t(1))
@@ -127,6 +133,23 @@ final class FilmoraImporterTests: XCTestCase {
         let whooshes = p.clips(on: "SFX")
         XCTAssertEqual(whooshes.map(\.audio?.gainDB), [-15, -15])
         XCTAssertEqual(whooshes[1].audio?.fadeOut, whooshes[1].duration, "a fade longer than its clip is clamped")
+    }
+
+    func testKeepingFilmorasLevels() async throws {
+        let result = try await importMini(speechLevels: .keepFilmora)
+        let p = result.project
+        // Filmora's Auto Normalization levels to about -24 LUFS on Tandem's
+        // meter, then adds the clip's LoudnessGain.
+        let voice = p.clips(on: "Voice")
+        XCTAssertEqual(voice[0].audio?.normalizeTo, -24)
+        XCTAssertEqual(voice[0].audio?.gainDB, 3)
+        XCTAssertEqual(p.clips(on: "Voice 2")[0].audio?.normalizeTo, -24)
+        XCTAssertEqual(p.clips(on: "Voice 2")[0].audio?.gainDB, 3.5)
+        let screen = try XCTUnwrap(voice.first { p.media($0.mediaID!)?.role == .screen })
+        XCTAssertNil(screen.audio?.normalizeTo, "no Auto Normalization, just its volume")
+        XCTAssertEqual(p.clips(on: "Music")[0].audio?.gainDB ?? 0, -30.6, accuracy: 1e-9)
+        XCTAssertTrue(result.report.items(.note).contains { $0.message.hasPrefix("Filmora's Auto Normalization became normalise to -24 LUFS") }, result.report.text)
+        XCTAssertFalse(result.report.text.contains("speech clips were normalised"))
     }
 
     func testTransitionsMapToTandemTypes() async throws {

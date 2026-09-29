@@ -91,7 +91,11 @@ final class TaskbarIconCache {
     private let now: () -> Date
     private let queue: DispatchQueue
     private let iconLoader: (TaskbarIconRequest) -> CGImage?
-    private var icons: [String: CGImage] = [:]
+    /// Loaded icons, with the processes they were loaded for. An app that
+    /// relaunches gets its icon loaded again, since a rebuilt app (a
+    /// mikerosoft tool, say) can come back with a new one; until the new
+    /// one loads the old one shows.
+    private var icons: [String: (image: CGImage, pids: Set<pid_t>)] = [:]
     private var loadingKeys: Set<String> = []
     private var failedAt: [String: Date] = [:]
 
@@ -115,9 +119,10 @@ final class TaskbarIconCache {
         )
 
         lock.lock()
-        if let icon = icons[request.key] {
+        let cached = icons[request.key]
+        if let cached, request.pid.map(cached.pids.contains) ?? true {
             lock.unlock()
-            return icon
+            return cached.image
         }
         purgeExpiredFailures(at: now())
         let retryIsBlocked = failedAt[request.retryKey] != nil
@@ -134,7 +139,8 @@ final class TaskbarIconCache {
                 let completedAt = self.now()
                 self.lock.lock()
                 if let icon {
-                    self.icons[request.key] = icon
+                    let pids = (self.icons[request.key]?.pids ?? []).union(request.pid.map { [$0] } ?? [])
+                    self.icons[request.key] = (icon, pids)
                     self.failedAt.removeValue(forKey: request.retryKey)
                 } else {
                     self.failedAt[request.retryKey] = completedAt
@@ -144,7 +150,8 @@ final class TaskbarIconCache {
             }
         }
 
-        return nil
+        // A relaunched app keeps its old icon while the new one loads.
+        return cached?.image
     }
 
     private func purgeExpiredFailures(at time: Date) {

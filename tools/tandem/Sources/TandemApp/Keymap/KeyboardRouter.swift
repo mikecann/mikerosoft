@@ -29,7 +29,16 @@ extension KeyChord {
     /// otherwise the menu would steal plain keys from text fields).
     var menuKeyEquivalent: (key: String, modifiers: NSEvent.ModifierFlags)? {
         guard modifiers.contains(.command) else { return nil }
-        var flags: NSEvent.ModifierFlags = [.command]
+        return displayKeyEquivalent
+    }
+
+    /// The key equivalent a menu item shows for this chord, plain keys
+    /// included. Only for showing: the main menu passes plain keys on to
+    /// the keyboard router (see `EditorMainMenu`), and a context menu only
+    /// hears keys while it's open.
+    var displayKeyEquivalent: (key: String, modifiers: NSEvent.ModifierFlags)? {
+        var flags: NSEvent.ModifierFlags = []
+        if modifiers.contains(.command) { flags.insert(.command) }
         if modifiers.contains(.shift) { flags.insert(.shift) }
         if modifiers.contains(.option) { flags.insert(.option) }
         if modifiers.contains(.control) { flags.insert(.control) }
