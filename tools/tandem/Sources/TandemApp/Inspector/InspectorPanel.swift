@@ -277,6 +277,7 @@ struct VideoInspector: View {
                 }
             )
             SliderRow(label: "Scale", value: video.transform.scale * 100, range: 0...400, format: { "\(Int($0.rounded()))%" },
+                      defaultValue: 100, help: "How big the picture is. 100% fits it inside the frame; 50% is the PiP size.",
                       onPreview: preview { properties, value in properties.transform.scale = (value ?? 0) / 100 },
                       accessory: key("video.transform.scale"),
                       onCommit: { value in
@@ -286,12 +287,14 @@ struct VideoInspector: View {
                 commit("video.transform.position", .point(position), label: "Position", plain: commitTransform { transform in transform.position = position })
             }
             SliderRow(label: "Rotation", value: video.transform.rotation, range: -180...180, bipolar: true, format: { "\(Int($0.rounded()))°" },
+                      help: "Turns the picture about its centre, clockwise.",
                       onPreview: preview { properties, value in properties.transform.rotation = value ?? 0 },
                       accessory: key("video.transform.rotation"),
                       onCommit: { value in
                           commit("video.transform.rotation", .number(value), label: "Rotation", plain: commitTransform { transform in transform.rotation = value })
                       })
             SliderRow(label: "Opacity", value: video.opacity * 100, range: 0...100, format: { "\(Int($0.rounded()))%" },
+                      defaultValue: 100, help: "How solid the clip is. 0% lets everything underneath show through.",
                       onPreview: preview { properties, value in properties.opacity = (value ?? 0) / 100 },
                       accessory: key("video.opacity"),
                       onCommit: { value in
@@ -321,6 +324,7 @@ struct VideoInspector: View {
             }
         }) {
             SliderRow(label: "Edge", value: cutout?.edgeFeather ?? 2, range: 0...20, format: { String(format: "%.0f px", $0) },
+                      defaultValue: 2, help: "Softens the cutout's edge, in pixels, so hair and shoulders don't look cut with scissors.",
                       onCommit: { value in model.apply(InspectorEdits.video(clip.id, ["cutout": .object(["edgeFeather": .number(value)])], label: "Cutout edge")) })
             HStack(spacing: 10) {
                 Text("Keep mic")
@@ -337,6 +341,7 @@ struct VideoInspector: View {
                 }
             }
             SliderRow(label: "Shadow", value: shadow?.params["opacity"]?.number ?? (shadow == nil ? 0 : 60), range: 0...100, format: { "\(Int($0.rounded()))%" },
+                      help: "How dark the drop shadow behind the cutout is. 0% is no shadow.",
                       onCommit: { value in model.apply(InspectorEdits.shadowOpacity(clip, percent: value)) })
         }
         .opacity(enabled ? 1 : 0.75)
@@ -346,6 +351,7 @@ struct VideoInspector: View {
         InspectorSection(title: "Crop", icon: Icons.crop) {
             ForEach(["left", "top", "right", "bottom"], id: \.self) { edge in
                 SliderRow(label: edge.capitalized, value: value(of: edge) * 100, range: 0...50, format: { "\(Int($0.rounded()))%" },
+                          defaultValue: 0, help: "Trims the \(edge) edge off the picture, as a share of its size.",
                           onPreview: { value in
                               var preview = video
                               if let value { set(edge, value / 100, in: &preview.crop) }
@@ -497,16 +503,16 @@ struct AudioInspector: View {
             SpeechLevelSection(model: model)
             InspectorSection(title: "Fades", icon: Icons.fades) {
                 SliderRow(label: "Fade in", value: audio.fadeIn.seconds, range: 0...min(5, first.duration.seconds), format: { String(format: "%.1f s", $0) },
+                          defaultValue: 0, help: "How long the sound takes to come up from silence at the clip's start (an equal-power curve).",
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["fadeIn": .number(value)], label: "Fade in")) })
-                    .help("How long the sound takes to come up from silence at the clip's start (an equal-power curve).")
                 SliderRow(label: "Fade out", value: audio.fadeOut.seconds, range: 0...min(5, first.duration.seconds), format: { String(format: "%.1f s", $0) },
+                          defaultValue: 0, help: "How long the sound takes to go down to silence at the clip's end (an equal-power curve).",
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["fadeOut": .number(value)], label: "Fade out")) })
-                    .help("How long the sound takes to go down to silence at the clip's end (an equal-power curve).")
             }
             InspectorSection(title: "Voice isolation", icon: Icons.voiceIsolation) {
                 SliderRow(label: "Amount", value: audio.voiceIsolation * 100, range: 0...100, format: { "\(Int($0.rounded()))%" },
+                          defaultValue: 0, help: "How much of the isolated voice (room noise and music taken out) replaces the original sound. 0% is the original.",
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["voiceIsolation": .number(value / 100)], label: "Voice isolation")) })
-                    .help("How much of the isolated voice (room noise and music taken out) replaces the original sound. 0% is the original.")
                 Text("Mixes in the isolated voice once the media module has made it.")
                     .font(.ui(11))
                     .foregroundStyle(Theme.textFaint.color)
@@ -635,7 +641,8 @@ struct TransitionInspector: View {
                     }
                 }
             }
-            SliderRow(label: "Duration", value: transition.duration.seconds, range: 0.1...3, format: { String(format: "%.2f s", $0) }) { value in
+            SliderRow(label: "Duration", value: transition.duration.seconds, range: 0.1...3, format: { String(format: "%.2f s", $0) },
+                      defaultValue: transition.type.defaultDuration.seconds, help: "How long the transition takes.") { value in
                 update(["duration": .number((value * 100).rounded() / 100)], "Transition length")
             }
             Button {
