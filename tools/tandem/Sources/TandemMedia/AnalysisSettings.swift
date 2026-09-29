@@ -20,7 +20,8 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
     /// SpeechAnalyzer locale. en-US beat en-AU on Mike's voice (7.1% against
     /// 8.8% word error rate in the transcription spike).
     public var transcriptLocale: String
-    /// What makes the cutout matte. Vision (version 2) is the default.
+    /// What makes the cutout matte: RVM by default, with Vision (version 2)
+    /// standing in when RVM's model can't be had.
     public var matteModel: MatteModel
     public var matteQuality: MatteQuality
     /// `personAndProps` keeps a handheld mic; `person` is the plain person mask.
@@ -41,7 +42,7 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         proxyMaxHeight: Int = 1080,
         proxyQuality: Double = 0.45,
         transcriptLocale: String = "en-US",
-        matteModel: MatteModel = .vision,
+        matteModel: MatteModel = .robustVideoMatting,
         matteQuality: MatteQuality = .accurate,
         matteMode: CutoutMode = .personAndProps,
         matteProps: MatteProps = .subject,
@@ -97,12 +98,14 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
 /// What makes the cutout matte.
 public enum MatteModel: String, Codable, Sendable, CaseIterable {
     /// Apple Vision's person and subject masks, steadied by `MatteSmoother`
-    /// (matte version 2). The default.
+    /// (matte version 2). Also what an RVM matte falls back to, saying so,
+    /// when RVM's model can't be downloaded or loaded.
     case vision
     /// Robust Video Matting (MobileNetV3), a video matting model that
-    /// carries what it saw from frame to frame. Steadier than Vision on
-    /// Mike's takes, with softer edges. GPL-3.0: the model is downloaded on
-    /// first use and never bundled (see `RVMMatte`).
+    /// carries what it saw from frame to frame: steadier than Vision on
+    /// Mike's takes, with soft edges (their light rim trimmed, see
+    /// `RVMMatte.cleanEdge`). The default. GPL-3.0: the model is downloaded
+    /// on first use and never bundled (see `RVMMatte`).
     case robustVideoMatting
 }
 

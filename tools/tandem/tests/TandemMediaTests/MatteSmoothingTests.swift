@@ -227,7 +227,7 @@ final class MatteSmoothingTests: XCTestCase {
     // MARK: - Settings
 
     func testMatteSettingsGoInTheCacheKey() {
-        let standard = AnalysisSettings()
+        let standard = AnalysisSettings(matteModel: .vision)
         XCTAssertEqual(standard.matteProps, .subject)
         XCTAssertEqual(standard.matteSmoothing, .steady)
         XCTAssertEqual(AnalysisKind.matte.algorithmVersion, 2, "version 1 mattes flicker; they rebuild")

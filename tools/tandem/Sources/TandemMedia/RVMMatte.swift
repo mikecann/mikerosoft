@@ -27,13 +27,40 @@ import VideoToolbox
 /// ~/Library/Application Support/Tandem/Models/rvm/, and checks the SHA-256.
 enum RVMMatte {
     /// Bump when RVM mattes change; it's in their cache key, apart from
-    /// Vision's.
-    static let version = 1
+    /// Vision's. 2: `cleanEdge`.
+    static let version = 2
     static let modelFile = "rvm_mobilenetv3_1280x720_s0.375_fp16.mlmodel"
     static let modelURL = URL(string: "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_1280x720_s0.375_fp16.mlmodel")!
     static let modelSHA256 = "b1b60ff93d57ba4c3c0eeedd1d38590ccbd498144d4ddcdaf8624dbe69e901ad"
     static let inputWidth = 1280
     static let inputHeight = 720
+
+    /// RVM's soft edge takes some of the wall with it: the source's own
+    /// colours under a partial alpha, a light rim around the cap and
+    /// shoulders that shows most over dark UI. `cleanEdge` pulls the edge in
+    /// by this many pixels at 1080p (scaled with the matte), then clears
+    /// alpha below `fringeFloor` and stretches the rest back to 0...1.
+    ///
+    /// Measured on the two test ranges (docs/MEDIA.md): the rim's light is
+    /// cut to 30% while 98% of the alpha where hands move stays. Two pixels
+    /// took it to 26% but shaved the ear; a higher floor starts on fine hair.
+    static let chokeAt1080 = 1
+    static let fringeFloor = 0.3
+    static let fringeCurve: [UInt8] = (0..<256).map { value in
+        let x = (Double(value) / 255 - fringeFloor) / (1 - fringeFloor)
+        return UInt8((min(1, max(0, x)) * 255).rounded())
+    }
+
+    /// The edge fix, in place on a width x height alpha plane.
+    static func cleanEdge(_ alpha: inout [UInt8], width: Int, height: Int) {
+        let radius = max(1, Int((Double(chokeAt1080) * Double(height) / 1080).rounded()))
+        alpha = MatteBlender.morphology(alpha, width, height, kernel: 2 * radius + 1, grow: false)
+        fringeCurve.withUnsafeBufferPointer { table in
+            _ = MatteBlender.withImage(&alpha, width, height) { image in
+                vImageTableLookUp_Planar8(&image, &image, table.baseAddress!, vImage_Flags(kvImageNoFlags))
+            }
+        }
+    }
 
     /// Where a width x height frame lands in the model's input when it's
     /// scaled to fit (letterboxed or pillarboxed, centred).
@@ -52,8 +79,10 @@ enum RVMMatte {
         let loaded: (model: MLModel, compiled: URL)
         do {
             loaded = try await store.loadModel()
+        } catch let error as CancellationError {
+            throw error
         } catch {
-            throw MediaError.failed("The RVM model isn't available: \(error.localizedDescription)")
+            throw Unavailable(reason: error.localizedDescription)
         }
         defer { try? FileManager.default.removeItem(at: loaded.compiled) }
         let reader = try await VideoFrameReader(url: source, timeRange: timeRange)
@@ -83,6 +112,34 @@ enum RVMMatte {
     }
 }
 
+extension RVMMatte {
+    /// The model couldn't be downloaded or loaded; `MatteJob` falls back to
+    /// Vision.
+    struct Unavailable: Error, LocalizedError {
+        var reason: String
+        var errorDescription: String? { "The RVM model isn't available: \(reason)" }
+    }
+}
+
+/// Written next to a matte Vision made because RVM's model wasn't there to
+/// use, with the state the model file was in. Once that changes (the model
+/// arrived, or was replaced), `MediaAnalysis` rebuilds the matte once.
+struct MatteFallback: Codable, Equatable {
+    static let file = "fallback.json"
+    var reason: String
+    /// `RVMModelStore.stamp()` when it fell back.
+    var model: String
+
+    static func read(from folder: URL) -> MatteFallback? {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent(file)) else { return nil }
+        return try? JSONDecoder().decode(MatteFallback.self, from: data)
+    }
+
+    func write(to folder: URL) throws {
+        try JSONEncoder().encode(self).write(to: folder.appendingPathComponent(Self.file))
+    }
+}
+
 /// Where the RVM model lives and how it gets there: downloaded on first use
 /// (or when the file there doesn't match its checksum), checked, then
 /// compiled for this Mac for each job.
@@ -101,8 +158,21 @@ struct RVMModelStore: Sendable {
         fileName: RVMMatte.modelFile,
         remote: RVMMatte.modelURL,
         sha256: RVMMatte.modelSHA256,
-        fetch: { try await download($0) }
+        fetch: { url in
+            // Tests never download: without the model they get Vision.
+            if NSClassFromString("XCTestCase") != nil { throw MediaError.failed("downloads are off while testing") }
+            return try await download(url)
+        }
     )
+
+    /// The model file's size and date, or "absent": cheap enough to check on
+    /// every lookup, unlike its checksum.
+    func stamp() -> String {
+        let file = folder.appendingPathComponent(fileName)
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+              let size = attributes[.size] as? Int, let date = attributes[.modificationDate] as? Date else { return "absent" }
+        return "\(size)-\(date.timeIntervalSince1970)"
+    }
 
     static func download(_ url: URL) async throws -> URL {
         let (file, response) = try await URLSession.shared.download(from: url)
@@ -239,18 +309,19 @@ final class RVMRunner: @unchecked Sendable {
         )
         var out = [UInt8](repeating: 0, count: outputWidth * outputHeight)
         if Int(content.width) == outputWidth, Int(content.height) == outputHeight {
-            // The usual case (16:9 into a 1080p matte): rows straight across.
             out.withUnsafeMutableBytes { raw in
                 for row in 0..<outputHeight {
                     memcpy(raw.baseAddress! + row * outputWidth, source.data + row * stride, outputWidth)
                 }
             }
-            return out
+        } else {
+            let error = MatteBlender.withImage(&out, outputWidth, outputHeight) { destination in
+                vImageScale_Planar8(&source, &destination, nil, vImage_Flags(kvImageHighQualityResampling))
+            }
+            guard error == kvImageNoError else { return nil }
         }
-        let error = MatteBlender.withImage(&out, outputWidth, outputHeight) { destination in
-            vImageScale_Planar8(&source, &destination, nil, vImage_Flags(kvImageHighQualityResampling))
-        }
-        return error == kvImageNoError ? out : nil
+        RVMMatte.cleanEdge(&out, width: outputWidth, height: outputHeight)
+        return out
     }
 }
 

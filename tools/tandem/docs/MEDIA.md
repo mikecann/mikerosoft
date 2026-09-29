@@ -158,7 +158,8 @@ Notes on each:
   of padding. On the test minute that finds 5 pauses over 0.3 s (5.4 s),
   against 1 (3.1 s) without and 8 (6.9 s) for Whisper medium.en; word
   starts stay within 80 ms of Whisper's (median).
-- **Matte (version 2).** Per frame, accurate person segmentation
+- **Matte (version 2, Vision).** RVM (below) is the default now; this is
+  what it falls back to. Per frame, accurate person segmentation
   (2016x1512) and the foreground subject mask
   (`VNGenerateForegroundInstanceMaskRequest`, "lift subject", 512x512),
   blended by `MatteBlender.keepSubject`. The subject mask holds still and
@@ -190,7 +191,7 @@ Notes on each:
   | Fast alone | 0.50 / 0.46 | 54 / 36 | twice the pops where he moves, coarse edges |
   | Subject mask alone | 0.10 / 0.09 | 10 / 9 | loses hands held out |
   | Version 2 blend, per frame | 0.60 / 0.84 | 72 / 92 | 7 / 12 |
-  | Version 2 with smoothing (the default) | 0.17 / 0.20 | 12 / 14 | 2 / 2 |
+  | Version 2 with smoothing (now RVM's fallback) | 0.17 / 0.20 | 12 / 14 | 2 / 2 |
 
   The flicker was three things: the instance blend dropping the mic (B:
   on 102 of 600 frames), the accurate mask's outline shimmering (about
@@ -211,7 +212,7 @@ Notes on each:
   stateful, but three workers sharing frames, a fresh request per frame
   and one worker in order give byte-identical mattes (measured on 20 s of
   the camera), so the workers take frames in any order.
-- **Matte with RVM (optional, `matteModel: .robustVideoMatting`).**
+- **Matte with RVM (the default, `matteModel: .robustVideoMatting`).**
   Robust Video Matting's own Core ML export of its MobileNetV3 model
   (1280x720 input, downsample ratio 0.375 built in), run on the GPU one
   frame at a time with its recurrent state carried from frame to frame,
@@ -221,17 +222,35 @@ Notes on each:
   committed or bundled: `RVMModelStore` downloads it from the official
   v1.0.0 release on first use into
   `~/Library/Application Support/Tandem/Models/rvm/` and checks its
-  SHA-256. Both cutout modes share one RVM matte, and its cache key has
-  its own version (`RVMMatte.version`). On the same two ranges, through the
-  job: flicker 0.08 / 0.07 against version 2's 0.17 / 0.20, no pop frames
-  against 12 / 14, edge contrast 116 / 123 against 108 / 94, the mic kept
-  on 99.2% of B against 99.5%. It looks steadier and softer: moving hands
-  keep their motion blur, no sofa, desk or wedge beside a fast arm. The
-  price is a faint light rim of the wall around the cap and shoulders,
-  since the soft alpha is applied to the source's own colours (RVM's
-  foreground output would fix that; the renderer doesn't use it). The
-  1920x1080 export scored the same and looked the same at 1:1 but ran at
-  22 to 30 fps. Version 2 stays the default until Mike picks.
+  SHA-256. Tests never download it (the store refuses while XCTest is
+  loaded). Both cutout modes share one RVM matte; its cache key has its own
+  version (`RVMMatte.version`, 2 since the edge fix). Making RVM the default
+  changed the matte key, so existing Vision mattes rebuild with RVM.
+
+  RVM's soft edge took some of the wall with it: a light rim around the cap
+  and shoulders, worst over dark UI, because the renderer applies the alpha
+  to the source's own colours. `RVMMatte.cleanEdge` chokes the alpha by a
+  pixel at 1080p and clears alpha under 0.3, stretching the rest back to
+  0...1. The light the rim adds (alpha times how much brighter the edge is
+  than the person just inside, where the picture is still) drops to 32% and
+  33% on the two ranges; 98% of the alpha where hands move stays, and fast
+  swipes keep their motion blur. A 2 px choke took the rim to 26% but shaved
+  the ear; a higher floor would start on fine hair. Using RVM's own
+  foreground output to decontaminate the colour would need the renderer to
+  carry a second picture, so it isn't done.
+
+  Scores through the job on the two ranges (A / B): flicker 0.066 / 0.062
+  (version 2: 0.17 / 0.20, RVM before the edge fix 0.082 / 0.070), pop
+  frames 0 / 1, the mic kept on 99.1% of B. Speed: 40 fps on a quiet
+  machine before the edge fix, 36 to 38 with it while other work ran.
+
+  If the model can't be downloaded or loaded, the job makes the version 2
+  Vision matte instead and says so: its status keeps "Made with Vision: RVM
+  unavailable (why)" after it finishes, and `fallback.json` in the entry
+  records the model file's size and date. Once that file changes (the
+  model arrived or was replaced) `MediaAnalysis` counts the matte as
+  missing and rebuilds it once, serving the fallback meanwhile; a rebuild
+  that falls back again records the new state, so it never loops.
 - **Isolated voice.** AUSoundIsolation (voice model, 100% wet) in offline
   manual rendering. The unit's reported latency (3,665 samples in stereo,
   2,705 in mono) is dropped from the front and fed as silence at the end,
@@ -271,8 +290,8 @@ Real footage, release build (`report.txt` has the latest numbers):
 | Thumbnails, 24 min camera | 724 JPEGs in 3.4 to 4.2 s |
 | Proxy | 489 fps for 4K camera and VFR screen (about 1.5 min for a 24 min take), 5 Mbps camera, 7.4 Mbps screen |
 | Transcript | 65x realtime for a minute, whole take in 11 s (132x) |
-| Matte, RVM | 40 fps on a quiet machine, the same as version 2 (GPU, one frame at a time); 35 to 37 with other work running |
-| Matte | 41 fps with 4 workers (18 min for a 24 min take, 1.4x real time at 30 fps); the Neural Engine is the limit, the smoother (about 10 ms a frame) hides behind it. Version 1 was 49 to 52 fps |
+| Matte, RVM (the default) | 40 fps on a quiet machine before the edge fix, the same as version 2 (GPU, one frame at a time); 36 to 38 with the edge fix while other work ran |
+| Matte, Vision (fallback) | 41 fps with 4 workers (18 min for a 24 min take, 1.4x real time at 30 fps); the Neural Engine is the limit, the smoother (about 10 ms a frame) hides behind it. Version 1 was 49 to 52 fps |
 | Isolated voice | 38x realtime, within 1 sample of the original |
 | Every default for a 43 s take, background priority | 33 s, the matte last |
 

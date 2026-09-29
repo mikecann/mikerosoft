@@ -18,6 +18,7 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     private let lock = NSLock()
     private var storedSettings: AnalysisSettings
+    private var storedRVMStore = RVMModelStore.standard
     /// Fingerprints computed for items that didn't carry one, by path.
     private var fingerprints: [String: (stat: FileStat, value: String)] = [:]
     /// Decoded transcripts and waveforms, by cache key.
@@ -46,6 +47,12 @@ public final class MediaAnalysis: @unchecked Sendable {
     public var settings: AnalysisSettings {
         get { lock.withLock { storedSettings } }
         set { lock.withLock { storedSettings = newValue } }
+    }
+
+    /// Where RVM mattes get their model. Tests point it elsewhere.
+    var rvmStore: RVMModelStore {
+        get { lock.withLock { storedRVMStore } }
+        set { lock.withLock { storedRVMStore = newValue } }
     }
 
     // MARK: - Cached results
@@ -94,7 +101,18 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     public func isCached(_ kind: AnalysisKind, for item: MediaItem) -> Bool {
         guard let key = cacheKey(kind, for: item) else { return false }
-        return cache.contains(kind: kind, key: key)
+        return cache.contains(kind: kind, key: key) && !needsRebuild(kind, key: key, settings: settings)
+    }
+
+    /// A matte Vision made in RVM's place (`MatteFallback`) is due for a
+    /// rebuild once the RVM model file has changed since: it arrived, or
+    /// was replaced. Until then it keeps serving, and if the rebuild falls
+    /// back again it records the new state, so there's one try per change.
+    func needsRebuild(_ kind: AnalysisKind, key: String, settings: AnalysisSettings) -> Bool {
+        guard kind == .matte, settings.matteModel == .robustVideoMatting,
+              let folder = cache.lookup(kind: kind, key: key),
+              let fallback = MatteFallback.read(from: folder) else { return false }
+        return fallback.model != rvmStore.stamp()
     }
 
     /// The cache key for one analysis of one item, or nil when the file
@@ -124,11 +142,12 @@ public final class MediaAnalysis: @unchecked Sendable {
         let settings = settings ?? self.settings
         let canonical = settings.canonical(for: kind)
         let key = AnalysisCache.key(fingerprint: fingerprint, kind: kind, algorithmVersion: kind.algorithmVersion, settings: canonical)
-        guard !cache.contains(kind: kind, key: key) else { return nil }
+        guard !cache.contains(kind: kind, key: key) || needsRebuild(kind, key: key, settings: settings) else { return nil }
         let source = folder.url(for: item)
         let cache = self.cache
+        let rvmStore = self.rvmStore
         let job = JobScheduler.Job(id: Self.jobID(kind, key: key), kind: kind, mediaID: item.id, priority: priority) { context in
-            try await Self.make(kind, item: item, source: source, fingerprint: fingerprint, key: key, settings: settings, cache: cache, context: context)
+            try await Self.make(kind, item: item, source: source, fingerprint: fingerprint, key: key, settings: settings, cache: cache, rvmStore: rvmStore, context: context)
         }
         return scheduler.submit(job)
     }
@@ -174,12 +193,13 @@ public final class MediaAnalysis: @unchecked Sendable {
     public func state(_ kind: AnalysisKind, for item: MediaItem, settings: AnalysisSettings? = nil) -> ResultState {
         guard kind.applies(to: item) else { return .notApplicable }
         guard let key = cacheKey(kind, for: item, settings: settings) else { return .unreadable }
-        if cache.contains(kind: kind, key: key) { return .ready }
+        let ready = cache.contains(kind: kind, key: key) && !needsRebuild(kind, key: key, settings: settings ?? self.settings)
+        if ready { return .ready }
         guard let status = scheduler.status(id: Self.jobID(kind, key: key)) else { return .missing }
         switch status.state {
         case .queued: return .queued
         case .running: return .running(progress: status.progress)
-        case .done: return cache.contains(kind: kind, key: key) ? .ready : .missing
+        case .done: return ready ? .ready : .missing
         case .failed: return .failed(status.message ?? "failed")
         case .cancelled: return .missing
         }
@@ -218,15 +238,18 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     /// Makes one analysis into a private folder and commits it, checking the
     /// file didn't change underneath.
-    static func make(_ kind: AnalysisKind, item: MediaItem, source: URL, fingerprint: String, key: String, settings: AnalysisSettings, cache: AnalysisCache, context: JobContext) async throws {
+    static func make(_ kind: AnalysisKind, item: MediaItem, source: URL, fingerprint: String, key: String, settings: AnalysisSettings, cache: AnalysisCache,
+                     rvmStore: RVMModelStore = .standard, context: JobContext) async throws {
         guard let expected = Fingerprint(fingerprint), expected.matchesStat(of: source) else {
             throw MediaError.fileChanged(item.path)
         }
         let pending = try cache.begin(kind: kind, key: key)
         do {
-            try await AnalysisJobs.run(kind, source: source, item: item, settings: settings, into: pending.folder, context: context)
+            try await AnalysisJobs.run(kind, source: source, item: item, settings: settings, into: pending.folder, context: context, rvmStore: rvmStore)
             try context.checkCancellation()
             guard expected.matchesStat(of: source) else { throw MediaError.fileChanged(item.path) }
+            // Only a fallback matte due for a rebuild is still there.
+            if cache.contains(kind: kind, key: key) { cache.remove(kind: kind, key: key) }
             try cache.commit(pending, fingerprint: fingerprint, algorithmVersion: kind.algorithmVersion, settings: settings.canonical(for: kind), source: item.path)
         } catch {
             cache.discard(pending)
@@ -285,7 +308,8 @@ private final class DecodedResult {
 
 /// Runs one kind of analysis into a folder.
 enum AnalysisJobs {
-    static func run(_ kind: AnalysisKind, source: URL, item: MediaItem, settings: AnalysisSettings, into folder: URL, context: JobContext, timeRange: CMTimeRange? = nil) async throws {
+    static func run(_ kind: AnalysisKind, source: URL, item: MediaItem, settings: AnalysisSettings, into folder: URL, context: JobContext, timeRange: CMTimeRange? = nil,
+                    rvmStore: RVMModelStore = .standard) async throws {
         switch kind {
         case .thumbnails:
             try await ThumbnailJob.run(source: source, kind: item.kind, interval: settings.thumbnailInterval, width: settings.thumbnailWidth, into: folder, context: context, timeRange: timeRange)
@@ -298,7 +322,9 @@ enum AnalysisJobs {
         case .transcript:
             try await TranscriptJob.run(source: source, locale: settings.transcriptLocale, into: folder, context: context, timeRange: timeRange)
         case .matte:
-            try await MatteJob.run(source: source, settings: settings, into: folder, context: context, timeRange: timeRange)
+            var tuning = MatteJob.Tuning()
+            tuning.rvmStore = rvmStore
+            try await MatteJob.run(source: source, settings: settings, into: folder, context: context, timeRange: timeRange, tuning: tuning)
         case .isolatedVoice:
             try await IsolatedVoiceJob.run(source: source, model: settings.voiceModel, into: folder, context: context, timeRange: timeRange)
         }
