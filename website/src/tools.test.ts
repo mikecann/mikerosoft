@@ -77,3 +77,13 @@ test('publishes Mikey Mouse as a macOS tool', () => {
   assert.match(tool.header ?? '', /mikey-mouse\/docs\/header\.webp$/);
   assert.match(tool.url, /tools\/mikey-mouse$/);
 });
+
+test('publishes Tandem as a documented macOS tool', () => {
+  const tool = tools.find(candidate => candidate.name === 'tandem');
+
+  assert.ok(tool);
+  assert.deepEqual(tool.platforms, ['macos']);
+  assert.match(tool.icon, /tandem\/icons\/tandem\.png$/);
+  assert.match(tool.header ?? '', /tandem\/docs\/header\.jpg$/);
+  assert.match(tool.url, /tools\/tandem$/);
+});

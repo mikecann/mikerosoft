@@ -268,6 +268,15 @@ export const tools: Tool[] = [
     platforms: ['macos'],
   },
   {
+    name: 'tandem',
+    desc: 'Native video editor that replaces Filmora for the Convex videos: record-it takes, a cutout PiP, ripple editing, titles, word captions, 9:16 shorts and a -14 LUFS export, with a CLI and MCP server so agents can edit the same project',
+    icon: `${base}/tandem/icons/tandem.png`,
+    header: `${base}/tandem/docs/header.jpg`,
+    screenshots: [`${base}/tandem/docs/ss1.jpg`, `${base}/tandem/docs/ss2.jpg`],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/tandem',
+    platforms: ['macos'],
+  },
+  {
     name: 'voice-type',
     desc: 'Push-to-talk local voice transcription for Windows and macOS. On Apple Silicon it uses MLX for faster final transcription',
     icon: `${base}/voice-type/icons/sound.png`,
