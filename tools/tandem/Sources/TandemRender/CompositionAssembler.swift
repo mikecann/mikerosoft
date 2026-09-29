@@ -291,9 +291,11 @@ enum CompositionAssembler {
         videoComposition.renderSize = canvas
         let rate = project.settings.frameRate
         videoComposition.frameDuration = CMTime(value: rate.denominator, timescale: CMTimeScale(rate.numerator))
-        videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
-        videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
-        videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+        // No colour properties here: with them AVFoundation hands the
+        // compositor every source frame tagged BT.709 without converting
+        // it, so BT.601 footage (Mike's camera) decoded with the wrong
+        // matrix (red 180/40/50 came out 192/54/48). Frames keep their own
+        // tags, and the compositor tags its output BT.709 itself.
         videoComposition.instructions = plan.instructions.map {
             TandemInstruction(range: $0.range, stack: $0.stack, scene: scene, trackIDs: trackIDs)
         }

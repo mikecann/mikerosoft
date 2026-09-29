@@ -70,7 +70,13 @@ apply their effects to everything below, mixed in by their opacity.
   the encoded values they are, like Filmora. Sources are decoded with their
   own YCbCr matrix and range (the Kiyo camera is full-range BT.601);
   output is tagged BT.709 video range. Solid and text colours are sRGB
-  code values.
+  code values. The video composition carries no colour properties: with
+  them AVFoundation re-tags every source frame BT.709 without converting
+  it, and BT.601 footage came out with the wrong matrix (red 180/40/50 as
+  192/54/48). The compositor also attaches Core Media's 709 colour space
+  to its output, as decoders do for 709 files: with the tags alone,
+  AVPlayerLayer uses the exact BT.709 curve and lifts the shadows (black
+  16 showed as 32 on screen, against 14 for paused stills and exports).
 - **Colour effect.** One kernel: exposure (stops), contrast (pivot mid grey,
   +100 is 1.5x), black level, highlights, shadows, saturation, vibrance,
   temperature, tint. Black level and the vignette were calibrated against
@@ -234,6 +240,14 @@ The spike's plain composite managed about 3.5x; the encoder is the limit.
   generated mask. There's a regression test.
 - `CGColor(red:green:blue:alpha:)` is Generic RGB: drawing it into an sRGB
   context colour-matches it. Use `CGColor(srgbRed:...)`.
+- Setting `colorPrimaries`, `colorTransferFunction` or `colorYCbCrMatrix` on
+  a video composition with a custom compositor re-tags the source frames
+  without converting them. And a pixel buffer tagged BT.709 with no
+  `CGColorSpace` attachment shows lighter in AVPlayerLayer than the same
+  pixels as a CGImage. `PlaybackMatchTests` covers both.
+- A `FrameRenderer` keeps the composition it first built. The viewer makes
+  a new one after every rebuild, since mattes and proxies arrive later
+  than edits.
 - AVAssetWriter interleaves inputs: pushing all video before any audio
   stalls. Pull each input with `requestMediaDataWhenReady`.
 - Calling `cancelReading()` on an AVAssetReader while another thread is in
@@ -245,7 +259,7 @@ The spike's plain composite managed about 3.5x; the encoder is the limit.
 ## Tests
 
 `swift test --package-path tools/tandem` runs the render tests in about
-5 s (the whole package in about 25 s):
+8 s (the whole package in about 40 s):
 pure maths and plan tests, golden-pixel compositor tests with stand-in
 frames, end-to-end grabs and exports of synthetic movies (frame-number
 stripes, a flash and a beep, tones with clicks). Real footage is opt-in:
@@ -257,3 +271,8 @@ TANDEM_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
 
 It reads the decision-models folder and the imported v14 project (never
 writing there) and writes to `/private/tmp/claude-501/tandem-render/bench`.
+`RealColourTests` measures the demo project's player, stills, export and
+camera file, and `ProxyNoiseTests` how much proxies flicker at each
+quality (both with `TANDEM_REAL_MEDIA=1`). `ColourOnScreenTests` shows the
+player and a still side by side in a window and reads them back from a
+screen capture (`TANDEM_SCREEN=1`).

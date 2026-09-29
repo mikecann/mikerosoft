@@ -69,6 +69,17 @@ class TandemCompositor: NSObject, AVVideoCompositing {
         ]
     }
 
+    /// Core Media's colour space for BT.709 tags, the one a decoder
+    /// attaches to a 709 file's frames.
+    static let outputColorSpace: CGColorSpace? = {
+        let tags: [CFString: CFString] = [
+            kCVImageBufferYCbCrMatrixKey: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+            kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
+            kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2
+        ]
+        return CVImageBufferCreateColorSpaceFromAttachments(tags as CFDictionary)?.takeRetainedValue()
+    }()
+
     func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
 
     func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
@@ -127,6 +138,14 @@ class TandemCompositor: NSObject, AVVideoCompositing {
         do {
             let task = try RenderEngine.context.startTask(toRender: image.cropped(to: CGRect(origin: .zero, size: outSize)), to: destination)
             _ = try task.waitUntilCompleted()
+            // The colour space those tags stand for, as decoders attach it.
+            // Without it AVPlayerLayer reads the tags as the exact BT.709
+            // curve, which lifts the shadows (16 shows as 32), while stills
+            // and 709 files everywhere else on macOS use Core Media's 709.
+            // Set after rendering, so Core Image doesn't colour match.
+            if let space = Self.outputColorSpace {
+                CVBufferSetAttachment(output, kCVImageBufferCGColorSpaceKey, space, .shouldPropagate)
+            }
             request.finish(withComposedVideoFrame: output)
         } catch {
             request.finish(with: error)
