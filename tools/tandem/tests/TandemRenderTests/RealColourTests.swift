@@ -406,8 +406,8 @@ final class ProxyNoiseTests: XCTestCase {
     }
 
     /// Encodes the frames the way `ProxyJob` does (hardware HEVC, speed
-    /// over quality, every frame a keyframe unless asked otherwise) and
-    /// decodes them again.
+    /// over quality, no reordering, a keyframe every `keyFrameInterval`
+    /// frames) and decodes them again.
     func proxyRoundTrip(_ frames: [CVPixelBuffer], quality: Double, fps: Float, keyFrameInterval: Int = 1) throws -> (frames: [CVPixelBuffer], bytes: Int) {
         let width = CVPixelBufferGetWidth(frames[0]), height = CVPixelBufferGetHeight(frames[0])
         var session: VTCompressionSession?
@@ -545,15 +545,17 @@ final class ProxyNoiseTests: XCTestCase {
         if let proxy = assets.proxies[item.id] {
             line("proxy on disk", try await frames(proxy, from: start, count: count).frames)
         }
-        // Encoded as ProxyJob does, at other qualities, and with P-frames
-        // (a keyframe every 15) for comparison: much cleaner and smaller,
-        // but proxies stay all-intra for scrubbing and playing backwards.
-        for (quality, keyFrameInterval) in [(0.45, 1), (0.55, 1), (0.6, 1), (0.65, 1), (0.75, 1), (0.55, 15)] {
+        // Encoded all-intra, as proxy versions 1 and 2 were (0.45 and 0.6),
+        // and as ProxyJob does now. Over one second the temporal deviation
+        // of a long-GOP proxy depends on where its keyframes fall;
+        // ProxyRealMediaTests measures the change from frame to frame.
+        let standard = AnalysisSettings.standard
+        for (quality, keyFrameInterval) in [(0.45, 1), (0.6, 1), (0.75, 1), (standard.proxyQuality, standard.proxyKeyFrameInterval)] {
             let trip = try proxyRoundTrip(original, quality: quality, fps: fps, keyFrameInterval: keyFrameInterval)
             let perMinute = Double(trip.bytes) / Double(count) * Double(fps) * 60 / 1_000_000
             let name = keyFrameInterval == 1 ? String(format: "proxy q %.2f", quality) : String(format: "q %.2f gop %d", quality, keyFrameInterval)
             line(name, trip.frames, String(format: "  %.0f MB/min", perMinute))
-            if keyFrameInterval == 1, quality < 0.7 { sheet.append((name, trip.frames)) }
+            if quality < 0.7 || keyFrameInterval > 1 { sheet.append((name, trip.frames)) }
         }
         // The compositor's own output on both paths: it adds no flicker.
         if isCamera, let clip = project.videoTracks.flatMap(\.clips).first(where: {

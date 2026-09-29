@@ -115,6 +115,18 @@ final class AnalysisTests: TempFolderTestCase {
         XCTAssertEqual(changed, [.transcript])
     }
 
+    func testProxyKeyFollowsItsKeyframesAndQuality() {
+        let standard = AnalysisSettings()
+        XCTAssertEqual(standard.canonical(for: .proxy), "{\"box\":\"1920x1080\",\"keyframes\":\"15\",\"quality\":\"0.78\"}")
+        var intra = standard
+        intra.proxyKeyFrameInterval = 1
+        XCTAssertNotEqual(intra.canonical(for: .proxy), standard.canonical(for: .proxy))
+        let changed = AnalysisKind.allCases.filter { intra.canonical(for: $0) != standard.canonical(for: $0) }
+        XCTAssertEqual(changed, [.proxy])
+        // Version 3 rebuilds the all-intra proxies whatever their settings.
+        XCTAssertEqual(AnalysisKind.proxy.algorithmVersion, 3)
+    }
+
     func testWaveformHasAPeakEveryHundredthOfASecond() async throws {
         try SyntheticMedia.writeAudioFile(to: file("music/tone.wav"), segments: [(1, 0), (1, 0.5)])
         let tone = try await item("music/tone.wav")
@@ -194,7 +206,7 @@ final class AnalysisTests: TempFolderTestCase {
         XCTAssertEqual(strip.height, 240)
     }
 
-    func testProxyIsSmallerAllIntraAndKeepsEveryTimestamp() async throws {
+    func testProxyIsSmallerWithRegularKeyframesAndKeepsEveryTimestamp() async throws {
         // A variable frame rate "screen recording" bigger than 1080p.
         var times: [Double] = []
         var t = 0.0
@@ -221,10 +233,19 @@ final class AnalysisTests: TempFolderTestCase {
         XCTAssertEqual(proxyTimes.count, sourceTimes.count)
         for (a, b) in zip(sourceTimes, proxyTimes) { XCTAssertEqual(CMTimeCompare(a, b), 0, "\(a.seconds) vs \(b.seconds)") }
 
+        // A keyframe every `proxyKeyFrameInterval` frames, P-frames between,
+        // decoded in the order they're shown.
+        let interval = AnalysisSettings.standard.proxyKeyFrameInterval
+        XCTAssertGreaterThan(interval, 1)
         let cursor = try XCTUnwrap(tracks[0].makeSampleCursorAtFirstSampleInDecodeOrder())
-        var keyframes = 0
-        repeat { if cursor.currentSampleSyncInfo.sampleIsFullSync.boolValue { keyframes += 1 } } while cursor.stepInDecodeOrder(byCount: 1) == 1
-        XCTAssertEqual(keyframes, sourceTimes.count, "all-intra")
+        var keyframes: [Int] = []
+        var decodeOrder: [CMTime] = []
+        repeat {
+            if cursor.currentSampleSyncInfo.sampleIsFullSync.boolValue { keyframes.append(decodeOrder.count) }
+            decodeOrder.append(cursor.presentationTimeStamp)
+        } while cursor.stepInDecodeOrder(byCount: 1) == 1
+        XCTAssertEqual(keyframes, Array(stride(from: 0, to: sourceTimes.count, by: interval)))
+        XCTAssertEqual(decodeOrder, decodeOrder.sorted { CMTimeCompare($0, $1) < 0 }, "no frame reordering")
 
         let sourceEnd = try await AVURLAsset(url: file("source/demo-screen.mov")).loadTracks(withMediaType: .video)[0].load(.timeRange).end
         let proxyEnd = try await tracks[0].load(.timeRange).end

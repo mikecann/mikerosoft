@@ -12,7 +12,7 @@ public enum AnalysisKind: String, Codable, Sendable, CaseIterable {
     case waveform
     /// EBU R128 loudness of the whole file.
     case loudness
-    /// 1080p all-intra HEVC copy for smooth scrubbing.
+    /// 1080p HEVC copy for playing and scrubbing, a keyframe every 15 frames.
     case proxy
     /// Word-level transcript.
     case transcript

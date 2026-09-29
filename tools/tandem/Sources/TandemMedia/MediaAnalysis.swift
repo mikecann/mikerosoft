@@ -75,7 +75,8 @@ public final class MediaAnalysis: @unchecked Sendable {
         return (strip, folder)
     }
 
-    /// 1080p all-intra HEVC with the source's exact frame times (video only).
+    /// 1080p HEVC with the source's exact frame times (video only): P-frames
+    /// with a keyframe every `proxyKeyFrameInterval` frames, no reordering.
     public func proxyURL(for item: MediaItem) -> URL? {
         entryFolder(.proxy, for: item)?.appendingPathComponent(ProxyJob.file)
     }

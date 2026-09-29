@@ -13,15 +13,25 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
     /// Proxies fit inside this box (landscape; portrait sources swap it).
     public var proxyMaxWidth: Int
     public var proxyMaxHeight: Int
-    /// VideoToolbox constant quality, 0...1. Every proxy frame is a
-    /// keyframe (for scrubbing and playing backwards), so its compression
-    /// noise is new every frame and shows as static crawling over flat
-    /// walls and screen text while playing. At 0.45 (34 MB a minute for
-    /// Mike's 4K camera) 8x8 blocks of a still wall flickered 3.3 times as
-    /// much as in the original; 0.6 is about 100 MB a minute, the size of
-    /// the original, and flickers 2.1 times as much. Higher costs far more
-    /// for less (0.65 is 130 MB a minute for 1.9 times).
+    /// VideoToolbox constant quality, 0...1. With a keyframe every 15
+    /// frames, 0.78 is about 97 MB a minute of Mike's 4K camera (all-intra
+    /// proxies at 0.6 were 105, the original is 104) and 11 of screen
+    /// recording (was 57). VideoToolbox rounds quality in steps: 0.76 and
+    /// 0.77 make the same file, as do 0.79 and 0.8, the next step up at
+    /// 111 MB a minute.
     public var proxyQuality: Double
+    /// Frames from one proxy keyframe to the next, P-frames between and no
+    /// reordering; 1 is all-intra. All-intra proxies made their compression
+    /// noise anew every frame, and it crawled over still walls and screen
+    /// text while playing: 8x8 blocks of the camera's wall changed 0.45
+    /// levels a frame at quality 0.6, the original 0.13. A P-frame leaves a
+    /// still area as it was, so with a keyframe every 15 frames it's 0.07 a
+    /// frame, with a tick of 0.31 at each keyframe (the camera's own
+    /// keyframes tick 0.26, every 2 s). The viewer's exact seeks decode from
+    /// the keyframe before: 16 ms at p95 against 9 all-intra, and drags
+    /// still show every frame both ways. Every 30 frames saves little and
+    /// drops frames dragging backwards. docs/RENDER.md has the numbers.
+    public var proxyKeyFrameInterval: Int
     /// SpeechAnalyzer locale. en-US beat en-AU on Mike's voice (7.1% against
     /// 8.8% word error rate in the transcription spike).
     public var transcriptLocale: String
@@ -45,7 +55,8 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         waveformRate: Int = 100,
         proxyMaxWidth: Int = 1920,
         proxyMaxHeight: Int = 1080,
-        proxyQuality: Double = 0.6,
+        proxyQuality: Double = 0.78,
+        proxyKeyFrameInterval: Int = 15,
         transcriptLocale: String = "en-US",
         matteModel: MatteModel = .robustVideoMatting,
         matteQuality: MatteQuality = .accurate,
@@ -62,6 +73,7 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         self.proxyMaxWidth = proxyMaxWidth
         self.proxyMaxHeight = proxyMaxHeight
         self.proxyQuality = proxyQuality
+        self.proxyKeyFrameInterval = proxyKeyFrameInterval
         self.transcriptLocale = transcriptLocale
         self.matteModel = matteModel
         self.matteQuality = matteQuality
@@ -82,7 +94,7 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         case .thumbnails: values = ["interval": "\(thumbnailInterval)", "width": "\(thumbnailWidth)"]
         case .waveform: values = ["rate": "\(waveformRate)"]
         case .loudness: values = [:]
-        case .proxy: values = ["box": "\(proxyMaxWidth)x\(proxyMaxHeight)", "quality": "\(proxyQuality)"]
+        case .proxy: values = ["box": "\(proxyMaxWidth)x\(proxyMaxHeight)", "keyframes": "\(proxyKeyFrameInterval)", "quality": "\(proxyQuality)"]
         case .transcript: values = ["locale": transcriptLocale]
         case .matte where matteModel == .robustVideoMatting:
             // RVM keeps what the person holds either way, so both cutout
@@ -158,7 +170,11 @@ extension AnalysisKind {
         // 2: the subject mask for props and smoothing over time.
         case .matte: return 2
         // 2: quality 0.6, so the 0.45 proxies that crawled rebuild.
-        case .proxy: return 2
+        // 3: P-frames with a keyframe every 15 frames at quality 0.78. The
+        // all-intra version 2 proxies made new compression noise every
+        // frame, which still crawled over walls and screen text while
+        // playing; these leave still areas still.
+        case .proxy: return 3
         }
     }
 

@@ -140,9 +140,12 @@ func makePixelBufferPool(width: Int, height: Int, pixelFormat: OSType) throws ->
     return pool
 }
 
-/// 1080p all-intra HEVC copy of a video, for smooth scrubbing. Every source
-/// frame keeps its exact presentation time and duration, so proxy time is
-/// source time even for variable frame rate screen recordings. Video only.
+/// 1080p HEVC copy of a video, for playing and scrubbing: P-frames with a
+/// keyframe every `proxyKeyFrameInterval` frames and no reordering, so a
+/// still area stays still while playing and an exact seek decodes at most
+/// that many frames. Every source frame keeps its exact presentation time
+/// and duration, so proxy time is source time even for variable frame rate
+/// screen recordings. Video only.
 enum ProxyJob {
     static let file = "proxy.mov"
 
@@ -151,7 +154,7 @@ enum ProxyJob {
         let size = fittedSize(width: Int(reader.size.width), height: Int(reader.size.height), maxWidth: settings.proxyMaxWidth, maxHeight: settings.proxyMaxHeight)
         let scaler = try PixelScaler(width: size.width, height: size.height, pixelFormat: reader.pixelFormat)
         let writer = try EncodedMovieWriter(url: folder.appendingPathComponent(file), settings: .init(
-            width: size.width, height: size.height, keyFrameInterval: 1, quality: settings.proxyQuality, prioritizeSpeed: true,
+            width: size.width, height: size.height, keyFrameInterval: max(1, settings.proxyKeyFrameInterval), quality: settings.proxyQuality, prioritizeSpeed: true,
             colorPrimaries: reader.colors.primaries, transferFunction: reader.colors.transfer, yCbCrMatrix: reader.colors.matrix,
             timescale: reader.timescale, transform: reader.transform, expectedFrameRate: reader.nominalFrameRate > 0 ? reader.nominalFrameRate : nil
         ))

@@ -136,7 +136,7 @@ copies of a file share a job):
 | thumbnails | `strip.json`, `t00000.jpg`... | `ThumbnailStrip`; file i shows time i * interval (2 s), 320 px wide; images get one |
 | waveform | `waveform.json`, `peaks.f32` | header plus little-endian Float32 peaks, 100 a second, the loudest sample over all channels, placed by sample time |
 | loudness | `loudness.json` | `Loudness`; silence is `-inf` (written as the string "-inf") |
-| proxy | `proxy.mov` | 1080p box, aspect kept, all-intra HEVC at quality 0.45, video only, every frame at its exact source time and duration, source colour tags and rotation |
+| proxy | `proxy.mov` | 1080p box, aspect kept, HEVC with a keyframe every 15 frames and P-frames between (no reordering) at quality 0.78, video only, every frame at its exact source time and duration, source colour tags and rotation |
 | transcript | `transcript.json` | `Transcript`, engine "SpeechAnalyzer", en-US, word times in media time |
 | matte | `matte.mov` | 1080p box, HEVC, keyframe every 10 frames; luma of full-range (420f) frames is the alpha (0 background, 255 person), chroma neutral, BT.709 tags, source frame times and rotation |
 | isolatedVoice | `voice.caf` | 48 kHz ALAC, source channels (max 2), same length as the source, lined up to the sample |
@@ -147,6 +147,13 @@ Notes on each:
   frame late, when the next one says how long it lasted; the last runs to
   the track end. Writing passes VideoToolbox's samples straight into
   AVAssetWriter with the source's timescale, so nothing is rounded.
+
+  Version 3 has a keyframe every 15 frames (`proxyKeyFrameInterval`) with
+  P-frames between, at quality 0.78. Versions 1 and 2 were all keyframes
+  (at 0.45, then 0.6), so their compression noise was new every frame and
+  crawled over still walls and screen text while playing; a P-frame leaves
+  a still area as it was. The box, keyframe interval and quality are all in
+  the cache key. docs/RENDER.md has the flicker, size and seek numbers.
 - **Transcript.** Audio streams from the file a second at a time as the
   analyzer pulls it (the whole 24 minute take peaks at 53 MB). The model
   works although AssetInventory says only "supported"; if analysis ever
@@ -288,7 +295,7 @@ Real footage, release build (`report.txt` has the latest numbers):
 | Loudness, 24 min camera | 1.0 s on a quiet machine (up to 5.7 s while other builds ran); -32.11 LUFS, LRA 11.75, TP -5.30 (ffmpeg: -32.1, 11.8, -5.3) |
 | Waveform, 24 min camera | 1.0 s quiet, up to 4.3 s under load |
 | Thumbnails, 24 min camera | 724 JPEGs in 3.4 to 4.2 s |
-| Proxy | 489 fps for 4K camera and VFR screen (about 1.5 min for a 24 min take), 5 Mbps camera, 7.4 Mbps screen |
+| Proxy | About 480 fps for 4K camera and VFR screen: 3.7 s a minute of camera, 2.3 of screen recording. Version 3 is 97 MB a minute of camera (13 Mbps), 11 of screen (1.5 Mbps) |
 | Transcript | 65x realtime for a minute, whole take in 11 s (132x) |
 | Matte, RVM (the default) | 40 fps on a quiet machine before the edge fix, the same as version 2 (GPU, one frame at a time); 36 to 38 with the edge fix while other work ran |
 | Matte, Vision (fallback) | 41 fps with 4 workers (18 min for a 24 min take, 1.4x real time at 30 fps); the Neural Engine is the limit, the smoother (about 10 ms a frame) hides behind it. Version 1 was 49 to 52 fps |

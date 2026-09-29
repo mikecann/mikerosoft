@@ -174,6 +174,85 @@ while encoding, released on every exit including cancel and errors (not
 held during the loudness passes, which don't encode). Outputs must be
 .mp4, .mov or .m4v and can't be one of the project's media files.
 
+## Proxies
+
+The viewer plays 1080p proxies (docs/MEDIA.md has how they're made);
+paused stills, API frame grabs and export read the originals. Since proxy
+version 3 a proxy has a keyframe every 15 frames with P-frames between, no
+reordering, at quality 0.78.
+
+Versions 1 and 2 were all keyframes, so every frame's compression noise was
+new and crawled over still walls and screen text while playing, gone the
+moment the player paused. A P-frame leaves a still area as it was. The costs
+are a tick at each keyframe, where the noise changes all at once, and seeks
+that decode from the keyframe before.
+
+Measured on the demo footage (`ProxyRealMediaTests` pins these): a minute of
+Mike's camera and of his screen recording through `ProxyJob`, and 150 frames
+of still areas in it: the wall beside him, and the sidebar and code boxes of
+the screen while only the pointer moves. Changes are the mean absolute
+change of 8x8 block means (luma levels) from one frame to the next, into
+keyframes and into the rest; the deviation is that of the block means over
+the 5 s, the measure behind the choice of 0.6.
+
+| Proxies | Wall: a frame | Wall: at keyframes | Wall: deviation | Sidebar: a frame / keyframes | Text: a frame / keyframes | Camera MB/min | Screen MB/min |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Original | 0.13 | 0.26, every 2 s | 0.33 | 0.013 / 0.075 | 0.004 / 0.040 | 104 | 5 (whole file) |
+| All keyframes, 0.6 (version 2) | 0.45 | every frame is one | 0.50 | 0.113 | 0.044 | 105 | 92 |
+| Every 15, 0.6 | 0.044 | 0.54 | 0.47 | 0.023 / 0.19 | 0.014 / 0.089 | 16 | 7 |
+| Every 15, 0.75 | 0.056 | 0.35 | 0.36 | 0.007 / 0.085 | 0.002 / 0.030 | 67 | 11 |
+| Every 15, 0.78 (version 3) | 0.067 | 0.31 | 0.35 | 0.007 / 0.070 | 0.003 / 0.030 | 95 | 13 |
+| Every 15, 0.8 | 0.071 | 0.29 | 0.34 | 0.007 / 0.070 | 0.003 / 0.028 | 111 | 14 |
+| Every 30, 0.8 | 0.065 | 0.32 | 0.34 | 0.004 / 0.081 | 0.001 / 0.024 | 103 | 9 |
+
+- The crawl is gone: a still wall changes 0.067 a frame where it changed
+  0.45, half as much as in the camera file itself, whose sensor noise the
+  proxy mostly drops. Screen text changes less than in the original.
+- The tick is about the camera's own. Its keyframes (every 2 s) change the
+  wall by 0.26; the proxy's (twice a second) by 0.31. Over 32x32 blocks,
+  where a change of brightness would show as pumping, the proxy's tick is
+  0.12, against 0.14 at the camera's keyframes and 0.09 for its ordinary
+  change from frame to frame. Fine detail doesn't breathe either: it drops
+  9% into a proxy keyframe, where the camera's keyframes add 27%. On the
+  screen the ticks are no bigger than the recording's own keyframes'. At
+  quality 0.6 the tick was bigger than all-intra's change every frame,
+  which is why the quality went up.
+- Quality rounds in steps: 0.76 and 0.77 make the same file, as do 0.79 and
+  0.8; 0.78 is the highest step no bigger than all-intra at 0.6. Over the
+  whole demo (24 minutes each of camera and screen, and some b-roll) version
+  3 proxies take 2.6 GB where version 2 took 4.0: 97 MB a minute of camera
+  (was 105), 11 of screen (was 57). They build as fast: 3.7 s a minute of 4K
+  camera, 2.3 of screen recording.
+- A keyframe every 30 frames saves little (the camera at 0.8 is 105 MB a
+  minute) and costs seeks: see below.
+
+The viewer's random access, on the whole v14 edit (screen, camera PiP with
+its cutout matte, b-roll) built from each set of proxies as the viewer builds
+it: an exact `AVPlayer` seek of a paused player, timed until the frame
+reaches the player's output, at 150 random frames, twice. Steps are the arrow
+keys: a dozen frames forwards and two dozen back from 8 places. Drags ask
+for a new time 60 times a second, as dragging the ruler does, and count the
+frames that reach the output.
+
+| Proxies | Seek p50 / p95 | A frame back p50 / p95 | A frame forward p95 | Dragging backwards, 1x / 4x |
+| --- | --- | --- | --- | --- |
+| All keyframes, 0.6 | 7.1 / 9.2 ms | 4.5 / 7.9 ms | 5.5 ms | 60 / 60 frames a second |
+| Every 15, 0.78 | 11.5 / 15.8 ms | 9.3 / 14.2 ms | 5.8 ms | 60 / 60 |
+| Every 30, 0.8 | 15.9 / 24.8 ms | 14.3 / 22.6 ms | 5.4 ms | 47 / 34 |
+| The 4K originals | 45 / 146 ms | 31 / 190 ms | 11 ms | 30 / 3.5 |
+
+(The last two rows are from an earlier run, in which all-intra was 6.2 /
+8.3 ms.) A frame forward carries on decoding, so it costs the same; a frame
+back decodes from the keyframe. Forward drags show every frame either way.
+Playing at 1x and 8x and backwards (J: the composition can play in reverse)
+shows as many frames a second with either proxy. A frame grab through proxies
+(project icons) takes 35 ms at p50 against 33. `ProxyExactFrameTests` checks
+that seeks, steps across keyframes both ways, and playing forwards and
+backwards from a paused frame show the frame for their time. The whole-demo
+comparison is `~/dev/me/tandem-research/proxy-gop/ProxyGOPExperiment.swift`,
+kept out of the package, and `compare/` beside it has a side-by-side clip of
+the wall (the original, all keyframes at 0.6, every 15 at 0.78).
+
 ## Random access
 
 The frame at a time is always the last one at or before it: variable frame
@@ -272,7 +351,9 @@ TANDEM_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
 It reads the decision-models folder and the imported v14 project (never
 writing there) and writes to `/private/tmp/claude-501/tandem-render/bench`.
 `RealColourTests` measures the demo project's player, stills, export and
-camera file, and `ProxyNoiseTests` how much proxies flicker at each
-quality (both with `TANDEM_REAL_MEDIA=1`). `ColourOnScreenTests` shows the
+camera file, `ProxyNoiseTests` how much proxies flicker at each quality,
+and `ProxyRealMediaTests` today's proxies against all-intra ones: flicker,
+keyframe ticks, size, build speed and seek times (all with
+`TANDEM_REAL_MEDIA=1`). `ColourOnScreenTests` shows the
 player and a still side by side in a window and reads them back from a
 screen capture (`TANDEM_SCREEN=1`).
