@@ -1,5 +1,6 @@
 import Foundation
 import TandemCore
+import TandemMedia
 
 // The render plan is a pure description of how a project maps onto
 // AVFoundation: which media plays on which composition track and when, what
@@ -140,6 +141,10 @@ enum RenderPlanner {
                 planned[trackIndex].append(PlannedClip(clip: clip, trackIndex: trackIndex, visible: visible))
 
                 guard let item, isMovingVideo else { continue }
+                if let codec = item.undecodableCodecName, assets?.convertedURL(for: item) == nil {
+                    warnings.add("\(item.path) is \(codec), which macOS can't decode, and it isn't converted yet, so it's left out.")
+                    continue
+                }
                 let sourceStart = clip.freezeFrame ? clip.sourceStart : clip.sourceStart - head.scaled(by: clip.speed)
                 let picture = PlannedSegment(
                     clipID: clip.id, mediaID: item.id, role: .picture, timeline: visible,
@@ -227,10 +232,15 @@ enum RenderPlanner {
                 let seamlessIn = previous.map { isSeamless($0, clip) } ?? false
                 let seamlessOut = next.map { isSeamless(clip, $0) } ?? false
 
+                // Normalising is a constant gain from the file's measured
+                // loudness; the clip gain (and its keyframes) go on top in
+                // the envelope. The viewer, review clips and export all take
+                // their sound from this plan, so they level the same.
                 var constant = 1.0
                 if let target = audio.normalizeTo {
-                    if let measured = assets?.loudness(for: item)?.integratedLUFS, measured.isFinite {
-                        constant *= AudioEnvelope.gain(dB: min(max(target - measured, -30), 30))
+                    let measured = assets?.loudness(for: item)?.integratedLUFS
+                    if let gain = AudioLevels.normalizeGainDB(target: target, measuredLUFS: measured) {
+                        constant *= AudioEnvelope.gain(dB: gain)
                     } else {
                         warnings.add("No loudness measurement for \(item.path) yet, so it isn't normalised.")
                     }

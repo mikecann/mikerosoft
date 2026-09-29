@@ -51,6 +51,7 @@ extension MediaResult: ReadableResult {
             var parts = [item.id.padding(toLength: idWidth, withPad: " ", startingAt: 0), item.path, item.role.rawValue]
             if let duration = item.duration { parts.append(duration.description) }
             if let w = item.width, let h = item.height { parts.append("\(w)x\(h)") }
+            if let codec = item.undecodableCodec { parts.append(MediaItem.codecName(codec)) }
             if let take = item.takeID { parts.append("take \(take) +\(TimeText.duration(item.takeOffset ?? .zero))") }
             parts.append(item.clips == 1 ? "1 clip" : "\(item.clips) clips")
             if !item.exists { parts.append("MISSING FILE") }
@@ -63,13 +64,14 @@ extension MediaResult: ReadableResult {
 
 extension MediaResult {
     /// "transcript ready, proxy 45%, matte queued", leaving out analyses
-    /// nobody has asked for yet.
+    /// nobody has asked for yet. A failure says why.
     static func analysisSummary(_ analysis: [String: AnalysisState]) -> String {
-        let order = ["transcript", "loudness", "waveform", "thumbnails", "proxy", "matte", "isolatedVoice"]
+        let order = ["converted", "transcript", "loudness", "waveform", "thumbnails", "proxy", "matte", "isolatedVoice"]
         let keys = analysis.keys.sorted { (order.firstIndex(of: $0) ?? 99, $0) < (order.firstIndex(of: $1) ?? 99, $1) }
         let started = keys.compactMap { key -> String? in
             guard let state = analysis[key], state.state != "none" else { return nil }
             if let progress = state.progress { return "\(key) \(Int(progress * 100))%" }
+            if let message = state.message { return "\(key) \(state.state): \(message)" }
             return "\(key) \(state.state)"
         }
         if analysis.isEmpty { return "(no analysis applies)" }
@@ -286,7 +288,10 @@ extension ExportOutcome: ReadableResult {
 
 extension LoudnessResult: ReadableResult {
     public var readableText: String {
-        var lines = [String(format: "Target %.1f LUFS, true peak ceiling %.1f dBTP.", target, truePeakCeiling)]
+        var lines = [String(
+            format: "Speech is levelled to %.1f LUFS; export brings the mix to %.1f LUFS with true peaks under %.1f dBTP.",
+            speechLoudness, target, truePeakCeiling
+        )]
         if media.isEmpty {
             lines.append("No media with sound.")
         }
@@ -319,8 +324,13 @@ extension LoudnessResult: ReadableResult {
                 groups.append(group)
             }
         }
+        let speech = clips.filter(\.speech)
+        let unlevelled = speech.filter { $0.normalizeTo != speechLoudness || $0.gainDB != 0 }.count
+        if !speech.isEmpty && unlevelled > 0 {
+            lines.append("\(unlevelled) of \(speech.count) speech clips aren't at the speech level; normalizeSpeech sets them.")
+        }
         if !groups.isEmpty {
-            lines.append("Clip levels by track:")
+            lines.append("Clip levels by track (clip gain is added after levelling):")
             let width = groups.map(\.track.count).max() ?? 0
             for group in groups {
                 let count = group.gains.count

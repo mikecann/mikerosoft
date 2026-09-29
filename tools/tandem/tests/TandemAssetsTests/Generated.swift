@@ -4,6 +4,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 @testable import TandemAssets
+import TandemMedia
 
 /// Small media files made on the fly, so no binaries live in the repo.
 enum Generated {
@@ -115,5 +116,18 @@ extension Generated {
            "ip":0,"op":15,"st":0,"bm":0}]}
         """
         try json.write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+extension Generated {
+    /// A 64 x 64, half second sticker in a codec macOS can't decode, the
+    /// way stock packs ship them: `qtrle` (QuickTime Animation) or `png` in
+    /// a MOV. The left half is opaque red, the right half clear.
+    static func undecodableSticker(at url: URL, codec: String, ffmpeg: FFmpeg) throws {
+        try ffmpeg.run([
+            "-y", "-v", "error", "-f", "lavfi",
+            "-i", "color=c=red:s=64x64:d=0.5:r=30,format=rgba,geq=r='255':g='0':b='0':a='if(lt(X,32),255,0)'",
+            "-c:v", codec, "-pix_fmt", codec == "qtrle" ? "argb" : "rgba", url.path
+        ])
     }
 }

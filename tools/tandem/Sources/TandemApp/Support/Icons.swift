@@ -54,6 +54,8 @@ enum Icons {
     static let level = "speaker.wave.2"
     static let fades = "chart.line.uptrend.xyaxis"
     static let voiceIsolation = "waveform.badge.mic"
+    /// The project's speech level, in the Audio tab.
+    static let speechLevel = "person.wave.2"
     static let effects = "sparkles"
     static let look = "camera.filters"
     static let clipOnly = "film"
@@ -83,6 +85,74 @@ enum Icons {
         case .light: return "sun.max"
         case .colour: return "thermometer.medium"
         default: return effect(section.effectType)
+        }
+    }
+
+    /// A command's icon, for menus and buttons.
+    static func command(_ command: EditorCommand) -> String? {
+        switch command {
+        case .playPause: return "playpause"
+        case .shuttleReverse: return "backward"
+        case .shuttleStop: return "stop"
+        case .shuttleForward: return "forward"
+        case .stepBack, .stepBackFive: return "backward.frame"
+        case .stepForward, .stepForwardFive: return "forward.frame"
+        case .goToStart: return "backward.end"
+        case .goToEnd: return "forward.end"
+        case .previousEdit: return "arrow.left.to.line"
+        case .nextEdit: return "arrow.right.to.line"
+        case .previousMarker: return "chevron.left"
+        case .nextMarker: return "chevron.right"
+        case .markIn: return "rectangle.lefthalf.filled"
+        case .markOut: return "rectangle.righthalf.filled"
+        case .clearIn, .clearOut, .clearInOut: return "xmark.circle"
+        case .markClip: return "selection.pin.in.out"
+        case .liftInOut: return "arrow.up.bin"
+        case .extractInOut: return "scissors"
+        case .bladeAtPlayhead: return "scissors"
+        case .rippleTrimStart: return "arrow.left.to.line"
+        case .rippleTrimEnd: return "arrow.right.to.line"
+        case .lift: return "trash"
+        case .rippleDelete: return "delete.backward"
+        case .nudgeLeft, .nudgeLeftFive: return "arrow.left"
+        case .nudgeRight, .nudgeRightFive: return "arrow.right"
+        case .link: return "link"
+        case .addMarker: return "bookmark"
+        case .addTransition: return transition
+        case .toggleKeyframe: return animation
+        case .previousKeyframe: return "chevron.left"
+        case .nextKeyframe: return "chevron.right"
+        case .addVideoTrack: return "plus.rectangle"
+        case .addAudioTrack: return "waveform.badge.plus"
+        case .layoutFull: return layout(.full)
+        case .layoutPipRight: return layout(.pipRight)
+        case .layoutPipLeft: return layout(.pipLeft)
+        case .layoutSplit: return layout(.split)
+        case .selectAll: return "checkmark.circle"
+        case .deselectAll: return "circle.dashed"
+        case .selectForward: return "arrow.right.circle"
+        case .zoomIn: return "plus.magnifyingglass"
+        case .zoomOut: return "minus.magnifyingglass"
+        case .zoomToFit: return "arrow.up.left.and.arrow.down.right"
+        case .toggleSnapping: return "arrow.right.and.line.vertical.and.arrow.left"
+        case .toggleLinkedSelection: return "link"
+        case .toggleRipple: return "arrow.right.to.line"
+        case .toggleTranscriptLane: return "text.bubble"
+        case .toolSelect: return "cursorarrow"
+        case .toolBlade: return "scissors"
+        case .toolRippleTrim: return "arrow.left.to.line"
+        case .toolRoll: return "arrow.left.arrow.right"
+        case .toolSlip: return "arrow.left.and.right"
+        case .toolSlide: return "arrow.left.and.line.vertical.and.arrow.right"
+        case .toggleSafeMargins: return "rectangle.dashed"
+        case .toggleProxy: return "bolt.horizontal"
+        case .undo: return "arrow.uturn.backward"
+        case .redo: return "arrow.uturn.forward"
+        case .save: return "square.and.arrow.down"
+        case .saveVersion: return "doc.on.doc"
+        case .export: return "square.and.arrow.up"
+        case .newProject: return "plus.square"
+        case .openProject: return "folder"
         }
     }
 

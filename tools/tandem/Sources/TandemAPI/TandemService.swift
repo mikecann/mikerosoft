@@ -182,6 +182,7 @@ public final class TandemService: @unchecked Sendable {
                 frameRate: item.frameRate?.framesPerSecond,
                 hasVideo: item.hasVideo,
                 hasAudio: item.hasAudio,
+                undecodableCodec: item.undecodableCodec,
                 takeID: item.takeID,
                 takeOffset: item.takeOffset,
                 clips: usage[item.id] ?? 0,
@@ -195,6 +196,7 @@ public final class TandemService: @unchecked Sendable {
     /// The analyses that apply to a file, and how far along each is.
     func analysisStates(for item: MediaItem, jobs: [JobStatus]) -> [String: AnalysisState] {
         var kinds: [AnalysisKind] = []
+        if AnalysisKind.converted.applies(to: item) { kinds.append(.converted) }
         if item.hasVideo || item.kind == .image { kinds.append(.thumbnails) }
         if item.hasVideo && item.kind == .video { kinds.append(.proxy) }
         if item.hasAudio { kinds += [.waveform, .loudness, .transcript] }
@@ -207,7 +209,8 @@ public final class TandemService: @unchecked Sendable {
             if analysis.isReady(kind, for: item) {
                 states[kind.rawValue] = AnalysisState(state: "ready")
             } else if let job = jobs.last(where: { $0.mediaID == item.id && $0.kind == kind }) {
-                states[kind.rawValue] = AnalysisState(state: job.state.rawValue, progress: job.state == .running ? job.progress : nil)
+                states[kind.rawValue] = AnalysisState(state: job.state.rawValue, progress: job.state == .running ? job.progress : nil,
+                                                      message: job.state == .failed ? job.message : nil)
             } else {
                 states[kind.rawValue] = AnalysisState(state: "none")
             }
@@ -703,19 +706,20 @@ public final class TandemService: @unchecked Sendable {
             for clip in track.clips {
                 guard let id = clip.mediaID, wanted.contains(id) else { continue }
                 let audio = clip.audio ?? AudioProperties()
-                var normalizeGain: Double?
-                if let target = audio.normalizeTo, let lufs = measured[id]?.integratedLUFS, lufs.isFinite {
-                    normalizeGain = target - lufs
+                // The same sum the render makes, so this is what plays.
+                let normalizeGain = audio.normalizeTo.flatMap {
+                    AudioLevels.normalizeGainDB(target: $0, measuredLUFS: measured[id]?.integratedLUFS)
                 }
                 clips.append(ClipLevel(
                     clipID: clip.id, mediaID: id, track: track.name, gainDB: audio.gainDB,
-                    normalizeTo: audio.normalizeTo, normalizeGainDB: normalizeGain
+                    normalizeTo: audio.normalizeTo, normalizeGainDB: normalizeGain,
+                    speech: AudioLevels.isSpeech(clip, on: track, in: project)
                 ))
             }
         }
         return LoudnessResult(
             target: project.settings.loudnessTarget, truePeakCeiling: project.settings.truePeakCeiling,
-            media: media, clips: clips
+            speechLoudness: project.settings.speechLoudness, media: media, clips: clips
         )
     }
 

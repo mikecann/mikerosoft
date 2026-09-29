@@ -35,14 +35,14 @@ struct TimelineToolbar: View {
         HStack(spacing: 14) {
             HStack(spacing: 2) {
                 ForEach(TimelineTool.allCases, id: \.self) { tool in
-                    ToolButton(tool: tool, selected: model.tool == tool, key: key(for: tool)) {
+                    ToolButton(tool: tool, selected: model.tool == tool) {
                         model.tool = tool
                     }
                 }
             }
-            ToggleText(title: "Snap", on: model.snapping, help: "Snapping (S)") { model.snapping.toggle() }
-            ToggleText(title: "Ripple", on: model.rippleTrims, help: "Edge drags ripple the rest of the timeline") { model.rippleTrims.toggle() }
-            ToggleText(title: model.linkedSelection ? "Linked camera + screen" : "Linked selection off", on: model.linkedSelection, help: "Clicking a clip selects its linked picture and sound. Option-click picks one side.") {
+            ToggleText(title: "Snap", on: model.snapping, help: Shortcuts.help("Snapping: clips and the playhead snap to edges and markers", .toggleSnapping)) { model.snapping.toggle() }
+            ToggleText(title: "Ripple", on: model.rippleTrims, help: Shortcuts.help("Ripple trims: dragging an edge moves everything after it", .toggleRipple)) { model.rippleTrims.toggle() }
+            ToggleText(title: model.linkedSelection ? "Linked camera + screen" : "Linked selection off", on: model.linkedSelection, help: Shortcuts.help("Linked selection: clicking a clip selects its linked picture and sound. Option-click picks one side", .toggleLinkedSelection)) {
                 model.linkedSelection.toggle()
             }
             if let range = model.inOutRange {
@@ -59,11 +59,11 @@ struct TimelineToolbar: View {
                     .foregroundStyle(Theme.textMuted.color)
             }
             .buttonStyle(.plain)
-            .help("Remove long pauses from the take using its transcript")
+            .help("Tighten pauses: remove long silences from the take, found from its transcript")
             .popover(isPresented: $showTighten, arrowEdge: .top) {
                 TightenPausesPopover(model: model) { showTighten = false }
             }
-            ToggleText(title: "Transcript lane", on: model.showTranscript, help: "Show the transcript above the tracks (T)") { model.showTranscript.toggle() }
+            ToggleText(title: "Transcript lane", on: model.showTranscript, help: Shortcuts.help("Transcript lane: show what's said above the tracks", .toggleTranscriptLane)) { model.showTranscript.toggle() }
             GraphiteSlider(
                 value: Binding(get: { model.timeline.zoomFraction }, set: { model.timeline.zoomFraction = $0 }),
                 range: 0...1,
@@ -71,24 +71,18 @@ struct TimelineToolbar: View {
                 fill: Theme.textMuted
             )
             .frame(width: 84)
-            .help("Zoom (⌘+ and ⌘−, Shift-Z to fit)")
+            .help(zoomHelp)
         }
         .padding(.horizontal, 14)
         .frame(height: Theme.Metrics.timelineToolbarHeight)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.borderSubtle.color).frame(height: 1) }
     }
 
-    private func key(for tool: TimelineTool) -> String {
-        let command: EditorCommand
-        switch tool {
-        case .select: command = .toolSelect
-        case .blade: command = .toolBlade
-        case .rippleTrim: command = .toolRippleTrim
-        case .roll: command = .toolRoll
-        case .slip: command = .toolSlip
-        case .slide: command = .toolSlide
+    private var zoomHelp: String {
+        let keys = [EditorCommand.zoomIn, .zoomOut, .zoomToFit].compactMap { command in
+            Shortcuts.symbol(for: command).map { "\($0) \(command == .zoomToFit ? "fits" : command == .zoomIn ? "in" : "out")" }
         }
-        return ProjectDocuments.shared.keymap.chords(for: command).first?.symbol ?? ""
+        return keys.isEmpty ? "Timeline zoom" : "Timeline zoom (" + keys.joined(separator: ", ") + ")"
     }
 }
 
@@ -113,7 +107,6 @@ struct ToggleText: View {
 private struct ToolButton: View {
     let tool: TimelineTool
     let selected: Bool
-    let key: String
     let action: () -> Void
 
     var body: some View {
@@ -125,7 +118,8 @@ private struct ToolButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(key.isEmpty ? tool.name : "\(tool.name) (\(key))")
+        // "Blade tool (B): click a clip to cut it there"
+        .help(Shortcuts.help("\(tool.name) tool", tool.command) + ": " + tool.summary)
     }
 }
 

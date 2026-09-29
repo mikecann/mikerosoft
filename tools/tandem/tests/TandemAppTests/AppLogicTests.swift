@@ -148,12 +148,11 @@ final class MediaCatalogTests: XCTestCase {
     func testClipsFromTheLibraryShowTheAssetsName() {
         var project = Project.standard(name: "Names")
         project.media = [MediaItem(id: "med_r", path: "assets/sticker/rocket-x3iqg3mw.mov", kind: .video, role: .sticker, duration: t(1), hasVideo: true)]
-        let renderer = ClipRenderer(project: project, scale: TimelineScale(pixelsPerSecond: 10), artwork: nil, visible: 0...0)
         // placeMedia names a clip after its file.
         var clip = Clip(name: "rocket-x3iqg3mw", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
-        XCTAssertEqual(renderer.name(of: clip), "rocket")
+        XCTAssertEqual(ClipRenderer.name(of: clip, in: project), "rocket")
         clip.name = "Launch"
-        XCTAssertEqual(renderer.name(of: clip), "Launch", "a name someone chose stays")
+        XCTAssertEqual(ClipRenderer.name(of: clip, in: project), "Launch", "a name someone chose stays")
     }
 
     func testTimeOfDayFromRecordItNames() {
@@ -176,6 +175,17 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://new?folder=/videos/static-hosting")!), .newProject(folder: "/videos/static-hosting"))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://version?out=/videos/a/Video%20v2.tandem")!), .saveVersion(out: "/videos/a/Video v2.tandem"))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt")!), .debug(out: "/tmp/tree.txt"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt&reset=1")!), .debug(out: "/tmp/tree.txt", resetTimings: true))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://window?order=back")!), .windowOrder(toFront: false))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://window?order=sideways")!))
+        XCTAssertEqual(
+            AppURLCommand.parse(URL(string: "tandem://simulate?scroll=900,1100,-12,0&steps=90&interval=16")!),
+            .simulate(InputSimulator.Gesture(kind: .scroll(dx: -12, dy: 0, steps: 90), at: CGPoint(x: 900, y: 1_100), modifiers: [], interval: 0.016))
+        )
+        XCTAssertEqual(
+            AppURLCommand.parse(URL(string: "tandem://simulate?scroll=900,1100,0,4&mods=option")!),
+            .simulate(InputSimulator.Gesture(kind: .scroll(dx: 0, dy: 4, steps: 1), at: CGPoint(x: 900, y: 1_100), modifiers: .option))
+        )
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=icons&search=rocket&online=1")!), .assets(section: .icons, search: "rocket", scope: nil, online: true))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=sfx&scope=recent")!), .assets(section: .sfx, search: nil, scope: .recent, online: false))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=looks")!), .assets(section: .looks, search: nil, scope: nil, online: false))
@@ -327,7 +337,7 @@ final class SmallPieceTests: XCTestCase {
         XCTAssertEqual(f.clip("Camera").video?.effects.first?.params["opacity"], .number(70))
         try f.apply(InspectorEdits.audio([f.clip("Voice").id], ["gainDB": .number(-3)], label: "Gain"))
         XCTAssertEqual(f.clip("Voice").audio?.gainDB, -3)
-        XCTAssertEqual(f.clip("Voice").audio?.normalizeTo, -14, "untouched fields stay")
+        XCTAssertEqual(f.clip("Voice").audio?.normalizeTo, -20, "untouched fields stay")
         let look = [Effect(id: "fx_look", type: "colorAdjust", params: ["contrast": .number(8)])]
         try f.apply(InspectorEdits.look("med_camera", look, label: "Look"))
         let item = try XCTUnwrap(f.project.media("med_camera"))
@@ -490,5 +500,22 @@ final class PreviewSizeTests: XCTestCase {
         // Already small enough: the project's own size.
         XCTAssertNil(PlaybackController.previewSize(for: CGSize(width: 1920, height: 1080)))
         XCTAssertNil(PlaybackController.previewSize(for: CGSize(width: 1080, height: 1920)))
+    }
+}
+
+final class ViewerZoomTests: XCTestCase {
+    /// Zooming about the pointer keeps the spot under it where it was, in
+    /// and out of fit.
+    func testZoomKeepsThePointOverTheSamePartOfThePicture() {
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 600)
+        let point = CGPoint(x: 700, y: 200)
+        for (from, to) in [(1.0, 2.0), (1.0, 0.5), (2.0, 0.25), (0.5, 3.0)] as [(CGFloat, CGFloat)] {
+            let before = CanvasGeometry.canvasRect(in: bounds, width: 3840, height: 2160, zoom: from, pan: CGPoint(x: 30, y: -10))
+            let spot = CGPoint(x: (point.x - before.minX) / before.width, y: (point.y - before.minY) / before.height)
+            let pan = CanvasGeometry.pan(keeping: point, in: bounds, width: 3840, height: 2160, from: from, to: to, pan: CGPoint(x: 30, y: -10))
+            let after = CanvasGeometry.canvasRect(in: bounds, width: 3840, height: 2160, zoom: to, pan: pan)
+            XCTAssertEqual(after.minX + spot.x * after.width, point.x, accuracy: 1.5, "\(from) to \(to)")
+            XCTAssertEqual(after.minY + spot.y * after.height, point.y, accuracy: 1.5, "\(from) to \(to)")
+        }
     }
 }

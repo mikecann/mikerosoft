@@ -35,6 +35,8 @@ public struct RenderContext: Sendable {
     public var sizeOverride: CGSize?
     /// Effect definitions, for parameter defaults and Core Image bindings.
     public var effects: EffectRegistry
+    /// The viewer's drag previews, read by the player on every frame.
+    public var liveOverrides: LiveVideoOverrides?
 
     public init(
         project: Project,
@@ -138,7 +140,8 @@ public enum CompositionBuilder {
 ///
 /// It builds the composition once, from the project and the proxies and
 /// mattes that exist then. Make a new one when either changes: one kept
-/// past a finished matte renders that clip without its cutout.
+/// past a finished matte renders that clip without its cutout. Files macOS
+/// can't decode are converted before it builds (`ConvertedMedia`).
 public final class FrameRenderer: @unchecked Sendable {
     public let context: RenderContext
     private let lock = NSLock()
@@ -192,7 +195,9 @@ public final class FrameRenderer: @unchecked Sendable {
             if let prepared { return prepared }
             let context = self.context
             let task = Task { () async throws -> Prepared in
-                let built = try await CompositionAssembler.build(context)
+                let (ready, notes) = await ConvertedMedia.prepare(context)
+                var built = try await CompositionAssembler.build(ready)
+                built.warnings = notes + built.warnings
                 let rgb = built.videoComposition.mutableCopy() as! AVMutableVideoComposition
                 rgb.customVideoCompositorClass = TandemRGBCompositor.self
                 return Prepared(built: built, rgb: rgb)
@@ -288,6 +293,11 @@ public final class Exporter: @unchecked Sendable {
     private let lock = NSLock()
     private var job: ExportPipeline?
     private var cancelRequested = false
+
+    /// What rendered differently from the project (a cutout matte not made
+    /// yet, a sticker that couldn't be converted), once `run` has built the
+    /// composition.
+    public var warnings: [String] { lock.withLock { job }?.warnings ?? [] }
 
     public init(context: RenderContext, preset: ExportPreset, output: URL) {
         self.context = context

@@ -167,10 +167,10 @@ private struct MediaEntryInteractions: ViewModifier {
                 return NSItemProvider(object: MediaDrag.payload(entry.mediaIDs) as NSString)
             }
             .contextMenu {
-                Button("Place at playhead") { place(insert: false) }
-                Button("Insert at playhead") { place(insert: true) }
+                Button("Place at playhead", systemImage: "plus.rectangle.on.rectangle") { place(insert: false) }
+                Button("Insert at playhead", systemImage: "text.insert") { place(insert: true) }
                 Divider()
-                Button("Show in Finder") {
+                Button("Show in Finder", systemImage: "folder") {
                     let urls = entry.mediaIDs.compactMap { model.project.media($0) }.map { model.folder.url(for: $0) }
                     NSWorkspace.shared.activateFileViewerSelecting(urls)
                 }

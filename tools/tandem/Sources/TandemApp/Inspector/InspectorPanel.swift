@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import TandemCore
+import TandemMedia
 
 /// The right panel: the selected clip's Video, Colour, Audio and Info, and
 /// the activity feed.
@@ -25,6 +26,7 @@ struct InspectorPanel: View {
                 tabRow(hasClip: hasClip, compact: true)
             }
             .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 40)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
 
@@ -145,7 +147,7 @@ struct ClipHeader: View {
     private var trackName: String { model.project.track(containingClip: clip.id)?.name ?? "" }
 
     private var title: String {
-        let name = ClipRenderer(project: model.project, scale: model.timeline.scale, artwork: nil, visible: 0...0).name(of: clip)
+        let name = ClipRenderer.name(of: clip, in: model.project)
         let count = model.selection.count
         let suffix = count > 1 ? " and \(count - 1) more" : ""
         return "\(trackName) · \(name)\(suffix)"
@@ -186,6 +188,7 @@ private struct NothingSelected: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
             InspectorSection(title: "Project", icon: Icons.project) {
                 InfoRow(label: "Canvas", value: "\(settings.width) × \(settings.height)")
@@ -489,63 +492,21 @@ struct AudioInspector: View {
         if let first = targets.first {
             let audio = first.audio ?? AudioProperties()
             let ids = targets.map(\.id)
-            let noun = targets.count == 1 ? "clip" : "\(targets.count) clips"
             AnimationSection(model: model, clip: first, domain: "audio.")
-            InspectorSection(title: "Level", icon: Icons.level) {
-                // Animated gain follows the playhead.
-                let gain = first.keyframes["audio.gainDB"] == nil ? audio.gainDB : first.resolvedAudio(at: model.clipTime(of: first)).gainDB
-                SliderRow(label: "Gain", value: gain, range: -60...12, bipolar: true, valueWidth: 62,
-                          format: { String(format: "%+.1f dB", $0).replacingOccurrences(of: "-", with: "−") },
-                          parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-+0123456789.".contains($0) }) },
-                          accessory: targets.count == 1 ? AnyView(KeyframeButton(model: model, clip: first, parameter: "audio.gainDB")) : nil,
-                          onCommit: { value in
-                              let db = (value * 10).rounded() / 10
-                              if targets.count == 1 {
-                                  model.setParameter("audio.gainDB", to: .number(db), in: first, label: "Gain") { InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain") }
-                              } else {
-                                  model.apply(InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain"))
-                              }
-                          })
-                HStack(spacing: 10) {
-                    Text("Muted")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.textMuted.color)
-                        .frame(width: 86, alignment: .leading)
-                    Text(audio.muted ? "Yes" : "No")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.text.color)
-                    Spacer()
-                    GraphiteSwitch(isOn: audio.muted) {
-                        model.apply(InspectorEdits.audio(ids, ["muted": .bool(!audio.muted)], label: audio.muted ? "Unmute \(noun)" : "Mute \(noun)"))
-                    }
-                }
-                HStack(spacing: 10) {
-                    Text("Normalise")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.textMuted.color)
-                        .frame(width: 86, alignment: .leading)
-                    Text(audio.normalizeTo.map { String(format: "to %.0f LUFS", $0).replacingOccurrences(of: "-", with: "−") } ?? "Off")
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.text.color)
-                    Spacer()
-                    GraphiteSwitch(isOn: audio.normalizeTo != nil) {
-                        let value: JSONValue = audio.normalizeTo == nil ? .number(model.project.settings.loudnessTarget) : .null
-                        model.apply(InspectorEdits.audio(ids, ["normalizeTo": value], label: audio.normalizeTo == nil ? "Normalise" : "Stop normalising"))
-                    }
-                }
-                if let item = model.media(for: first), let loudness = model.session.analysis.loudness(for: item) {
-                    InfoRow(label: "Measured", value: String(format: "%.1f LUFS · peak %.1f dBTP", loudness.integratedLUFS, loudness.truePeakDBTP).replacingOccurrences(of: "-", with: "−"))
-                }
-            }
+            LevelSection(model: model, targets: targets)
+            SpeechLevelSection(model: model)
             InspectorSection(title: "Fades", icon: Icons.fades) {
                 SliderRow(label: "Fade in", value: audio.fadeIn.seconds, range: 0...min(5, first.duration.seconds), format: { String(format: "%.1f s", $0) },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["fadeIn": .number(value)], label: "Fade in")) })
+                    .help("How long the sound takes to come up from silence at the clip's start (an equal-power curve).")
                 SliderRow(label: "Fade out", value: audio.fadeOut.seconds, range: 0...min(5, first.duration.seconds), format: { String(format: "%.1f s", $0) },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["fadeOut": .number(value)], label: "Fade out")) })
+                    .help("How long the sound takes to go down to silence at the clip's end (an equal-power curve).")
             }
             InspectorSection(title: "Voice isolation", icon: Icons.voiceIsolation) {
                 SliderRow(label: "Amount", value: audio.voiceIsolation * 100, range: 0...100, format: { "\(Int($0.rounded()))%" },
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["voiceIsolation": .number(value / 100)], label: "Voice isolation")) })
+                    .help("How much of the isolated voice (room noise and music taken out) replaces the original sound. 0% is the original.")
                 Text("Mixes in the isolated voice once the media module has made it.")
                     .font(.ui(11))
                     .foregroundStyle(Theme.textFaint.color)
@@ -612,9 +573,19 @@ struct ClipInfo: View {
                 if let fps = item.frameRate { InfoRow(label: "Frame rate", value: String(format: "%g fps%@", fps.framesPerSecond, item.variableFrameRate ? ", variable" : "")) }
                 if let duration = item.duration { InfoRow(label: "Length", value: Timecode.string(duration, rate: rate)) }
                 InfoRow(label: "Streams", value: [item.hasVideo ? "picture" : nil, item.hasAudio ? "sound" : nil, item.hasAlpha ? "alpha" : nil].compactMap { $0 }.joined(separator: ", "))
+                if let codec = item.undecodableCodecName { InfoRow(label: "Codec", value: conversionText(codec, item)) }
                 if let take = item.takeID { InfoRow(label: "Take", value: take + (item.takeOffset.map { " · starts \(String(format: "%.3f", $0.seconds)) s in" } ?? "")) }
             }
         }
+    }
+
+    /// macOS can't decode QuickTime Animation or PNG video, so Tandem plays
+    /// a converted copy; says how that's going.
+    private func conversionText(_ codec: String, _ item: MediaItem) -> String {
+        if model.session.analysis.convertedURL(for: item) != nil { return "\(codec) · plays from an HEVC copy" }
+        let job = model.jobs.last { $0.mediaID == item.id && $0.kind == .converted }
+        if job?.state == .failed { return "\(codec) · can't convert: \(job?.message ?? "unknown error")" }
+        return "\(codec) · converting to HEVC"
     }
 }
 

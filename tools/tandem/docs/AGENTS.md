@@ -51,8 +51,10 @@ tandem undo [--expect N]    tandem redo    tandem history    tandem validate
 tandem frame <time> [-o out.png]   tandem clip <start> <end> [-o out.mp4]
 tandem export [--preset youtube4k] [-o out.mp4] [--from T] [--to T]
 tandem loudness    tandem effects    tandem schema    tandem watch [--once]
+tandem archive [<project>] [--to <folder>] [--with-cache] [--dry-run]
+tandem relink [--search <folder>]... [--dry-run]    find missing media
 tandem new <path.tandem>           tandem serve    tandem mcp
-tandem import filmora <file.wfp> [--out DIR]     a Filmora project as a .tandem
+tandem import filmora <file.wfp> [--out DIR] [--keep-levels]   a Filmora project as a .tandem
 tandem import edl [edl.json] --recipe decision-models [--out DIR]
 tandem import compare <a.tandem> <b.tandem>      how two cuts of one take differ
 tandem assets providers                          asset sources and what to fix
@@ -68,7 +70,12 @@ Imports write `<out>/<name>/<name>.tandem` with a report beside it
 (`<name>.import.txt` for people, `.import.json` for agents) listing anything
 that couldn't be carried over. Filmora media paths saved on another Mac are
 fixed with `--rewrite /Users/old/=/Users/new/`, and moved files are found
-with `--search <folder>`.
+with `--search <folder>`. A Filmora import normalises speech (the camera's
+sound and the Voice tracks) to the project's speech level with no gain, the
+way placing does, instead of copying Filmora's gains; music and sound
+effects keep their Filmora volume. `--keep-levels` keeps Filmora's own
+levels: its Auto Normalization becomes `normalizeTo: -24` (where Filmora
+levels, on Tandem's meter) with the clip's gain on top.
 
 ### When the app is open
 
@@ -114,8 +121,8 @@ args = ["mcp"]
 
 The tools mirror the operations: `status`, `timeline`, `media`,
 `transcript`, `search`, `pauses`, `tighten`, `apply`, `undo`, `redo`,
-`history`, `validate`, `frame`, `screenshot`, `clip`, `export`, `loudness`,
-`watch` and `effects`, plus the asset library's `assets_search`,
+`history`, `validate`, `frame`, `screenshot`, `clip`, `export`, `archive`,
+`relink`, `loudness`, `watch` and `effects`, plus the asset library's `assets_search`,
 `assets_use`, `assets_credits`, `assets_generate` and `assets_providers`.
 Tool results are readable text; pass `json: true` for the raw JSON. `frame` and `screenshot` return the picture as an image.
 The `apply` tool's input schema describes every edit command. The server
@@ -272,8 +279,8 @@ V2 Camera  trk_camera  cut
   clip_cam2  00:30.000-01:00.000    30.000s  take1-camera.mov [00:32.000-01:02.000]  linked #2  layout pipRight  scale 0.5 at 0.87,0.77  cutout  fx dropShadow
 
 A1 Voice  trk_voice  cut
-  clip_voc1  00:00.000-00:30.000    30.000s  take1-camera.mov [00:00.000-00:30.000]  linked #1  level -14 LUFS
-  clip_voc2  00:30.000-01:00.000    30.000s  take1-camera.mov [00:32.000-01:02.000]  linked #2  level -14 LUFS
+  clip_voc1  00:00.000-00:30.000    30.000s  take1-camera.mov [00:00.000-00:30.000]  linked #1  level -20 LUFS
+  clip_voc2  00:30.000-01:00.000    30.000s  take1-camera.mov [00:32.000-01:02.000]  linked #2  level -20 LUFS
 
 A2 Music  trk_music  follow
   clip_mus1  00:00.000-01:00.000  01:00.000  bed.m4a [00:00.000-01:00.000]  gain -31 dB  fade out 2.000s
@@ -388,8 +395,12 @@ Changes the project's name or metadata.
 
 #### updateSettings
 
-Changes the canvas size, frame rate, sample rate, loudness target or true
-peak ceiling, or adds alternate formats like the 9:16 short.
+Changes the canvas size, frame rate, sample rate, the master's loudness
+target (`loudnessTarget`, -14 LUFS) or true peak ceiling (-1 dBTP), the
+speech level (`speechLoudness`, -20 LUFS, between -40 and -10), or adds
+alternate formats like the 9:16 short. Changing the speech level moves every
+clip normalised to the old level to the new one; clips with a level of
+their own keep it.
 
 ```json
 {"updateSettings": {"patch": {"loudnessTarget": -14}}}
@@ -468,6 +479,11 @@ linked clip, and the files of one take are placed in sync and linked.
 `sourceStart` is measured from the start of the take (or the file) and
 `duration` defaults to all the media that's left. `mode` is `place` (fails
 if the range is taken), `overwrite` or `insert` (pushes later clips right).
+
+Sound gets Mike's levels: speech (a camera's sound, files with no clearer
+role such as a rendered intro, and anything placed on a take track like
+Voice) is normalised to the project's speech level with no gain, music gets
+-31 dB with a 2 s fade out, and sound effects -15 dB.
 
 ```json
 {"placeMedia": {"mediaIDs": ["med_camera", "med_screen"], "at": 0}}
@@ -607,6 +623,11 @@ Changes any clip setting: `video.transform` (position, scale, rotation),
 `video.crop`, `video.opacity`, `video.cutout`, `audio.gainDB`,
 `audio.fadeIn`, `audio.fadeOut`, `audio.normalizeTo`, `audio.voiceIsolation`,
 the text of a title, `enabled`, `name`, `tags`...
+
+`audio.normalizeTo` levels the clip from its file's measured loudness (the
+target minus the measurement, at most 30 dB either way) and `audio.gainDB`
+is added after it: normalised to -20 LUFS with `gainDB` 2, a clip plays at
+about -18. `null` stops normalising.
 
 ```json
 {"updateClip": {"clipID": "clip_k3f9x2mq", "patch": {"video": {"opacity": 0.5}}}}
@@ -759,6 +780,21 @@ animation.
 
 ```json
 {"setKeyframes": {"clipID": "clip_scr1", "parameter": "video.transform.scale", "keyframes": [{"time": 0, "value": 1, "interpolation": "linear"}, {"time": 2, "value": 1.5}]}}
+```
+
+### Sound
+
+#### normalizeSpeech
+
+Sets every speech clip to the project's speech level (`speechLoudness`,
+-20 LUFS unless changed) and clears its gain, as one undo step. Speech is a
+camera's sound, a file with no clearer role, or anything on a take track
+like Voice (an audio track whose ripple mode is `cut`, muted or not). Music
+and sound effects keep their gains; fades, voice isolation, effects and gain
+keyframes stay; locked tracks are left alone with a warning.
+
+```json
+{"normalizeSpeech": {}}
 ```
 
 ### Markers
@@ -1005,6 +1041,33 @@ Zoom the screen clip into the top-right quarter at 1:12 and back out at
 ]}
 ```
 
+### Level the voice
+
+Speech is levelled per take to the project's speech level, -20 LUFS, and
+export brings the whole mix to -14 LUFS with true peaks under -1 dBTP. So
+the speech level sets how the voice sits against the music and sound
+effects (and how loud the app plays), not how loud the video is. Placing
+media levels new speech by itself; a project imported with its own gains,
+or made before the speech level existed, gets there with one command:
+
+```bash
+tandem loudness                              # each file's loudness, each track's levels
+tandem apply - <<< '{"normalizeSpeech": {}}'
+tandem loudness                              # "Speech is levelled to -20.0 LUFS" and no stragglers
+```
+
+To move the voice for the whole video, change the level (clips normalised
+to the old level follow it), then check a review clip:
+
+```json
+{"label": "Voice a little louder", "commands": [
+  {"updateSettings": {"patch": {"speechLoudness": -18}}}
+]}
+```
+
+A single clip can still differ: `{"updateClip": {"clipID": "clip_voc7",
+"patch": {"audio": {"gainDB": 2}}}}` plays it 2 dB over the rest.
+
 ### Export a review clip
 
 ```bash
@@ -1071,6 +1134,81 @@ removing media the cut no longer uses. Sort out everything under "Before
 publishing" first. `--optional` adds courtesy credits nobody requires
 (Pexels creators).
 
+### Archive a finished video
+
+When a video's done it moves to Bruce, Mike's other Mac, which keeps the
+archive. A project there has to open with nothing missing, but projects use
+files from outside their folder: an import's absolute paths, a sound from
+another video's folder, a LUT, a font installed only on this Mac. Look first:
+
+```bash
+tandem archive --dry-run
+```
+
+```
+Dry run, nothing changed. Making Decision Models.tandem standalone would bring in 19 files from outside its folder (2.89 GB).
+From outside the folder:
+  media/music/score.wav  192.2 MB  from ~/dev/convex/convex-videos/decision-models/music/score.wav
+  media/main vid/2026-09-24_105434-camera.mov  1.16 GB  from ~/dev/convex/...
+  ...
+Missing, so left as they are (1):
+  /Users/m5-mike/Desktop/old-take.mov  (med_x, 2 clips)
+```
+
+Then either make the project's own folder standalone (the files are copied
+in and the project points at them, as one undo step credited to you):
+
+```bash
+tandem archive
+```
+
+or write a standalone copy of the whole folder somewhere else, leaving the
+original as it is:
+
+```bash
+tandem archive --to "/Volumes/CannMedia/Archive" --dry-run   # the folder by top-level folder, with sizes
+tandem archive --to "/Volumes/CannMedia/Archive"
+```
+
+The copy is `/Volumes/CannMedia/Archive/<project folder name>/`, with every
+path relative, so it opens anywhere. Proxies, mattes, thumbnails and
+isolated voice are left out (Tandem makes them again; `--with-cache` keeps
+them), as are `node_modules` folders; transcripts and the converted copies
+of stickers macOS can't decode always go. Files outside
+the folder land in `media/<the folder they were in>/`, LUTs in `assets/lut/`
+and fonts in `assets/font/`. Other `.tandem` files in the folder (versions)
+get the same treatment.
+
+Every copy is an APFS clone when it can be (instant, no extra space) and is
+checked against the original by SHA-256 when it isn't. A different file with
+the same name is never replaced; the copy goes beside it as `name 2`.
+`archive.json` in the archived folder says where each file came from, with
+its checksum and date. Missing files are listed and left as they are.
+
+A run that stops part way (Ctrl-C, a share that went away) changed nothing in
+the project; run the same command again and it carries on, using what it
+already copied. An archive to the same place later brings that archive up to
+date. With the app closed the project stays locked while it copies, so a big
+archive to a network share is best run when Mike isn't about to open it; with
+the app open, the archive runs in the app.
+
+### Relink missing media
+
+A project opened on another Mac, or a folder tidied by hand, can lose track
+of files. `tandem media` marks them `MISSING FILE` and `tandem validate`
+fails. The app offers to search a folder when it opens such a project; from
+the command line:
+
+```bash
+tandem relink --dry-run                        # what it would find in the project folder
+tandem relink --search "/Volumes/CannMedia/decision-models"
+```
+
+It looks in the project folder and each `--search` folder (subfolders too)
+for a file with the same name, and takes it only when its content matches
+what the project knew (its fingerprint). A file with no fingerprint is taken
+when it's the only one with that name. It's one undo step.
+
 ### Work alongside Mike
 
 - Read before you write: take the revision from `timeline` or `status` and
@@ -1103,6 +1241,8 @@ publishing" first. `--optional` adds courtesy credits nobody requires
 | screenshot | | `POST /v1/screenshot` | `screenshot` (app only) |
 | clip | `tandem clip <start> <end> -o out.mp4` | `POST /v1/clip {"start", "end"}` | `clip` |
 | export | `tandem export [--preset] -o out.mp4` | `POST /v1/export {"preset", "output"}` | `export` |
+| archive | `tandem archive [<project>] [--to <folder>] [--with-cache] [--dry-run]` | `POST /v1/archive {"to", "withCache", "dryRun"}` | `archive` |
+| relink | `tandem relink [--search <folder>]... [--dry-run]` | `POST /v1/relink {"search": [...], "dryRun"}` | `relink` |
 | loudness | `tandem loudness` | `POST /v1/loudness` | `loudness` |
 | watch | `tandem watch [--once]` | `GET /v1/watch` (events), `POST /v1/watch` (wait) | `watch` |
 | effects | `tandem effects` | `POST /v1/effects` | `effects` |
@@ -1134,6 +1274,11 @@ reach the project (through the app's API when it's open).
   rendering or media analysis isn't in this build.
 - **No pauses or search results**: check `tandem media`; transcripts are
   made in the background after files are added.
+- **"... is QuickTime Animation, which macOS can't decode"**: stock stickers
+  often come as QuickTime Animation or PNG video. Tandem converts them to
+  HEVC with ffmpeg (frames and exports wait for it; `tandem media` shows
+  `converted`). If the warning says ffmpeg is missing, Mike installs it with
+  `brew install ffmpeg`.
 - **"Nothing to undo" after editing with the app closed**: headless undo
   history only lasts while nobody else edits the project. `tandem history`
   shows what can be undone.
@@ -1142,3 +1287,10 @@ reach the project (through the app's API when it's open).
   for the key in ElevenLabs; `tandem assets providers` says when it's fixed.
 - **"No asset ... in the library"**: search for it first (with `--online`
   for provider assets), then use the ID the search gives.
+- **"There's no folder at /Volumes/... to archive into"**: the share isn't
+  mounted. Mike connects to it in Finder first.
+- **"archive.json ... isn't a Tandem archive manifest"**: a file of that name
+  that Tandem didn't write is in the way; it's never written over. Rename it.
+- **"The copy of ... didn't match the original"**: a copy failed its
+  checksum and was thrown away, and nothing in the project changed. Run it
+  again; if it keeps failing, the destination disk is suspect.

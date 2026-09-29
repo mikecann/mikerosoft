@@ -20,8 +20,18 @@ struct ClipRenderer {
     let project: Project
     let scale: TimelineScale
     let artwork: MediaArtwork?
-    /// The lanes' visible horizontal span, so off-screen detail is skipped.
+    /// The horizontal span being drawn, so detail outside it is skipped.
     let visible: ClosedRange<CGFloat>
+    /// Where labels stop when their clip starts further left: the lanes'
+    /// left edge, whichever part of them is being drawn.
+    let pinX: CGFloat
+    /// When set, labels aren't drawn; how far right they'd reach is noted
+    /// here instead (see `labelReach`).
+    var reach: LabelReach?
+    /// The colour space and pixels per point of the screen being drawn
+    /// for, so thumbnails come ready to copy (see `MediaArtwork`).
+    var colorSpace: CGColorSpace?
+    var backingScale: CGFloat = 2
 
     // MARK: - Styles
 
@@ -58,9 +68,21 @@ struct ClipRenderer {
 
     // MARK: - Clips
 
+    /// The rectangle a clip draws in: one point of gap between touching
+    /// clips, so cuts read clearly, on whole points.
+    nonisolated static func drawnRect(_ fullRect: CGRect) -> CGRect {
+        let inset = fullRect.insetBy(dx: 1, dy: 0)
+        guard !inset.isNull else { return inset }
+        // Frame times often land exactly on whole points; rounding error
+        // either side of one mustn't move an edge a point, or different
+        // paintings of the same clip disagree.
+        func settled(_ x: CGFloat) -> CGFloat { (x * 1_000_000).rounded() / 1_000_000 }
+        let minX = settled(inset.minX)
+        return CGRect(x: minX, y: inset.minY, width: settled(inset.maxX) - minX, height: inset.height).integral
+    }
+
     func draw(_ clip: Clip, lane: TimelineLane, rect fullRect: CGRect, state: ClipDrawState, in context: CGContext) {
-        // One point of gap between touching clips, so cuts read clearly.
-        let rect = fullRect.insetBy(dx: 1, dy: 0).integral.insetBy(dx: 0, dy: 0)
+        let rect = Self.drawnRect(fullRect)
         guard rect.width >= 1, rect.maxX >= visible.lowerBound - 2, rect.minX <= visible.upperBound + 2 else { return }
         let style = style(for: clip, lane: lane)
         // Slivers on a zoomed-out timeline: a plain bar is all that shows,
@@ -148,7 +170,8 @@ struct ClipRenderer {
             let tile = CGRect(x: x, y: rect.minY, width: tileWidth, height: rect.height)
             if hasThumbnails, let item {
                 let time = scale.time(atX: min(max(x + tileWidth / 2, rect.minX), rect.maxX), rate: project.settings.frameRate)
-                if let cg = artwork?.thumbnail(for: item, at: clip.sourceTime(atTimelineTime: time)) {
+                let pixels = CGSize(width: tile.width * backingScale, height: tile.height * backingScale)
+                if let cg = artwork?.thumbnail(for: item, at: clip.sourceTime(atTimelineTime: time), pixelSize: pixels, colorSpace: colorSpace) {
                     context.saveGState()
                     context.interpolationQuality = .medium
                     context.translateBy(x: tile.minX, y: tile.maxY)
@@ -173,10 +196,9 @@ struct ClipRenderer {
     }
 
     private func drawGraphicThumbnail(_ clip: Clip, rect: CGRect, in context: CGContext) {
-        guard let item = clip.mediaID.flatMap({ project.media($0) }),
-              let cg = artwork?.thumbnail(for: item, at: clip.sourceStart) else { return }
         let width = min(rect.height * 16 / 9, rect.width / 2)
-        guard width > 12 else { return }
+        guard width > 12, let item = clip.mediaID.flatMap({ project.media($0) }),
+              let cg = artwork?.thumbnail(for: item, at: clip.sourceStart, pixelSize: CGSize(width: width * backingScale, height: rect.height * backingScale), colorSpace: colorSpace) else { return }
         context.saveGState()
         context.translateBy(x: rect.minX, y: rect.maxY)
         context.scaleBy(x: 1, y: -1)
@@ -193,7 +215,9 @@ struct ClipRenderer {
             context.fill(CGRect(x: rect.minX + 2, y: midY - 0.5, width: max(0, rect.width - 4), height: 1))
             return
         }
-        let start = max(rect.minX, visible.lowerBound)
+        // Columns sit on whole points from the clip's start, so a part
+        // drawn on its own lines up with what's around it.
+        let start = rect.minX + max(0, (visible.lowerBound - rect.minX).rounded(.down))
         let end = min(rect.maxX, visible.upperBound)
         guard start < end else { return }
         let half = rect.height / 2 - 3
@@ -231,7 +255,8 @@ struct ClipRenderer {
         let fadeOut = min(scale.width(of: audio.fadeOut), rect.width / 2)
         let path = CGMutablePath()
         if let keys = clip.keyframes["audio.gainDB"], !keys.isEmpty {
-            let start = max(rect.minX, visible.lowerBound - 3)
+            // Every 3 points from the clip's start, wherever drawing starts.
+            let start = rect.minX + max(0, ((visible.lowerBound - 3 - rect.minX) / 3).rounded(.down) * 3)
             let end = min(rect.maxX, visible.upperBound + 3)
             guard start < end else { return }
             var x = start
@@ -336,6 +361,12 @@ struct ClipRenderer {
     }
 
     func name(of clip: Clip) -> String {
+        Self.name(of: clip, in: project)
+    }
+
+    /// A clip's name as the timeline shows it: its text, its own name, or
+    /// its file's.
+    static func name(of clip: Clip, in project: Project) -> String {
         switch clip.content {
         case .text(let text):
             return text.text.split(separator: "\n").first.map(String.init) ?? "Text"
@@ -359,8 +390,20 @@ struct ClipRenderer {
         }
     }
 
-    private func drawLabel(_ clip: Clip, lane: TimelineLane, rect: CGRect, style: Theme.ClipStyle, in context: CGContext) {
-        let left = max(rect.minX, visible.lowerBound)
+    /// How far right a clip's label reaches (its right edge, or the edge
+    /// of its text when truncated), or nil when it has none showing.
+    func labelReach(of clip: Clip, lane: TimelineLane, rect fullRect: CGRect) -> CGFloat? {
+        var measuring = self
+        let reach = LabelReach()
+        measuring.reach = reach
+        measuring.drawLabel(clip, lane: lane, rect: Self.drawnRect(fullRect), style: style(for: clip, lane: lane), in: nil)
+        return reach.maxX.isFinite ? reach.maxX : nil
+    }
+
+    /// Draws a clip's name and badges, or with `reach` set, only measures
+    /// them (with no context).
+    private func drawLabel(_ clip: Clip, lane: TimelineLane, rect: CGRect, style: Theme.ClipStyle, in context: CGContext?) {
+        let left = max(rect.minX, pinX)
         let room = rect.maxX - left
         guard room > 14 else { return }
         switch lane.style {
@@ -418,13 +461,18 @@ struct ClipRenderer {
 
     /// Draws a dark rounded badge and returns its right edge.
     @discardableResult
-    func drawBadge(_ text: String, at origin: CGPoint, color: Swatch, in clipRect: CGRect, context: CGContext) -> CGFloat {
+    func drawBadge(_ text: String, at origin: CGPoint, color: Swatch, in clipRect: CGRect, context: CGContext?) -> CGFloat {
         let font = Theme.Fonts.ui(9.5, .semibold)
         guard clipRect.maxX - origin.x > 30 else { return origin.x }
         let size = CGSize(width: TextMetrics.width(of: text, font: font), height: 12)
         // A badge that doesn't fit whole ("Pi") is noise; leave it out.
         guard size.width + 10 <= clipRect.maxX - origin.x - 3 else { return origin.x }
         let badge = CGRect(x: origin.x, y: origin.y, width: size.width + 10, height: 14)
+        if let reach {
+            reach.note(badge.maxX)
+            return badge.maxX
+        }
+        guard let context else { return badge.maxX }
         context.addPath(CGPath(roundedRect: badge, cornerWidth: 3, cornerHeight: 3, transform: nil))
         context.setFillColor(Theme.badge.cg)
         context.fillPath()
@@ -438,6 +486,10 @@ struct ClipRenderer {
         // short text that fits ("Full") always draws.
         guard width > 6 else { return }
         if width < 40, TextMetrics.width(of: text, font: font) > width { return }
+        if let reach {
+            reach.note(point.x + min(TextMetrics.width(of: text, font: font), width))
+            return
+        }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color.ns, .paragraphStyle: paragraph]
@@ -451,7 +503,12 @@ struct ClipRenderer {
         (text as NSString).draw(with: CGRect(x: point.x, y: point.y, width: width, height: font.pointSize + 5), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
     }
 
-    private func drawBars(at origin: CGPoint, color: Swatch, in context: CGContext) {
+    private func drawBars(at origin: CGPoint, color: Swatch, in context: CGContext?) {
+        if let reach {
+            reach.note(origin.x + 12)
+            return
+        }
+        guard let context else { return }
         context.setFillColor(color.cg)
         for (x, y, h) in [(0.0, 5.0, 5.0), (4.5, 2.0, 8.0), (9.0, 0.0, 10.0)] {
             context.fill(CGRect(x: origin.x + x, y: origin.y + y, width: 3, height: h))
@@ -504,6 +561,15 @@ struct ClipRenderer {
         context.addPath(path)
         context.setFillColor(Theme.onAmber.cg)
         context.fillPath()
+    }
+}
+
+/// How far right measured labels reach.
+final class LabelReach {
+    private(set) var maxX = -CGFloat.infinity
+
+    func note(_ x: CGFloat) {
+        maxX = max(maxX, x)
     }
 }
 

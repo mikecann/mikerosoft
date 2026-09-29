@@ -2,9 +2,10 @@ import AppKit
 import TandemCore
 
 /// The timeline: ruler on top, track headers on the left, lanes filling the
-/// rest, and the playhead over both. Layer-backed AppKit throughout; it
-/// redraws when the model changes and moves only the playhead view while
-/// playing.
+/// rest, and the playhead over both. Layer-backed AppKit throughout. When
+/// the model changes it redraws only the views, and the parts of the lanes,
+/// that look different (see `TimelineDamage`); while playing it moves only
+/// the playhead view.
 @MainActor
 final class TimelineContainerView: NSView {
     let model: EditorModel
@@ -18,11 +19,22 @@ final class TimelineContainerView: NSView {
     /// The lane layout for the project being shown (which may be a drag
     /// preview).
     private(set) var layoutCache: TimelineLayout
+    /// What the views draw, copied from the model (see `TimelineDrawState`).
+    private(set) var drawState: TimelineDrawState
+    /// The playhead's time, kept here so layout and drawing never read the
+    /// playback controller (which would redraw them 60 times a second).
+    private(set) var playheadTime: Time
+    /// Model changes and drag previews wait here for the next frame.
+    private var modelPending = false
+    private var previewPending = false
+    private lazy var pacer = FramePacer(view: self) { [weak self] in self?.applyPending() }
 
     init(model: EditorModel) {
         self.model = model
         self.artwork = MediaArtwork(analysis: model.session.analysis)
         self.layoutCache = TimelineLayout.make(project: model.project, showTranscript: model.showTranscript, heightOverrides: model.timeline.trackHeights)
+        self.drawState = TimelineDrawState(model: model)
+        self.playheadTime = model.playback.time
         super.init(frame: NSRect(x: 0, y: 0, width: 1_200, height: 320))
         wantsLayer = true
         // Since macOS 14 views don't clip drawing to their bounds by
@@ -39,14 +51,14 @@ final class TimelineContainerView: NSView {
             guard let self else { return nil }
             return self.model.timeline.scale.x(self.model.playback.time)
         }
-        loops.append(ObservationLoop(read: { [weak self] in self?.readDrawingState() }, onChange: { [weak self] in self?.modelChanged() }))
+        loops.append(ObservationLoop(read: { [weak self] in self?.readDrawingState() }, onChange: { [weak self] in self?.modelChangeArrived() }))
         loops.append(ObservationLoop(read: { [weak self] in _ = self?.model.playback.time }, onChange: { [weak self] in self?.playheadMoved() }))
         // New thumbnails, waveforms or transcripts: look again and redraw.
         // Job progress alone doesn't redraw the timeline.
-        artwork.onDecoded = { [weak self] in self?.setAllNeedsDisplay() }
+        artwork.onDecoded = { [weak self] in self?.lanes.artworkDecoded() }
         loops.append(ObservationLoop(read: { [weak self] in _ = self?.model.artworkRevision }, onChange: { [weak self] in
             self?.artwork.invalidate()
-            self?.setAllNeedsDisplay()
+            self?.modelChangeArrived()
         }))
     }
 
@@ -64,45 +76,94 @@ final class TimelineContainerView: NSView {
     /// Touches everything the timeline draws, so the observation loop knows
     /// what to watch.
     private func readDrawingState() {
-        _ = model.project
-        _ = model.selection
-        _ = model.selectedTransitionID
-        _ = model.inPoint
-        _ = model.outPoint
-        _ = model.showTranscript
-        _ = model.tool
-        _ = model.linkedSelection
-        _ = model.timeline.scale
-        _ = model.timeline.verticalOffset
-        _ = model.timeline.trackHeights
-        _ = model.draggedMediaIDs
-        _ = model.timeline.renamingTrackID
+        _ = TimelineDrawState(model: model)
     }
 
+    /// The model changed: the timeline catches up at the next frame.
+    private func modelChangeArrived() {
+        modelPending = true
+        pacer.request()
+    }
+
+    private func applyPending() {
+        let started = CACurrentMediaTime()
+        defer { DrawTiming.record("timeline updates", CACurrentMediaTime() - started) }
+        if modelPending {
+            modelPending = false
+            modelChanged()
+        }
+        if previewPending {
+            previewPending = false
+            if relayoutLanes() { headers.needsDisplay = true }
+            lanes.previewDidChange()
+        }
+    }
+
+    /// Copies the model's new state and redraws what it changed.
     private func modelChanged() {
-        relayoutLanes()
-        setAllNeedsDisplay()
+        let old = drawState
+        drawState = TimelineDrawState(model: model)
+        let layoutChanged = relayoutLanes()
+        let damage = TimelineDamage.between(old, drawState, layout: layoutCache, layoutChanged: layoutChanged)
+        if damage.ruler { ruler.needsDisplay = true }
+        if damage.headers { headers.needsDisplay = true }
+        if damage.lanesReshaped {
+            lanes.reshaped()
+        } else if damage.allLanes {
+            lanes.redrawAll()
+        } else {
+            if damage.lanesMoved { lanes.lanesMoved() }
+            if damage.lanesEdited { lanes.contentChanged() }
+            for rect in damage.laneRects { lanes.redraw(rect) }
+        }
+        if old.scale != drawState.scale || old.showTranscript != drawState.showTranscript || old.revision != drawState.revision {
+            lanes.playheadMoved(to: playheadTime)
+        }
         positionPlayhead()
         // A new track opens its name for typing.
         if model.timeline.renamingTrackID != nil { headers.syncRename() }
     }
 
-    func setAllNeedsDisplay() {
-        ruler.needsDisplay = true
-        headers.needsDisplay = true
-        lanes.needsDisplay = true
+    /// The lanes' drag or drop preview changed: at the next frame they
+    /// redraw, and so do the headers when the lanes moved (a drop can add a
+    /// track).
+    func previewChanged() {
+        previewPending = true
+        pacer.request()
+    }
+
+    // MARK: - Painted positions
+
+    /// The content point (x is seconds times pixels a second, y down from
+    /// the top of the tracks) at the lanes' top left, on whole points so
+    /// that painted tiles land on whole pixels wherever they're scrolled.
+    var contentOrigin: CGPoint {
+        let scale = drawState.scale
+        return CGPoint(x: (scale.scrollSeconds * scale.pixelsPerSecond).rounded(), y: drawState.verticalOffset.rounded())
+    }
+
+    /// The scale the timeline is painted at: the model's, scrolled to a
+    /// whole point.
+    var drawScale: TimelineScale {
+        let scale = drawState.scale
+        return TimelineScale(pixelsPerSecond: scale.pixelsPerSecond, scrollSeconds: contentOrigin.x / scale.pixelsPerSecond)
     }
 
     // MARK: - Layout
 
     /// The project the lanes show: the drag preview while dragging.
-    var displayedProject: Project { lanes.previewProject ?? model.project }
+    var displayedProject: Project { lanes.previewProject ?? drawState.project }
 
-    func relayoutLanes() {
+    /// Lays the lanes out again for the project shown, and says whether
+    /// they moved.
+    @discardableResult
+    func relayoutLanes() -> Bool {
         let project = displayedProject
-        let layout = TimelineLayout.make(project: project, showTranscript: model.showTranscript, heightOverrides: model.timeline.trackHeights)
-        if layout != layoutCache { layoutCache = layout }
+        let layout = TimelineLayout.make(project: project, showTranscript: drawState.showTranscript, heightOverrides: drawState.trackHeights)
+        let changed = layout != layoutCache
+        if changed { layoutCache = layout }
         clampVerticalOffset()
+        return changed
     }
 
     override func layout() {
@@ -117,6 +178,8 @@ final class TimelineContainerView: NSView {
         if abs(model.timeline.lanesWidth - width) > 0.5 { model.timeline.lanesWidth = width }
         if model.timeline.fitPending && width > 200 {
             model.timeline.fit(model.project.duration)
+            // Drawn at the fitted scale in this same pass, not the next.
+            modelChanged()
         }
         clampVerticalOffset()
         positionPlayhead()
@@ -131,13 +194,14 @@ final class TimelineContainerView: NSView {
     // MARK: - Playhead
 
     private func playheadMoved() {
+        playheadTime = model.playback.time
         positionPlayhead()
         followPlayhead()
-        lanes.playheadMoved()
+        lanes.playheadMoved(to: playheadTime)
     }
 
     func positionPlayhead() {
-        let x = Theme.Metrics.trackHeaderWidth + model.timeline.scale.x(model.playback.time)
+        let x = Theme.Metrics.trackHeaderWidth + drawScale.x(playheadTime)
         let width = Theme.Metrics.playheadHeadWidth
         let visible = x >= Theme.Metrics.trackHeaderWidth - width / 2 && x <= bounds.width + width
         playheadView.isHidden = !visible

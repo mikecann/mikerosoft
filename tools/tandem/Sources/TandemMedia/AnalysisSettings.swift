@@ -106,6 +106,7 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
             if matteMode == .personAndProps { matte["props"] = matteProps.rawValue }
             values = matte
         case .isolatedVoice: values = ["model": voiceModel.rawValue]
+        case .converted: values = [:]
         }
         let body = values.keys.sorted().map { "\"\($0)\":\"\(values[$0]!)\"" }.joined(separator: ",")
         return "{\(body)}"
@@ -166,7 +167,7 @@ extension AnalysisKind {
     /// Bump when a kind's output changes, so old cache entries are rebuilt.
     public var algorithmVersion: Int {
         switch self {
-        case .thumbnails, .waveform, .loudness, .transcript, .isolatedVoice: return 1
+        case .thumbnails, .waveform, .loudness, .transcript, .isolatedVoice, .converted: return 1
         // 2: the subject mask for props and smoothing over time.
         case .matte: return 2
         // 2: quality 0.6, so the 0.45 proxies that crawled rebuild.
@@ -184,6 +185,16 @@ extension AnalysisKind {
         case .thumbnails: return item.hasVideo || item.kind == .image
         case .waveform, .loudness, .transcript, .isolatedVoice: return item.hasAudio
         case .proxy, .matte: return item.kind == .video && item.hasVideo
+        case .converted: return item.kind == .video && item.hasVideo && item.undecodableCodec != nil
+        }
+    }
+
+    /// Kinds that decode the picture, so for a file macOS can't decode
+    /// they're made from its `converted` copy.
+    var readsPicture: Bool {
+        switch self {
+        case .thumbnails, .proxy, .matte: return true
+        case .waveform, .loudness, .transcript, .isolatedVoice, .converted: return false
         }
     }
 }

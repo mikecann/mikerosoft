@@ -12,13 +12,17 @@ final class ViewerView: NSView, CaptureAware {
     private let playerHost = PlayerHostView()
     private let overlay = ViewerOverlayView()
     private var loops: [ObservationLoop] = []
-    /// 1 fits the canvas; above that the canvas is magnified and pans.
+    /// 1 fits the canvas. Above that it's magnified; below, it's smaller
+    /// than the viewer, with room around it. Either way it pans.
     var zoom: CGFloat = 1 {
         didSet { needsLayout = true; setNeedsDisplayEverywhere() }
     }
     var pan: CGPoint = .zero {
         didSet { needsLayout = true; setNeedsDisplayEverywhere() }
     }
+    static let zoomRange: ClosedRange<CGFloat> = 0.25...8
+    /// Tells the transport bar when a pinch or the wheel changes the zoom.
+    var onZoomChange: ((CGFloat) -> Void)?
 
     init(model: EditorModel) {
         self.model = model
@@ -34,6 +38,12 @@ final class ViewerView: NSView, CaptureAware {
         loops.append(ObservationLoop(read: { [weak self] in self?.readState() }, onChange: { [weak self] in
             self?.needsLayout = true
             self?.setNeedsDisplayEverywhere()
+        }))
+        // Drags here or in the inspector move the picture itself, not just
+        // its outline: the player draws the previews until the edit lands.
+        loops.append(ObservationLoop(read: { [weak self] in _ = self?.model.videoPreview }, onChange: { [weak self] in
+            guard let self else { return }
+            self.model.playback.previewVideo(self.model.videoPreview)
         }))
     }
 
@@ -164,7 +174,7 @@ final class ViewerView: NSView, CaptureAware {
             default:
                 fill(visible, Theme.brollClip, context)
             }
-            let name = ClipRenderer(project: project, scale: model.timeline.scale, artwork: nil, visible: 0...0).name(of: clip)
+            let name = ClipRenderer.name(of: clip, in: project)
             label(name, in: visible, colour: Theme.textSecondary, context: context)
         }
         context.restoreGState()
@@ -247,14 +257,43 @@ final class ViewerView: NSView, CaptureAware {
 
     // MARK: - Zoom and pan
 
+    /// Zooms to `newZoom` keeping `point` (viewer coordinates) still, or
+    /// about the middle.
+    func setZoom(_ newZoom: CGFloat, about point: CGPoint? = nil) {
+        let clamped = min(max(newZoom, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+        guard abs(clamped - zoom) > 0.0001 else { return }
+        let settings = model.project.settings
+        let anchor = point ?? CGPoint(x: bounds.midX, y: bounds.midY)
+        pan = abs(clamped - 1) < 0.001 ? .zero : CanvasGeometry.pan(keeping: anchor, in: bounds, width: settings.width, height: settings.height, from: zoom, to: clamped, pan: pan)
+        zoom = clamped
+        onZoomChange?(zoom)
+    }
+
+    func zoomToFit() {
+        pan = .zero
+        setZoom(1)
+        onZoomChange?(zoom)
+    }
+
+    /// Command or Option with the wheel (or a pinch) zooms about the
+    /// pointer, as on the timeline. Away from fit, the wheel pans.
     override func scrollWheel(with event: NSEvent) {
-        guard zoom > 1 else { return }
-        pan = CGPoint(x: pan.x + event.scrollingDeltaX, y: pan.y + event.scrollingDeltaY)
+        var dx = event.scrollingDeltaX
+        var dy = event.scrollingDeltaY
+        if !event.hasPreciseScrollingDeltas {
+            dx *= 8
+            dy *= 8
+        }
+        if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
+            setZoom(zoom * pow(1.01, dy + dx), about: convert(event.locationInWindow, from: nil))
+            return
+        }
+        guard zoom != 1 || pan != .zero else { return super.scrollWheel(with: event) }
+        pan = CGPoint(x: pan.x + dx, y: pan.y + dy)
     }
 
     override func magnify(with event: NSEvent) {
-        zoom = min(max(zoom * (1 + event.magnification), 1), 6)
-        if zoom == 1 { pan = .zero }
+        setZoom(zoom * (1 + event.magnification), about: convert(event.locationInWindow, from: nil))
     }
 }
 
@@ -336,6 +375,11 @@ final class ViewerOverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let viewer, let model, let context = NSGraphicsContext.current?.cgContext else { return }
         let canvas = viewer.canvasRect
+        // The edge of the frame, so it's clear what's in the video, zoomed
+        // out especially.
+        context.setStrokeColor(Theme.textFaint.opacity(0.6).cg)
+        context.setLineWidth(1)
+        context.stroke(canvas.insetBy(dx: -0.5, dy: -0.5))
         if model.showSafeMargins {
             context.setStrokeColor(NSColor.white.withAlphaComponent(0.28).cgColor)
             context.setLineWidth(1)
@@ -371,8 +415,7 @@ final class ViewerOverlayView: NSView {
             return
         }
         if event.clickCount == 2 {
-            viewer.zoom = 1
-            viewer.pan = .zero
+            viewer.zoomToFit()
             return
         }
         if let (clip, video, frame) = selectedLayer() {
@@ -475,7 +518,7 @@ final class ViewerOverlayView: NSView {
         guard !layers.isEmpty else { return nil }
         let menu = NSMenu()
         if let screen = layers.first(where: { model.project.media($0.clip.mediaID ?? "")?.role == .screen }) {
-            menu.add("Zoom back out at playhead") {
+            menu.add("Zoom back out at playhead", icon: "minus.magnifyingglass") {
                 model.apply(EditBatch(label: "Zoom out at playhead", commands: [
                     .zoomToRegion(clipID: screen.clip.id, rect: Rect(x: 0, y: 0, width: 1, height: 1), at: model.playback.time, duration: Time(seconds: 0.5))
                 ]))
@@ -483,12 +526,12 @@ final class ViewerOverlayView: NSView {
             menu.addItem(.separator())
         }
         for preset in LayoutPreset.allCases {
-            menu.add("Layout: \(preset.name)") {
+            menu.add("Layout: \(preset.name)", icon: Icons.layout(preset), command: TimelineLanesView.layoutCommand(preset)) {
                 model.apply(TimelineEdits.applyLayout(model.project, preset: preset, playhead: model.playback.time, selection: model.selection))
             }
         }
         menu.addItem(.separator())
-        menu.add("Safe margins", checked: model.showSafeMargins) { model.showSafeMargins.toggle() }
+        menu.add("Safe margins", command: .toggleSafeMargins, checked: model.showSafeMargins) { model.showSafeMargins.toggle() }
         return menu
     }
 }

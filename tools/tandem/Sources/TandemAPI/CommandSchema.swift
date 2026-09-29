@@ -293,11 +293,11 @@ extension CommandSchema {
     ])
 
     static let audioProperties = S.object([
-        "gainDB": S.number(),
+        "gainDB": S.number("Clip gain in dB, added after normalizeTo's levelling."),
         "fadeIn": S.time(),
         "fadeOut": S.time(),
         "muted": S.boolean(),
-        "normalizeTo": S.number("Level to this loudness (LUFS)."),
+        "normalizeTo": S.number("Level the clip to this loudness (LUFS) from its file's measured loudness (within ±30 dB); gainDB goes on top. Speech clips use settings.speechLoudness."),
         "voiceIsolation": S.number("0 original, 1 fully isolated voice.", minimum: 0, maximum: 1),
         "effects": S.array(S.ref("Effect"))
     ])
@@ -362,6 +362,7 @@ extension CommandSchema {
         "takeID": S.string(), "takeOffset": S.time(),
         "duration": S.time(), "frameRate": S.ref("FrameRate"), "width": S.integer(), "height": S.integer(),
         "hasVideo": S.boolean(), "hasAudio": S.boolean(), "hasAlpha": S.boolean(), "variableFrameRate": S.boolean(),
+        "undecodableCodec": S.string("Set by scanning: the codec macOS can't decode (\"rle \" or \"png \"). Tandem plays a converted copy."),
         "fingerprint": S.string(),
         "look": S.array(S.ref("Effect"), "Colour grade for every clip of the file.")
     ], required: ["path"])
@@ -410,7 +411,13 @@ extension CommandSchema {
 
     static let projectSettings = S.object([
         "width": S.integer(), "height": S.integer(), "frameRate": S.ref("FrameRate"), "sampleRate": S.integer(),
-        "loudnessTarget": S.number(), "truePeakCeiling": S.number(), "colorSpace": S.string(),
+        "loudnessTarget": S.number("The master's loudness, in LUFS (default -14)."),
+        "truePeakCeiling": S.number("The master limiter's ceiling, in dBTP (default -1)."),
+        "speechLoudness": S.number(
+            "The level speech clips are normalised to, in LUFS (default -20). Changing it moves the clips normalised to the old level.",
+            minimum: AudioLevels.speechLoudnessRange.lowerBound, maximum: AudioLevels.speechLoudnessRange.upperBound
+        ),
+        "colorSpace": S.string(),
         "alternateFormats": S.array(S.object(["id": S.string(), "name": S.string(), "width": S.integer(), "height": S.integer()], required: ["id", "name", "width", "height"]))
     ])
 
@@ -437,8 +444,8 @@ extension CommandSchema {
         ),
         Entry(
             command: .updateSettings,
-            summary: "Changes canvas size, frame rate or loudness target.",
-            arguments: S.object(["patch": S.patch(of: "ProjectSettings", "Fields: width, height, frameRate, sampleRate, loudnessTarget, truePeakCeiling, colorSpace, alternateFormats.")], required: ["patch"]),
+            summary: "Changes canvas size, frame rate, the master's loudness target and true peak ceiling, or the speech level (speechLoudness). Clips normalised to the old speech level move to the new one.",
+            arguments: S.object(["patch": S.patch(of: "ProjectSettings", "Fields: width, height, frameRate, sampleRate, loudnessTarget, truePeakCeiling, speechLoudness, colorSpace, alternateFormats.")], required: ["patch"]),
             example: #"{"updateSettings": {"patch": {"loudnessTarget": -14}}}"#
         ),
         Entry(
@@ -699,6 +706,12 @@ extension CommandSchema {
                 "keyframes": S.array(S.ref("Keyframe"), "Times are seconds from the clip's start.")
             ], required: ["clipID", "parameter", "keyframes"]),
             example: #"{"setKeyframes": {"clipID": "clip_scr1", "parameter": "video.transform.scale", "keyframes": [{"time": 0, "value": 1, "interpolation": "linear"}, {"time": 2, "value": 1.5}]}}"#
+        ),
+        Entry(
+            command: .normalizeSpeech,
+            summary: "Levels every speech clip (camera and voice sound, and anything on a take track like Voice) to the project's speech level (settings.speechLoudness, default -20 LUFS) and clears its clip gain. Music and sound effects keep their gains. Change the level first with updateSettings if you want another.",
+            arguments: S.object([:]),
+            example: #"{"normalizeSpeech": {}}"#
         ),
         Entry(
             command: .addMarker,

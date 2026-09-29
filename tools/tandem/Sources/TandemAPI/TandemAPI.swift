@@ -33,6 +33,8 @@ public enum ServiceOperation: String, CaseIterable, Codable, Sendable {
     case loudness
     case watch
     case effects
+    case archive
+    case relink
 
     /// The request type that carries this operation's parameters.
     public var callType: any ServiceCall.Type {
@@ -58,13 +60,15 @@ public enum ServiceOperation: String, CaseIterable, Codable, Sendable {
         case .loudness: return LoudnessRequest.self
         case .watch: return WatchRequest.self
         case .effects: return EffectsRequest.self
+        case .archive: return ArchiveRequest.self
+        case .relink: return RelinkRequest.self
         }
     }
 
     /// True for operations that change the project.
     public var edits: Bool {
         switch self {
-        case .apply, .undo, .redo, .tighten, .captions, .short, .media: return true
+        case .apply, .undo, .redo, .tighten, .captions, .short, .media, .archive, .relink: return true
         default: return false
         }
     }

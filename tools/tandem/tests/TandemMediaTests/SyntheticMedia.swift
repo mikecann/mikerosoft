@@ -5,6 +5,7 @@ import CoreVideo
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
+@testable import TandemMedia
 import XCTest
 
 /// Small media files made inside the tests, so nothing depends on footage
@@ -312,5 +313,21 @@ extension SyntheticMedia {
         sink.file = nil
         _ = synthesizer
         return finished
+    }
+}
+
+extension SyntheticMedia {
+    /// A sticker in a codec macOS can't decode, written by ffmpeg: `qtrle`
+    /// (QuickTime Animation) or `png` in a MOV, the way stock sticker packs
+    /// ship them. The left third is opaque red, the middle third red at half
+    /// alpha, the right third clear. Skips the test without ffmpeg.
+    static func writeUndecodableSticker(to url: URL, codec: String, width: Int = 96, height: Int = 64, seconds: Double = 0.5, fps: Int = 30) throws {
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        let pixelFormat = codec == "qtrle" ? "argb" : "rgba"
+        try ffmpeg.run([
+            "-y", "-v", "error", "-f", "lavfi",
+            "-i", "color=c=red:s=\(width)x\(height):d=\(seconds):r=\(fps),format=rgba,geq=r='255':g='0':b='0':a='if(lt(X,W/3),255,if(lt(X,2*W/3),128,0))'",
+            "-c:v", codec, "-pix_fmt", pixelFormat, url.path
+        ])
     }
 }

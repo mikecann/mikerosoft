@@ -74,6 +74,29 @@ self-contained. A different file already there under the same name (a copy
 Mike reworked, or an older version the timeline still plays) is never
 replaced: the new copy goes beside it.
 
+## Shared files and archived projects
+
+The library is the shared, global folder: stickers, sounds, music, LUTs,
+fonts, icons and logos live there once for every project, and Mike's own
+collections join it as import folders (`addImportFolder`). Effects, title
+styles and transitions are data built into Tandem (packs later), so a
+project never needs their files.
+
+A project can still end up using files from outside its folder: an import's
+absolute paths, a sound from another video's folder, a LUT picked from
+Downloads, a library file a project referred to directly, a font a title
+names that's only installed on this Mac. Archiving (File > Archive project…,
+`tandem archive`, see ARCHITECTURE.md) copies all of those into the project
+folder, media into `media/<the folder it was in>/`, LUTs into
+`assets/lut/`, fonts into `assets/font/`, and points the project at the
+copies, so the folder opens on another Mac (Bruce) with nothing missing.
+With `--to <folder>` it writes a standalone copy of the whole folder there
+instead. Fonts are looked for with Core Text first (fonts in
+`/System/Library` come with every Mac and aren't copied), then among the
+library's downloaded fonts, which the CLI doesn't register. `archive.json`
+records where each file came from, so the licence trail (the catalogue's
+usage and licence tables) can still be followed from an archived copy.
+
 ## Normalising on import (tested on this Mac)
 
 - Alpha video: AVFoundation can't open WebM. Decode VP9 WebM with ffmpeg's
@@ -81,6 +104,13 @@ replaced: the new copy goes beside it.
   convert to HEVC with alpha via `AVAssetExportPresetHEVCHighestQualityWithAlpha`
   (a 5 s sticker: 520 KB WebM, 23 MB ProRes 4444, 386 KB HEVC-alpha). Don't use
   ffmpeg's `hevc_videotoolbox` for alpha; its output fails to decode.
+- QuickTime Animation and PNG in a MOV (Storyblocks, Motion Array and older
+  VideoHive sticker packs): macOS 26 can't decode either, so they go the
+  WebM way through ffmpeg and ProRes 4444 to HEVC with alpha
+  (`HEVCTranscoder`, shared with project media). Animation and PNG frames
+  are RGB: they're converted with the BT.709 matrix and tagged, because
+  untagged, the export guessed SMPTE-C for a small picture and turned red
+  orange. Without ffmpeg the import fails and says to install it.
 - Animated WebP and GIF: ImageIO decodes both with alpha and frame delays.
 - Lottie: render offscreen with alpha (about 1.5 to 2.3 s for 140 frames at
   1024 square) into HEVC-alpha at import, so the renderer only sees video.

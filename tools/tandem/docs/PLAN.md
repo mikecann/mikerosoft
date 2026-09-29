@@ -35,6 +35,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Matte v2: accurate person mask plus the foreground subject mask (keeps the mic), smoothed only where the picture is still; about 9x less flicker, 41 fps [media]
 - [x] Analysis follows the edit: heavy jobs only for what the timeline uses [integration]
 - [x] Isolated voice (AUSoundIsolation), latency compensated [media]
+- [x] Video macOS can't decode (QuickTime Animation and PNG stock stickers) converted to HEVC with alpha through ffmpeg, in projects and the asset library; renders no longer fail with "Cannot Decode" [media]
 
 ## Milestone 3: render and export
 
