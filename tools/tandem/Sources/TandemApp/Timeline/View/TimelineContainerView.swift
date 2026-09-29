@@ -325,3 +325,49 @@ final class MarqueeView: NSView {
         isHidden = false
     }
 }
+
+/// Amber outlines over the clips a selection box is picking up, drawn by a
+/// shape layer so the clips under them don't redraw while the box moves.
+final class ClipOutlineView: NSView {
+    private let shape = CAShapeLayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        shape.fillColor = nil
+        shape.strokeColor = Theme.amber.cg
+        shape.lineWidth = 2
+        shape.actions = ["path": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        layer?.addSublayer(shape)
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        shape.frame = bounds
+    }
+
+    /// Shows `outlines`, in this view's (flipped) coordinates.
+    func show(_ outlines: [Marquee.Outline]) {
+        let path = CGMutablePath()
+        for outline in outlines {
+            path.addRoundedRect(in: outline.rect, cornerWidth: outline.radius, cornerHeight: outline.radius)
+        }
+        // The layer's own coordinates start at the bottom.
+        var flip = CGAffineTransform(translationX: 0, y: bounds.height).scaledBy(x: 1, y: -1)
+        let flipped = (layer?.isGeometryFlipped ?? false) ? path : (path.copy(using: &flip) ?? path)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shape.frame = bounds
+        shape.path = flipped
+        CATransaction.commit()
+        isHidden = outlines.isEmpty
+    }
+}

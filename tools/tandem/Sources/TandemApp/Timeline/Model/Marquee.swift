@@ -54,6 +54,42 @@ struct Marquee: Equatable {
     }
 }
 
+extension Marquee {
+    /// An amber outline for a clip the box is picking up.
+    struct Outline: Equatable {
+        var rect: CGRect
+        var radius: CGFloat
+    }
+
+    /// Outlines for `clipIDs` in the lanes' view coordinates, the same as
+    /// the stroke a selected clip draws (see `ClipRenderer.draw`), for
+    /// clips that reach into `visibleX`. They show over the clips while the
+    /// box is dragged, so the clips themselves don't redraw on every move:
+    /// on a 2560 point wide timeline a redraw costs 8 ms and more, and then
+    /// waits for the screen to let go of the last one.
+    static func outlines(
+        of clipIDs: Set<String>, project: Project, layout: TimelineLayout, scale: TimelineScale,
+        verticalOffset: CGFloat, visibleX: ClosedRange<CGFloat>
+    ) -> [Outline] {
+        guard !clipIDs.isEmpty else { return [] }
+        var outlines: [Outline] = []
+        for lane in layout.lanes {
+            guard let trackID = lane.trackID, let track = project.track(trackID) else { continue }
+            for clip in track.clips where clipIDs.contains(clip.id) {
+                let x0 = scale.x(clip.start)
+                let x1 = scale.x(clip.end)
+                guard x1 >= visibleX.lowerBound, x0 <= visibleX.upperBound else { continue }
+                let full = CGRect(x: x0, y: lane.y - verticalOffset, width: max(1, x1 - x0), height: lane.height)
+                let rect = full.insetBy(dx: 1, dy: 0).integral
+                guard rect.width >= 1 else { continue }
+                let radius = min(Theme.Metrics.clipCornerRadius, rect.width / 2, rect.height / 2)
+                outlines.append(Outline(rect: rect.insetBy(dx: 1, dy: 1), radius: max(radius - 1, 0)))
+            }
+        }
+        return outlines
+    }
+}
+
 /// A middle-button drag of the timeline. What's under the pointer stays
 /// under it, like pushing a sheet of paper about: time scrolls sideways,
 /// and the tracks scroll up and down when they don't all fit.

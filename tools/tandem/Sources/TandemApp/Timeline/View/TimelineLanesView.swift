@@ -28,10 +28,14 @@ final class TimelineLanesView: TimelineChildView {
     private var pressModifiers = SelectionRules.Modifiers()
     /// A selected clip Cmd-pressed: deselected on mouse up unless dragged.
     private var pendingCommandToggle: String?
-    /// A selection box being dragged, drawn by `marqueeView` so moving it
-    /// never redraws the clips.
+    /// A selection box being dragged. It and the clips it picks up are
+    /// drawn by layers over the lanes (`outlineView` and `marqueeView`), so
+    /// dragging it never redraws the clips.
     private var marquee: Marquee?
+    private let outlineView = ClipOutlineView()
     private let marqueeView = MarqueeView()
+    /// The scroll, zoom and track offset the outlines were placed for.
+    private var outlinedAt: (scale: TimelineScale, offset: CGFloat)?
     private var snapLine: Time?
     private var dragLabel: (text: String, point: CGPoint)?
     private var drop: (batch: EditBatch, laneID: String?)?
@@ -56,6 +60,7 @@ final class TimelineLanesView: TimelineChildView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         registerForDraggedTypes([.tandemMedia, .string, .fileURL])
+        addSubview(outlineView)
         addSubview(marqueeView)
     }
 
@@ -105,8 +110,7 @@ final class TimelineLanesView: TimelineChildView {
         }
 
         let renderer = ClipRenderer(project: project, scale: scale, artwork: container.artwork, visible: dirtyRect.minX...dirtyRect.maxX)
-        // While a box is being dragged, the clips it would select.
-        let selected = marquee?.selection ?? model.selection
+        let selected = model.selection
         let linkedGroups = Set(selected.compactMap { project.clip($0)?.linkGroup })
         let changed = previewChangedClipIDs(project)
 
@@ -519,10 +523,18 @@ final class TimelineLanesView: TimelineChildView {
         if var box = marquee, let tester = tester(for: model.project) {
             let changed = box.move(to: point, tester: tester, linkedSelection: model.linkedSelection)
             marquee = box
-            // The box itself is a layer that moves; the clips only redraw
-            // when it takes in or lets go of one.
-            marqueeView.show(box.rect(scale: model.timeline.scale).offsetBy(dx: 0, dy: -offset))
-            if changed { needsDisplay = true }
+            let scale = model.timeline.scale
+            marqueeView.show(box.rect(scale: scale).offsetBy(dx: 0, dy: -offset))
+            // Outlines go round what the box adds; they move again only
+            // when it picks up or drops a clip, or the timeline scrolls.
+            if changed || outlinedAt?.scale != scale || outlinedAt?.offset != offset {
+                if outlineView.frame != bounds { outlineView.frame = bounds }
+                outlineView.show(Marquee.outlines(
+                    of: box.selection.subtracting(model.selection), project: model.project, layout: container.layoutCache,
+                    scale: scale, verticalOffset: offset, visibleX: -8...(bounds.width + 8)
+                ))
+                outlinedAt = (scale, offset)
+            }
         }
     }
 
@@ -605,6 +617,8 @@ final class TimelineLanesView: TimelineChildView {
         previewProject = nil
         marquee = nil
         marqueeView.isHidden = true
+        outlineView.isHidden = true
+        outlinedAt = nil
         snapLine = nil
         dragLabel = nil
         container.relayoutLanes()

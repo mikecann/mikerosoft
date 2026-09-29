@@ -93,3 +93,29 @@ final class SimulatedGestureTests: XCTestCase {
         XCTAssertNil(InputSimulator.parse(["drag": "1,2,3,4", "interval": "5000"]), "a step can't wait more than a second")
     }
 }
+
+final class MarqueeOutlineTests: XCTestCase {
+    /// The outline sits where a selected clip draws its amber stroke: the
+    /// clip less a point each side, then a point in for the 2 pt line.
+    func testOutlinesMatchTheSelectedStroke() throws {
+        let f = try AppFixture()
+        let layout = TimelineLayout.make(project: f.project, showTranscript: true)
+        let lane = layout.lane(forTrack: f.track("B-roll").id)!
+        let outlines = Marquee.outlines(
+            of: [f.clip("B-roll").id], project: f.project, layout: layout, scale: TimelineScale(pixelsPerSecond: 10),
+            verticalOffset: 30, visibleX: 0...1_000
+        )
+        // 20 to 25 s at 10 px a second: 200 to 250.
+        XCTAssertEqual(outlines, [Marquee.Outline(rect: CGRect(x: 202, y: lane.y - 30 + 1, width: 46, height: lane.height - 2), radius: 3)])
+    }
+
+    func testLeavesOutClipsOffScreenAndOthers() throws {
+        let f = try AppFixture()
+        let layout = TimelineLayout.make(project: f.project, showTranscript: true)
+        let scale = TimelineScale(pixelsPerSecond: 10)
+        XCTAssertEqual(Marquee.outlines(of: [f.clip("B-roll").id], project: f.project, layout: layout, scale: scale, verticalOffset: 0, visibleX: 0...150), [])
+        XCTAssertEqual(Marquee.outlines(of: [], project: f.project, layout: layout, scale: scale, verticalOffset: 0, visibleX: 0...1_000), [])
+        let both = Marquee.outlines(of: [f.clip("B-roll").id, f.clip("Music").id], project: f.project, layout: layout, scale: scale, verticalOffset: 0, visibleX: 0...1_000)
+        XCTAssertEqual(both.count, 2)
+    }
+}
