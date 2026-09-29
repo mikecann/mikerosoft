@@ -183,7 +183,7 @@ results are Codable so the CLI and MCP can return them as JSON.
 | Use in a project | `use(id, in:projectID:)` gives an `AssetPlacement`; `editCommands(at:in:)` adds and places it |
 | Description credits | `credits(for: project, in: folder).text()`, plus `warnings`; `licenceHistory(id)` for disputes |
 | Import folders | `addImportFolder(url, licence: FolderLicence.presets["envato"])`, `rescanImportFolders()`, `watchImportFolders` |
-| Fonts | `registerFonts()` at launch, `AssetLibrary.registerFonts(in: project)` on open |
+| Fonts | `registerFonts()` at launch; a project's own `assets/font/` is registered by whatever renders it (`ProjectFonts` in TandemRender) |
 | Housekeeping | `prune()`, `evictUnpinnedFiles()`, `rebuildCatalogFromDisk()` |
 
 An import folder's licence note is `tandem-licence.json` in the folder

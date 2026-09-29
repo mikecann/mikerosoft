@@ -88,9 +88,7 @@ enum ArchiveFonts {
 
     /// The family a text clip draws with: its own font, or its preset's.
     static func family(of text: TextContent) -> String {
-        let defaults = TextStyle()
-        if text.style.font != defaults.font { return text.style.font }
-        return TitlePresets.preset(text.preset)?.style.font ?? defaults.font
+        TitlePresets.style(for: text).font
     }
 
     /// Every family a project's titles use, with the clips that use it.

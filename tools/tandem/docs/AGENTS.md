@@ -37,7 +37,7 @@ result. Errors go to standard error with exit code 1 (2 for usage
 mistakes); with `--json` the error is printed as `{"error": {...}}`.
 
 ```
-tandem status                      revision, length, who has it open, jobs
+tandem status                      revision, length, who has it open, jobs, missing fonts
 tandem timeline [--summary] [--from T] [--to T] [--words] [--json]
 tandem media [--refresh]           files, clip counts, analysis status
 tandem transcript [<clip or media id>] [--from T] [--to T]
@@ -363,6 +363,11 @@ clips in the range).
   project, like `Warning: No cutout matte for ...-camera.mov yet, showing the
   full frame.` while the matte is still being made; only lines about what
   plays in the part rendered are shown.
+- Titles in a font this Mac doesn't have are drawn in SF Pro, and never
+  quietly: `frame`, `clip`, `export`, `captions`, `status` and `validate`
+  all say so with the fix, like `Tilt Warp, the caption preset's font, isn't
+  installed, so 42 text clips are drawn in SF Pro instead. Install it with:
+  tandem assets use fontsource:tilt-warp`.
 
 ## Assets
 
@@ -391,7 +396,11 @@ recorded, which is what the description credits are built from.
   Music at -31 dB with a 2 s fade out, stickers, icons and logos on
   Graphics, stock video on B-roll. The edit goes through the app when the app
   has the project open, as one undo step under your name. Fonts are
-  installed instead of placed; use their name in a title's style.
+  installed instead of placed, into the project's `assets/font/`; use their
+  name in a title's style. When the app has the project open it has the
+  font straight away too (the output says so), with no restart. A
+  `fontsource:<name>` ID works without searching first, so the fix a
+  missing-font warning gives can be run as it is.
 - `tandem assets fetch <id>` downloads and normalises without using it.
 - `tandem assets credits` (`assets_credits`) prints the credits block for
   the video description from what the project uses now, plus anything to
@@ -911,6 +920,14 @@ use about 0.85 for landscape. Run it again over the same range to redo them
 stumbles, a word shows once, on the side of the cut where most of it plays,
 and words that were cut out don't show.
 
+Each caption stores the preset, its words and only what you passed (`--y`
+is its position), so the preset decides the look and a later change to it
+reaches every caption. Tilt Warp doesn't come with macOS: the first time
+captions are applied, Tandem installs it from Fontsource into the project's
+`assets/font/` (the output says so), and the app picks it up. If that can't
+happen (offline), the captions still go in and the output says what to run.
+To restyle them, patch the captions' `style` (see Add a title).
+
 ### Make a short
 
 A short is 1080x1920, and there are two ways to make one.
@@ -1010,6 +1027,26 @@ and insert a text clip:
 
 Change the words later with
 `{"updateClip": {"clipID": "clip_...", "patch": {"content": {"text": {"text": "TIP 2"}}}}}`.
+
+The preset gives the look. A clip's `style` holds only what it changes
+(`font`, `size`, `weight`, `color`, `strokeColor`, `strokeWidth`,
+`backgroundColor`, `alignment`, `uppercase`, `shadow`, `lineSpacing`), and
+each field that's there wins over the preset, even `false` or `0`. So a URL
+on a label stays lower case, and a callout can lose its shadow and outline:
+
+```json
+{"label": "Plain end card", "commands": [
+  {"updateClip": {"clipID": "clip_url", "patch": {"content": {"text": {"style": {"uppercase": false, "strokeWidth": 0, "shadow": false}}}}}}
+]}
+```
+
+`null` for a field in a patch takes it back to the preset's. A
+`backgroundColor` with `"a": 0` switches off a preset's box, and
+`"animationIn": "none"` (or `animationOut`) its animation. `tandem timeline`
+lists what each title sets itself (`style uppercase=false shadow=false`).
+The app's Text inspector shows the values the title is drawn with, marks the
+ones the clip sets itself in amber, and has a button beside each that goes
+back to the preset's.
 
 ### Add a section card
 
@@ -1357,6 +1394,15 @@ reach the project (through the app's API when it's open).
   plain `tandem export`.
 - **No pauses or search results**: check `tandem media`; transcripts are
   made in the background after files are added.
+- **"... isn't installed, so N text clips are drawn in SF Pro instead"**:
+  run the `tandem assets use fontsource:...` it gives. The font goes into
+  the project's `assets/font/`, and the app (if it has the project open)
+  uses it straight away. For a font Fontsource doesn't have, search with
+  `tandem assets search "<name>" --kind font --online`, or pick another
+  font for those titles.
+- **"This project was saved by a newer Tandem (schema 2)"**: an older
+  build opened a project a newer one saved. Update Tandem. Schema 2 is the
+  one where a title's own style always wins over its preset.
 - **"... is QuickTime Animation, which macOS can't decode"**: stock stickers
   often come as QuickTime Animation or PNG video. Tandem converts them to
   HEVC with ffmpeg (frames and exports wait for it; `tandem media` shows

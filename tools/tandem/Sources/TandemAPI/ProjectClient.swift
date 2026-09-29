@@ -11,19 +11,19 @@ public protocol DeferredServiceCall: ServiceCall {
 
 extension FrameRequest: DeferredServiceCall {
     public func prepare(on service: TandemService, context: CallContext) throws -> @Sendable () async throws -> ImageResult {
-        try service.prepareFrame(self)
+        try service.withPresetFonts(try service.prepareFrame(self))
     }
 }
 
 extension ClipRequest: DeferredServiceCall {
     public func prepare(on service: TandemService, context: CallContext) throws -> @Sendable () async throws -> ExportOutcome {
-        try service.prepareClip(self)
+        try service.withPresetFonts(try service.prepareClip(self))
     }
 }
 
 extension ExportRequest: DeferredServiceCall {
     public func prepare(on service: TandemService, context: CallContext) throws -> @Sendable () async throws -> ExportOutcome {
-        try service.prepareExport(self)
+        try service.withPresetFonts(try service.prepareExport(self))
     }
 }
 
@@ -49,9 +49,11 @@ public final class TandemAPIHost: @unchecked Sendable {
         session: ProjectSession,
         analysis: AnalysisSource? = nil,
         renderer: RenderBackend = DefaultRenderBackend(),
+        fontInstaller: FontInstalling? = nil,
         port: UInt16 = 0
     ) async throws -> TandemAPIHost {
         let service = TandemService(session: session, mode: .hosted, analysis: analysis, renderer: renderer)
+        service.fontInstaller = fontInstaller
         let server = TandemHTTPServer(service: service)
         do {
             let bound = try await server.start(port: port)
@@ -166,6 +168,8 @@ public final class ProjectClient: @unchecked Sendable {
     /// Overrides for tests: what a headless service uses.
     var analysis: AnalysisSource?
     var renderer: RenderBackend = DefaultRenderBackend()
+    /// Where a headless command gets the fonts built-in presets need.
+    var fontInstaller: FontInstalling? = LibraryFontInstaller.shared
     /// How long to wait for a project another command is busy with.
     var lockWait: TimeInterval = 15
 
@@ -244,13 +248,13 @@ public final class ProjectClient: @unchecked Sendable {
     private func runHeadless<C: ServiceCall>(_ call: C) async throws -> C.Result {
         let context = CallContext(author: author)
         if let deferred = call as? any DeferredServiceCall {
-            let work = try HeadlessPool.shared.with(projectURL, analysis: analysis, renderer: renderer) { service in
+            let work = try HeadlessPool.shared.with(projectURL, analysis: analysis, renderer: renderer, fontInstaller: fontInstaller) { service in
                 try Self.prepare(deferred, on: service, context: context)
             }
             // The project is closed again while the render runs.
             return try await work() as! C.Result
         }
-        let service = try HeadlessPool.shared.acquire(projectURL, analysis: analysis, renderer: renderer)
+        let service = try HeadlessPool.shared.acquire(projectURL, analysis: analysis, renderer: renderer, fontInstaller: fontInstaller)
         defer { HeadlessPool.shared.release(projectURL) }
         return try await call.run(on: service, context: context)
     }
@@ -344,7 +348,7 @@ final class HeadlessPool: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [URL: Entry] = [:]
 
-    func acquire(_ url: URL, analysis: AnalysisSource?, renderer: RenderBackend) throws -> TandemService {
+    func acquire(_ url: URL, analysis: AnalysisSource?, renderer: RenderBackend, fontInstaller: FontInstalling? = nil) throws -> TandemService {
         lock.lock()
         defer { lock.unlock() }
         if var entry = entries[url] {
@@ -354,6 +358,7 @@ final class HeadlessPool: @unchecked Sendable {
         }
         let session = try ProjectSession.open(url, owner: .cli)
         let service = TandemService(session: session, mode: .headless, analysis: analysis, renderer: renderer)
+        service.fontInstaller = fontInstaller
         entries[url] = Entry(session: session, service: service, users: 1)
         return service
     }
@@ -374,8 +379,8 @@ final class HeadlessPool: @unchecked Sendable {
         entry.session.close()
     }
 
-    func with<T>(_ url: URL, analysis: AnalysisSource?, renderer: RenderBackend, _ body: (TandemService) throws -> T) throws -> T {
-        let service = try acquire(url, analysis: analysis, renderer: renderer)
+    func with<T>(_ url: URL, analysis: AnalysisSource?, renderer: RenderBackend, fontInstaller: FontInstalling? = nil, _ body: (TandemService) throws -> T) throws -> T {
+        let service = try acquire(url, analysis: analysis, renderer: renderer, fontInstaller: fontInstaller)
         defer { release(url) }
         return try body(service)
     }

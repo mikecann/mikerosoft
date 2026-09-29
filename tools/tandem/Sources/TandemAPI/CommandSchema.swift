@@ -303,11 +303,12 @@ extension CommandSchema {
     ])
 
     static let textStyle = S.object([
-        "font": S.string(), "size": S.number("Points at 1080p."), "weight": S.number(),
-        "color": S.ref("Color"), "strokeColor": S.ref("Color"), "strokeWidth": S.number(), "backgroundColor": S.ref("Color"),
+        "font": S.string("A family (Tilt Warp), PostScript name or full name."), "size": S.number("Points at 1080p."), "weight": S.number("100 thin to 900 black."),
+        "color": S.ref("Color"), "strokeColor": S.ref("Color"), "strokeWidth": S.number("Outline width in points at 1080p. 0 switches the preset's outline off."),
+        "backgroundColor": S.ref("Color"),
         "alignment": S.enumeration(["left", "center", "right"]), "uppercase": S.boolean(), "shadow": S.boolean(),
         "lineSpacing": S.number()
-    ])
+    ], required: [], "The title's own style. Every field is optional, and one that's set wins over the preset even when it's false or 0. Leave a field out (or send null in a patch) to take the preset's. A backgroundColor with a 0 switches the preset's box off.")
 
     static let timedWord = S.object(["text": S.string(), "start": S.time(), "end": S.time()], required: ["text", "start", "end"])
 
@@ -315,9 +316,9 @@ extension CommandSchema {
         "text": S.string(),
         "preset": S.string("A title preset, like callout, label or sectionHeader."),
         "style": S.ref("TextStyle"),
-        "animationIn": S.string("Like popIn or slideUp."),
+        "animationIn": S.string("Like popIn or slideUp. none switches the preset's off."),
         "animationOut": S.string(),
-        "animationDuration": S.time(),
+        "animationDuration": S.time("Seconds each animation takes. Leave it out for the preset's."),
         "words": S.array(S.ref("TimedWord"), "For word-by-word captions.")
     ])
 

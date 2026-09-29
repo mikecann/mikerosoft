@@ -33,7 +33,10 @@ final class SchemaTests: XCTestCase {
         let clip = Clip(
             id: "clip_full", name: "Full", content: .text(TextContent(
                 text: "Hi", preset: "callout",
-                style: TextStyle(strokeColor: .black, strokeWidth: 2, backgroundColor: .white, uppercase: true, shadow: true, lineSpacing: 0.2),
+                style: TextStyle(
+                    font: "Tilt Warp", size: 72, weight: 400, color: .white, strokeColor: .black, strokeWidth: 2,
+                    backgroundColor: .white, alignment: "left", uppercase: true, shadow: true, lineSpacing: 0.2
+                ),
                 animationIn: "popIn", animationOut: "fadeOut", animationDuration: t(0.5),
                 words: [TimedWord(text: "Hi", start: t(0), end: t(0.4))]
             )),

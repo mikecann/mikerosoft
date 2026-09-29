@@ -16,7 +16,9 @@ import Foundation
 //   first, the last video track draws on top.
 
 public struct Project: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    /// 2: a text style field that's set always wins over the preset (see
+    /// `LegacyTextStyles`).
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var id: String
@@ -745,16 +747,28 @@ public struct Transition: Codable, Equatable, Identifiable, Sendable {
 public struct TextContent: Codable, Equatable, Sendable {
     public var text: String
     /// A title preset from a pack (for example `"callout"`), which supplies
-    /// the style and animations. `style` holds this clip's overrides.
+    /// the style and animations. `style` holds what this clip sets itself,
+    /// and that wins over the preset.
     public var preset: String?
     public var style: TextStyle
     /// Named in and out animations, for example `"popIn"` or `"slideUp"`.
+    /// Nil takes the preset's; `"none"` switches the preset's off.
     public var animationIn: String?
     public var animationOut: String?
-    public var animationDuration: Time
+    /// How long each animation takes. Nil takes the preset's, or
+    /// `defaultAnimationDuration` without one.
+    public var animationDuration: Time?
     /// Word timings for captions that highlight word by word, relative to
     /// the clip start.
     public var words: [TimedWord]?
+
+    /// How long an animation takes when neither the clip nor its preset
+    /// says.
+    public static let defaultAnimationDuration = Time(seconds: 0.4)
+
+    enum CodingKeys: String, CodingKey {
+        case text, preset, style, animationIn, animationOut, animationDuration, words
+    }
 
     public init(
         text: String,
@@ -762,7 +776,7 @@ public struct TextContent: Codable, Equatable, Sendable {
         style: TextStyle = TextStyle(),
         animationIn: String? = nil,
         animationOut: String? = nil,
-        animationDuration: Time = Time(seconds: 0.4),
+        animationDuration: Time? = nil,
         words: [TimedWord]? = nil
     ) {
         self.text = text
@@ -787,33 +801,46 @@ public struct TimedWord: Codable, Equatable, Sendable {
     }
 }
 
+/// How a title looks. Every field is optional. A field that's set is the
+/// clip's own choice and wins over its preset, even when it's the same as
+/// the default (`"uppercase": false` on a label that shouts). A field
+/// that isn't set comes from the preset, then from `TextStyle.defaults`.
 public struct TextStyle: Codable, Equatable, Sendable {
-    public var font: String
+    /// A family ("Tilt Warp"), PostScript name ("TiltWarp-Regular") or
+    /// full name.
+    public var font: String?
     /// Points at 1080p. Scaled with the canvas.
-    public var size: Double
-    public var weight: Double
-    public var color: RGBA
+    public var size: Double?
+    /// CSS-style weight, 100 thin to 900 black.
+    public var weight: Double?
+    public var color: RGBA?
+    /// The outline's colour. It's drawn when `strokeWidth` is above 0.
     public var strokeColor: RGBA?
-    public var strokeWidth: Double
+    /// The outline's width in points at 1080p. 0 switches a preset's
+    /// outline off.
+    public var strokeWidth: Double?
+    /// The box behind the text. A see-through colour (`a` 0) switches a
+    /// preset's box off.
     public var backgroundColor: RGBA?
-    public var alignment: String
-    public var uppercase: Bool
-    public var shadow: Bool
+    /// `left`, `center` or `right`.
+    public var alignment: String?
+    public var uppercase: Bool?
+    public var shadow: Bool?
     /// Extra space between lines, as a multiple of the font size.
-    public var lineSpacing: Double
+    public var lineSpacing: Double?
 
     public init(
-        font: String = "SF Pro Display",
-        size: Double = 64,
-        weight: Double = 800,
-        color: RGBA = .white,
+        font: String? = nil,
+        size: Double? = nil,
+        weight: Double? = nil,
+        color: RGBA? = nil,
         strokeColor: RGBA? = nil,
-        strokeWidth: Double = 0,
+        strokeWidth: Double? = nil,
         backgroundColor: RGBA? = nil,
-        alignment: String = "center",
-        uppercase: Bool = false,
-        shadow: Bool = false,
-        lineSpacing: Double = 0
+        alignment: String? = nil,
+        uppercase: Bool? = nil,
+        shadow: Bool? = nil,
+        lineSpacing: Double? = nil
     ) {
         self.font = font
         self.size = size
@@ -1183,26 +1210,40 @@ extension TextContent {
         style = try c.decode(.style, or: TextStyle())
         animationIn = try c.decodeIfPresent(String.self, forKey: .animationIn)
         animationOut = try c.decodeIfPresent(String.self, forKey: .animationOut)
-        animationDuration = try c.decode(.animationDuration, or: Time(seconds: 0.4))
+        animationDuration = try c.decodeIfPresent(Time.self, forKey: .animationDuration)
         words = try c.decodeIfPresent([TimedWord].self, forKey: .words)
+    }
+
+    /// Writes only what the clip sets, so a caption reads as its preset
+    /// and its words rather than a full style that looks like an override.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(text, forKey: .text)
+        try c.encodeIfPresent(preset, forKey: .preset)
+        if !style.isEmpty { try c.encode(style, forKey: .style) }
+        try c.encodeIfPresent(animationIn, forKey: .animationIn)
+        try c.encodeIfPresent(animationOut, forKey: .animationOut)
+        try c.encodeIfPresent(animationDuration, forKey: .animationDuration)
+        try c.encodeIfPresent(words, forKey: .words)
     }
 }
 
 extension TextStyle {
+    /// Only the fields that are there are set. A missing field, or `null`,
+    /// leaves it to the preset.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        let d = TextStyle()
-        font = try c.decode(.font, or: d.font)
-        size = try c.decode(.size, or: d.size)
-        weight = try c.decode(.weight, or: d.weight)
-        color = try c.decode(.color, or: d.color)
+        font = try c.decodeIfPresent(String.self, forKey: .font)
+        size = try c.decodeIfPresent(Double.self, forKey: .size)
+        weight = try c.decodeIfPresent(Double.self, forKey: .weight)
+        color = try c.decodeIfPresent(RGBA.self, forKey: .color)
         strokeColor = try c.decodeIfPresent(RGBA.self, forKey: .strokeColor)
-        strokeWidth = try c.decode(.strokeWidth, or: d.strokeWidth)
+        strokeWidth = try c.decodeIfPresent(Double.self, forKey: .strokeWidth)
         backgroundColor = try c.decodeIfPresent(RGBA.self, forKey: .backgroundColor)
-        alignment = try c.decode(.alignment, or: d.alignment)
-        uppercase = try c.decode(.uppercase, or: d.uppercase)
-        shadow = try c.decode(.shadow, or: d.shadow)
-        lineSpacing = try c.decode(.lineSpacing, or: d.lineSpacing)
+        alignment = try c.decodeIfPresent(String.self, forKey: .alignment)
+        uppercase = try c.decodeIfPresent(Bool.self, forKey: .uppercase)
+        shadow = try c.decodeIfPresent(Bool.self, forKey: .shadow)
+        lineSpacing = try c.decodeIfPresent(Double.self, forKey: .lineSpacing)
     }
 }
 

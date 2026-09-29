@@ -26,6 +26,11 @@ public final class TandemService: @unchecked Sendable {
     public let events = EventHub()
     /// Set by the app to capture its window for `screenshot`.
     public var screenshotProvider: (@Sendable () async throws -> Data)?
+    /// Installs the fonts built-in title presets need (the caption preset's
+    /// Tilt Warp) the first time the project uses one that's missing. The
+    /// app, `tandem serve` and CLI commands set the asset library's; nil
+    /// leaves them missing, with a warning.
+    public var fontInstaller: FontInstalling?
     /// Called for every call a client makes, reads included, with the
     /// operation's name (`status`, `apply`, `watch`...) and the author it's
     /// credited to, so the app can show which agent is connected. Runs on
@@ -123,6 +128,7 @@ public final class TandemService: @unchecked Sendable {
 
     public func status() -> StatusResult {
         let (project, revision) = coordinator.snapshot()
+        let fonts = fontWarnings(project)
         let lock = ProjectSession.readLock(for: session.fileURL)
         let owner = lock.map { OwnerInfo(owner: $0.owner.rawValue, pid: $0.pid, started: $0.started, port: $0.port) }
         // What `undo` and `redo` would do: the coordinator's stacks, or the
@@ -153,8 +159,18 @@ public final class TandemService: @unchecked Sendable {
             jobs: analysis.jobs,
             exports: running,
             recoveredEdits: session.recoveredEdits,
-            apiVersion: TandemAPI.version
+            apiVersion: TandemAPI.version,
+            warnings: fonts
         )
+    }
+
+    /// Titles in a font this process can't draw, with the fix. The
+    /// project's own fonts are registered first, so a font added to
+    /// assets/font/ since (by `tandem assets use`, say) counts, and the app
+    /// draws with it from then on.
+    func fontWarnings(_ project: Project) -> [String] {
+        ProjectFonts.registerNew(in: folder)
+        return ProjectFonts.missing(in: project).map(\.warning)
     }
 
     // MARK: - media
@@ -162,6 +178,9 @@ public final class TandemService: @unchecked Sendable {
     public func media(refresh: Bool) async throws -> MediaResult {
         var added: [String] = []
         if refresh {
+            // Fonts aren't media, but a refresh is when new files are looked
+            // for, and the renderer should have any new ones in assets/font/.
+            ProjectFonts.registerNew(in: folder)
             added = try await session.refreshMedia()
         }
         let (project, revision) = coordinator.snapshot()
@@ -506,6 +525,10 @@ public final class TandemService: @unchecked Sendable {
             let users = project.allTracks.flatMap(\.clips).filter { $0.mediaID == item.id }.count
             let severity: ValidationIssue.Severity = users > 0 ? .error : .warning
             issues.append(ValidationIssue(severity, "Media file \(item.path) is missing\(users > 0 ? " and \(users) clip(s) use it" : "").", objectID: item.id))
+        }
+        ProjectFonts.registerNew(in: folder)
+        for font in ProjectFonts.missing(in: project) {
+            issues.append(ValidationIssue(.warning, font.warning, objectID: font.clipIDs.first))
         }
         return ValidateResult(revision: revision, ok: !issues.contains { $0.severity == .error }, issues: issues)
     }
