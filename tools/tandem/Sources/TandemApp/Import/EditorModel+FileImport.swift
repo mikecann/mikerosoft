@@ -5,8 +5,9 @@ import TandemMedia
 extension EditorModel {
     /// Files and folders from Finder: brought into the project folder
     /// (copied, or linked from another disk), probed, added to the media,
-    /// and with `at`, placed on the timeline there. One undoable edit.
-    func importFiles(_ urls: [URL], at time: Time?, trackID: String?) {
+    /// and with `at`, placed on the timeline there, on a new track of
+    /// `newTrack`'s kind when given. One undoable edit.
+    func importFiles(_ urls: [URL], at time: Time?, trackID: String?, newTrack: TrackKind? = nil) {
         let files = FileImport.mediaFiles(in: urls)
         guard !files.isEmpty else {
             show(.info, "Nothing there Tandem can use. It takes video, audio and pictures.")
@@ -37,7 +38,7 @@ extension EditorModel {
                 // files meanwhile, and this window may not have heard yet.
                 let committed: (batch: EditBatch, result: ProjectCoordinator.CommitResult)?
                 do {
-                    committed = try FileImport.commit(items, to: self.session.coordinator, folder: self.folder, at: time, trackID: trackID)
+                    committed = try FileImport.commit(items, to: self.session.coordinator, folder: self.folder, at: time, trackID: trackID, newTrack: newTrack)
                 } catch {
                     self.show(.error, "Couldn't add the files: \(Self.describe(error))")
                     return

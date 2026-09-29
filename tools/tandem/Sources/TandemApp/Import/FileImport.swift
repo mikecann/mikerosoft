@@ -141,9 +141,11 @@ enum FileImport {
     /// The edit for probed files: new media added (a file the project
     /// already has keeps its media, matched by ID or by where it is in the
     /// folder), and with `at`, each placed after the one before, stills for
-    /// 5 s. Dropping one file on a track uses that track. Nil when there's
+    /// 5 s. Dropping one file on a track uses that track. With `newTrack`
+    /// (a drop above or below the tracks) the files that fit go on a track
+    /// made for them, and the rest are placed as usual. Nil when there's
     /// nothing to do.
-    static func batch(_ items: [MediaItem], into project: Project, folder: ProjectFolder? = nil, at time: Time?, trackID: String?) -> EditBatch? {
+    static func batch(_ items: [MediaItem], into project: Project, folder: ProjectFolder? = nil, at time: Time?, trackID: String?, newTrack: (kind: TrackKind, id: String)? = nil) -> EditBatch? {
         var project = project
         var commands: [EditCommand] = []
         var ids: [String] = []
@@ -167,13 +169,30 @@ enum FileImport {
             return EditBatch(label: commands.count == 1 ? "Add \(name(of: ids[0], in: project)) to the media" : "Add \(commands.count) files to the media", commands: commands)
         }
         var start = max(.zero, time)
+        var madeTrack = false
         for id in ids {
             guard let placed = TimelineEdits.placeMedia(project, mediaIDs: [id], at: start, trackID: ids.count == 1 ? trackID : nil, insert: false) else { continue }
-            commands += placed.commands
+            if let newTrack, let item = project.media(id), fits(item, on: newTrack.kind) {
+                if !madeTrack { commands.append(.addTrack(kind: newTrack.kind, id: newTrack.id)) }
+                madeTrack = true
+                commands.append(.placeMedia(
+                    mediaIDs: [id], at: start, mode: .overwrite,
+                    videoTrackID: newTrack.kind == .video ? newTrack.id : nil, audioTrackID: newTrack.kind == .audio ? newTrack.id : nil
+                ))
+            } else {
+                commands += placed.commands
+            }
             start = start + (project.media(id)?.duration ?? Time(seconds: 5))
         }
         guard !commands.isEmpty else { return nil }
-        return EditBatch(label: ids.count == 1 ? "Add \(name(of: ids[0], in: project))" : "Add \(ids.count) files", commands: commands)
+        let label = ids.count == 1 ? "Add \(name(of: ids[0], in: project))" : "Add \(ids.count) files"
+        guard madeTrack, let newTrack else { return EditBatch(label: label, commands: commands) }
+        return EditBatch(label: label + (newTrack.kind == .video ? " on a new video track" : " on a new audio track"), commands: commands)
+    }
+
+    /// Picture goes on a video track and sound on an audio track.
+    private static func fits(_ item: MediaItem, on kind: TrackKind) -> Bool {
+        kind == .video ? item.hasVideo || item.kind == .image : item.hasAudio
     }
 
     /// Commits probed files to the project as it is at that moment, not
@@ -183,12 +202,14 @@ enum FileImport {
     /// worked out against, and is worked out again if another commit lands
     /// first. `beforeApply` is for tests to land one. Nil when there's
     /// nothing left to do.
-    static func commit(_ items: [MediaItem], to coordinator: ProjectCoordinator, folder: ProjectFolder, at time: Time?, trackID: String?, attempts: Int = 20, beforeApply: (() -> Void)? = nil) throws -> (batch: EditBatch, result: ProjectCoordinator.CommitResult)? {
+    static func commit(_ items: [MediaItem], to coordinator: ProjectCoordinator, folder: ProjectFolder, at time: Time?, trackID: String?, newTrack: TrackKind? = nil, attempts: Int = 20, beforeApply: (() -> Void)? = nil) throws -> (batch: EditBatch, result: ProjectCoordinator.CommitResult)? {
         var attempt = 0
+        // One ID for every attempt, so a retry doesn't make another track.
+        let made = newTrack.map { (kind: $0, id: IDs.make("trk")) }
         while true {
             attempt += 1
             let (current, revision) = coordinator.snapshot()
-            guard var batch = batch(items, into: current, folder: folder, at: time, trackID: trackID) else { return nil }
+            guard var batch = batch(items, into: current, folder: folder, at: time, trackID: trackID, newTrack: made) else { return nil }
             batch.expectedRevision = revision
             beforeApply?()
             do {

@@ -120,6 +120,44 @@ final class FileImportTests: XCTestCase {
         XCTAssertNil(FileImport.batch([items[1]], into: project, at: nil, trackID: nil), "nothing new to add")
     }
 
+    /// Files from Finder dropped above the tracks get a new video track,
+    /// like library media. A file with no picture can't go there, so it's
+    /// placed as usual.
+    func testFilesDroppedAboveTheTracksGoOnANewVideoTrack() throws {
+        let project = Project.standard(name: "Import")
+        let items = [
+            MediaItem(id: "med_drone", path: "broll/drone.mov", kind: .video, role: .broll, duration: t(4), hasVideo: true),
+            MediaItem(id: "med_whoosh", path: "audio/whoosh.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true),
+            MediaItem(id: "med_png", path: "graphics/diagram.png", kind: .image, role: .graphic, hasVideo: true)
+        ]
+        let batch = try XCTUnwrap(FileImport.batch(items, into: project, at: t(10), trackID: nil, newTrack: (.video, "trk_new")))
+        XCTAssertEqual(batch.label, "Add 3 files on a new video track")
+        let coordinator = ProjectCoordinator(project: project)
+        _ = try coordinator.apply(batch)
+        assertValid(coordinator.project)
+        let result = coordinator.project
+        XCTAssertEqual(result.videoTracks.count, project.videoTracks.count + 1)
+        XCTAssertEqual(result.videoTracks.last?.id, "trk_new", "on top of the video tracks")
+        let onNew = result.track("trk_new")?.clips ?? []
+        XCTAssertEqual(onNew.map(\.mediaID), ["med_drone", "med_png"])
+        XCTAssertEqual(onNew.map(\.start), [t(10), t(15)], "one after another, the sound's second still counted")
+        XCTAssertTrue(result.audioTracks.flatMap(\.clips).contains { $0.mediaID == "med_whoosh" }, "the sound is placed as usual")
+    }
+
+    func testSoundDroppedBelowTheTracksGoesOnANewAudioTrack() throws {
+        let project = Project.standard(name: "Import")
+        let items = [MediaItem(id: "med_whoosh", path: "audio/whoosh.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)]
+        let batch = try XCTUnwrap(FileImport.batch(items, into: project, at: t(3), trackID: nil, newTrack: (.audio, "trk_sound")))
+        let coordinator = ProjectCoordinator(project: project)
+        _ = try coordinator.apply(batch)
+        XCTAssertEqual(coordinator.project.audioTracks.last?.id, "trk_sound", "below the other audio tracks")
+        XCTAssertEqual(coordinator.project.track("trk_sound")?.clips.map(\.mediaID), ["med_whoosh"])
+        // Nothing fits a new track: no empty track is made.
+        let still = [MediaItem(id: "med_png", path: "graphics/diagram.png", kind: .image, role: .graphic, hasVideo: true)]
+        let placed = try XCTUnwrap(FileImport.batch(still, into: project, at: t(3), trackID: nil, newTrack: (.audio, "trk_sound")))
+        XCTAssertFalse(placed.commands.contains { if case .addTrack = $0 { return true } else { return false } })
+    }
+
     func testADropIsWorkedOutAgainstTheProjectWhenItLands() throws {
         let coordinator = ProjectCoordinator(project: Project.standard(name: "Import"))
         let dropped = MediaItem(id: "med_drop", path: "broll/drone.mov", kind: .video, role: .broll, duration: t(4), hasVideo: true)

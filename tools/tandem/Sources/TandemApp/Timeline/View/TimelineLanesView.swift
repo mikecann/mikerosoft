@@ -58,7 +58,7 @@ final class TimelineLanesView: TimelineChildView {
     private var assetApply: (asset: Asset, clipID: String)?
     /// Media files dragged in from Finder, found once per drag, and where
     /// they'd go.
-    private var fileDrop: (files: [URL], time: Time, trackID: String?)?
+    private var fileDrop: (files: [URL], time: Time, trackID: String?, newTrack: TrackKind?)?
     private var draggedFiles: [URL]?
     /// A keyframe being dragged: its clip as it was, the diamond, the rect
     /// the clip had (for reading levels off the volume line), and the edit
@@ -1129,7 +1129,7 @@ final class TimelineLanesView: TimelineChildView {
         }
         if let files = fileDrop {
             clearDrop()
-            model.importFiles(files.files, at: files.time, trackID: files.trackID)
+            model.importFiles(files.files, at: files.time, trackID: files.trackID, newTrack: files.newTrack)
             window?.makeKeyAndOrderFront(nil)
             return true
         }
@@ -1186,19 +1186,27 @@ final class TimelineLanesView: TimelineChildView {
                 time = snapped
             }
             let lane = container.layoutCache.lane(atY: point.y)
-            if let fileDrop, fileDrop.time == time, fileDrop.trackID == lane?.trackID, let dragLabel {
+            // Above or below the tracks, as for library media, the files
+            // get a track of their own.
+            let newTrack: TrackKind?
+            switch DropTarget.at(y: point.y, in: container.layoutCache) {
+            case .newVideoTrackOnTop: newTrack = .video
+            case .newAudioTrackAtBottom: newTrack = .audio
+            case .track: newTrack = nil
+            }
+            if let fileDrop, fileDrop.time == time, fileDrop.trackID == lane?.trackID, fileDrop.newTrack == newTrack, let dragLabel {
                 // Still the same frame and track: the label follows the pointer.
                 self.snapLine = time
                 self.dragLabel = (dragLabel.text, point)
                 container.previewChanged()
                 return .copy
             }
-            fileDrop = (files, time, lane?.trackID)
+            fileDrop = (files, time, lane?.trackID, newTrack)
             drop = nil
             previewProject = nil
             snapLine = time
             let what = files.count == 1 ? files[0].lastPathComponent : "\(files.count) files"
-            dragLabel = ("Add \(what) at \(Timecode.string(time, rate: model.frameRate))", point)
+            dragLabel = ((newTrack != nil ? "New track · " : "") + "Add \(what) at \(Timecode.string(time, rate: model.frameRate))", point)
             container.previewChanged()
             return .copy
         }
