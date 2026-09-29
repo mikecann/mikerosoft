@@ -218,7 +218,8 @@ final class RealMediaTests: XCTestCase {
         }
     }
 
-    /// Version 2 against version 1 on 20 s of the camera: the matte's
+    /// Version 2 and RVM (its model must already be in place) against
+    /// version 1 on 20 s of the camera: the matte's
     /// average frame-to-frame change (every 4th pixel), moving hands
     /// included. docs/MEDIA.md has the finer score, where the picture is
     /// still.
@@ -227,7 +228,8 @@ final class RealMediaTests: XCTestCase {
         var change: [String: Double] = [:]
         for (name, settings) in [("version-1", AnalysisSettings(matteProps: .personInstances, matteSmoothing: .off)),
                                  ("version-2-per-frame", AnalysisSettings(matteSmoothing: .off)),
-                                 ("version-2", AnalysisSettings())] {
+                                 ("version-2", AnalysisSettings()),
+                                 ("rvm", AnalysisSettings(matteModel: .robustVideoMatting))] {
             let folder = try output("matte-\(name)")
             let (_, seconds) = try await time {
                 try await MatteJob.run(source: Self.camera, settings: settings, into: folder, context: context(.matte), timeRange: range)
@@ -239,6 +241,7 @@ final class RealMediaTests: XCTestCase {
         }
         // Measured 1.65 against 3.41 (moving hands are most of what's left).
         XCTAssertLessThan(try XCTUnwrap(change["version-2"]), try XCTUnwrap(change["version-1"]) * 0.6)
+        XCTAssertLessThan(try XCTUnwrap(change["rvm"]), try XCTUnwrap(change["version-1"]) * 0.6)
     }
 
     /// Luma planes of every frame of a matte, in order.

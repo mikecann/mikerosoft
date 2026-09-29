@@ -20,6 +20,8 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
     /// SpeechAnalyzer locale. en-US beat en-AU on Mike's voice (7.1% against
     /// 8.8% word error rate in the transcription spike).
     public var transcriptLocale: String
+    /// What makes the cutout matte. Vision (version 2) is the default.
+    public var matteModel: MatteModel
     public var matteQuality: MatteQuality
     /// `personAndProps` keeps a handheld mic; `person` is the plain person mask.
     public var matteMode: CutoutMode
@@ -39,6 +41,7 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         proxyMaxHeight: Int = 1080,
         proxyQuality: Double = 0.45,
         transcriptLocale: String = "en-US",
+        matteModel: MatteModel = .vision,
         matteQuality: MatteQuality = .accurate,
         matteMode: CutoutMode = .personAndProps,
         matteProps: MatteProps = .subject,
@@ -54,6 +57,7 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         self.proxyMaxHeight = proxyMaxHeight
         self.proxyQuality = proxyQuality
         self.transcriptLocale = transcriptLocale
+        self.matteModel = matteModel
         self.matteQuality = matteQuality
         self.matteMode = matteMode
         self.matteProps = matteProps
@@ -74,6 +78,10 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         case .loudness: values = [:]
         case .proxy: values = ["box": "\(proxyMaxWidth)x\(proxyMaxHeight)", "quality": "\(proxyQuality)"]
         case .transcript: values = ["locale": transcriptLocale]
+        case .matte where matteModel == .robustVideoMatting:
+            // RVM keeps what the person holds either way, so both cutout
+            // modes share one matte; its own version rebuilds only RVM mattes.
+            values = ["box": "\(matteMaxWidth)x\(matteMaxHeight)", "model": matteModel.rawValue, "rvm": "\(RVMMatte.version)"]
         case .matte:
             var matte = ["box": "\(matteMaxWidth)x\(matteMaxHeight)", "mode": matteMode.rawValue, "quality": matteQuality.rawValue, "smoothing": matteSmoothing.rawValue]
             // A person-only matte has no props to find.
@@ -84,6 +92,18 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         let body = values.keys.sorted().map { "\"\($0)\":\"\(values[$0]!)\"" }.joined(separator: ",")
         return "{\(body)}"
     }
+}
+
+/// What makes the cutout matte.
+public enum MatteModel: String, Codable, Sendable, CaseIterable {
+    /// Apple Vision's person and subject masks, steadied by `MatteSmoother`
+    /// (matte version 2). The default.
+    case vision
+    /// Robust Video Matting (MobileNetV3), a video matting model that
+    /// carries what it saw from frame to frame. Steadier than Vision on
+    /// Mike's takes, with softer edges. GPL-3.0: the model is downloaded on
+    /// first use and never bundled (see `RVMMatte`).
+    case robustVideoMatting
 }
 
 /// Vision person segmentation quality. Accurate is about 60 frames a second
