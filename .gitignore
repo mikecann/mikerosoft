@@ -26,6 +26,7 @@ tools/task-stats/screenshots/*_with_audio.srt
 .env
 
 # Bun / Node dependencies and generated files
+website/src/toolDates.generated.ts
 node_modules/
 tools/*/build/
 tools/*/.build/

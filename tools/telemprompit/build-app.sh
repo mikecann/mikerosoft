@@ -63,8 +63,9 @@ if [[ "$SIGNING_IDENTITY" == "-" ]]; then
   # by "Turn On Elgato Prompter". Pin it to the bundle identifier instead.
   SIGNING_REQUIREMENTS=(--requirements '=designated => identifier "com.mikerosoft.telemprompit"')
 fi
+# The ${array[@]+...} form keeps bash 3.2 happy under `set -u` when the array is empty.
 codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
-  "${SIGNING_REQUIREMENTS[@]+"${SIGNING_REQUIREMENTS[@]}"}" "$APP_DIR" >/dev/null
+  ${SIGNING_REQUIREMENTS[@]+"${SIGNING_REQUIREMENTS[@]}"} "$APP_DIR" >/dev/null
 
 if [[ -x "$LSREGISTER" ]]; then
   "$LSREGISTER" -f "$APP_DIR" >/dev/null 2>&1 || true

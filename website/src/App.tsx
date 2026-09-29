@@ -10,12 +10,15 @@ import {
   Group,
   Image,
   MantineProvider,
+  SegmentedControl,
   SimpleGrid,
   Stack,
   Text,
   Title,
 } from '@mantine/core';
 import { ToolCard } from './ToolCard';
+import { TOOL_DATES } from './toolDates.generated';
+import { SORT_OPTIONS, sortTools, type SortDirection, type SortField } from './toolDates';
 import {
   filterToolsByPlatforms,
   PLATFORM_COLOR,
@@ -73,7 +76,14 @@ function GithubCorner() {
 
 export default function App() {
   const [activePlatforms, setActivePlatforms] = useState<PlatformId[]>([...PLATFORM_ORDER]);
-  const visibleTools = filterToolsByPlatforms(tools, activePlatforms);
+  const [sortField, setSortField] = useState<SortField>('default');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('newest');
+  const visibleTools = sortTools(
+    filterToolsByPlatforms(tools, activePlatforms),
+    TOOL_DATES,
+    sortField,
+    sortDirection,
+  );
 
   function togglePlatform(platform: PlatformId) {
     setActivePlatforms(current => (
@@ -111,31 +121,56 @@ export default function App() {
                 (and is in no way affiliated with Microsoft... please don't sue me!)
               </Text>
             </Text>
-            <Group
-              gap="xs"
-              justify="center"
-              wrap="wrap"
-              role="group"
-              aria-label="Filter tools by platform"
-            >
-              {PLATFORM_ORDER.map(id => {
-                const isActive = activePlatforms.includes(id);
-                return (
+            <Group gap="lg" justify="center" wrap="wrap">
+              <Group
+                gap="xs"
+                justify="center"
+                wrap="wrap"
+                role="group"
+                aria-label="Filter tools by platform"
+              >
+                {PLATFORM_ORDER.map(id => {
+                  const isActive = activePlatforms.includes(id);
+                  return (
+                    <Button
+                      key={id}
+                      type="button"
+                      size="compact-sm"
+                      radius="xl"
+                      variant={isActive ? 'light' : 'outline'}
+                      color={isActive ? PLATFORM_COLOR[id] : 'gray'}
+                      aria-pressed={isActive}
+                      onClick={() => togglePlatform(id)}
+                      className="platform-filter"
+                    >
+                      {PLATFORM_LABEL[id]}
+                    </Button>
+                  );
+                })}
+              </Group>
+              <Group gap="xs" justify="center" wrap="wrap">
+                <SegmentedControl
+                  size="xs"
+                  radius="xl"
+                  value={sortField}
+                  onChange={value => setSortField(value as SortField)}
+                  data={[...SORT_OPTIONS]}
+                  aria-label="Sort tools"
+                />
+                {sortField !== 'default' && (
                   <Button
-                    key={id}
                     type="button"
                     size="compact-sm"
                     radius="xl"
-                    variant={isActive ? 'light' : 'outline'}
-                    color={isActive ? PLATFORM_COLOR[id] : 'gray'}
-                    aria-pressed={isActive}
-                    onClick={() => togglePlatform(id)}
-                    className="platform-filter"
+                    variant="subtle"
+                    color="gray"
+                    onClick={() => setSortDirection(current => (current === 'newest' ? 'oldest' : 'newest'))}
+                    aria-label={`Showing ${sortDirection} first. Click to reverse.`}
                   >
-                    {PLATFORM_LABEL[id]}
+                    {sortDirection === 'newest' ? 'Newest first ↓' : 'Oldest first ↑'}
                   </Button>
-                );
-              })}
+                )}
+              </Group>
             </Group>
           </Stack>
 
@@ -146,7 +181,12 @@ export default function App() {
               spacing="lg"
             >
               {visibleTools.map(tool => (
-                <ToolCard key={tool.name} tool={tool} />
+                <ToolCard
+                  key={tool.name}
+                  tool={tool}
+                  dates={TOOL_DATES[tool.name]}
+                  highlight={sortField === 'default' ? undefined : sortField}
+                />
               ))}
             </SimpleGrid>
           ) : (

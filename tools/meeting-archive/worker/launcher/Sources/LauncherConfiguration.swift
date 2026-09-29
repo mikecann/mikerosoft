@@ -67,7 +67,10 @@ struct WorkerLauncherConfiguration: Equatable {
         archiveDirectory: URL = URL(fileURLWithPath: expectedArchivePath, isDirectory: true),
         expectedVolumeUUID: String = expectedVolumeUUID
     ) {
-        self.archiveDirectory = archiveDirectory.standardizedFileURL
+        // Lexical only. standardizedFileURL consults the file system and
+        // rewrites real paths such as /private/tmp into symlinked ones such
+        // as /tmp, which the no-follow preflight walk then rejects.
+        self.archiveDirectory = archiveDirectory.standardized
         self.expectedVolumeUUID = expectedVolumeUUID.uppercased()
     }
 
@@ -98,7 +101,7 @@ struct WorkerLauncherConfiguration: Equatable {
     }
 
     func selectionError(for selectedDirectory: URL) -> String? {
-        let selected = selectedDirectory.standardizedFileURL.path
+        let selected = selectedDirectory.standardized.path
         guard selected == archiveDirectory.path else {
             return "Choose exactly \(archiveDirectory.path). The worker will not accept a parent, sibling, or lookalike folder."
         }
@@ -144,7 +147,7 @@ enum ArchivePathPreflight {
     }
 
     private static func walk(_ url: URL, finalMustBeDirectory: Bool) throws {
-        let path = url.standardizedFileURL.path
+        let path = url.standardized.path
         guard path.hasPrefix("/") else {
             throw LauncherPreflightError(errorDescription: "Expected an absolute path: \(path)")
         }

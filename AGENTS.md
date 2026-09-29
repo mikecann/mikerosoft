@@ -379,10 +379,17 @@ bash tools/record-it/restart.sh
 Always launch the staged `~/Applications/Record It.app`. Do not run the raw
 SwiftPM executable for permission testing because macOS keys Screen Recording,
 Camera, and Microphone permissions to the signed app bundle.
-When no Apple Development identity exists, `build-app.sh` adds a stable explicit
-designated requirement to the ad-hoc signature. Do not remove it: the default
-ad-hoc requirement is the changing binary hash and invalidates TCC permissions
-after every rebuild.
+`build-app.sh` signs with the first `Apple Development` identity in the keychain.
+That certificate's default designated requirement (bundle ID plus certificate)
+stays the same across rebuilds, so TCC permissions persist without help.
+The stable-requirement workaround only applies when no Apple Development
+identity exists. Then `build-app.sh` falls back to an ad-hoc signature and adds
+an explicit `identifier "com.mikerosoft.record-it"` designated requirement.
+Do not remove it: the default ad-hoc requirement is the changing binary hash
+and invalidates TCC permissions after every rebuild. Grants made under that
+ad-hoc requirement carried over to the certificate-signed app on this Mac
+without a new prompt. If macOS does prompt once after switching, approve it and
+later rebuilds keep the grant.
 
 ### Key behaviour
 
@@ -445,6 +452,62 @@ after every rebuild.
 
 ---
 
+## phone-mirror specifics
+
+AppKit app that mirrors every USB-connected iPhone or iPad in its own window and
+controls it through WebDriverAgent (WDA).
+
+### Dev workflow
+
+```bash
+swift test --package-path tools/phone-mirror
+bash tools/phone-mirror/restart.sh
+tail -f ~/Library/Logs/"Phone Mirror"/phone-mirror.log
+```
+
+- `open -g "phonemirror://tap?x=0.5&y=0.5"` (also `swipe?dy=-300`,
+  `type?text=hi`, `home`) drives the first phone without clicking. Use it for
+  smoke tests.
+- Each phone's xcodebuild output goes to
+  `~/Library/Logs/Phone Mirror/helper-<phone name>.log`. The line
+  `ServerURLHere->...<-ServerURLHere` means WDA is up.
+
+### Key behaviour
+
+- Video: setting `kCMIOHardwarePropertyAllowScreenCaptureDevices` makes phones
+  appear as `.external` muxed capture devices with model ID `iOS Device`. The same
+  phone also appears as a Continuity Camera; the filter skips it.
+- Control: `agent.sh` pins WebDriverAgent to a release, clones it into
+  `~/Library/Application Support/Phone Mirror/WebDriverAgent`, and rewrites the
+  runner bundle ID to `com.mikecann.phonemirror.WebDriverAgentRunner`. The stock
+  `com.facebook...` ID belongs to another team and can't be signed.
+- The team ID comes from `PHONE_MIRROR_TEAM_ID`, then `team-id` in the support
+  folder, then the OU of the keychain's Apple Development certificate.
+- `AgentRunner` runs `agent.sh run`, builds once per launch when the run fails
+  with a signing or provisioning error (new phone, expired signing), and
+  restarts the helper whenever a command fails.
+- The app reaches WDA at `http://[tunnelIPAddress]:8100`, the USB tunnel address
+  from `xcrun devicectl list devices`. No usbmux forwarding is needed.
+- Sessions use `shouldWaitForQuiescence: false` and `waitForIdleTimeout: 0`.
+  Without them each tap waits for the app to go idle, which takes seconds on
+  animated screens.
+- A Bluetooth HID approach was tried and dropped. macOS 26 never got a classic
+  Bluetooth link to the phone from a third-party app, and the iPhone only accepts
+  a mouse through AssistiveTouch.
+
+### Key files
+
+| Path | What it is |
+|---|---|
+| `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneScreenDevices.swift` | Screen capture opt-in and phone discovery |
+| `tools/phone-mirror/Sources/PhoneMirrorApp/MirrorWindowController.swift` | Per-phone window, input handling |
+| `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneGestures.swift` | Click/drag/scroll/key to gesture translation (pure) |
+| `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneAgent.swift` | WDA HTTP client with an ordered command queue |
+| `tools/phone-mirror/Sources/PhoneMirrorApp/AgentRunner.swift` | Builds, starts and restarts WDA per phone |
+| `tools/phone-mirror/agent.sh` | Fetches, signs, builds and runs WDA |
+
+---
+
 ## telemprompit specifics
 
 SwiftUI/AppKit teleprompter for the Elgato Prompter. Paste notes, step
@@ -468,6 +531,54 @@ bash tools/telemprompit/restart.sh
   `swift test --package-path tools/taskbar`,
   `swift test --package-path tools/video-hq`,
   `swift test --package-path tools/telemprompit`.
+
+---
+
+## mikey-mouse specifics
+
+Menu-bar replacement for Mac Mouse Fix. Side buttons become back/forward
+navigation swipes in apps that ignore buttons 4 and 5, and the notched wheel
+scrolls smoothly.
+
+### Dev workflow
+
+```bash
+swift test --package-path tools/mikey-mouse
+bash tools/mikey-mouse/restart.sh
+tail -f ~/Library/Logs/mikey-mouse.log
+```
+
+- Always test the staged `~/Applications/Mikey Mouse.app` via `restart.sh`.
+  Accessibility permission is keyed to the signed bundle.
+- Verify side buttons with a real press over Finder. Each press logs the app
+  under the pointer and whether it became a swipe. A swipe posted straight to
+  Finder's pid with `CGEvent.postToPid` does not navigate, so it is no substitute.
+- The event tap sits at the HID level on its own thread. Anything slow in the
+  callback makes the whole mouse lag, and macOS turns a slow tap off.
+- Only apps in `BackForwardRouter.swipeApps` get swipes. Chrome, VS Code and
+  other apps that handle buttons 4 and 5 themselves must keep the raw click.
+- Scroll feel (pixels per notch, time constant, acceleration) is subjective.
+  Change it with Mike trying the real wheel, not from unit tests alone.
+
+---
+
+## website specifics
+
+The mikerosoft.app site in `website/` deploys from `main` through
+`.github/workflows/deploy-website.yml` whenever `website/` or `tools/` changes.
+
+- Tool cards come from `website/src/tools.ts`. Give every tool a
+  `tools/<name>/docs/header.webp` (1376x768, subject in the middle band because
+  the card crops it to a 180px strip) and reference it as `header`.
+- The added and updated dates on each card come from git history.
+  `npm run dates` (run automatically before `dev` and `build`) writes the
+  ignored `website/src/toolDates.generated.ts`. Added dates follow renames, so
+  tools that moved from the repo root keep their first commit. Updated dates
+  ignore `docs/` and the tool's `README.md`, since those describe a tool
+  rather than change it.
+- CI checks out with `fetch-depth: 0`. The generator refuses a shallow clone
+  because every tool would get the same date.
+- `npm test` in `website/` runs the tool list, sorting and git-history tests.
 
 ---
 

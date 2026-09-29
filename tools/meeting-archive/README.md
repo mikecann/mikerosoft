@@ -1,5 +1,7 @@
 # Meeting Archive
 
+![A webcam switching on a video call whose audio becomes speaker-labelled transcript cards filed into an archive box](docs/header.webp)
+
 Meeting Archive is a native macOS menu-bar app for recording eligible meeting
 windows with the microphone and incoming system audio, then keeping a local
 library while a worker transfers verified bundles to Bruce for processing.

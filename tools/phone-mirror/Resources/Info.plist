@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>phone-mirror-swift</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.mikerosoft.phone-mirror</string>
+    <key>CFBundleName</key>
+    <string>Phone Mirror</string>
+    <key>CFBundleDisplayName</key>
+    <string>Phone Mirror</string>
+    <key>CFBundleIconFile</key>
+    <string>phone-mirror</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>Phone Mirror shows the screen of an iPhone or iPad plugged in with a USB cable. macOS treats that screen as a camera.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>A plugged-in iPhone or iPad sends its audio alongside its screen.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.mikerosoft.phone-mirror</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>phonemirror</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

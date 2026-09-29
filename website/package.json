@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dates": "tsx scripts/generate-tool-dates.ts",
+    "predev": "npm run dates",
     "dev": "vite",
     "test": "tsx --test src/*.test.ts",
+    "prebuild": "npm run dates",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy"
