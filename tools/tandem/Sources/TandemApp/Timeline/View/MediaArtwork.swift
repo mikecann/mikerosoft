@@ -60,7 +60,9 @@ final class MediaArtwork {
     func thumbnail(for item: MediaItem, at mediaTime: Time) -> CGImage? {
         guard let (strip, folder) = thumbnailStrip(for: item) else { return nil }
         let index = min(max(Int((mediaTime.seconds / max(strip.interval, 0.001)).rounded(.down)), 0), strip.files.count - 1)
-        let path = folder.appendingPathComponent(strip.files[index]).path
+        // Saying it's a file keeps Foundation from asking the disk whether
+        // it's a folder: that was a third of the timeline's drawing time.
+        let path = folder.appendingPathComponent(strip.files[index], isDirectory: false).path
         if let image = images.object(forKey: path as NSString) { return image }
         decode(path)
         return nil

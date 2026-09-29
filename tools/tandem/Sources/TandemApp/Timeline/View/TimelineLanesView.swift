@@ -26,10 +26,12 @@ final class TimelineLanesView: TimelineChildView {
     private var pressSeconds: Double = 0
     private var pressHit: TimelineHit = .nothing
     private var pressModifiers = SelectionRules.Modifiers()
-    private var selectionAtPress: Set<String> = []
     /// A selected clip Cmd-pressed: deselected on mouse up unless dragged.
     private var pendingCommandToggle: String?
-    private var marquee: (start: CGPoint, end: CGPoint)?
+    /// A selection box being dragged, drawn by `marqueeView` so moving it
+    /// never redraws the clips.
+    private var marquee: Marquee?
+    private let marqueeView = MarqueeView()
     private var snapLine: Time?
     private var dragLabel: (text: String, point: CGPoint)?
     private var drop: (batch: EditBatch, laneID: String?)?
@@ -54,6 +56,7 @@ final class TimelineLanesView: TimelineChildView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         registerForDraggedTypes([.tandemMedia, .string, .fileURL])
+        addSubview(marqueeView)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -102,7 +105,8 @@ final class TimelineLanesView: TimelineChildView {
         }
 
         let renderer = ClipRenderer(project: project, scale: scale, artwork: container.artwork, visible: dirtyRect.minX...dirtyRect.maxX)
-        let selected = model.selection
+        // While a box is being dragged, the clips it would select.
+        let selected = marquee?.selection ?? model.selection
         let linkedGroups = Set(selected.compactMap { project.clip($0)?.linkGroup })
         let changed = previewChangedClipIDs(project)
 
@@ -153,18 +157,6 @@ final class TimelineLanesView: TimelineChildView {
             context.addLine(to: CGPoint(x: x, y: bounds.height))
             context.strokePath()
             context.setLineDash(phase: 0, lengths: [])
-        }
-
-        if let marquee {
-            let rect = CGRect(
-                x: min(marquee.start.x, marquee.end.x), y: min(marquee.start.y, marquee.end.y) - offset,
-                width: abs(marquee.end.x - marquee.start.x), height: abs(marquee.end.y - marquee.start.y)
-            )
-            context.setFillColor(Theme.marqueeFill.cg)
-            context.fill(rect)
-            context.setStrokeColor(Theme.amber.opacity(0.7).cg)
-            context.setLineWidth(1)
-            context.stroke(rect.insetBy(dx: 0.5, dy: 0.5))
         }
 
         if let dragLabel {
@@ -385,7 +377,6 @@ final class TimelineLanesView: TimelineChildView {
         pressSeconds = model.timeline.scale.seconds(atX: point.x)
         pressHit = hit
         pressModifiers = mods
-        selectionAtPress = model.selection
         session = nil
         keyframeDrag = nil
 
@@ -463,11 +454,11 @@ final class TimelineLanesView: TimelineChildView {
             ), let context = dragContext() else { return }
             session = DragSession(kind: kind, context: context)
         case .emptyTrack, .transcript, .nothing:
-            marquee = (point, point)
             if !(mods.shift || mods.command) {
                 model.selection = []
                 model.selectedTransitionID = nil
             }
+            marquee = Marquee(at: point, scale: model.timeline.scale, base: model.selection, modifiers: mods)
         }
     }
 
@@ -526,13 +517,12 @@ final class TimelineLanesView: TimelineChildView {
             return
         }
         if var box = marquee, let tester = tester(for: model.project) {
-            box.end = point
+            let changed = box.move(to: point, tester: tester, linkedSelection: model.linkedSelection)
             marquee = box
-            let rect = CGRect(x: min(box.start.x, box.end.x), y: min(box.start.y, box.end.y), width: abs(box.end.x - box.start.x), height: abs(box.end.y - box.start.y))
-            let ids = tester.clips(in: rect)
-            let base = pressModifiers.shift || pressModifiers.command ? selectionAtPress : []
-            model.selection = SelectionRules.marquee(ids, in: model.project, current: base, modifiers: pressModifiers, linkedSelection: model.linkedSelection)
-            needsDisplay = true
+            // The box itself is a layer that moves; the clips only redraw
+            // when it takes in or lets go of one.
+            marqueeView.show(box.rect(scale: model.timeline.scale).offsetBy(dx: 0, dy: -offset))
+            if changed { needsDisplay = true }
         }
     }
 
@@ -596,15 +586,25 @@ final class TimelineLanesView: TimelineChildView {
                 }
             }
             pendingCommandToggle = nil
-        } else if let box = marquee, hypot(box.end.x - box.start.x, box.end.y - box.start.y) < 3, !(pressModifiers.shift || pressModifiers.command) {
-            // A click on empty space moves the playhead there, which is
-            // handy on a trackpad.
-            model.playback.pause()
-            model.playback.seek(to: model.timeline.scale.time(atX: box.start.x, rate: model.frameRate))
+        } else if let box = marquee {
+            let rect = box.rect(scale: model.timeline.scale)
+            if hypot(rect.width, rect.height) < 3 {
+                // A click on empty space moves the playhead there, which is
+                // handy on a trackpad.
+                if !(pressModifiers.shift || pressModifiers.command) {
+                    model.playback.pause()
+                    model.playback.seek(to: box.startTime(rate: model.frameRate))
+                }
+            } else {
+                // The model hears about the box's selection once, now.
+                let picked = SelectionRules.pruned(box.selection, in: model.project)
+                if picked != model.selection { model.selection = picked }
+            }
         }
         session = nil
         previewProject = nil
         marquee = nil
+        marqueeView.isHidden = true
         snapLine = nil
         dragLabel = nil
         container.relayoutLanes()

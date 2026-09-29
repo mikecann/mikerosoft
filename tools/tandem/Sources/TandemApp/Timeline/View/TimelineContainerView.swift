@@ -197,6 +197,36 @@ final class TimelineContainerView: NSView {
     override func scrollWheel(with event: NSEvent) {
         handleScroll(event, lanesX: convert(event.locationInWindow, from: nil).x - Theme.Metrics.trackHeaderWidth)
     }
+
+    // MARK: - Hand drag
+
+    /// A middle-button drag in progress. The ruler, headers and lanes pass
+    /// the button up to here, so a drag can start anywhere on the timeline,
+    /// clips included: the middle button does nothing else.
+    private var pan: TimelinePan?
+
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 2 else { return super.otherMouseDown(with: event) }
+        pan = TimelinePan(start: convert(event.locationInWindow, from: nil), scrollSeconds: model.timeline.scale.scrollSeconds, verticalOffset: model.timeline.verticalOffset)
+        NSCursor.closedHand.set()
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        guard let pan else { return super.otherMouseDragged(with: event) }
+        let next = pan.offsets(
+            at: convert(event.locationInWindow, from: nil), pixelsPerSecond: model.timeline.scale.pixelsPerSecond,
+            maxScrollSeconds: maxScrollSeconds, maxVerticalOffset: layoutCache.contentHeight - lanes.bounds.height
+        )
+        if next.scrollSeconds != model.timeline.scale.scrollSeconds { model.timeline.scale.scrollSeconds = next.scrollSeconds }
+        if next.verticalOffset != model.timeline.verticalOffset { model.timeline.verticalOffset = next.verticalOffset }
+        NSCursor.closedHand.set()
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard pan != nil, event.buttonNumber == 2 else { return super.otherMouseUp(with: event) }
+        pan = nil
+        NSCursor.arrow.set()
+    }
 }
 
 /// A subview of the timeline that can reach its container.
@@ -266,5 +296,32 @@ final class PlayheadView: NSView {
         context.fillPath()
         let line = Theme.Metrics.playheadWidth
         context.fill(CGRect(x: width / 2 - line / 2, y: head - 2, width: line, height: bounds.height - head + 2))
+    }
+}
+
+/// The selection box over the lanes: a tinted, outlined layer that moves
+/// by changing its frame, so dragging it never redraws the clips under it.
+final class MarqueeView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = Theme.marqueeFill.cg
+        layer?.borderColor = Theme.amber.opacity(0.7).cg
+        layer?.borderWidth = 1
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Shows the box at `rect`, in the lanes' view coordinates.
+    func show(_ rect: CGRect) {
+        let frame = rect.integral
+        if self.frame != frame { self.frame = frame }
+        isHidden = false
     }
 }

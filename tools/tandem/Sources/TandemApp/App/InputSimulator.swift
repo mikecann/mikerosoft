@@ -10,11 +10,16 @@ extension NSHostingView: NSHostingViewMarker {}
 /// agents can drive the timeline and viewer without screen control:
 ///
 ///     open -g "tandem://simulate?drag=600,700,700,700&mods=cmd"
+///     open -g "tandem://simulate?drag=600,700,300,700&button=middle"
+///     open -g "tandem://simulate?drag=600,700,900,760&steps=120&interval=8"
 ///     open -g "tandem://simulate?menu=600,700&out=/tmp/menu.txt"
 ///     open -g "tandem://simulate?drop=tandem-effect:vignette&at=600,700"
 ///
 /// A drop hands a library payload (see `LibraryDrag`) to the drop target
 /// under the point, as if it had been dragged there from a library tab.
+/// A drag with an `interval` (milliseconds) sends its steps that far apart
+/// so the app draws between them, as it does for a real mouse; without
+/// one they all go at once.
 ///
 /// Points are in window coordinates measured from the top left.
 @MainActor
@@ -43,6 +48,14 @@ enum InputSimulator {
         var modifiers: NSEvent.ModifierFlags
         /// A plain key held during the gesture, like Z for zoom rectangles.
         var heldKey: String? = nil
+        /// The button a drag holds down: the middle one pans the timeline.
+        var button: Button = .left
+        /// Seconds between a drag's steps, or nil to send them all at once.
+        var interval: TimeInterval? = nil
+
+        enum Button: String, Equatable {
+            case left, middle
+        }
     }
 
     nonisolated static func parse(_ query: [String: String]) -> Gesture? {
@@ -62,7 +75,20 @@ enum InputSimulator {
         let drag = numbers(query["drag"])
         if drag.count == 4 {
             let steps = Int(query["steps"] ?? "") ?? 12
-            return Gesture(kind: .drag(to: CGPoint(x: drag[2], y: drag[3]), steps: max(1, steps)), at: CGPoint(x: drag[0], y: drag[1]), modifiers: flags, heldKey: query["hold"])
+            var button = Gesture.Button.left
+            if let name = query["button"] {
+                guard let named = Gesture.Button(rawValue: name) else { return nil }
+                button = named
+            }
+            var interval: TimeInterval?
+            if let text = query["interval"] {
+                guard let milliseconds = Double(text), (0...1_000).contains(milliseconds) else { return nil }
+                interval = milliseconds / 1_000
+            }
+            return Gesture(
+                kind: .drag(to: CGPoint(x: drag[2], y: drag[3]), steps: max(1, steps)), at: CGPoint(x: drag[0], y: drag[1]),
+                modifiers: flags, heldKey: query["hold"], button: button, interval: interval
+            )
         }
         let click = numbers(query["click"])
         if click.count == 2 {
@@ -104,7 +130,11 @@ enum InputSimulator {
     /// a real mouse to the window server (window drags).
     static private(set) var isReplaying = false
 
-    static func run(_ gesture: Gesture, in window: NSWindow) {
+    /// Replays `gesture`, then calls `done`: straight away, or after the
+    /// last step of a paced drag.
+    static func run(_ gesture: Gesture, in window: NSWindow, done: @escaping @MainActor () -> Void = {}) {
+        var finished = true
+        defer { if finished { done() } }
         guard let frame = window.contentView?.superview ?? window.contentView else { return }
         isReplaying = true
         defer { isReplaying = false }
@@ -136,13 +166,41 @@ enum InputSimulator {
             }
         case .drag(let to, let steps):
             let end = windowPoint(to)
-            if let down = mouse(.leftMouseDown, start) { target.mouseDown(with: down) }
+            let middle = gesture.button == .middle
+            // Events are made as they're sent, so their timestamps are real.
+            func send(_ type: NSEvent.EventType, _ point: NSPoint) {
+                guard var event = mouse(type, point) else { return }
+                if middle {
+                    // NSEvent can't make a middle-button event itself, but
+                    // its CGEvent can carry the button number.
+                    guard let cgEvent = event.cgEvent else { return }
+                    cgEvent.setIntegerValueField(.mouseEventButtonNumber, value: 2)
+                    guard let other = NSEvent(cgEvent: cgEvent) else { return }
+                    event = other
+                }
+                switch type {
+                case .leftMouseDown: target.mouseDown(with: event)
+                case .leftMouseDragged: target.mouseDragged(with: event)
+                case .leftMouseUp: target.mouseUp(with: event)
+                case .otherMouseDown: target.otherMouseDown(with: event)
+                case .otherMouseDragged: target.otherMouseDragged(with: event)
+                case .otherMouseUp: target.otherMouseUp(with: event)
+                default: break
+                }
+            }
+            var actions: [() -> Void] = [{ send(middle ? .otherMouseDown : .leftMouseDown, start) }]
             for step in 1...steps {
                 let fraction = CGFloat(step) / CGFloat(steps)
                 let point = NSPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction)
-                if let drag = mouse(.leftMouseDragged, point) { target.mouseDragged(with: drag) }
+                actions.append { send(middle ? .otherMouseDragged : .leftMouseDragged, point) }
             }
-            if let up = mouse(.leftMouseUp, end) { target.mouseUp(with: up) }
+            actions.append { send(middle ? .otherMouseUp : .leftMouseUp, end) }
+            if let interval = gesture.interval {
+                finished = false
+                PacedReplay(actions: actions, done: done).start(every: interval)
+            } else {
+                for action in actions { action() }
+            }
         case .menu(let out):
             guard let event = mouse(.rightMouseDown, start) else { return }
             let menu = target.menu(for: event)
@@ -215,6 +273,45 @@ enum InputSimulator {
             if let submenu = item.submenu { lines.append(describe(submenu, depth: depth + 1)) }
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+/// A drag's steps sent on a timer, one per tick, with the run loop turning
+/// (and the app drawing) in between.
+@MainActor
+private final class PacedReplay {
+    private var actions: ArraySlice<() -> Void>
+    private let done: @MainActor () -> Void
+
+    init(actions: [() -> Void], done: @escaping @MainActor () -> Void) {
+        self.actions = actions[...]
+        self.done = done
+    }
+
+    func start(every interval: TimeInterval) {
+        let timer = Timer(timeInterval: max(interval, 0.001), repeats: true) { timer in
+            MainActor.assumeIsolated { self.step(timer) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func step(_ timer: Timer) {
+        if let action = actions.popFirst() {
+            InputSimulator.replaying(action)
+        }
+        if actions.isEmpty {
+            timer.invalidate()
+            done()
+        }
+    }
+}
+
+extension InputSimulator {
+    /// Runs one step of a paced replay with `isReplaying` set.
+    static func replaying(_ action: () -> Void) {
+        isReplaying = true
+        defer { isReplaying = false }
+        action()
     }
 }
 

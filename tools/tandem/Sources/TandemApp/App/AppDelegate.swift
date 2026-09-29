@@ -163,8 +163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         case .simulate(let gesture):
             guard let front, let window = front.window else { return }
             if gesture.heldKey == "z" { front.model.zoomKeyHeld = true }
-            InputSimulator.run(gesture, in: window)
-            if gesture.heldKey == "z" { front.model.zoomKeyHeld = false }
+            InputSimulator.run(gesture, in: window) {
+                if gesture.heldKey == "z" { front.model.zoomKeyHeld = false }
+            }
         case .windowSize(let width, let height):
             guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
             let size = NSSize(width: max(width, window.contentMinSize.width), height: max(height, window.contentMinSize.height))
