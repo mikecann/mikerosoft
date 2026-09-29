@@ -96,4 +96,4 @@ if /bin/launchctl print "${domain}/${LABEL}" >/dev/null 2>&1; then
 else
     /bin/launchctl bootstrap "${domain}" "${PLIST}"
 fi
-echo "Enabled ${LABEL} on localhost:8765. Tailscale Serve remains unchanged."
+echo "Enabled ${LABEL} on localhost:8791. Tailscale Serve remains unchanged."

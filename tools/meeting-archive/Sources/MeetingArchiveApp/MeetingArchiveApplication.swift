@@ -8,6 +8,10 @@ struct MeetingArchiveApplication: App {
     var body: some Scene {
         MenuBarExtra {
             Text(controller.status)
+            if let failure = controller.failure {
+                Text(failure).lineLimit(3)
+                Button("Clear warning") { controller.clearFailure() }
+            }
             if controller.isRecording { Button("Skip this meeting") { controller.skip() } }
             Button(controller.isPaused ? "Resume automatic recording" : "Pause automatic recording") { controller.togglePause() }
             Divider()
@@ -40,8 +44,10 @@ struct MeetingArchiveApplication: App {
         Window("Meeting Archive", id: "library") {
             LibraryView(controller: controller)
                 .onOpenURL { url in
+                    // The viewer's "open in Mac app" link lands here; show the
+                    // meeting's speakers rather than bouncing back to the viewer.
                     guard url.scheme == "meetingarchive", let id = UUID(uuidString: url.lastPathComponent) else { return }
-                    controller.openPlayback(id)
+                    controller.showFollowUp(id)
                 }
         }.defaultSize(width: 820, height: 540)
             .defaultLaunchBehavior(CommandLine.arguments.contains("--background") ? .suppressed : .presented)
@@ -56,32 +62,96 @@ private struct WindowButton: View {
 
 struct NamingView: View {
     @ObservedObject var controller: ArchiveController
+    @FocusState private var titleFocused: Bool
+    @State private var confirmingDiscard = false
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("What was this meeting about?").font(.title3)
             TextField("Meeting title", text: $controller.titleDraft)
+                .focused($titleFocused)
+                .onChange(of: controller.titleDraft) { controller.titleDraftEdited() }
+                .onSubmit { save() }
             if !controller.calendarChoices.isEmpty {
                 Menu("Use a calendar event") {
                     ForEach(controller.calendarChoices) { event in Button(event.title) { controller.titleDraft = event.title } }
                 }
+            } else if controller.settings.selectedCalendarIDs.isEmpty {
+                Text("Select calendars in Settings to get title suggestions.").font(.caption).foregroundStyle(.secondary)
             }
-            Text("Saves automatically after 20 seconds, or when you close this window.").font(.caption).foregroundStyle(.secondary)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(countdown(at: context.date)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
             HStack {
-                Button("Discard recording", role: .destructive) {
-                    if let pending = controller.pending { controller.resolve(pending.id, resolution: .discard) }
-                }
+                Button("Discard recording", role: .destructive) { confirmingDiscard = true }
+                    .confirmationDialog("Delete this recording?", isPresented: $confirmingDiscard) {
+                        Button("Delete recording", role: .destructive) {
+                            if let pending = controller.pending { controller.resolve(pending.id, resolution: .discard) }
+                        }
+                    } message: { Text("The video and audio are removed from this Mac and never sent to Bruce.") }
                 Spacer()
-                Button("Save recording") {
-                    if let pending = controller.pending { controller.resolve(pending.id, resolution: .accept(trigger: .keepButton)) }
-                }.keyboardShortcut(.defaultAction)
+                Button("Save recording") { save() }.keyboardShortcut(.defaultAction)
             }
-        }.padding(20)
+        }
+        .padding(20)
+        .onAppear { titleFocused = true }
+    }
+
+    private func save() {
+        if let pending = controller.pending { controller.resolve(pending.id, resolution: .accept(trigger: .keepButton)) }
+    }
+
+    private func countdown(at now: Date) -> String {
+        guard let deadline = controller.promptDeadline else { return "" }
+        let seconds = max(0, Int(deadline.timeIntervalSince(now).rounded(.up)))
+        return "Saves automatically in \(seconds)s. Typing gives you more time; Esc saves as is."
+    }
+}
+
+private struct RenameMeetingSheet: View {
+    @ObservedObject var controller: ArchiveController
+    let record: MeetingRecord
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var saving = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Rename meeting").font(.title3)
+            Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.sourceApplication.displayName)")
+                .font(.caption).foregroundStyle(.secondary)
+            TextField("Meeting title", text: $title).onSubmit(save)
+            Text("Updates the title on Bruce and in Notion. Nothing is re-uploaded or re-transcribed.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Rename", action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(saving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+        .onAppear { title = record.title }
+    }
+
+    private func save() {
+        guard !saving else { return }
+        saving = true
+        Task {
+            let renamed = await controller.rename(record.id, to: title)
+            saving = false
+            if renamed { dismiss() }
+        }
     }
 }
 
 struct LibraryView: View {
     @ObservedObject var controller: ArchiveController
     @State private var search = ""
+    @State private var renaming: MeetingRecord?
+    @State private var transcriptResults: [WorkerSearchResult] = []
+    @State private var transcriptSearchStatus: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -98,7 +168,7 @@ struct LibraryView: View {
                     Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
                     Text(failure).font(.callout).textSelection(.enabled)
                     Spacer()
-                    Button("Dismiss") { controller.failure = nil }
+                    Button("Dismiss") { controller.clearFailure() }
                 }.padding(12).background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             }
             if let failure = controller.workerStatusFailure {
@@ -108,7 +178,30 @@ struct LibraryView: View {
                     Spacer()
                 }.padding(10).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
             }
-            TextField("Search meeting titles", text: $search)
+            TextField("Search titles and transcripts", text: $search)
+                .task(id: search) { await searchTranscripts() }
+            if let transcriptSearchStatus {
+                Text(transcriptSearchStatus).font(.caption).foregroundStyle(.secondary)
+            }
+            if !transcriptResults.isEmpty {
+                GroupBox("Said in meetings") {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(transcriptResults) { result in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Button(controller.meetings.first { $0.id == result.meetingID }?.title ?? result.title ?? "Meeting") {
+                                        controller.openInViewer(result.meetingID)
+                                    }.buttonStyle(.link)
+                                    ForEach(Array(result.matches.enumerated()), id: \.offset) { _, match in
+                                        Text("\(Duration.seconds(match.startSeconds).formatted(.time(pattern: .minuteSecond))) \(match.speaker.map { "\($0): " } ?? "")\(match.text)")
+                                            .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    }
+                                }
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: 180)
+                }
+            }
             List {
                 ForEach(controller.meetings.filter { record in
                     if case .discarded = record.acceptance { return false }
@@ -117,7 +210,7 @@ struct LibraryView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(record.title).font(.headline)
-                            Text("\(record.startedAt.formatted()) · \(Int(record.endedAt.timeIntervalSince(record.startedAt))) seconds · \(record.sourceApplication.displayName)")
+                            Text("\(record.startedAt.formatted()) · \(Duration.seconds(record.endedAt.timeIntervalSince(record.startedAt)).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2))) · \(record.sourceApplication.displayName)")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text(jobLabel(record)).font(.caption).foregroundStyle(.secondary)
                             if controller.followUpPhase(for: record).isBusy {
@@ -125,18 +218,50 @@ struct LibraryView: View {
                             }
                         }
                         Spacer()
-                        Button("Play") { controller.openPlayback(record.id) }
+                        if controller.canRename(record) {
+                            Button("Rename…") { renaming = record }
+                        }
+                        Button("Open") { controller.openInViewer(record.id) }
+                            .help("Watch with the transcript in Bruce's viewer")
                         Button("Transcript") { controller.openTranscript(record.id) }
+                            .help("Download the transcript as Markdown")
                         Button(currentWorkerStatus(record)?.unconfirmedSpeakerCount ?? 0 > 0 ? "Name speakers…" : "Speakers…") { controller.showFollowUp(record.id) }
                         if currentWorkerStatus(record)?.retryStage != nil {
                             Button("Retry") { controller.retryWorker(record.id) }
                         }
                     }.padding(.vertical, 6)
                 }
-            }.overlay {
+            }
+            .sheet(item: $renaming) { record in
+                RenameMeetingSheet(controller: controller, record: record)
+            }
+            .overlay {
                 if controller.meetings.isEmpty { ContentUnavailableView("No meetings yet", systemImage: "video", description: Text("Grant the permissions in Settings. Eligible calls will appear here after recording.")) }
             }
         }.padding(20)
+    }
+
+    private func searchTranscripts() async {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 2 else {
+            transcriptResults = []
+            transcriptSearchStatus = nil
+            return
+        }
+        // Debounce: each keystroke restarts this task, so only a pause searches.
+        try? await Task.sleep(for: .milliseconds(500))
+        guard !Task.isCancelled else { return }
+        transcriptSearchStatus = "Searching transcripts on Bruce…"
+        do {
+            let results = try await controller.searchTranscripts(query)
+            guard !Task.isCancelled else { return }
+            transcriptResults = results
+            transcriptSearchStatus = results.isEmpty ? "No transcript matches" : nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            transcriptResults = []
+            transcriptSearchStatus = "Transcript search unavailable: \(error.localizedDescription)"
+        }
     }
 
     private func jobLabel(_ record: MeetingRecord) -> String {
@@ -249,8 +374,12 @@ struct ArchiveSettingsView: View {
                 PermissionRow(permission: .calendar, status: permissions.status(for: .calendar)) {
                     Task {
                         await permissions.performAction(for: .calendar, calendar: controller.calendar)
-                        calendars = controller.calendar.calendars()
+                        loadCalendars()
                     }
+                }
+                if !calendars.isEmpty, settings.selectedCalendarIDs.isEmpty {
+                    Label("No calendars selected, so meetings are not named from your calendar.", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
                 }
                 ForEach(calendars, id: \.id) { calendar in
                     Toggle(calendar.title, isOn: Binding(get: { settings.selectedCalendarIDs.contains(calendar.id) }, set: { selected in
@@ -261,6 +390,7 @@ struct ArchiveSettingsView: View {
             Section("Bruce archive") {
                 TextField("SSH host", text: $settings.archiveHost)
                 TextField("Archive directory", text: $settings.archiveRoot)
+                TextField("Viewer address", text: $settings.viewerURL)
                 Toggle("This directory is covered by Bruce’s backup; remove verified local media", isOn: $settings.backupCoverageVerified)
                     .help("Media is removed only after Bruce verifies every file and saves its processing job.")
             }
@@ -275,7 +405,15 @@ struct ArchiveSettingsView: View {
 
     private func refreshPermissionsAndCalendars() async {
         await permissions.refresh()
+        loadCalendars()
+    }
+
+    private func loadCalendars() {
+        controller.calendar.reload()
         calendars = controller.calendar.calendars()
+        if settings.selectedCalendarIDs.isEmpty {
+            settings.selectedCalendarIDs = controller.calendar.defaultCalendarIDs()
+        }
     }
 }
 

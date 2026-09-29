@@ -4,7 +4,7 @@ import XCTest
 
 final class MeetingSignalProviderTests: XCTestCase {
     func testMeetJoinedCameraOnIsAttributedButVideoFailsClosed() throws {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(observation(
             ax: [window(
                 app: .chrome,
@@ -27,7 +27,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testMeetPrejoinCameraPreviewIsExcluded() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(observation(
             ax: [window(
                 app: .chrome,
@@ -49,7 +49,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testMeetTabSwitchBecomesUnknownRatherThanCameraOff() throws {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let joined = resolver.resolve(observation(
             ax: [window(
                 app: .chrome,
@@ -81,7 +81,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testExplicitCameraOffEndsEpochAndLaterOnUsesNewID() throws {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let on = resolver.resolve(zoomObservation(cameraControl: "Stop Video"))
         let off = resolver.resolve(zoomObservation(cameraControl: "Start Video"))
         let stillOff = resolver.resolve(zoomObservation(cameraControl: "Start Video"))
@@ -94,8 +94,91 @@ final class MeetingSignalProviderTests: XCTestCase {
         XCTAssertEqual(onAgain.cameraActive, true)
     }
 
+    func testBriefCameraToggleKeepsTheSameSession() throws {
+        // 29 Sep: video went off for 1.4s mid-call and the recording split in two.
+        var resolver = MeetingSignalResolver(offGrace: .standard)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let on = resolver.resolve(zoomObservation(cameraControl: "Stop Video"), at: start)
+        let off = resolver.resolve(zoomObservation(cameraControl: "Start Video"), at: start.addingTimeInterval(1))
+        let back = resolver.resolve(zoomObservation(cameraControl: "Stop Video"), at: start.addingTimeInterval(2.4))
+
+        XCTAssertEqual(off.session?.id, on.session?.id)
+        XCTAssertNil(off.cameraActive, "an off edge inside the grace period is not yet a stop")
+        XCTAssertTrue(off.videoSafe)
+        XCTAssertEqual(back.session?.id, on.session?.id)
+        XCTAssertEqual(back.cameraActive, true)
+
+        // The grace restarts from the latest off edge, not the first one.
+        _ = resolver.resolve(zoomObservation(cameraControl: "Start Video"), at: start.addingTimeInterval(30))
+        let held = resolver.resolve(zoomObservation(cameraControl: "Start Video"), at: start.addingTimeInterval(49))
+        XCTAssertNil(held.cameraActive)
+        XCTAssertEqual(held.session?.id, on.session?.id)
+    }
+
+    func testCameraOffHeldPastGraceEndsTheSession() throws {
+        var resolver = MeetingSignalResolver(offGrace: .standard)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let on = resolver.resolve(zoomObservation(cameraControl: "Stop Video"), at: start)
+        _ = resolver.resolve(zoomObservation(cameraControl: "Start Video"), at: start.addingTimeInterval(1))
+        let ended = resolver.resolve(zoomObservation(cameraControl: "Start Video"), at: start.addingTimeInterval(21))
+        let after = resolver.resolve(zoomObservation(cameraControl: "Start Video"), at: start.addingTimeInterval(22))
+
+        XCTAssertEqual(ended.session?.id, on.session?.id)
+        XCTAssertEqual(ended.cameraActive, false)
+        XCTAssertNil(after.session)
+    }
+
+    func testClosedWindowUsesTheShortGrace() throws {
+        var resolver = MeetingSignalResolver(offGrace: .standard)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let active = resolver.resolve(zoomObservation(cameraControl: "Stop Video"), at: start)
+        let gone = observation(
+            ax: [window(app: .zoom, title: "Zoom Workplace", number: 205, controls: [])],
+            cg: [cgWindow(id: 205, app: .zoom, title: "Zoom Workplace")]
+        )
+        XCTAssertNil(resolver.resolve(gone, at: start.addingTimeInterval(1)).cameraActive)
+        let closed = resolver.resolve(gone, at: start.addingTimeInterval(4))
+        XCTAssertEqual(closed.session?.id, active.session?.id)
+        XCTAssertEqual(closed.cameraActive, false)
+    }
+
+    func testMeetingMovingToANewWindowKeepsTheSessionAndFollowsIt() throws {
+        var resolver = MeetingSignalResolver(offGrace: .standard)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let on = resolver.resolve(zoomObservation(cameraControl: "Stop Video"), at: start)
+        let moved = observation(
+            ax: [window(app: .zoom, title: "Zoom Meeting", number: 305, controls: [control(title: "Leave"), control(title: "Stop Video")])],
+            cg: [cgWindow(id: 305, app: .zoom, title: "Zoom Meeting")]
+        )
+        let followed = resolver.resolve(moved, at: start.addingTimeInterval(1))
+        let later = resolver.resolve(moved, at: start.addingTimeInterval(30))
+
+        XCTAssertEqual(followed.session?.id, on.session?.id)
+        XCTAssertEqual(followed.windowID, 305)
+        XCTAssertEqual(followed.cameraActive, true)
+        XCTAssertEqual(later.session?.id, on.session?.id, "the handoff must not age into an off edge")
+        XCTAssertEqual(later.windowID, 305)
+    }
+
+    func testHandoffRefusesWhenMoreThanOneWindowCouldBeTheMeeting() throws {
+        var resolver = MeetingSignalResolver(offGrace: .standard)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let on = resolver.resolve(zoomObservation(cameraControl: "Stop Video"), at: start)
+        let two = observation(
+            ax: [
+                window(app: .zoom, title: "Zoom Meeting", number: 305, controls: [control(title: "Leave"), control(title: "Stop Video")]),
+                window(app: .zoom, title: "Zoom Webinar", number: 306, controls: [control(title: "Leave"), control(title: "Stop Video")]),
+            ],
+            cg: [cgWindow(id: 305, app: .zoom, title: "Zoom Meeting"), cgWindow(id: 306, app: .zoom, title: "Zoom Webinar")]
+        )
+        let result = resolver.resolve(two, at: start.addingTimeInterval(1))
+        XCTAssertEqual(result.session?.id, on.session?.id)
+        XCTAssertNotEqual(result.windowID, 305)
+        XCTAssertNotEqual(result.windowID, 306)
+    }
+
     func testClosedNativeMeetingWindowEmitsOffButPermissionLossDoesNot() throws {
-        var closedResolver = MeetingSignalResolver()
+        var closedResolver = MeetingSignalResolver(offGrace: .none)
         let active = closedResolver.resolve(zoomObservation(cameraControl: "Stop Video"))
         let closed = closedResolver.resolve(observation(
             ax: [window(app: .zoom, title: "Zoom Workplace", number: 205, controls: [])],
@@ -105,7 +188,7 @@ final class MeetingSignalProviderTests: XCTestCase {
         XCTAssertEqual(closed.session?.id, active.session?.id)
         XCTAssertEqual(closed.cameraActive, false)
 
-        var deniedResolver = MeetingSignalResolver()
+        var deniedResolver = MeetingSignalResolver(offGrace: .none)
         let deniedActive = deniedResolver.resolve(zoomObservation(cameraControl: "Stop Video"))
         let denied = deniedResolver.resolve(MeetingAccessibilityObservation(
             accessibilityTrusted: false,
@@ -117,7 +200,7 @@ final class MeetingSignalProviderTests: XCTestCase {
         XCTAssertNil(denied.cameraActive)
         XCTAssertEqual(denied.status, .accessibilityPermissionRequired)
 
-        var stalledResolver = MeetingSignalResolver()
+        var stalledResolver = MeetingSignalResolver(offGrace: .none)
         let stalledActive = stalledResolver.resolve(zoomObservation(cameraControl: "Stop Video"))
         let stalled = stalledResolver.resolve(MeetingAccessibilityObservation(
             accessibilityTrusted: true,
@@ -132,7 +215,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testZoomPreviewAndJoinWindowAreExcluded() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(observation(
             ax: [window(
                 app: .zoom,
@@ -149,7 +232,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testZoomMeetingMenuKeepsCameraOnWhenToolbarIsHidden() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(zoomMenuObservation(
             item: "Stop video",
             windows: [window(
@@ -167,7 +250,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testZoomMeetingMenuEmitsCameraOffAfterToolbarHides() throws {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let active = resolver.resolve(zoomMenuObservation(
             item: "Stop video",
             windows: [window(
@@ -206,7 +289,7 @@ final class MeetingSignalProviderTests: XCTestCase {
                 window(app: .zoom, title: "Zoom Meeting", number: 205, controls: []),
             ],
         ] {
-            var resolver = MeetingSignalResolver()
+            var resolver = MeetingSignalResolver(offGrace: .none)
             let result = resolver.resolve(zoomMenuObservation(item: "Stop video", windows: windows))
 
             XCTAssertNil(result.session, "Global menu evidence leaked onto a non-unique joined surface")
@@ -215,7 +298,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testConflictingZoomToolbarAndMenuCameraActionsFailClosed() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(zoomMenuObservation(
             item: "Start video",
             windows: [window(
@@ -232,7 +315,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testZoomHelpStopVideoOverridesStaleStartVideoDescription() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(zoomMenuObservation(
             item: "Stop video",
             windows: [window(
@@ -256,7 +339,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testZoomHelpStartVideoOverridesStaleStopVideoDescription() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let active = resolver.resolve(zoomMenuObservation(
             item: "Stop video",
             windows: [window(
@@ -289,7 +372,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testZoomMissingHelpFallsBackToVisibleControlAction() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(zoomMenuObservation(
             item: "Stop video",
             windows: [window(
@@ -305,7 +388,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testZoomHelpCameraActionCannotQualifyPreview() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(zoomMenuObservation(
             item: "Stop video",
             windows: [window(
@@ -325,7 +408,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testTeamsJoinedCameraOffIsExplicit() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(observation(
             ax: [window(
                 app: .teams,
@@ -342,7 +425,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testSlackUnknownCameraLabelFailsClosed() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(observation(
             ax: [window(
                 app: .slack,
@@ -360,7 +443,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testAmbiguousAXToCGMappingFailsClosed() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let axWindow = window(
             app: .zoom,
             title: "Zoom Meeting",
@@ -387,7 +470,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testRestoredDescriptorKeepsEpochIDForSameWindow() throws {
-        var first = MeetingSignalResolver()
+        var first = MeetingSignalResolver(offGrace: .none)
         let initial = first.resolve(zoomObservation(cameraControl: "Stop Video"))
         let descriptor = try XCTUnwrap(initial.session)
         var restored = MeetingSignalResolver(restoring: descriptor)
@@ -399,7 +482,7 @@ final class MeetingSignalProviderTests: XCTestCase {
     }
 
     func testMinimizedNativeWindowRetainsCameraStateButBlocksVideo() {
-        var resolver = MeetingSignalResolver()
+        var resolver = MeetingSignalResolver(offGrace: .none)
         let result = resolver.resolve(observation(
             ax: [window(
                 app: .zoom,

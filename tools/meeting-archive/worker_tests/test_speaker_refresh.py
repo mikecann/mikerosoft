@@ -302,7 +302,8 @@ class SpeakerRefreshTests(unittest.TestCase):
             "Mike Cann",
         )
 
-        result = reconcile_pending_speakers(self.database)
+        with patch("sys.stderr"):
+            result = reconcile_pending_speakers(self.database)
 
         self.assertEqual(result["processed"], 1)
         self.assertEqual(result["remaining"], 1)
@@ -310,6 +311,26 @@ class SpeakerRefreshTests(unittest.TestCase):
         self.assertEqual(broken[1], 1)
         self.assertIn("JSONDecodeError", broken[2])
         self.assertIsNone(self._pending(valid_id))
+
+    def test_pending_sweep_backs_off_after_failure_until_a_new_request(self) -> None:
+        broken_id = str(uuid.uuid4())
+        broken_archive, _ = self._accepted_archive(broken_id)
+        (broken_archive / "transcripts" / "v1" / "transcript.json").write_text("not json")
+        self.registry.request_refresh(broken_id, 1)
+
+        with patch("sys.stderr"):
+            reconcile_pending_speakers(self.database, clock=lambda: 1000.0)
+            # The service sweeps every poll; a broken transcript must not be
+            # re-read and re-recorded each time.
+            reconcile_pending_speakers(self.database, clock=lambda: 1001.0)
+            self.assertEqual(self._pending(broken_id)[1], 1)
+            reconcile_pending_speakers(self.database, clock=lambda: 1000.0 + 3600)
+            self.assertEqual(self._pending(broken_id)[1], 2)
+
+            # A fresh confirmation is new input, so it is tried immediately.
+            self.registry.request_refresh(broken_id, 1)
+            reconcile_pending_speakers(self.database, clock=lambda: 1000.0 + 3601)
+            self.assertEqual(self._pending(broken_id)[1], 3)
 
     def test_service_reconciles_pending_speakers_before_processing(self) -> None:
         meeting_id = str(uuid.uuid4())

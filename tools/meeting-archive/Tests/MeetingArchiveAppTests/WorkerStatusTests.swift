@@ -183,6 +183,52 @@ final class WorkerStatusTests: XCTestCase {
         XCTAssertEqual(requests.count, 2)
     }
 
+    func testRenameSendsQuotedTitleAndValidatesTheEchoedMeeting() async throws {
+        let meetingID = UUID()
+        let title = "Mike's 1:1 with \"Sam\""
+        let response = try JSONSerialization.data(withJSONObject: [
+            "schema_version": 1, "meeting_id": meetingID.uuidString.lowercased(), "title": title,
+        ])
+        let runner = WorkerStatusStubRunner(results: [.init(exitCode: 0, stdout: response, stderr: "")])
+        let client = WorkerStatusClient(processRunner: runner, cacheDuration: 60)
+
+        let renamed = try await client.rename(meetingID: meetingID, title: title, configuration: .bruce)
+
+        XCTAssertEqual(renamed, title)
+        let requests = await runner.recordedRequests()
+        let command = try XCTUnwrap(requests.first?.arguments.last)
+        XCTAssertTrue(command.contains("'rename' '--meeting-id' '\(meetingID.uuidString.lowercased())'"))
+        XCTAssertTrue(command.contains("'--title=Mike'\"'\"'s 1:1 with \"Sam\"'"))
+
+        let wrong = try JSONSerialization.data(withJSONObject: [
+            "schema_version": 1, "meeting_id": UUID().uuidString.lowercased(), "title": title,
+        ])
+        let wrongRunner = WorkerStatusStubRunner(results: [.init(exitCode: 0, stdout: wrong, stderr: "")])
+        do {
+            _ = try await WorkerStatusClient(processRunner: wrongRunner, cacheDuration: 60)
+                .rename(meetingID: meetingID, title: title, configuration: .bruce)
+            XCTFail("a response for another meeting must be rejected")
+        } catch {}
+    }
+
+    func testSearchDecodesTranscriptMatches() async throws {
+        let meetingID = UUID()
+        let response = Data("""
+        {"results":[{"matches":[{"speaker":"Mike Cann","start_seconds":12.5,"text":"the budget review"}],
+          "meeting_id":"\(meetingID.uuidString.lowercased())","title":null}],"schema_version":1}
+        """.utf8)
+        let runner = WorkerStatusStubRunner(results: [.init(exitCode: 0, stdout: response, stderr: "")])
+        let client = WorkerStatusClient(processRunner: runner, cacheDuration: 60)
+
+        let results = try await client.search(query: "-budget", configuration: .bruce)
+
+        XCTAssertEqual(results.first?.meetingID, meetingID)
+        XCTAssertEqual(results.first?.matches.first?.speaker, "Mike Cann")
+        XCTAssertEqual(results.first?.matches.first?.startSeconds, 12.5)
+        let requests = await runner.recordedRequests()
+        XCTAssertTrue(try XCTUnwrap(requests.first?.arguments.last).contains("'search' '--query=-budget'"))
+    }
+
     func testRetryValidatesIdentityAndInvalidatesCachedStatus() async throws {
         let meetingID = UUID()
         let status = statusFixture(
@@ -474,4 +520,29 @@ private actor RetryBlockingWorkerStatusRunner: ArchiveProcessRunning {
     }
 
     func requestCount() -> Int { requests.count }
+}
+
+final class WorkerStatusPollingTests: XCTestCase {
+    func testOnlyUnsettledMeetingsNeedRoutinePolling() {
+        let id = UUID()
+        var status = WorkerMeetingStatus(
+            meetingID: id, phase: .published, processingState: .succeeded, publicationState: .succeeded,
+            speakerReview: .available, retryStage: nil, lastError: nil, manifestRevision: 2,
+            totalSpeakerCount: 3, unconfirmedSpeakerCount: 1
+        )
+        XCTAssertFalse(WorkerStatusPolling.isSettled(nil, revision: 2))
+        XCTAssertTrue(WorkerStatusPolling.isSettled(status, revision: 2))
+        XCTAssertFalse(WorkerStatusPolling.isSettled(status, revision: 3), "a newer local revision is still being processed")
+        status.publicationState = .retryWait
+        XCTAssertFalse(WorkerStatusPolling.isSettled(status, revision: 2), "publication is still retrying on Bruce")
+        status.processingState = .permanentFailure
+        XCTAssertTrue(WorkerStatusPolling.isSettled(status, revision: 2), "only a manual retry changes a permanent failure")
+    }
+
+    func testPollingBacksOffAfterConsecutiveFailures() {
+        XCTAssertEqual(WorkerStatusPolling.interval(hasBusyMeetings: true, consecutiveFailures: 0), 15)
+        XCTAssertEqual(WorkerStatusPolling.interval(hasBusyMeetings: false, consecutiveFailures: 0), 60)
+        XCTAssertEqual(WorkerStatusPolling.interval(hasBusyMeetings: true, consecutiveFailures: 2), 60)
+        XCTAssertEqual(WorkerStatusPolling.interval(hasBusyMeetings: true, consecutiveFailures: 20), 900)
+    }
 }

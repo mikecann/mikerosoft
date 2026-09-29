@@ -266,6 +266,12 @@ def parser() -> argparse.ArgumentParser:
     accept.add_argument("--archive-root", type=Path, required=True)
     accept.add_argument("--db", type=Path, required=True)
     accept.add_argument(
+        "--incoming-root",
+        type=Path,
+        help="staging root whose <meeting>/r<revision> copy is removed after acceptance "
+        "(default: incoming beside the archive root)",
+    )
+    accept.add_argument(
         "--validate-media",
         action="store_true",
         help="ffprobe and fully decode finalized media before allowing cleanup",
@@ -305,7 +311,53 @@ def parser() -> argparse.ArgumentParser:
     locate.add_argument("--meeting-id", required=True)
     locate.add_argument("--archive-root", type=Path, required=True)
     locate.add_argument("--db", type=Path, required=True)
+    rename = commands.add_parser("rename", help="set a meeting's display title")
+    rename.add_argument("--meeting-id", required=True)
+    rename.add_argument("--title", required=True)
+    rename.add_argument("--archive-root", type=Path, required=True)
+    rename.add_argument("--db", type=Path, required=True)
+    search = commands.add_parser("search", help="search transcripts of accepted meetings")
+    search.add_argument("--query", required=True)
+    search.add_argument("--archive-root", type=Path, required=True)
+    search.add_argument("--db", type=Path, required=True)
+    search.add_argument("--limit", type=int, default=20, help="maximum meetings returned (1-100)")
     return result
+
+
+def _accepted_archive_path(database: Path, archive_root: Path, meeting_id: str) -> Path:
+    acknowledgement = JobQueue(database).acceptance(meeting_id)
+    if acknowledgement is None:
+        raise ValueError(f"Meeting {meeting_id} is not accepted in this archive.")
+    path = Path(acknowledgement["archive_path"])
+    if not path.is_absolute():
+        path = archive_root / path
+    return path
+
+
+def _rename(args: argparse.Namespace) -> int:
+    from .service import PublicationQueue
+    from .titles import normalize_title, write_title
+
+    meeting_id = str(uuid.UUID(args.meeting_id)).lower()
+    title = normalize_title(args.title)
+    archive = _accepted_archive_path(args.db, args.archive_root, meeting_id)
+    write_title(archive, title)
+    # Republish like a speaker correction does. Queue even when the title was
+    # already saved, so a retry after a crash here still reaches Notion; an
+    # unchanged page short-circuits on its content fingerprint. Meetings not
+    # yet processed publish later and read the new title then.
+    succeeded = [
+        job for job in JobQueue(args.db).status({meeting_id})["jobs"]
+        if job["state"] == "succeeded"
+    ]
+    if succeeded:
+        latest = max(succeeded, key=lambda job: (job["manifest_revision"], job["id"]))
+        job_archive = Path(latest["archive_path"])
+        if not job_archive.is_absolute():
+            job_archive = args.archive_root / job_archive
+        PublicationQueue(args.db).refresh(int(latest["id"]), str(job_archive))
+    _print_json({"schema_version": 1, "meeting_id": meeting_id, "title": title})
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -324,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.archive_root,
                 args.db,
                 validate_media=args.validate_media,
+                # Bruce keeps MeetingArchive/incoming beside MeetingArchive/meetings.
+                incoming_root=args.incoming_root or Path(os.path.abspath(args.archive_root)).parent / "incoming",
             ).accept(
                 incoming,
                 expected_manifest_sha256=args.manifest_sha256,
@@ -425,13 +479,16 @@ def main(argv: list[str] | None = None) -> int:
             _print_json({"schema_version": 1, "confirmed": True, "meeting_id": args.meeting_id, "manifest_revision": args.revision, "speaker_id": args.speaker_id, "name": args.name, "voice_profile_enrolled": enrolled})
             return 0
         if args.command == "locate":
-            acknowledgement = JobQueue(args.db).acceptance(args.meeting_id)
-            if acknowledgement is None:
-                raise ValueError(f"Meeting {args.meeting_id} is not accepted in this archive.")
-            path = Path(acknowledgement["archive_path"])
-            if not path.is_absolute():
-                path = args.archive_root / path
+            path = _accepted_archive_path(args.db, args.archive_root, args.meeting_id)
             _print_json({"schema_version": 1, "meeting_id": args.meeting_id, "archive_path": str(path)})
+            return 0
+        if args.command == "rename":
+            return _rename(args)
+        if args.command == "search":
+            from .search import search_transcripts
+
+            JobQueue(args.db)  # validates the database directory and schema
+            _print_json(search_transcripts(args.db, args.archive_root, args.query, args.limit))
             return 0
         raise AssertionError(f"Unknown command {args.command}")
     except (

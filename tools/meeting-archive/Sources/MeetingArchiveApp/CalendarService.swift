@@ -17,9 +17,12 @@ struct CalendarSuggestion: Codable, Equatable, Identifiable, Sendable {
 
 enum CalendarRanking {
     static func best(_ events: [CalendarSuggestion], start: Date, end: Date) -> CalendarSuggestion? {
-        let duration = max(1, end.timeIntervalSince(start))
+        let recording = max(1, end.timeIntervalSince(start))
+        // Measure overlap against the shorter of the two, so a 30-minute slot
+        // that ran over into an 80-minute call still counts as a match.
         let ranked = events.map { event in
-            (event, max(0, min(end, event.end).timeIntervalSince(max(start, event.start))) / duration)
+            let overlap = max(0, min(end, event.end).timeIntervalSince(max(start, event.start)))
+            return (event, overlap / max(1, min(recording, event.end.timeIntervalSince(event.start))))
         }.filter { $0.1 >= 0.5 }.sorted { $0.1 > $1.1 }
         guard let first = ranked.first else { return nil }
         if ranked.count > 1, first.1 - ranked[1].1 < 0.2 { return nil }
@@ -27,12 +30,40 @@ enum CalendarRanking {
     }
 }
 
+struct CalendarCandidate: Equatable {
+    let id: String
+    let account: EKSourceType
+    let kind: EKCalendarType
+    let writable: Bool
+}
+
 @MainActor
 final class CalendarService {
+    /// Calendars from signed-in accounts (Google syncs as CalDAV) that the user
+    /// can edit. Holidays, birthdays, subscriptions and local calendars are left
+    /// out, since their events are never the meeting being recorded.
+    nonisolated static func defaultSelection(from calendars: [CalendarCandidate]) -> [String] {
+        calendars.filter {
+            [.calDAV, .exchange].contains($0.account) && [.calDAV, .exchange].contains($0.kind) && $0.writable
+        }.map(\.id)
+    }
+
+    func defaultCalendarIDs() -> Set<String> {
+        guard authorized else { return [] }
+        let candidates = store.calendars(for: .event).map {
+            CalendarCandidate(id: $0.calendarIdentifier, account: $0.source.sourceType, kind: $0.type, writable: $0.allowsContentModifications)
+        }
+        return Set(Self.defaultSelection(from: candidates))
+    }
+
     private let store = EKEventStore()
     var authorized: Bool { EKEventStore.authorizationStatus(for: .event) == .fullAccess }
 
     func requestAccess() async throws -> Bool { try await store.requestFullAccessToEvents() }
+
+    /// A store created before access was granted can keep returning no
+    /// calendars until it is reset.
+    func reload() { store.reset() }
 
     func calendars() -> [(id: String, title: String)] {
         guard authorized else { return [] }

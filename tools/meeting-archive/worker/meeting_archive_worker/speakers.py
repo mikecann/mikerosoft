@@ -59,6 +59,7 @@ class SpeakerRegistry:
                 "source_revision": "INTEGER",
                 "source_speaker_id": "TEXT",
             })
+            self._ensure_columns(connection, "speaker_refreshes", {"retry_after": "REAL"})
             self._ensure_columns(connection, "observed_voices", {"model_id": "TEXT NOT NULL DEFAULT 'legacy'", "dimension": "INTEGER NOT NULL DEFAULT 0"})
             self._backfill_profile_provenance(connection)
             self._deduplicate_profile_sources(connection)
@@ -296,7 +297,7 @@ class SpeakerRegistry:
             "(meeting_id,manifest_revision,generation,attempts,last_error,requested_at) "
             "VALUES (?, ?, 1, 0, NULL, ?) ON CONFLICT(meeting_id,manifest_revision) "
             "DO UPDATE SET generation=speaker_refreshes.generation+1, "
-            "last_error=NULL, requested_at=excluded.requested_at",
+            "last_error=NULL, retry_after=NULL, requested_at=excluded.requested_at",
             (meeting_id, revision, requested_at),
         )
 

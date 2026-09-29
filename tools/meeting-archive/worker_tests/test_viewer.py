@@ -172,6 +172,19 @@ class ViewerTests(unittest.TestCase):
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
         self.assertEqual(headers["Cache-Control"], "private, no-store")
 
+    def test_landing_page_uses_renamed_title_escaped(self) -> None:
+        (self.archive / "title.json").write_text(
+            json.dumps({"schema_version": 1, "title": "Launch <b>review</b>", "updated_at": "2026-09-29T00:00:00Z"}),
+            encoding="utf-8",
+        )
+
+        status, _headers, body = self._request(f"/meeting/{self.meeting_id}")
+
+        self.assertEqual(status, 200)
+        page = body.decode("utf-8")
+        self.assertIn("<h1>Launch &lt;b&gt;review&lt;/b&gt;</h1>", page)
+        self.assertNotIn("Planning &lt;img", page)
+
     def test_landing_page_gives_unnamed_speakers_stable_natural_labels(self) -> None:
         transcript_path = self.archive / "transcripts" / "v1" / "transcript.json"
         transcript_path.write_text(
@@ -523,7 +536,7 @@ class ViewerScriptTests(unittest.TestCase):
         self.assertNotIn("tailscale serve", installer)
         self.assertIn("5CCB1D81-5A98-4C4A-9E2C-3E10B23F1B46", wrapper)
         self.assertIn("127.0.0.1", wrapper)
-        self.assertIn("8765", wrapper)
+        self.assertIn("8791", wrapper)
         self.assertIn(ALLOWED_LOGIN, wrapper)
 
 

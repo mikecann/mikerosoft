@@ -266,8 +266,8 @@ public enum AcceptanceResolution: Equatable, Sendable {
     case discard
 }
 
-public struct MeetingRecord: Codable, Equatable, Sendable {
-    public static let acceptanceDelay: TimeInterval = 20
+public struct MeetingRecord: Codable, Equatable, Identifiable, Sendable {
+    public static let acceptanceDelay: TimeInterval = 90
 
     public var schemaVersion: Int
     public var id: UUID
@@ -323,6 +323,16 @@ public struct MeetingRecord: Codable, Equatable, Sendable {
         case .accept(let trigger): copy.acceptance = .accepted(at: date, trigger: trigger)
         case .discard: copy.acceptance = .discarded(at: date)
         }
+        copy.updatedAt = date
+        return copy
+    }
+
+    /// Bruce keeps the new title alongside the archive (the archived metadata
+    /// is hash-verified and never rewritten), so this changes only the local
+    /// copy and does not start a new upload revision.
+    public func renamingArchived(_ title: String, at date: Date) -> MeetingRecord {
+        var copy = self
+        copy.title = title
         copy.updatedAt = date
         return copy
     }
