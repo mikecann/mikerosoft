@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""Resolve the repo script even when launched through an install_mac symlink."""
+from pathlib import Path
+import sys
+
+folder = Path(__file__).resolve().parent
+sys.path.insert(0, str(folder))
+from bookmarks import main
+
+sys.exit(main())

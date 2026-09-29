@@ -39,6 +39,15 @@ const base = 'https://cdn.jsdelivr.net/gh/mikecann/mikerosoft@main/tools';
 
 export const tools: Tool[] = [
   {
+    name: 'x-bookmarks',
+    desc: 'Turn new X bookmarks into researched Codex briefs with fact-checks, useful follow-ups and source links; unchanged polling uses zero LLM tokens',
+    icon: `${base}/x-bookmarks/icons/x-bookmarks.png`,
+    header: `/x-bookmarks-header.png`,
+    screenshots: [],
+    url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/x-bookmarks',
+    platforms: ['macos'],
+  },
+  {
     name: 'transcribe',
     desc: 'Extract audio from a video and transcribe it via faster-whisper (CUDA with CPU fallback); right-click any video file in Explorer',
     icon: `${base}/transcribe/icons/film.png`,

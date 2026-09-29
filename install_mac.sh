@@ -75,6 +75,7 @@ echo "Installing macOS CLI launchers into $TARGET_DIR"
 echo ""
 
 link_tool ghopen tools/ghopen/ghopen
+link_tool x-bookmarks tools/x-bookmarks/x-bookmarks
 link_tool worktrees tools/worktrees/worktrees
 link_tool video-to-markdown tools/video-to-markdown/video-to-markdown
 link_tool video-titles tools/video-titles/video-titles
