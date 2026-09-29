@@ -23,29 +23,40 @@ struct TitleLibrary: View {
         }
     }
 
+    /// Titles, Templates, Segments and Fonts, closer together (and without
+    /// the count) when the panel is narrow.
     private func tabs(count: Int?) -> some View {
+        ViewThatFits(in: .horizontal) {
+            tabRow(count: count, spacing: 16, size: 13)
+            tabRow(count: nil, spacing: 12, size: 13)
+            tabRow(count: nil, spacing: 8, size: 12)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tabRow(count: Int?, spacing: CGFloat, size: CGFloat) -> some View {
         let host = AssetLibraryHost.shared
-        return HStack(spacing: 16) {
-            SubTab(title: "Titles", selected: !host.fontsShown && !host.segmentsShown && !showTemplates) {
+        return HStack(spacing: spacing) {
+            SubTab(title: "Titles", selected: !host.fontsShown && !host.segmentsShown && !showTemplates, size: size) {
                 host.fontsShown = false
                 host.segmentsShown = false
                 showTemplates = false
             }
-            SubTab(title: "Templates", selected: !host.fontsShown && !host.segmentsShown && showTemplates) {
+            SubTab(title: "Templates", selected: !host.fontsShown && !host.segmentsShown && showTemplates, size: size) {
                 host.fontsShown = false
                 host.segmentsShown = false
                 showTemplates = true
             }
-            SubTab(title: "Segments", selected: host.segmentsShown) {
+            SubTab(title: "Segments", selected: host.segmentsShown, size: size) {
                 host.fontsShown = false
                 host.segmentsShown = true
             }
-            SubTab(title: "Fonts", selected: host.fontsShown) {
+            SubTab(title: "Fonts", selected: host.fontsShown, size: size) {
                 host.segmentsShown = false
                 host.fontsShown = true
             }
-            Spacer(minLength: 4)
             if let count {
+                Spacer(minLength: 4)
                 Text(verbatim: String(count))
                     .font(.ui(11.5))
                     .foregroundStyle(Theme.textFaint.color)
@@ -204,12 +215,13 @@ private struct TemplatePreview: View {
 struct SubTab: View {
     let title: String
     let selected: Bool
+    var size: CGFloat = 13
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.ui(13, selected ? .bold : .regular))
+                .font(.ui(size, selected ? .bold : .regular))
                 .foregroundStyle(selected ? Theme.text.color : Theme.textFaint.color)
         }
         .buttonStyle(.plain)

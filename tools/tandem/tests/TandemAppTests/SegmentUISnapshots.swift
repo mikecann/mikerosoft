@@ -102,6 +102,10 @@ final class SegmentUISnapshots: XCTestCase {
         try render(SaveSegmentView(model: sheetModel), "2-save-sheet")
 
         try render(SharedChip().padding(8).background(Theme.panel.color), "3-shared-chip")
+        // The Text tab's four sub-tabs, at the narrowest and the usual width.
+        for width in [240.0, 300.0] {
+            try render(TitleLibrary(model: model).frame(width: width, height: 160).background(Theme.panel.color), "5-text-tab-\(Int(width))")
+        }
         try render(SettingsView(), "4-settings")
     }
 }

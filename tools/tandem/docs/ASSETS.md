@@ -141,10 +141,11 @@ are used from the library too.
 | Downloaded or generated (Noto, Iconify, SVGL, Fontsource, Pexels, Pixabay, ElevenLabs) | copied into `assets/<kind>/` |
 
 **Segments.** A segment is a reusable bit of timeline (Mike's intro, outro,
-like and subscribe, comment below): a `Template` of clips with their offsets,
-the transitions between them and optional fields, plus copies of every file
-those clips play and their LUTs, beside `segment.json` in `Segments/<name>/`, so it keeps working
-whatever happens to the project it came from. Save one with Timeline > Save
+like and subscribe, comment below): a `Template` of clips with their
+offsets, the transitions between them and optional fields, plus copies of
+every file those clips play and their LUTs, beside `segment.json` in
+`Segments/<name>/`, so it keeps working whatever happens to the project it
+came from. Save one with Timeline > Save
 selection as segment… (or right-click a clip), `tandem segments save` or
 `segments_save`; they're in the Text tab under Segments. Inserting one is a
 single `insertTemplate` whose media clips carry their media items, pointing

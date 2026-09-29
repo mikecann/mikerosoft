@@ -90,9 +90,9 @@ plus copies of the files its clips play, so it stands on its own in the
 library. A `TemplateClip` can carry the `MediaItem` its file needs
 (`media`); `insertTemplate` adds it when the project has nothing at that
 path yet and reuses what's there otherwise. A template's `transitions` name
-its clips by index and are added once the clips are in. Inserting a segment is one
-`insertTemplate` whose files are the segment's own, where they are in the
-library.
+its clips by index and are added once the clips are in. Inserting a segment
+is one `insertTemplate` whose files are the segment's own, where they are
+in the library.
 
 ## Model conventions
 

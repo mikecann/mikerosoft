@@ -260,7 +260,8 @@ public final class MCPServer: @unchecked Sendable {
     Start with `timeline` (add words: true to see what's said in each voice clip). Change things with `apply`, a batch of edit commands applied \
     atomically as one undo step credited to you; pass expectedRevision from your last read so you never edit a timeline that changed under you, \
     and try dryRun: true when unsure. `undo` reverts your last edit. `search` finds a phrase's timeline time, `pauses` lists silences and \
-    `tighten` shortens them (a dry run unless apply: true). `frame` shows a moment, `clip` renders a review MP4. Times are seconds or mm:ss.mmm. \
+    `tighten` shortens them (a dry run unless apply: true). `frame` shows a moment, `clip` renders a review MP4. Mike's saved segments (his intro, \
+    outro and calls to action) are in `segments_list` and go in with `segments_insert`. Times are seconds or mm:ss.mmm. \
     Pass `project` (a .tandem path) when the server wasn't started in the video's folder.
     """
 

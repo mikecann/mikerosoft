@@ -101,7 +101,7 @@ public struct SharedLibrary: Sendable, Equatable {
                 return """
                 Stickers
 
-                Animated stickers for the Graphics track. HEVC with alpha (.mov) plays as it is; WebM, animated GIF and WebP, and Lottie (.json) are converted once, the first time a project uses them, and again whenever you change them here.
+                Animated stickers for the Graphics track. HEVC with alpha (.mov) plays as it is; WebM, animated GIF and WebP, and Lottie (.json) are converted once, when Tandem first shows them, and again whenever you change them here.
 
                 They show up in the Graphics tab under Stickers, with the Shared library chip. Subfolders are fine: their names become search words.
                 """
