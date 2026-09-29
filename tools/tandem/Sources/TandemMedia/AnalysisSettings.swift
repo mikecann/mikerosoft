@@ -13,9 +13,14 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
     /// Proxies fit inside this box (landscape; portrait sources swap it).
     public var proxyMaxWidth: Int
     public var proxyMaxHeight: Int
-    /// VideoToolbox constant quality, 0...1. 0.45 is about 30 MB a minute
-    /// for Mike's 4K camera, plenty for scrubbing (paused frames decode the
-    /// original).
+    /// VideoToolbox constant quality, 0...1. Every proxy frame is a
+    /// keyframe (for scrubbing and playing backwards), so its compression
+    /// noise is new every frame and shows as static crawling over flat
+    /// walls and screen text while playing. At 0.45 (34 MB a minute for
+    /// Mike's 4K camera) 8x8 blocks of a still wall flickered 3.3 times as
+    /// much as in the original; 0.6 is about 100 MB a minute, the size of
+    /// the original, and flickers 2.1 times as much. Higher costs far more
+    /// for less (0.65 is 130 MB a minute for 1.9 times).
     public var proxyQuality: Double
     /// SpeechAnalyzer locale. en-US beat en-AU on Mike's voice (7.1% against
     /// 8.8% word error rate in the transcription spike).
@@ -40,7 +45,7 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
         waveformRate: Int = 100,
         proxyMaxWidth: Int = 1920,
         proxyMaxHeight: Int = 1080,
-        proxyQuality: Double = 0.45,
+        proxyQuality: Double = 0.6,
         transcriptLocale: String = "en-US",
         matteModel: MatteModel = .robustVideoMatting,
         matteQuality: MatteQuality = .accurate,
@@ -149,9 +154,11 @@ extension AnalysisKind {
     /// Bump when a kind's output changes, so old cache entries are rebuilt.
     public var algorithmVersion: Int {
         switch self {
-        case .thumbnails, .waveform, .loudness, .proxy, .transcript, .isolatedVoice: return 1
+        case .thumbnails, .waveform, .loudness, .transcript, .isolatedVoice: return 1
         // 2: the subject mask for props and smoothing over time.
         case .matte: return 2
+        // 2: quality 0.6, so the 0.45 proxies that crawled rebuild.
+        case .proxy: return 2
         }
     }
 
