@@ -18,13 +18,35 @@ import TandemMedia
 /// play (WebM stickers) are left out with a to-do marker where they were;
 /// missing media stays on the timeline offline, with the length Filmora
 /// recorded, so it can be relinked.
+///
+/// Speech is normalised to the project's speech level by default, like
+/// clips placed in Tandem (`SpeechLevels`).
 public struct FilmoraImporter: Sendable {
+    /// How an import levels speech: the camera's sound and anything on a
+    /// take track (`AudioLevels.isSpeech`).
+    public enum SpeechLevels: String, Codable, Sendable {
+        /// Normalised to the project's speech level (-20 LUFS) with no
+        /// gain, like clips placed in Tandem. Filmora played Mike's voice
+        /// at about that level, so music and sound effects, which keep
+        /// their Filmora volume, keep their balance with it.
+        case normalize
+        /// Filmora's own levels, the way Filmora played them: a clip with
+        /// Auto Normalization is normalised to -24 LUFS (where Filmora
+        /// levels, on Tandem's meter) plus its loudness and volume gain.
+        case keepFilmora
+    }
+
     public var locating: MediaLocating
+    public var speechLevels: SpeechLevels
 
     /// By default, paths from TinkerDesk (the other Mac) are also tried
     /// under this Mac's home folder.
-    public init(locating: MediaLocating = MediaLocating(pathRewrites: [MediaLocating.tinkerDeskHome])) {
+    public init(
+        locating: MediaLocating = MediaLocating(pathRewrites: [MediaLocating.tinkerDeskHome]),
+        speechLevels: SpeechLevels = .normalize
+    ) {
         self.locating = locating
+        self.speechLevels = speechLevels
     }
 
     /// Imports a `.wfp` file or an unzipped project folder. `name` defaults
@@ -32,7 +54,7 @@ public struct FilmoraImporter: Sendable {
     public func importProject(at url: URL, name: String? = nil) async throws -> ImportResult {
         let wfp = try WfpProject.load(from: url)
         guard wfp.mainTimeline != nil else { throw ImportError.invalid("\(url.lastPathComponent) has no main timeline") }
-        let run = FilmoraRun(wfp: wfp, source: url.path, name: name ?? wfp.name, locating: locating)
+        let run = FilmoraRun(wfp: wfp, source: url.path, name: name ?? wfp.name, locating: locating, speechLevels: speechLevels)
         return await run.build()
     }
 }
@@ -89,6 +111,7 @@ final class FilmoraRun {
     let wfp: WfpProject
     let source: String
     let name: String
+    let speechLevels: FilmoraImporter.SpeechLevels
     let catalog: MediaCatalog
     var report: ImportReport
     var ids = ImportIDs.Allocator()
@@ -100,10 +123,11 @@ final class FilmoraRun {
     var flattenedSounds = Set<String>()
     var titleSizeNoted = false
 
-    init(wfp: WfpProject, source: String, name: String, locating: MediaLocating) {
+    init(wfp: WfpProject, source: String, name: String, locating: MediaLocating, speechLevels: FilmoraImporter.SpeechLevels = .normalize) {
         self.wfp = wfp
         self.source = source
         self.name = name
+        self.speechLevels = speechLevels
         self.catalog = MediaCatalog(locating: locating)
         self.report = ImportReport(source: source, importer: "filmora", projectName: name)
         var settings = ProjectSettings(width: wfp.width, height: wfp.height, frameRate: wfp.frameRate)
@@ -595,12 +619,22 @@ final class FilmoraRun {
 
     // MARK: - Sound
 
+    /// Where Filmora's Auto Normalization levels a file, on Tandem's
+    /// (BS.1770) meter. Filmora says -23 LUFS. Measured on Mike's v14
+    /// export against its sources: 62 voice clips from three takes played
+    /// at -24.1 LUFS plus the clip's LoudnessGain (spread 0.7 dB), where
+    /// the music played at its plain VolumeGain.
+    static let autoNormalizationLUFS = -24.0
+
     func audioProperties(_ clip: WfpClip, duration: Time, at time: Time) -> AudioProperties {
         var audio = AudioProperties()
         if let volume = clip.effect("audio/effect/volume"), volume.isOn {
             var gain = volume.number("VolumeGain") ?? 0
             if volume.params["LoudnessGainEnable"]?.bool == true {
+                // LoudnessGain goes on top of Filmora's levelling, not the
+                // raw file, which is what normalizeTo plus gainDB does.
                 gain += volume.number("LoudnessGain") ?? 0
+                audio.normalizeTo = Self.autoNormalizationLUFS
             }
             audio.gainDB = gain
             if let balance = volume.number("Balance"), balance != 0, abs(balance - 0.5) > 0.01 {

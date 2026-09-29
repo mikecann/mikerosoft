@@ -201,6 +201,13 @@ the file, and -0.9 before the change: the codec's overshoot). The voice
 now sits 23.7 dB over the music in the pauses, against 25.9 dB in
 Filmora's own export and 18.0 dB with the gains the Filmora import copied.
 
+A Filmora import normalises speech to the speech level, the way placing
+does. It used to copy LoudnessGain as a plain gain, which put the voice
+8 dB lower against the music than Filmora played it. `--keep-levels`
+keeps Filmora's own levels instead, as `normalizeTo: -24` plus the clip's
+gain. The decision-models EDL recipe's -28.74 LUFS voice came from the same
+reading of LoudnessGain; it now uses the speech level.
+
 ## Export
 
 1. Build the composition at the preset's size and format (never proxies).

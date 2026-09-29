@@ -63,7 +63,8 @@ struct ImportCommand {
             output: url(args.options["out"] ?? "."),
             name: args.options["name"],
             searchFolders: args.values("search").map(url),
-            pathRewrites: [MediaLocating.tinkerDeskHome] + rewrites
+            pathRewrites: [MediaLocating.tinkerDeskHome] + rewrites,
+            speechLevels: args.has("keep-levels") ? .keepFilmora : .normalize
         )
         let (projectURL, result) = try await request.perform()
         if json {

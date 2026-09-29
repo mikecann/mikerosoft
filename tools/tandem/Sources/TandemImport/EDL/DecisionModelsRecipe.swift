@@ -51,9 +51,6 @@ private let decisionModelsRecipeJSON = #"""
       "screen": "source/main vid/2026-09-24_145626-screen.mov"
     }
   ],
-  "voice": {
-    "normalizeTo": -28.74
-  },
   "pip": {
     "x": 0.8899423480033875,
     "y": 0.8004488348960876,
@@ -84,8 +81,7 @@ private let decisionModelsRecipeJSON = #"""
   ],
   "intro": {
     "path": "Intro v5.mp4",
-    "replacesBefore": 149.0,
-    "normalizeTo": -28.74
+    "replacesBefore": 149.0
   },
   "cutAdjustments": [
     {"start": 149.0, "end": 157.19, "newStart": 149.0, "newEnd": 157.49},
@@ -373,7 +369,7 @@ private let decisionModelsRecipeJSON = #"""
     "Frame rate 30, the footage's own. v14 was a 25 fps Filmora project because build_wfp.py cloned the AI Gateway template.",
     "No audio fades at the camera and screen switches: in v14 those let about half a second of cut-out voice play under the next clip. Voice cuts stay clean.",
     "Takes: the three record-it sessions. EDL time is main-camera.mov, the sessions end to end, so each take starts at its session offset (build_wfp.py CAM_SESSIONS). A session's screen and camera share a clock (use_originals.py, intro.py).",
-    "Voice levelled to -28.74 LUFS, the target build_wfp.py gave Filmora's LoudnessGain. level_voice.py's per-clip smoothing needed audio analysis and isn't reproduced.",
+    "Voice and intro at the project's speech level (-20 LUFS), about where v14 played them (voice -20.4, intro -18.8 LUFS in its export). build_wfp.py aimed Filmora's LoudnessGain at -28.74 LUFS (+1.6 to +4.0 dB on each session), but Filmora adds it after its own Auto Normalization to about -24 LUFS; at -28.74 the voice sat 8 dB lower against the music and sound effects than in v14. level_voice.py's per-clip smoothing needed audio analysis and isn't reproduced.",
     "PiP and camera grade copied from the AI Gateway template clips build_wfp.py cloned: scale 50 at (0.890, 0.800); HSL red -17, purple -21, blue -3; vignette -34; black level +7.",
     "Intro v5.mp4 (intro.py) replaced the Magic Jev Ball segments before take time 149.0, as in Mike's Decision Models.wfp.",
     "Cut adjustments are fix_cutoffs.py's output as saved in Decision Models v5 (tinkerdesk).wfp. Four of them also carry trims Mike made by hand before it ran.",
