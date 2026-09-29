@@ -66,7 +66,7 @@ struct AnimationSection: View {
             let clipTime = model.clipTime(of: clip)
             let here = KeyframeEdits.parameters(in: clip, keyedAt: clipTime, tolerance: tolerance, among: parameters)
             let count = KeyframeEdits.times(in: clip, parameters: parameters, tolerance: tolerance).count
-            InspectorSection(title: "Animation", accessory: {
+            InspectorSection(title: "Animation", icon: Icons.animation, accessory: {
                 HStack(spacing: 2) {
                     StepButton(symbol: "chevron.left", help: "Previous keyframe (Shift-J)") { model.seekKeyframe(forward: false) }
                     Button { model.toggleKeyframes() } label: {

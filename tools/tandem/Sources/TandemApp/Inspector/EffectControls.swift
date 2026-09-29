@@ -29,10 +29,10 @@ struct EffectStack: View {
         let shown = effects.filter { belongs($0.type) }
         let prefix = domain == .video ? "video.effects." : "audio.effects."
         let available = EffectRegistry.standard.sorted.filter { $0.domain == domain && belongs($0.type) }
-        InspectorSection(title: title, accessory: {
+        InspectorSection(title: title, icon: title == "Effects" ? Icons.effects : Icons.clipOnly, accessory: {
             Menu {
                 ForEach(available, id: \.type) { definition in
-                    Button(definition.name) {
+                    Button(definition.name, systemImage: Icons.effect(definition.type)) {
                         let effect = Effect(type: definition.type)
                         if model.apply(EditBatch(label: "Add \(definition.name.lowercased())", commands: [.addEffect(clipID: clip.id, effect: effect)])) != nil {
                             expanded.insert(effect.id)
@@ -107,6 +107,7 @@ struct EffectRow: View {
                 }
                 .buttonStyle(.plain)
                 .help(effect.enabled ? "Turn off" : "Turn on")
+                PanelIcon(name: Icons.effect(effect.type), color: effect.enabled ? Theme.textSecondary.color : Theme.textFaint.color)
                 Text(definition?.name ?? "\(effect.type) (unknown)")
                     .font(.ui(12))
                     .foregroundStyle(effect.enabled ? Theme.text.color : Theme.textMuted.color)
@@ -125,8 +126,8 @@ struct EffectRow: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: toggleExpanded)
             .contextMenu {
-                Button(effect.enabled ? "Turn off" : "Turn on") { setEnabled(!effect.enabled) }
-                if let remove { Button("Remove", action: remove) }
+                Button(effect.enabled ? "Turn off" : "Turn on", systemImage: effect.enabled ? "eye.slash" : "eye") { setEnabled(!effect.enabled) }
+                if let remove { Button("Remove", systemImage: "trash", action: remove) }
             }
             if expanded, let definition {
                 ParamControls(definition: definition, values: definition.resolvedParams(effect), keyframe: keyframe, commit: commit)
@@ -327,10 +328,10 @@ struct ColourInspector: View {
     private func lookSection(_ item: MediaItem) -> some View {
         let colourTypes = EffectRegistry.standard.sorted.filter { $0.domain == .video && $0.category == "Colour" }
         let users = model.project.videoTracks.flatMap(\.clips).filter { $0.mediaID == item.id }.count
-        return InspectorSection(title: "Look", accessory: {
+        return InspectorSection(title: "Look", icon: Icons.look, accessory: {
             Menu {
                 ForEach(colourTypes, id: \.type) { definition in
-                    Button(definition.name) {
+                    Button(definition.name, systemImage: Icons.effect(definition.type)) {
                         let effect = Effect(type: definition.type)
                         if model.apply(InspectorEdits.look(item.id, item.look + [effect], label: "Add \(definition.name.lowercased()) to the look")) != nil {
                             expanded.insert(effect.id)

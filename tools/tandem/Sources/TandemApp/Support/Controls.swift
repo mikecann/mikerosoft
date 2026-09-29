@@ -78,11 +78,14 @@ struct GraphiteSwitch: View {
     }
 }
 
-/// The layout control: equal segments on a dark track.
+/// The layout control: equal segments on a dark track, each with an
+/// optional icon over its title.
 struct GraphiteSegmented<Option: Hashable>: View {
     let options: [Option]
     let selected: Option?
     let title: (Option) -> String
+    var icon: ((Option) -> String)? = nil
+    var help: ((Option) -> String)? = nil
     let action: (Option) -> Void
 
     var body: some View {
@@ -92,15 +95,23 @@ struct GraphiteSegmented<Option: Hashable>: View {
                 Button {
                     action(option)
                 } label: {
-                    Text(title(option))
-                        .font(.ui(11.5, isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? Theme.text.color : Theme.textSecondary.color)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(isSelected ? Theme.segmentSelected.color : .clear))
-                        .contentShape(Rectangle())
+                    VStack(spacing: 3) {
+                        if let icon {
+                            Image(systemName: icon(option))
+                                .font(.system(size: 13, weight: .regular))
+                        }
+                        Text(title(option))
+                            .font(.ui(icon == nil ? 11.5 : 10.5, isSelected ? .semibold : .regular))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(isSelected ? Theme.text.color : Theme.textSecondary.color)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, icon == nil ? 4 : 5)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(isSelected ? Theme.segmentSelected.color : .clear))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help(help?(option) ?? "")
             }
         }
         .padding(3)
@@ -108,15 +119,18 @@ struct GraphiteSegmented<Option: Hashable>: View {
     }
 }
 
-/// A section of the inspector with a bold title and a divider below.
+/// A section of the inspector with a bold title (and its icon) and a
+/// divider below.
 struct InspectorSection<Content: View, Accessory: View>: View {
     let title: String
+    var icon: String? = nil
     @ViewBuilder var accessory: () -> Accessory
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            HStack {
+            HStack(spacing: 6) {
+                if let icon { PanelIcon(name: icon) }
                 Text(title)
                     .font(.ui(12, .bold))
                     .foregroundStyle(Theme.text.color)
@@ -132,8 +146,9 @@ struct InspectorSection<Content: View, Accessory: View>: View {
 }
 
 extension InspectorSection where Accessory == EmptyView {
-    init(title: String, @ViewBuilder content: @escaping () -> Content) {
+    init(title: String, icon: String? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
+        self.icon = icon
         self.accessory = { EmptyView() }
         self.content = content
     }
