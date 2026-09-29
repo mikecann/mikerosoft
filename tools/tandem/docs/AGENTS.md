@@ -1117,7 +1117,8 @@ tandem archive --to "/Volumes/CannMedia/Archive"
 The copy is `/Volumes/CannMedia/Archive/<project folder name>/`, with every
 path relative, so it opens anywhere. Proxies, mattes, thumbnails and
 isolated voice are left out (Tandem makes them again; `--with-cache` keeps
-them), as are `node_modules` folders; transcripts always go. Files outside
+them), as are `node_modules` folders; transcripts and the converted copies
+of stickers macOS can't decode always go. Files outside
 the folder land in `media/<the folder they were in>/`, LUTs in `assets/lut/`
 and fonts in `assets/font/`. Other `.tandem` files in the folder (versions)
 get the same treatment.

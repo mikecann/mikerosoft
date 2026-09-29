@@ -562,7 +562,9 @@ public final class ProjectArchiver: @unchecked Sendable {
 
     /// Analysis the archive leaves out unless asked: big, and Tandem makes
     /// it again for what the edit uses. Transcripts, waveforms and loudness
-    /// always go; transcripts especially are slow to make again.
+    /// always go; transcripts especially are slow to make again. So do the
+    /// converted copies of stickers macOS can't decode: they're small, and
+    /// making them again needs ffmpeg, which the Mac opening it may not have.
     static let rebuildableCache = Set([AnalysisKind.proxy, .matte, .thumbnails, .isolatedVoice].map(\.rawValue))
 
     private func walkFolder(_ plan: Plan) {

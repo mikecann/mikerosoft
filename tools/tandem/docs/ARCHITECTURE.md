@@ -293,7 +293,9 @@ Two modes:
   for what the edit uses (`--with-cache` keeps them); `node_modules`; lock
   files, cache temporaries, and the archived projects' journals and headless
   undo history (they describe the old paths); links to things outside the
-  folder. Transcripts, waveforms and loudness always go. Their cache keys
+  folder. Transcripts, waveforms and loudness always go, and so do the
+  converted copies of video macOS can't decode (small, and making them
+  again needs ffmpeg). Their cache keys
   come from the media fingerprints, which survive because copies keep
   modification dates.
 

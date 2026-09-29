@@ -395,7 +395,7 @@ final class ArchiveTests: XCTestCase {
             Set((try? FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent(".tandem/cache").path)) ?? [])
         }
         let leanFolder = URL(fileURLWithPath: lean.folder)
-        XCTAssertEqual(kinds(leanFolder), ["transcript", "waveform", "loudness"])
+        XCTAssertEqual(kinds(leanFolder), ["transcript", "waveform", "loudness", "converted"])
         XCTAssertEqual(Set(lean.leftOut.map(\.path)), [".tandem/cache/proxy", ".tandem/cache/matte", ".tandem/cache/thumbnails", ".tandem/cache/isolatedVoice"])
         XCTAssertTrue(lean.leftOut.allSatisfy { $0.bytes > 0 })
         XCTAssertFalse(FileManager.default.fileExists(atPath: leanFolder.appendingPathComponent(".tandem/Video.lock").path))
