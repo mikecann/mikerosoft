@@ -8,8 +8,10 @@ import Vision
 /// The cutout matte, written as a greyscale HEVC movie with the source's
 /// exact frame times.
 ///
-/// Version 2, the default: Vision's person segmentation for every frame,
-/// with the foreground subject mask adding what the person holds (the mic,
+/// By default Robust Video Matting makes it (`RVMMatte`). When RVM's model
+/// can't be had, it's the Vision version 2 matte instead, and the job says
+/// so: Vision's person segmentation for every frame, with the foreground
+/// subject mask adding what the person holds (the mic,
 /// `MatteBlender.keepSubject`), then steadied over time where the picture
 /// is still (`MatteSmoother`). Version 1 blended the person instance mask
 /// and had no smoothing, so the mic popped in and out and the edges
@@ -43,9 +45,21 @@ enum MatteJob {
     }
 
     static func run(source: URL, settings: AnalysisSettings, into folder: URL, context: JobContext, timeRange: CMTimeRange? = nil, tuning: Tuning = Tuning()) async throws {
+        var settings = settings
+        var fellBack = false
         if settings.matteModel == .robustVideoMatting {
-            try await RVMMatte.run(source: source, settings: settings, into: folder, context: context, timeRange: timeRange, store: tuning.rvmStore)
-            return
+            do {
+                try await RVMMatte.run(source: source, settings: settings, into: folder, context: context, timeRange: timeRange, store: tuning.rvmStore)
+                return
+            } catch let unavailable as RVMMatte.Unavailable {
+                // Not silently: the job's status keeps this line, and the
+                // fallback file gets the matte rebuilt with RVM once the
+                // model file changes (see MediaAnalysis).
+                context.note("Made with Vision: RVM unavailable (\(unavailable.reason))")
+                try MatteFallback(reason: unavailable.reason, model: tuning.rvmStore.stamp()).write(to: folder)
+                settings.matteModel = .vision
+                fellBack = true
+            }
         }
         let reader = try await VideoFrameReader(url: source, timeRange: timeRange)
         let size = fittedSize(width: Int(reader.size.width), height: Int(reader.size.height), maxWidth: settings.matteMaxWidth, maxHeight: settings.matteMaxHeight)
@@ -58,6 +72,7 @@ enum MatteJob {
                 let more = try await Blocking.run(qos: context.qos) { try pipeline.write(upTo: 15, into: writer) }
                 let done = pipeline.written
                 var message = "Frame \(done) of \(reader.frameCount)"
+                if fellBack { message += ", Vision (RVM unavailable)" }
                 if pipeline.failures > 0 { message += ", \(pipeline.failures) held from the frame before" }
                 context.progress(Double(done) / Double(max(1, reader.frameCount)), message: message)
                 if !more { break }

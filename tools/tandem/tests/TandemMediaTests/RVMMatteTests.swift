@@ -106,12 +106,13 @@ final class RVMMatteTests: XCTestCase {
         XCTAssertEqual(RVMMatte.contentRect(width: 1080, height: 1920, inputWidth: 1920, inputHeight: 1080), CGRect(x: 656, y: 0, width: 608, height: 1080))
     }
 
-    func testRVMHasItsOwnCacheKeyAndVisionStaysTheDefault() {
-        let standard = AnalysisSettings()
-        XCTAssertEqual(standard.matteModel, .vision, "version 2 stays the default until Mike picks")
-        var rvm = standard
-        rvm.matteModel = .robustVideoMatting
-        XCTAssertNotEqual(rvm.canonical(for: .matte), standard.canonical(for: .matte))
+    func testRVMIsTheDefaultWithItsOwnCacheKey() {
+        let rvm = AnalysisSettings()
+        XCTAssertEqual(rvm.matteModel, .robustVideoMatting, "Mike picked RVM")
+        XCTAssertEqual(RVMMatte.version, 2, "version 1 RVM mattes had the light rim; they rebuild")
+        var standard = rvm
+        standard.matteModel = .vision
+        XCTAssertNotEqual(rvm.canonical(for: .matte), standard.canonical(for: .matte), "Vision mattes rebuild as RVM ones")
         XCTAssertTrue(rvm.canonical(for: .matte).contains("\"rvm\":\"\(RVMMatte.version)\""), rvm.canonical(for: .matte))
         // Vision's knobs don't touch an RVM matte, and RVM keeps what the
         // person holds either way, so both cutout modes share one.
@@ -128,22 +129,43 @@ final class RVMMatteTests: XCTestCase {
         XCTAssertEqual(AnalysisKind.allCases.filter { standard.canonical(for: $0) != rvm.canonical(for: $0) }, [.matte])
     }
 
-    func testWithoutTheModelTheJobFailsSayingWhy() async throws {
+    func testWithoutTheModelTheJobFallsBackToVisionAndSaysWhy() async throws {
         let movie = temp.appendingPathComponent("take-camera.mov")
         try await SyntheticMedia.writeMovie(to: movie, .init(width: 320, height: 180, duration: 0.5))
-        var settings = AnalysisSettings()
-        settings.matteModel = .robustVideoMatting
         var tuning = MatteJob.Tuning()
         tuning.rvmStore = RVMModelStore(folder: temp.appendingPathComponent("Models/rvm", isDirectory: true), fileName: "model.mlmodel",
                                         remote: URL(string: "https://example.invalid/model.mlmodel")!, sha256: String(repeating: "0", count: 64),
                                         fetch: { _ in throw URLError(.notConnectedToInternet) })
         let folder = temp.appendingPathComponent("out", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        do {
-            try await MatteJob.run(source: movie, settings: settings, into: folder, context: JobContext(id: "rvm", kind: .matte, qos: .utility, scheduler: nil), tuning: tuning)
-            XCTFail("no model, no matte")
-        } catch {
-            XCTAssertTrue(error.localizedDescription.contains("RVM"), error.localizedDescription)
+        let context = JobContext(id: "rvm", kind: .matte, qos: .utility, scheduler: nil)
+        try await MatteJob.run(source: movie, settings: AnalysisSettings(), into: folder, context: context, tuning: tuning)
+        let times = try await videoSampleTimes(folder.appendingPathComponent(MatteJob.file))
+        let sourceTimes = try await videoSampleTimes(movie)
+        XCTAssertEqual(times.count, sourceTimes.count, "a whole matte, made by Vision")
+        let note = try XCTUnwrap(context.lastNote)
+        XCTAssertTrue(note.contains("RVM") && note.contains("Vision"), note)
+        let fallback = try XCTUnwrap(MatteFallback.read(from: folder))
+        XCTAssertEqual(fallback.model, tuning.rvmStore.stamp(), "remembers the model file it couldn't use")
+    }
+
+    func testTheEdgeFixClearsTheFringeAndPullsTheEdgeInOnePixel() {
+        // A soft edge across a row (a shoulder), and a finger 12 px wide.
+        let width = 64, height = 8
+        var alpha = [UInt8](repeating: 0, count: width * height)
+        let ramp: [UInt8] = [10, 30, 60, 90, 130, 170, 210, 240]
+        for y in 0..<height {
+            for (i, value) in ramp.enumerated() { alpha[y * width + i] = value }
+            for x in ramp.count..<24 { alpha[y * width + x] = 255 }
+            for x in 40..<52 { alpha[y * width + x] = 255 }
         }
+        RVMMatte.cleanEdge(&alpha, width: width, height: height)
+        let row = Array(alpha[(3 * width)..<(4 * width)])
+        XCTAssertEqual(Array(row[0..<4]), [0, 0, 0, 0], "the faint outer fringe goes")
+        XCTAssertGreaterThan(row[6], 0, "the edge stays soft")
+        XCTAssertEqual(Array(row[9..<23]), Array(repeating: 255, count: 14), "the solid part stays solid")
+        XCTAssertEqual(row[23], 0, "pulled in by a pixel")
+        XCTAssertEqual(Array(row[41..<51]), Array(repeating: 255, count: 10), "a finger loses a pixel each side, no more")
+        XCTAssertEqual(row[40], 0)
     }
 }

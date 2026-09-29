@@ -48,8 +48,14 @@ func firstFrameAverages(_ url: URL) async throws -> (luma: Double, chroma: Doubl
 final class AnalysisTests: TempFolderTestCase {
     var folder: ProjectFolder { ProjectFolder(root: temp) }
 
+    /// Mattes fall back to Vision here unless a test gives RVM a model:
+    /// tests never download it.
     func analysis() -> MediaAnalysis {
-        MediaAnalysis(folder: folder, encoderLock: EncoderLock())
+        let analysis = MediaAnalysis(folder: folder, encoderLock: EncoderLock())
+        analysis.rvmStore = RVMModelStore(folder: folder.root.appendingPathComponent("no-models", isDirectory: true), fileName: "model.mlmodel",
+                                          remote: URL(string: "https://example.invalid/model.mlmodel")!, sha256: String(repeating: "0", count: 64),
+                                          fetch: { _ in throw URLError(.notConnectedToInternet) })
+        return analysis
     }
 
     func item(_ path: String) async throws -> MediaItem {
@@ -235,6 +241,8 @@ final class AnalysisTests: TempFolderTestCase {
         try await SyntheticMedia.writeMovie(to: file("source/take-camera.mov"), .init(width: 320, height: 180, frameTimes: times))
         let camera = try await item("source/take-camera.mov")
         let analysis = analysis()
+        // Vision's mattes differ by cutout mode; RVM's don't.
+        analysis.settings.matteModel = .vision
         let state = await analysis.waitFor(.matte, for: camera)
         XCTAssertEqual(state, .ready)
 
@@ -257,6 +265,49 @@ final class AnalysisTests: TempFolderTestCase {
         XCTAssertEqual(personState, .ready)
         XCTAssertNotNil(analysis.matteURL(for: camera, mode: .person))
         XCTAssertNotEqual(analysis.matteURL(for: camera, mode: .person), analysis.matteURL(for: camera))
+    }
+
+    func testTheMatteFallsBackToVisionSayingSoAndRebuildsOnceWhenRVMArrives() async throws {
+        try await SyntheticMedia.writeMovie(to: file("source/take-camera.mov"), .init(width: 320, height: 180, duration: 0.5))
+        let camera = try await item("source/take-camera.mov")
+        let analysis = analysis()
+        let models = folder.root.appendingPathComponent("models", isDirectory: true)
+        analysis.rvmStore = RVMModelStore(folder: models, fileName: "model.mlmodel", remote: URL(string: "https://example.invalid/model.mlmodel")!,
+                                          sha256: String(repeating: "0", count: 64), fetch: { _ in throw URLError(.notConnectedToInternet) })
+        XCTAssertEqual(analysis.settings.matteModel, .robustVideoMatting)
+        let state = await analysis.waitFor(.matte, for: camera)
+        XCTAssertEqual(state, .ready, "offline: a Vision matte rather than none")
+        let status = try XCTUnwrap(analysis.jobs.first { $0.kind == .matte })
+        XCTAssertTrue(status.message?.contains("Vision") ?? false, "not silently: \(status.message ?? "no message")")
+        XCTAssertNotNil(analysis.matteURL(for: camera))
+        XCTAssertNil(analysis.submit(.matte, for: camera), "nothing new to try yet")
+
+        // The model turns up (here a file that won't load): one rebuild, and
+        // the fallback keeps serving until it's done.
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        try Data("not a model".utf8).write(to: models.appendingPathComponent("model.mlmodel"))
+        XCTAssertEqual(analysis.state(.matte, for: camera), .missing)
+        XCTAssertNotNil(analysis.matteURL(for: camera))
+        let rebuild = await analysis.waitFor(.matte, for: camera)
+        XCTAssertEqual(rebuild, .ready)
+        XCTAssertNil(analysis.submit(.matte, for: camera), "no rebuild loop while the model stays as it is")
+    }
+
+    func testRVMMattesATakeWhenItsModelIsHere() async throws {
+        let model = RVMModelStore.standard.folder.appendingPathComponent(RVMModelStore.standard.fileName)
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: model.path), "the RVM model isn't on this Mac (tests never download it)")
+        try await SyntheticMedia.writeMovie(to: file("source/take-camera.mov"), .init(width: 320, height: 180, duration: 0.5))
+        let camera = try await item("source/take-camera.mov")
+        let analysis = analysis()
+        analysis.rvmStore = .standard
+        let state = await analysis.waitFor(.matte, for: camera)
+        XCTAssertEqual(state, .ready)
+        let matte = try XCTUnwrap(analysis.matteURL(for: camera))
+        XCTAssertNil(MatteFallback.read(from: matte.deletingLastPathComponent()), "made by RVM")
+        let matteTimes = try await videoSampleTimes(matte)
+        let sourceTimes = try await videoSampleTimes(file("source/take-camera.mov"))
+        XCTAssertEqual(matteTimes.count, sourceTimes.count)
+        XCTAssertEqual(analysis.matteURL(for: camera, mode: .person), matte, "both cutout modes share one RVM matte")
     }
 
     func testIsolatedVoiceKeepsTheLengthAtFortyEightKilohertz() async throws {

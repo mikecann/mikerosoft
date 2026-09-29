@@ -209,8 +209,8 @@ final class RealMediaTests: XCTestCase {
         let matte = folder.appendingPathComponent(MatteJob.file)
         let frames = try await assertSameFrames(matte, as: Self.camera, "matte")
         let bytes = AnalysisCache.folderSize(folder)
-        report(String(format: "matte camera 60 s (version 2: accurate + subject, steadied, %d workers): %d frames in %.2f s = %.1f fps (a 24 min take: %.1f min), %.1f MB",
-                      MatteJob.workers, frames, seconds, Double(frames) / seconds, 43_376 / (Double(frames) / seconds) / 60, Double(bytes) / 1e6))
+        report(String(format: "matte camera 60 s (%@): %d frames in %.2f s = %.1f fps (a 24 min take: %.1f min), %.1f MB",
+                      settings.matteModel.rawValue, frames, seconds, Double(frames) / seconds, 43_376 / (Double(frames) / seconds) / 60, Double(bytes) / 1e6))
 
         // Stills of the matte and a cutout over blue for looking at.
         for t in [1015.0, 1040.0, 1065.0] {
@@ -226,9 +226,9 @@ final class RealMediaTests: XCTestCase {
     func testMatteIsSteadierThanVersion1() async throws {
         let range = CMTimeRange(start: CMTime(seconds: 1010, preferredTimescale: 600), duration: CMTime(seconds: 20, preferredTimescale: 600))
         var change: [String: Double] = [:]
-        for (name, settings) in [("version-1", AnalysisSettings(matteProps: .personInstances, matteSmoothing: .off)),
-                                 ("version-2-per-frame", AnalysisSettings(matteSmoothing: .off)),
-                                 ("version-2", AnalysisSettings()),
+        for (name, settings) in [("version-1", AnalysisSettings(matteModel: .vision, matteProps: .personInstances, matteSmoothing: .off)),
+                                 ("version-2-per-frame", AnalysisSettings(matteModel: .vision, matteSmoothing: .off)),
+                                 ("version-2", AnalysisSettings(matteModel: .vision)),
                                  ("rvm", AnalysisSettings(matteModel: .robustVideoMatting))] {
             let folder = try output("matte-\(name)")
             let (_, seconds) = try await time {
@@ -287,7 +287,7 @@ final class RealMediaTests: XCTestCase {
                                ("in-order", MatteJob.Tuning(workers: 1, stateless: false))] {
             let folder = try output("matte-\(name)")
             let (_, seconds) = try await time {
-                try await MatteJob.run(source: Self.camera, settings: AnalysisSettings(), into: folder, context: context(.matte), timeRange: range, tuning: tuning)
+                try await MatteJob.run(source: Self.camera, settings: AnalysisSettings(matteModel: .vision), into: folder, context: context(.matte), timeRange: range, tuning: tuning)
             }
             let frames = try await matteFrames(folder.appendingPathComponent(MatteJob.file))
             results[name] = frames

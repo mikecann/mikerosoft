@@ -303,7 +303,7 @@ final class JobScheduler: @unchecked Sendable {
             do {
                 try context.checkCancellation()
                 try await job.work(context)
-                if context.isCancelled { state = .cancelled }
+                if context.isCancelled { state = .cancelled } else { message = context.lastNote }
             } catch {
                 if context.isCancelled || error is CancellationError {
                     state = .cancelled
@@ -337,6 +337,11 @@ final class JobScheduler: @unchecked Sendable {
     }
 
     // MARK: - Called by running jobs
+
+    func annotate(id: String, message: String) {
+        lock.withLock { entries[id]?.status.message = message }
+        scheduleNotify()
+    }
 
     func report(id: String, progress: Double, message: String?) {
         lock.withLock {
@@ -433,6 +438,7 @@ final class JobContext: @unchecked Sendable {
     private let encoderLock: EncoderLock?
     private let lock = NSLock()
     private var cancelled = false
+    private var note: String?
     private var holdsEncoder = false
     private var lastEncoderCheck = Date.distantPast
 
@@ -456,6 +462,15 @@ final class JobContext: @unchecked Sendable {
     func progress(_ fraction: Double, message: String? = nil) {
         scheduler?.report(id: id, progress: fraction, message: message)
     }
+
+    /// A line that stays on the job's status after it finishes, such as a
+    /// matte falling back to Vision. Shown while it runs too.
+    func note(_ message: String) {
+        lock.withLock { note = message }
+        scheduler?.annotate(id: id, message: message)
+    }
+
+    var lastNote: String? { lock.withLock { note } }
 
     /// Takes the shared hardware encoder at background priority. Exports
     /// (`.export` priority) jump ahead of every queued build.
