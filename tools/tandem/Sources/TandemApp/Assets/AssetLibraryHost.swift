@@ -237,7 +237,8 @@ final class AssetLibraryHost {
         if let result = model.apply(segment.insertBatch(at: max(.zero, time), mode: .overwrite, label: "Add \(segment.name.lowercased())")) {
             let created = SelectionRules.pruned(Set(result.createdIDs), in: model.project)
             if !created.isEmpty { model.selection = created }
-            model.show(.info, "Added \(segment.name) at \(Timecode.string(time, rate: model.frameRate)).")
+            // Warnings the edit had stay up.
+            if result.warnings.isEmpty { model.show(.info, "Added \(segment.name) at \(Timecode.string(time, rate: model.frameRate)).") }
         }
     }
 

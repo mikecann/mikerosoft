@@ -396,17 +396,30 @@ public enum SegmentMaker {
             }
         }
 
-        // Transitions between the clips aren't part of a template yet.
-        let pickedIDs = Set(ids)
-        let transitions = picked.map(\.track).reduce(into: [String: Track]()) { $0[$1.id] = $1 }.values.flatMap(\.transitions).filter { transition in
-            [transition.fromClipID, transition.toClipID].compactMap { $0 }.allSatisfy(pickedIDs.contains)
+        // Transitions come along when every clip they join is saved: a
+        // dissolve between two of them, a fade at one's head or tail.
+        let places = Dictionary(uniqueKeysWithValues: picked.enumerated().map { ($0.element.clip.id, $0.offset) })
+        var transitions: [TemplateTransition] = []
+        var halfSaved = 0
+        var seenTracks = Set<String>()
+        for track in picked.map(\.track) where seenTracks.insert(track.id).inserted {
+            for transition in track.transitions {
+                let from = transition.fromClipID.flatMap { places[$0] }
+                let to = transition.toClipID.flatMap { places[$0] }
+                guard from != nil || to != nil else { continue }
+                guard (transition.fromClipID == nil) == (from == nil), (transition.toClipID == nil) == (to == nil) else {
+                    halfSaved += 1
+                    continue
+                }
+                transitions.append(TemplateTransition(from: from, to: to, type: transition.type, direction: transition.direction, duration: transition.duration))
+            }
         }
-        if !transitions.isEmpty {
-            notes.append("\(transitions.count == 1 ? "A transition" : "\(transitions.count) transitions") between these clips \(transitions.count == 1 ? "isn't" : "aren't") kept; segments don't carry transitions yet.")
+        if halfSaved > 0 {
+            notes.append("\(halfSaved == 1 ? "A transition" : "\(halfSaved) transitions") to a clip that isn't in the segment \(halfSaved == 1 ? "is" : "are") left out.")
         }
 
         let folderName = SegmentStore.folderName(for: name)
-        let template = Template(id: "segment:\(folderName)", name: name, duration: end - start, fields: templateFields, clips: clips)
+        let template = Template(id: "segment:\(folderName)", name: name, duration: end - start, fields: templateFields, clips: clips, transitions: transitions)
         let segment = Segment(name: name, template: template, media: mediaOrder.compactMap { media[$0] }, savedFrom: project.name, notes: notes)
         return Draft(segment: segment, files: files.copies)
     }

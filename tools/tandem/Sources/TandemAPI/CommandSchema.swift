@@ -399,7 +399,14 @@ extension CommandSchema {
         "name": S.string(),
         "duration": S.time(),
         "fields": S.array(S.object(["key": S.string(), "label": S.string(), "defaultValue": S.string()], required: ["key"])),
-        "clips": S.array(S.ref("TemplateClip"))
+        "clips": S.array(S.ref("TemplateClip")),
+        "transitions": S.array(S.object([
+            "from": S.integer("The outgoing clip's index in clips; leave out for a transition at the head of to."),
+            "to": S.integer("The incoming clip's index; leave out for one at the tail of from."),
+            "type": S.enumeration(TransitionType.allCases.map(\.rawValue)),
+            "direction": S.enumeration(["up", "down", "left", "right"]),
+            "duration": S.time()
+        ], required: ["type"]), "Transitions between its clips (on one track), or at a clip's head or tail.")
     ], required: ["id", "duration", "clips"])
 
     static let timeRange = S.object([

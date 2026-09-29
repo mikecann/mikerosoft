@@ -125,9 +125,10 @@ final class SaveSegmentModel {
             return
         }
         stage = .saving
+        let saver = store
         Task { [weak self] in
             do {
-                let stored = try await ProjectArchiver.onBackgroundThread { try store.save(draft, replace: replace) }
+                let stored = try await ProjectArchiver.onBackgroundThread { try saver.save(draft, replace: replace) }
                 self?.stage = .editing
                 self?.onSaved?(stored)
                 self?.onClose?()

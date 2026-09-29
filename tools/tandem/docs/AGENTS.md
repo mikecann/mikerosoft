@@ -569,7 +569,9 @@ template uses is matched by path (`mediaPath`); a clip that carries its
 media item under `media` adds it when the project has nothing at that path
 yet, and reuses what's there otherwise. Saved segments carry theirs, which
 is how `tandem segments insert` works; without one, the file must already
-be in the project.
+be in the project. `transitions` joins its clips by their place in `clips`
+(`{"from": 0, "to": 1, "type": "dissolve"}`, or only `to` for a fade in at
+a clip's head).
 
 ```json
 {"insertTemplate": {"template": {"id": "sectionCard", "name": "Section card", "duration": 3, "fields": [{"key": "title", "label": "Title"}], "clips": [{"track": "Text", "clip": {"content": {"text": {"text": "{{title}}", "preset": "sectionHeader"}}, "duration": 3}}]}, "at": 60, "values": {"title": "CURSOR DOCS"}}}
@@ -1184,9 +1186,10 @@ tandem segments list
 `--clips` takes exactly those clips (a linked partner isn't added, so name
 the camera's sound too if it should come). `--field clip=Label` makes a
 title's words a field: they're asked for on insert, and the words it has now
-are the default. A `{{key}}` already in a title is a field too. Saving under
-a name that's taken fails unless `--replace` (the old one goes to the
-Trash). Transitions between the clips aren't kept yet, and saving says so.
+are the default. A `{{key}}` already in a title is a field too.
+Transitions come along when every clip they join is saved: a dissolve
+between two of the clips, a fade at one's head or tail. Saving under a name
+that's taken fails unless `--replace` (the old one goes to the Trash).
 
 Then put one on the timeline, as one undo step:
 

@@ -12,13 +12,20 @@ public struct Template: Codable, Equatable, Identifiable, Sendable {
     /// Values the template asks for, like the section title.
     public var fields: [TemplateField]
     public var clips: [TemplateClip]
+    /// Transitions between its clips, or at a clip's head or tail.
+    public var transitions: [TemplateTransition]
 
-    public init(id: String, name: String, duration: Time, fields: [TemplateField] = [], clips: [TemplateClip]) {
+    public init(id: String, name: String, duration: Time, fields: [TemplateField] = [], clips: [TemplateClip], transitions: [TemplateTransition] = []) {
         self.id = id
         self.name = name
         self.duration = duration
         self.fields = fields
         self.clips = clips
+        self.transitions = transitions
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, duration, fields, clips, transitions
     }
 
     public init(from decoder: Decoder) throws {
@@ -28,6 +35,47 @@ public struct Template: Codable, Equatable, Identifiable, Sendable {
         duration = try c.decode(Time.self, forKey: .duration)
         fields = try c.decode(.fields, or: [])
         clips = try c.decode([TemplateClip].self, forKey: .clips)
+        transitions = try c.decode(.transitions, or: [])
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(duration, forKey: .duration)
+        try c.encode(fields, forKey: .fields)
+        try c.encode(clips, forKey: .clips)
+        if !transitions.isEmpty { try c.encode(transitions, forKey: .transitions) }
+    }
+}
+
+/// A transition in a template, naming its clips by their place in
+/// `clips`: between two clips on one track, or at one clip's head (no
+/// `from`) or tail (no `to`), like a fade from black on an intro card.
+public struct TemplateTransition: Codable, Equatable, Sendable {
+    /// The outgoing clip's index in the template's clips.
+    public var from: Int?
+    /// The incoming clip's index.
+    public var to: Int?
+    public var type: TransitionType
+    public var direction: Direction?
+    public var duration: Time
+
+    public init(from: Int?, to: Int?, type: TransitionType, direction: Direction? = nil, duration: Time) {
+        self.from = from
+        self.to = to
+        self.type = type
+        self.direction = direction
+        self.duration = duration
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        from = try c.decodeIfPresent(Int.self, forKey: .from)
+        to = try c.decodeIfPresent(Int.self, forKey: .to)
+        type = try c.decode(TransitionType.self, forKey: .type)
+        direction = try c.decodeIfPresent(Direction.self, forKey: .direction)
+        duration = try c.decode(.duration, or: type.defaultDuration)
     }
 }
 
@@ -171,6 +219,25 @@ extension Editing {
         for (location, clip) in planned {
             p[location].add(clip)
             context.createdIDs.append(clip.id)
+        }
+        for item in template.transitions {
+            func clip(at index: Int?) throws -> (TrackLocation, Clip)? {
+                guard let index else { return nil }
+                guard planned.indices.contains(index) else {
+                    throw EditError.invalid("template \(template.id) has a transition on clip \(index), which it doesn't have")
+                }
+                return planned[index]
+            }
+            let from = try clip(at: item.from)
+            let to = try clip(at: item.to)
+            guard let location = (from ?? to)?.0 else {
+                throw EditError.invalid("template \(template.id) has a transition with no clip")
+            }
+            if let from, let to, from.0 != to.0 {
+                throw EditError.invalid("template \(template.id) has a transition between clips on different tracks")
+            }
+            let transition = Transition(id: context.makeID("tr"), type: item.type, direction: item.direction, duration: item.duration, fromClipID: from?.1.id, toClipID: to?.1.id)
+            try addTransition(&p, trackID: p[location].id, transition, &context)
         }
     }
 }

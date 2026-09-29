@@ -402,7 +402,7 @@ final class SegmentTests: XCTestCase {
         XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: intro.store.folder.path).contains { $0.hasPrefix(".") }, "no leftovers")
     }
 
-    func testTwoTracksWithOneNameStayApartAndTransitionsAreNoted() throws {
+    func testTwoTracksWithOneNameStayApartAndTransitionsComeAlong() throws {
         var project = Project.standard(name: "Two texts")
         project.videoTracks.append(Track(id: "trk_text2", kind: .video, name: "Text", clips: [], rippleMode: .follow))
         let first = try XCTUnwrap(project.track(named: "Text"))
@@ -411,13 +411,30 @@ final class SegmentTests: XCTestCase {
             Clip(id: "clip_a", content: .text(TextContent(text: "A")), start: t(0), duration: t(1)),
             Clip(id: "clip_b", content: .text(TextContent(text: "B")), start: t(1), duration: t(1))
         ]
-        project[firstLocation].transitions = [Transition(id: "tr_ab", type: .dissolve, duration: t(0.5), fromClipID: "clip_a", toClipID: "clip_b")]
+        project[firstLocation].clips.append(Clip(id: "clip_d", content: .text(TextContent(text: "D")), start: t(2), duration: t(1)))
+        project[firstLocation].transitions = [
+            Transition(id: "tr_in", type: .fadeFromBlack, duration: t(0.4), fromClipID: nil, toClipID: "clip_a"),
+            Transition(id: "tr_ab", type: .dissolve, duration: t(0.5), fromClipID: "clip_a", toClipID: "clip_b"),
+            Transition(id: "tr_bd", type: .dissolve, duration: t(0.5), fromClipID: "clip_b", toClipID: "clip_d")
+        ]
         project.videoTracks[project.videoTracks.count - 1].clips = [Clip(id: "clip_c", content: .text(TextContent(text: "C")), start: t(0), duration: t(2))]
         let folder = TempFolder("segment-tracks")
         let draft = try SegmentMaker.draft(name: "Texts", clipIDs: ["clip_a", "clip_b", "clip_c"], in: project, folder: ProjectFolder(root: folder.url))
-        XCTAssertEqual(Set(draft.segment.template.clips.map(\.track)), ["Text", "Text 2"])
-        XCTAssertEqual(draft.segment.notes, ["A transition between these clips isn't kept; segments don't carry transitions yet."])
+        let clips = draft.segment.template.clips
+        XCTAssertEqual(Set(clips.map(\.track)), ["Text", "Text 2"])
+        let a = try XCTUnwrap(clips.firstIndex { if case .text(let text) = $0.clip.content { return text.text == "A" } else { return false } })
+        let b = try XCTUnwrap(clips.firstIndex { if case .text(let text) = $0.clip.content { return text.text == "B" } else { return false } })
+        XCTAssertEqual(Set(draft.segment.template.transitions.map { "\($0.type.rawValue) \($0.from.map(String.init) ?? "-") \($0.to.map(String.init) ?? "-")" }),
+                       ["fadeFromBlack - \(a)", "dissolve \(a) \(b)"])
+        XCTAssertEqual(draft.segment.notes, ["A transition to a clip that isn't in the segment is left out."], "clip_d wasn't saved")
         XCTAssertTrue(draft.files.isEmpty)
+
+        // They go in with it.
+        let coordinator = ProjectCoordinator(project: Project.standard(name: "Other"))
+        let stored = StoredSegment(id: "Texts", folder: folder.url, segment: draft.segment)
+        try coordinator.apply(stored.insertBatch(at: t(10)))
+        let text = try XCTUnwrap(coordinator.project.track(named: "Text"))
+        XCTAssertEqual(Set(text.transitions.map(\.type)), [.fadeFromBlack, .dissolve])
         XCTAssertThrowsError(try SegmentMaker.draft(name: " ", clipIDs: ["clip_a"], in: project, folder: ProjectFolder(root: folder.url)))
         XCTAssertThrowsError(try SegmentMaker.draft(name: "x", clipIDs: ["clip_nope"], in: project, folder: ProjectFolder(root: folder.url)))
         XCTAssertEqual(SegmentStore.folderName(for: " Like/Subscribe: v2 "), "Like-Subscribe- v2")

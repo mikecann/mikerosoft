@@ -95,7 +95,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
 - [x] Shared library: one watched folder on this Mac (`~/Movies/Tandem Library`, moved in Settings) for stickers, graphics, sounds, music, looks, fonts and segments; its files are used where they are, archiving copies them in, relink looks there [assets, api, app]
 - [x] Saved segments: Save selection as segment (menu bar and clip menu), the Text tab's Segments, `tandem segments list/save/insert` and `segments_*` MCP tools; a segment carries copies of its files [core, api, app]
-- [ ] Segments keep the transitions between their clips; the app asks for a segment's words when it goes in
+- [ ] The app asks for a segment's words when it goes in (agents pass them already); relink finds LUTs too, not just media
 - [ ] Stickers: Lottie and HEVC with alpha
 - [x] Word-by-word captions from the transcripts (`tandem captions`, MCP `captions`) [integration]
 - [x] Colour tab like other editors': whole take or this clip, then Light, Colour, colour wheels (the new `colorWheels` effect), a Lightroom-style colour mixer, vignette, sharpen and LUT; sliders with gradient tracks, reset, scrubbing and typing [app, render]
