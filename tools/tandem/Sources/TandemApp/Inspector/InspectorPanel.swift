@@ -25,6 +25,7 @@ struct InspectorPanel: View {
                 tabRow(hasClip: hasClip, compact: true)
             }
             .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 40)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
 
@@ -186,6 +187,7 @@ private struct NothingSelected: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
             InspectorSection(title: "Project", icon: Icons.project) {
                 InfoRow(label: "Canvas", value: "\(settings.width) × \(settings.height)")
