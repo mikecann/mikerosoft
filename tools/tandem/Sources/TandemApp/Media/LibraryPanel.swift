@@ -433,7 +433,7 @@ private struct TakeStatus: View {
                     Capsule().fill(Theme.amber.color).frame(width: 56 * CGFloat(min(max(running.progress, 0), 1)), height: 3)
                 }
             }
-        } else if let item, model.session.analysis.transcript(for: item) != nil {
+        } else if let item, TranscriptPresence.isTranscribed(item, in: model) {
             HStack(spacing: 5) {
                 Image(systemName: "checkmark")
                     .font(.system(size: 9, weight: .bold))
@@ -447,6 +447,42 @@ private struct TakeStatus: View {
                 .font(.ui(10.5))
                 .foregroundStyle(Theme.textFaint.color)
         }
+    }
+}
+
+/// Whether takes have transcripts, looked up once each until the analysis
+/// results change. The lookup goes to the disk, and TakeStatus asked on
+/// every redraw of the list: about 20 ms a click with four takes listed.
+@MainActor
+enum TranscriptPresence {
+    private static var memos: [ObjectIdentifier: RevisionMemo<Bool>] = [:]
+
+    static func isTranscribed(_ item: MediaItem, in model: EditorModel) -> Bool {
+        // Reading the revision here also redraws the list when one lands.
+        let revision = model.artworkRevision
+        let id = ObjectIdentifier(model)
+        if memos[id] == nil, memos.count > 16 { memos.removeAll() }
+        return memos[id, default: RevisionMemo()].value(for: "\(item.id)|\(item.fingerprint ?? "")", revision: revision) {
+            model.session.analysis.isCached(.transcript, for: item)
+        }
+    }
+}
+
+/// Answers remembered by key until the revision they were worked out at
+/// changes.
+struct RevisionMemo<Value> {
+    private(set) var revision = Int.min
+    private var values: [String: Value] = [:]
+
+    mutating func value(for key: String, revision: Int, compute: () -> Value) -> Value {
+        if revision != self.revision {
+            values.removeAll()
+            self.revision = revision
+        }
+        if let known = values[key] { return known }
+        let value = compute()
+        values[key] = value
+        return value
     }
 }
 
