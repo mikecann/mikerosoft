@@ -109,6 +109,8 @@ public struct MediaInfo: Codable, Sendable {
     /// "png "), when it can't. The picture comes from a converted copy
     /// (`analysis.converted`).
     public var undecodableCodec: String?
+    /// For a Live Photo's still, its motion clip (the short movie beside it).
+    public var livePhotoVideo: String? = nil
     public var takeID: String?
     public var takeOffset: Time?
     /// How many timeline clips use this file.

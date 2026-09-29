@@ -6,6 +6,8 @@ folder. `ARCHITECTURE.md` is the contract; this is the detail behind it.
 | File | What it does |
 | --- | --- |
 | `MediaScanner.swift` | Walks the folder, matches known items, roles |
+| `CameraTakes.swift` | Camera takes nothing names: a recording with a voice and a face |
+| `LivePhotos.swift` | A Live Photo's still and movie as one item |
 | `MediaProbe.swift` | AVFoundation and ImageIO probing, frame timing, alpha |
 | `Fingerprint.swift` | `size-mtime-sha256` identity |
 | `TakePairing.swift` | record-it takes and the `.take.json` sidecar |
@@ -89,7 +91,74 @@ with "Cannot Decode".
 Roles, in order: `-camera` / `-screen` record-it names, the nearest folder
 that says what it holds (`music`, `sfx`, `broll`, `graphics`,
 `motion-graphics`, `stickers`...), words in the file name, then the kind.
-Stray audio under 10 s is `sfx`, longer is `music`.
+Stray audio under 10 s is `sfx`, longer is `music`. A new video none of
+that explains can still be a camera take (below). Roles are only worked out
+for files new to the project, so a role Mike changed stays changed.
+
+### Camera takes nothing names
+
+A phone video of Mike talking to the camera (`source/IMG_0151.MOV` in the
+workbench short) used to be `other`, so it got no transcript until its role
+was set by hand. `CameraTakes` makes a new video that nothing else explains
+(role `other`, with picture and sound, 4 s or longer) the camera take when
+all three hold:
+
+- **A recording, not a render.** Its metadata names the camera that shot
+  it (phones and cameras write their make and model: "Apple iPhone XS
+  Max"), or it's in `source/`. Renders of an edit have a voice and a face
+  too, and Mike's Filmora-era folders keep them beside the project
+  (`Decision Models v14.mp4`, `edit/preview/s060.mp4`); none of them has a
+  camera's make or model.
+- **A voice.** Apple's built-in sound classifier
+  (`SNClassifySoundRequest`, `.version1`, 1.5 s windows) runs over six 3 s
+  stretches spread across the file (all of it when it's under 18 s), and
+  hears speech (confidence 0.5 or more) in at least a quarter of the
+  windows, and two or more. The workbench selfie scores 22 of 22; record-it
+  camera takes, with typing and pauses, 7 to 15 of 22; a record-it screen
+  recording, a Live Photo movie and a phone clip of the finished bench
+  with no talking, 0. About 0.1 s a file.
+- **A face.** Vision (`VNDetectFaceRectanglesRequest`) finds a face at
+  least a tenth of the frame high in two of six frames, with the file's
+  rotation applied. The selfie's faces are 0.22 to 0.41 of the frame high,
+  record-it takes' 0.24 to 0.35. This keeps out a narrated screen
+  recording, and phone footage of hands at work with a voice over it
+  (`photos/IMG_0141.MOV`: speech 21 of 22, no face). A PiP render has faces
+  of 0.12 to 0.16, which is why renders are kept out by the first rule.
+
+`tandem new` prints each camera take with its reason and the `updateMedia`
+that changes it (`ScanReport.cameraTakes`, through
+`ProjectSession.refreshMediaReport`). The app's single-file probe, for
+files dropped from Finder, runs the same check; a dropped video lands in
+`broll/`, which says what it is, so the check only matters for a file
+already in the folder.
+
+### Live Photos
+
+Photos, AirDrop and Image Capture give a Live Photo as two files with one
+name: the still (`IMG_0130.HEIC`, or a JPEG) and a movie of 1 to 3 s
+(`IMG_0130.mov`). Added separately, 35 photos made 71 media items. Now the
+still is the item and records the movie in `livePhotoVideo`; the movie
+isn't media of its own.
+
+- A pair is a HEIC, HEIF or JPEG and a `.mov` in the same folder with the
+  same name, ignoring case. When both carry Apple's content identifier (the
+  still's maker note key 17, the movie's
+  `com.apple.quicktime.content.identifier`), those decide. Otherwise the
+  movie has to look like one: 5 s or less, a picture, no alpha. So a long
+  video that shares a photo's name, or an animated logo beside a PNG, stays
+  a video.
+- Only movies new to the project pair. A movie a project already has as
+  media (every Live Photo made before this, maybe on the timeline) stays as
+  it is.
+- Once paired, a scan skips the movie without probing it. A still whose
+  movie has gone forgets it; a movie that lands after its still joins it.
+- Dropped on the app, a movie goes beside its still (`graphics/`, or
+  `linked-media/` from another disk), with the still's name if that had to
+  be numbered, and is recorded on it.
+- Left: if Photos writes a movie before its still and the folder watcher
+  scans in the moment between, that movie becomes an item of its own. Both
+  halves of an export land in the same second, well inside the watcher's
+  settle time, so it hasn't been seen.
 
 ### Takes
 

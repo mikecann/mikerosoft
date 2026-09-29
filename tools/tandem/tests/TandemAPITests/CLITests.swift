@@ -426,6 +426,58 @@ final class NewProjectCLITests: XCTestCase {
         let bad = try CLITests().tandem("new", "Odd.tandem", "--size", "big", in: folder.url)
         XCTAssertEqual(bad.status, 2)
     }
+
+    /// A photo like an iPhone's, for a Live Photo.
+    static func writeJPEG(to url: URL) throws {
+        let context = CGContext(data: nil, width: 64, height: 48, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        context.setFillColor(CGColor(red: 0.6, green: 0.45, blue: 0.3, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+    }
+
+    func testSaysWhichFileIsTheCameraAndKeepsLivePhotosTogether() throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        func movie(_ path: String, seconds: Int, in folder: TempFolder) throws {
+            try FileManager.default.createDirectory(at: folder.file(path).deletingLastPathComponent(), withIntermediateDirectories: true)
+            try ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x806040:s=320x240:d=\(seconds):r=30", "-f", "lavfi", "-i", "sine=frequency=440:duration=\(seconds)",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", folder.file(path).path])
+        }
+        // A record-it camera file, and a Live Photo: the still and its two
+        // second movie.
+        let folder = TempFolder()
+        try movie("source/t1-camera.mov", seconds: 2, in: folder)
+        try movie("photos/IMG_0130.mov", seconds: 2, in: folder)
+        try Self.writeJPEG(to: folder.file("photos/IMG_0130.jpg"))
+
+        let result = try CLITests().tandem("new", "Bench.tandem", in: folder.url)
+        XCTAssertEqual(result.status, 0, result.stderr)
+        let project = try ProjectFile.load(from: folder.file("Bench.tandem")).project
+        XCTAssertEqual(project.media.map(\.path).sorted(), ["photos/IMG_0130.jpg", "source/t1-camera.mov"])
+        XCTAssertEqual(project.media.first { $0.path == "photos/IMG_0130.jpg" }?.livePhotoVideo, "photos/IMG_0130.mov")
+        let camera = try XCTUnwrap(project.media.first { $0.path == "source/t1-camera.mov" })
+        XCTAssertEqual(camera.role, .camera)
+        XCTAssertTrue(result.stdout.contains("Added 2 media files from the folder.\n"), result.stdout)
+        XCTAssertTrue(result.stdout.contains("1 is a Live Photo: "), result.stdout)
+        XCTAssertTrue(result.stdout.contains("Camera take: source/t1-camera.mov (\(camera.id)), named like a record-it camera file.\n"), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#"tandem apply '{"updateMedia": {"mediaID": "\#(camera.id)", "patch": {"role": "other"}}}'"#), result.stdout)
+        let media = try CLITests().tandem("media", in: folder.url)
+        XCTAssertTrue(media.stdout.contains("photos/IMG_0130.jpg  image  64x48  Live Photo, motion clip IMG_0130.mov  0 clips"), media.stdout)
+
+        // With no camera take it names the likeliest video to make one.
+        let bare = TempFolder()
+        try movie("source/talk.mov", seconds: 3, in: bare)
+        try movie("source/short.mov", seconds: 1, in: bare)
+        let none = try CLITests().tandem("new", "Bare.tandem", in: bare.url)
+        XCTAssertEqual(none.status, 0, none.stderr)
+        let talk = try XCTUnwrap(ProjectFile.load(from: bare.file("Bare.tandem")).project.media.first { $0.path == "source/talk.mov" })
+        XCTAssertEqual(talk.role, .other)
+        XCTAssertTrue(none.stdout.contains("No camera take: "), none.stdout)
+        XCTAssertTrue(none.stdout.contains(#"tandem apply '{"updateMedia": {"mediaID": "\#(talk.id)", "patch": {"role": "camera"}}}'"#), none.stdout)
+    }
 }
 
 /// Stock alpha stickers come as QuickTime Animation or PNG in a MOV, which

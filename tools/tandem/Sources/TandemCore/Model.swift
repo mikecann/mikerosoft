@@ -184,6 +184,11 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
     /// The source look: colour and sharpening applied to every clip of this
     /// file before the clip's own effects, so a camera grade is set once.
     public var look: [Effect]
+    /// For a Live Photo's still, its motion clip: the short movie the iPhone
+    /// records around the photo (`IMG_0130.mov` beside `IMG_0130.HEIC`),
+    /// stored like `path`. Scanning pairs them and doesn't add the movie as
+    /// media of its own, so it's kept here for later use.
+    public var livePhotoVideo: String?
 
     public init(
         id: String = IDs.make("med"),
@@ -202,7 +207,8 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
         variableFrameRate: Bool = false,
         undecodableCodec: String? = nil,
         fingerprint: String? = nil,
-        look: [Effect] = []
+        look: [Effect] = [],
+        livePhotoVideo: String? = nil
     ) {
         self.id = id
         self.path = path
@@ -221,6 +227,7 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
         self.undecodableCodec = undecodableCodec
         self.fingerprint = fingerprint
         self.look = look
+        self.livePhotoVideo = livePhotoVideo
     }
 }
 
@@ -967,6 +974,7 @@ extension MediaItem {
         undecodableCodec = try c.decodeIfPresent(String.self, forKey: .undecodableCodec)
         fingerprint = try c.decodeIfPresent(String.self, forKey: .fingerprint)
         look = try c.decode(.look, or: [])
+        livePhotoVideo = try c.decodeIfPresent(String.self, forKey: .livePhotoVideo)
     }
 }
 

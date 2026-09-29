@@ -183,6 +183,7 @@ public final class TandemService: @unchecked Sendable {
                 hasVideo: item.hasVideo,
                 hasAudio: item.hasAudio,
                 undecodableCodec: item.undecodableCodec,
+                livePhotoVideo: item.livePhotoVideo,
                 takeID: item.takeID,
                 takeOffset: item.takeOffset,
                 clips: usage[item.id] ?? 0,

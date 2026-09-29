@@ -77,6 +77,34 @@ effects keep their Filmora volume. `--keep-levels` keeps Filmora's own
 levels: its Auto Normalization becomes `normalizeTo: -24` (where Filmora
 levels, on Tandem's meter) with the clip's gain on top.
 
+### What a new project finds
+
+`tandem new` adds every media file in the folder (as `tandem media
+--refresh` does later) and gives each a role from its name and folder:
+record-it's `-camera` and `-screen` files, then folders like `music/`,
+`sfx/`, `broll/`, `graphics/` and `stickers/`. A video nothing names, like a
+phone's `IMG_0151.MOV`, becomes the camera take when it's a recording with
+a voice and a face: shot by a phone or camera (its metadata names it) or
+sitting in `source/`, with speech in its sound and a face in its frames. A
+render of an edit has both too, so one anywhere else in the folder stays
+`other`. Only files new to the project get a role this way. `tandem new`
+says which file it took for the camera, why, and how to change it:
+
+```
+Added 16 media files from the folder.
+13 are Live Photos: the still is the media item, with its motion clip kept on it (livePhotoVideo) rather than added on its own.
+Camera take: source/IMG_0151.MOV (med_yccfihfs), an Apple iPhone XS Max video with speech and a face in it.
+Not the camera? tandem apply '{"updateMedia": {"mediaID": "med_yccfihfs", "patch": {"role": "other"}}}'
+```
+
+A Live Photo exported from Photos is a still and a movie of a few seconds
+with the same name (`IMG_0130.HEIC`, `IMG_0130.mov`). The still is the
+media item and keeps the movie's path in `livePhotoVideo`; the movie isn't
+media of its own. `tandem media` shows it as `Live Photo, motion clip
+IMG_0130.mov`. Folder refreshes, the app's folder watcher and files dropped
+on the app all pair them the same way. A movie a project already had as
+media stays as it is.
+
 ### When the app is open
 
 Only one process owns a project at a time. When the Tandem app has it open,

@@ -6,6 +6,8 @@ extension EditorModel {
     /// Files and folders from Finder: brought into the project folder
     /// (copied, or linked from another disk), probed, added to the media,
     /// and with `at`, placed on the timeline there. One undoable edit.
+    /// A Live Photo's motion clip comes along beside its still and is kept
+    /// on it, rather than added as a video of its own.
     func importFiles(_ urls: [URL], at time: Time?, trackID: String?) {
         let files = FileImport.mediaFiles(in: urls)
         guard !files.isEmpty else {
@@ -13,16 +15,20 @@ extension EditorModel {
             return
         }
         let folder = self.folder
-        let plan = FileImport.plan(files, folder: folder) { FileImport.onSameVolume($0, as: folder.root) }
-        let copying = plan.filter { $0.action != .inPlace }.count
-        show(.info, copying == 0 ? "Adding \(files.count == 1 ? files[0].lastPathComponent : "\(files.count) files")…" : "Bringing \(copying == 1 ? "1 file" : "\(copying) files") into \(folderName)/…")
+        let counted = FileImport.countedFiles(files)
+        let copying = FileImport.plan(counted, folder: folder) { FileImport.onSameVolume($0, as: folder.root) }.filter { $0.action != .inPlace }.count
+        show(.info, copying == 0 ? "Adding \(counted.count == 1 ? counted[0].lastPathComponent : "\(counted.count) files")…" : "Bringing \(copying == 1 ? "1 file" : "\(copying) files") into \(folderName)/…")
         Task { @MainActor [weak self] in
             let result = await Task.detached(priority: .userInitiated) { () -> Result<[MediaItem], Error> in
                 do {
+                    let clips = await LivePhotos.motionClips(among: files)
+                    let plan = FileImport.plan(files, folder: folder, motionClips: clips) { FileImport.onSameVolume($0, as: folder.root) }
                     let placed = try FileImport.perform(plan, folder: folder)
                     var items: [MediaItem] = []
-                    for url in placed { items.append(try await MediaScanner.probe(url, folder: folder)) }
-                    return .success(items)
+                    for (entry, url) in zip(plan, placed) where entry.livePhotoOf == nil {
+                        items.append(try await MediaScanner.probe(url, folder: folder))
+                    }
+                    return .success(FileImport.withMotionClips(items, plan: plan))
                 } catch {
                     return .failure(error)
                 }

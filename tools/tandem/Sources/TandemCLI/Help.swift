@@ -13,7 +13,10 @@ struct CommandHelp {
 enum Help {
     static let commands: [CommandHelp] = [
         CommandHelp(name: "new", usage: "tandem new <path.tandem> [--name <name>] [--portrait | --size <width>x<height>]", summary: "Create a project with Mike's usual tracks and add the media in its folder.", options: ["name", "portrait", "size"],
-                    details: "The canvas is 3840x2160 unless you say otherwise: --portrait makes a 1080x1920 short, --size any other size."),
+                    details: """
+                    The canvas is 3840x2160 unless you say otherwise: --portrait makes a 1080x1920 short, --size any other size.
+                    It says which file it took for the camera take and why: a record-it -camera file, or a video from a phone or camera (or in source/) with speech and a face in it. Live Photos stay one item each, the still, with its movie in livePhotoVideo.
+                    """),
         CommandHelp(name: "status", usage: "tandem status", summary: "Revision, length, unsaved changes, who has it open, undo and background jobs.", options: []),
         CommandHelp(name: "media", usage: "tandem media [--refresh]", summary: "Media files, how many clips use each, and analysis status.", options: ["refresh"],
                     details: "--refresh scans the project folder for new files first."),
