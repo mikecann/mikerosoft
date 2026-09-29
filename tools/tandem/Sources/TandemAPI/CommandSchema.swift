@@ -323,8 +323,8 @@ extension CommandSchema {
     ])
 
     static let graphicContent = S.object([
-        "template": S.string("Like remotion:BarChart."),
-        "props": S.map(S.ref("ParamValue")),
+        "template": S.string("sectionCard (built in: Mike's section card), or a template like remotion:BarChart."),
+        "props": S.map(S.ref("ParamValue"), "A sectionCard takes title, subtitle, number (like \"01\"), total (sections, for the progress bars; 0 hides them), kicker (\"Section\" or \"Tip\", shown as SECTION 1 OF 3), and colours accent (first band, chip, subtitle, lit bars), band2, band3 and background. Missing words are left off; colours default to Convex's yellow, red and purple on #141418."),
         "propsJSON": S.string()
     ], required: ["template"])
 
@@ -392,7 +392,7 @@ extension CommandSchema {
         "trackKind": S.enumeration(["video", "audio"]),
         "offset": S.time("Start relative to the template."),
         "clip": S.ref("Clip"),
-        "mediaPath": S.string("For media clips: the path of the file, as the project has it. A clip may carry the item to add under media (saved segments do) when the project has nothing there yet."),
+        "mediaPath": S.string("For media clips: the path of the file, as the project has it. A clip may carry the item to add under media (saved segments and the section card's whooshes do) when the project has nothing there yet; its path is used when mediaPath is left out."),
         "media": S.ref("MediaItem")
     ], required: ["track", "clip"])
 
@@ -443,6 +443,14 @@ extension CommandSchema {
 
 extension CommandSchema {
     static let insertMode = S.enumeration(["place", "overwrite", "insert"], "place (default) fails if the range is taken, overwrite replaces what's there, insert pushes later clips right.")
+
+    static func sectionCardSound(_ description: String) -> JSONValue {
+        S.object([
+            "mediaID": S.string("A sound already in the project's media."),
+            "gainDB": S.number("Clip gain in dB. Default -15."),
+            "offset": S.time("Seconds after its sweep starts.")
+        ], required: ["mediaID"], description)
+    }
     static let includeLinked = S.boolean("Also act on linked clips (default true).")
 
     public static let entries: [Entry] = [
@@ -560,6 +568,20 @@ extension CommandSchema {
                 "mode": insertMode
             ], required: ["template", "at"]),
             example: #"{"insertTemplate": {"template": {"id": "sectionCard", "name": "Section card", "duration": 3, "fields": [{"key": "title", "label": "Title"}], "clips": [{"track": "Text", "clip": {"content": {"text": {"text": "{{title}}", "preset": "sectionHeader"}}, "duration": 3}}]}, "at": 60, "values": {"title": "CURSOR DOCS"}}}"#
+        ),
+        Entry(
+            command: .addSectionCards,
+            summary: "Puts a numbered section card (the built-in sectionCard graphic: Convex bands wiping in and out, a number chip, the title, a subtitle and progress bars) at every section marker after the start, or at markerIDs. Cards are numbered in time order, total is the count, titles come from the marker names and subtitles from their notes. Each card hides the frame from its marker on. A card already at a marker is renumbered and keeps its own words. mode insert also makes room so the card is a pause.",
+            arguments: S.object([
+                "markerIDs": S.ids("Markers to put cards at, any kind. Default: every section marker after 0:00."),
+                "trackID": S.string("Video track for the cards. Default Graphics (made on top if missing)."),
+                "duration": S.time("Card length. Default 3.2; the wipes keep their length and the hold changes."),
+                "kicker": S.string("Words beside the chip, like Section or Tip (shown as SECTION 1 OF 3). Default none; on cards already there, empty removes it."),
+                "mode": S.enumeration(["overwrite", "insert", "place"], "overwrite (default) lays the cards over the timeline, insert also makes room at each marker (the whole take moves), place fails where the card track is taken."),
+                "soundIn": sectionCardSound("A sound for the sweep in, like a whoosh. Starts 0.2 s after the card unless offset says otherwise."),
+                "soundOut": sectionCardSound("A sound for the sweep out. Starts as the sweep out does unless offset says otherwise.")
+            ]),
+            example: #"{"addSectionCards": {"kicker": "Section", "soundIn": {"mediaID": "med_whooshin", "gainDB": -14}, "soundOut": {"mediaID": "med_whooshout", "gainDB": -19}}}"#
         ),
         Entry(
             command: .blade,

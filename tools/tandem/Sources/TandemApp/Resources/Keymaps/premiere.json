@@ -46,6 +46,7 @@
     "option+right": "nudgeRight",
     "cmd+l": "link",
     "m": "addMarker",
+    "option+m": "addSectionCards",
     "cmd+d": "addTransition",
     "1": "layoutFull",
     "2": "layoutPipRight",

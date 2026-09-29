@@ -76,7 +76,7 @@ enum MainMenu {
             add(timeline, command, keymap)
         }
         timeline.addItem(.separator())
-        for command: EditorCommand in [.addMarker, .previousMarker, .nextMarker] {
+        for command: EditorCommand in [.addMarker, .previousMarker, .nextMarker, .addSectionCards] {
             add(timeline, command, keymap)
         }
         timeline.addItem(.separator())

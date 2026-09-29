@@ -173,6 +173,14 @@ struct CLI {
                 label: args.options["label"], expectedRevision: try args.integer("expect")
             )
             return show(try await client().call(request), json: json)
+        case "cards":
+            try args.expectPositionals(atMost: 0, command: name)
+            let request = CardsRequest(
+                markers: args.repeated["marker"], duration: try time(args, "duration"), kicker: args.options["kicker"],
+                track: args.options["track"], insert: args.has("insert") ? true : nil, sounds: args.has("no-sounds") ? false : nil,
+                apply: args.has("apply"), label: args.options["label"], expectedRevision: try args.integer("expect")
+            )
+            return show(try await client().call(request), json: json)
         case "frame":
             try args.expectPositionals(atMost: 1, command: name)
             let at = try parseTime(try args.positional(0, "a time, like tandem frame 01:23.500", command: name))

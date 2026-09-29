@@ -30,7 +30,14 @@ let package = Package(
         .target(name: "TandemMedia", dependencies: ["TandemCore"], path: "Sources/TandemMedia"),
         // Composition building, the Core Image compositor, audio mix,
         // frame grabs and export.
-        .target(name: "TandemRender", dependencies: ["TandemCore", "TandemMedia"], path: "Sources/TandemRender"),
+        .target(
+            name: "TandemRender",
+            dependencies: ["TandemCore", "TandemMedia"],
+            path: "Sources/TandemRender",
+            // The section card's typefaces (Anton, Instrument Sans,
+            // JetBrains Mono), OFL, with their licences.
+            resources: [.copy("Resources/Fonts")]
+        ),
         // Commands shared by the local server, the CLI and MCP, including
         // the asset library for agents.
         .target(name: "TandemAPI", dependencies: ["TandemCore", "TandemMedia", "TandemRender", "TandemAssets"], path: "Sources/TandemAPI"),

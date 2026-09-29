@@ -116,8 +116,12 @@ enum RenderPlanner {
                 var item: MediaItem?
                 switch clip.content {
                 case .graphic(let graphic):
-                    warnings.add("Graphic clips aren't rendered yet (\(graphic.template)).")
-                    continue
+                    // Built-in templates (the section card) are drawn by the
+                    // compositor like titles; others have nothing to draw yet.
+                    guard BuiltInGraphics.renders(graphic.template) else {
+                        warnings.add("Graphic clips aren't rendered yet (\(graphic.template)).")
+                        continue
+                    }
                 case .media(let mediaID):
                     guard let found = mediaByID[mediaID] else {
                         warnings.add("Clip \(clip.id) uses missing media \(mediaID).")

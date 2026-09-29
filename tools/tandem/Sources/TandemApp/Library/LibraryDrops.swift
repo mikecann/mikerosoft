@@ -1,4 +1,5 @@
 import Foundation
+import TandemAPI
 import TandemCore
 import TandemRender
 
@@ -83,30 +84,70 @@ enum TitleSamples {
 enum BuiltInTemplates {
     static let all: [Template] = [sectionCard, likeAndSubscribe, commentBelow]
 
-    /// A built-in template, or a saved segment (`segment:<folder>`).
+    /// A built-in template, or a saved segment (`segment:<folder>`). The
+    /// section card comes with its whooshes when a drag of its tile has
+    /// copied them into the project (see `SectionCardSoundCache`).
     static func template(_ id: String) -> Template? {
-        all.first { $0.id == id } ?? SegmentShelf.shared.template(id)
+        if id == sectionCard.id, let sounds = SectionCardSoundCache.shared.latest { return makeSectionCard(sounds: sounds) }
+        return all.first { $0.id == id } ?? SegmentShelf.shared.template(id)
     }
 
-    /// A dark card behind a two-line section header.
-    static let sectionCard = Template(
-        id: "sectionCard",
-        name: "Section card",
-        duration: Time(seconds: 3.3),
-        fields: [
-            TemplateField(key: "number", label: "Number", defaultValue: "1"),
-            TemplateField(key: "title", label: "Title", defaultValue: "The leaderboard")
-        ],
-        clips: [
-            TemplateClip(track: "Graphics", clip: Clip(name: "Section card", content: .solid(color: RGBA(r: 0.07, g: 0.07, b: 0.08)), start: .zero, duration: Time(seconds: 3.3))),
-            TemplateClip(track: "Text", offset: Time(seconds: 0.2), clip: Clip(
-                name: "Section title",
-                content: .text(TextContent(text: "Section {{number}}\n{{title}}", preset: "sectionHeader")),
+    /// Mike's section card, silent.
+    static let sectionCard = makeSectionCard(sounds: nil)
+
+    /// Mike's section card: the built-in `sectionCard` graphic on Graphics
+    /// (Convex's bands wipe in, the card holds the number, title, subtitle
+    /// and progress, the bands wipe out) and, given the whooshes, one on
+    /// SFX for each sweep. The words are edited in the inspector.
+    static func makeSectionCard(sounds: SectionCardSounds.Resolved?) -> Template {
+        let length = SectionCard.defaultDuration
+        let props: [String: ParamValue] = [
+            SectionCard.Key.number: .string("{{number}}"),
+            SectionCard.Key.title: .string("{{title}}"),
+            SectionCard.Key.subtitle: .string("{{subtitle}}")
+        ]
+        var clips = [
+            // Inserting gives clips new IDs; fixed ones here keep the
+            // template the same every time it's made.
+            TemplateClip(track: "Graphics", clip: Clip(
+                id: "clip_sectioncard",
+                content: .graphic(GraphicContent(template: SectionCard.template, props: props)),
                 start: .zero,
-                duration: Time(seconds: 3)
+                duration: length
             ))
         ]
-    )
+        if let sounds, sounds.media.count == 2 {
+            let motion = SectionCard.Motion(duration: length.seconds)
+            let sweeps: [(MediaItem, SectionCardSound, Time)] = [
+                (sounds.media[0], sounds.soundIn, Time(seconds: motion.inStart(0)) + (sounds.soundIn.offset ?? SectionCard.soundInOffset)),
+                (sounds.media[1], sounds.soundOut, Time(seconds: motion.outStart(0)) + (sounds.soundOut.offset ?? .zero))
+            ]
+            for (index, (item, sound, offset)) in sweeps.enumerated() {
+                clips.append(TemplateClip(
+                    track: "SFX", trackKind: .audio, offset: offset,
+                    clip: Clip(
+                        id: index == 0 ? "clip_sectioncardin" : "clip_sectioncardout",
+                        content: .media(mediaID: item.id),
+                        start: .zero,
+                        duration: item.duration ?? Time(seconds: 1),
+                        audio: AudioProperties(gainDB: sound.gainDB ?? SectionCard.soundGainDB)
+                    ),
+                    media: item
+                ))
+            }
+        }
+        return Template(
+            id: "sectionCard",
+            name: "Section card",
+            duration: length,
+            fields: [
+                TemplateField(key: "number", label: "Number", defaultValue: "01"),
+                TemplateField(key: "title", label: "Title", defaultValue: "The leaderboard"),
+                TemplateField(key: "subtitle", label: "Subtitle", defaultValue: "Who's on top")
+            ],
+            clips: clips
+        )
+    }
 
     /// The pop callout low in the frame.
     static let likeAndSubscribe = Template(

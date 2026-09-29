@@ -314,7 +314,16 @@ public enum TimelineDump {
             if let preset = text.preset { result += " \(preset)" }
             return result
         case .graphic(let graphic):
-            return "graphic \(graphic.template)"
+            guard graphic.template == SectionCard.template else { return "graphic \(graphic.template)" }
+            // Like: section card 01 "Methodology" / "Let's keep it fair" 1 of 3
+            let card = SectionCard.Props(graphic.props)
+            var result = "section card"
+            if !card.number.isEmpty { result += " \(card.number)" }
+            result += " \"\(shorten(card.title.replacingOccurrences(of: "\n", with: " "), 40))\""
+            if !card.subtitle.isEmpty { result += " / \"\(shorten(card.subtitle, 32))\"" }
+            if let index = card.index, card.total > 0 { result += " \(index) of \(card.total)" }
+            if !card.kicker.isEmpty { result += " kicker \(card.kicker)" }
+            return result
         case .solid(let color):
             return "solid \(hex(color))"
         case .adjustment:

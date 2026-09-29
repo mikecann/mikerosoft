@@ -48,6 +48,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Native titles: Core Text, the four styles, in and out animations, word-by-word captions [render]
 - [x] Audio mix: gain, fades, keyframes, normalisation, voice isolation, crossfades, 3 ms micro-fades, pitch-kept speed changes [render]
 - [x] pitchShift audio effect [render]
+- [x] Built-in graphic clips drawn by the compositor: the section card (Convex's bands wipe in and out; number chip, Anton title, subtitle, progress bars), matching the mockup to a pixel [render]
 - [ ] Graphic template clips (Remotion props rendered in the background) [render]
 - [x] Frame renderer for grabs and tests [render]
 - [x] Exporter: VideoToolbox speed priority, presets, master loudness to -14 LUFS under -1 dBTP, range export, snapshot beside the file [render] (the whole 11 min v14 edit in 156 s, 4.3x real time)
@@ -60,6 +61,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] `tandem` CLI, headless when the app is closed (undo kept on disk), talks to the app when open [api]
 - [x] `tandem mcp` stdio server (both MCP protocol eras) [api]
 - [x] Transcript tools: find phrase, list pauses, tighten pauses [api]
+- [x] A section card at every section marker: `addSectionCards`, `tandem cards`, MCP `cards`, Timeline > Add section cards at section markers [api, app]
 - [x] docs/AGENTS.md with an example of every command, checked by tests [api]
 
 ## Milestone 5: the app
@@ -92,7 +94,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Asset browser in the app: search, sources, favourites, hover previews, drag or double-click to place, credits [app]
 - [x] ElevenLabs Generate, the big Space preview, looks and fonts dropped onto clips [app]
 - [x] Sources as providers; paid libraries through watched import folders. ElevenLabs sound effects need the key's `sound_generation` permission (music works)
-- [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
+- [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card (done: one clip with its whooshes, edited in the inspector), Like and Subscribe, Comment Below
 - [x] Shared library: one watched folder on this Mac (`~/Movies/Tandem Library`, moved in Settings) for stickers, graphics, sounds, music, looks, fonts and segments; its files are used where they are (its fonts registered by every render), archiving copies them in (Live Photo movies too), relink looks there [assets, api, app]
 - [x] Saved segments: Save selection as segment (menu bar and clip menu), the Text tab's Segments, `tandem segments list/save/insert` and `segments_*` MCP tools; a segment carries copies of its files [core, api, app]
 - [ ] The app asks for a segment's words when it goes in (agents pass them already); relink finds LUTs too, not just media, and a Live Photo movie that went missing while its still didn't

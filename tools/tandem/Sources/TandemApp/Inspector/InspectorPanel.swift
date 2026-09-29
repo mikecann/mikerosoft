@@ -221,6 +221,9 @@ struct VideoInspector: View {
             if case .text(let text) = clip.content {
                 TextSection(model: model, clip: clip, text: text)
             }
+            if let card = SectionCard.props(of: clip) {
+                SectionCardSection(model: model, clip: clip, props: card)
+            }
             AnimationSection(model: model, clip: clip, domain: "video.")
             layoutSection
             if clip.mediaID != nil { cutoutSection }

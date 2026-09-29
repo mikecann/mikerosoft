@@ -46,6 +46,7 @@ tandem pauses [--min 0.6]          silences between words
 tandem tighten [--min 0.6] [--keep 0.15] [--apply]
 tandem captions [--from T] [--to T] [--max-words 3] [--y 0.42] [--apply]
 tandem short [--apply]             lay out a 9:16 short from the same edit
+tandem cards [--kicker Section] [--insert] [--no-sounds] [--apply]   a section card at every section marker
 tandem apply <batch.json | ->      [--dry-run] [--expect N] [--label L] [--key K]
 tandem undo [--expect N]    tandem redo    tandem history    tandem validate
 tandem frame <time> [-o out.png]   tandem clip <start> <end> [-o out.mp4]
@@ -152,7 +153,7 @@ args = ["mcp"]
 ```
 
 The tools mirror the operations: `status`, `timeline`, `media`,
-`transcript`, `search`, `pauses`, `tighten`, `apply`, `undo`, `redo`,
+`transcript`, `search`, `pauses`, `tighten`, `captions`, `short`, `cards`, `apply`, `undo`, `redo`,
 `history`, `validate`, `frame`, `screenshot`, `clip`, `export`, `archive`,
 `relink`, `loudness`, `watch` and `effects`, plus the asset library's `assets_search`,
 `assets_use`, `assets_credits`, `assets_generate` and `assets_providers`,
@@ -576,6 +577,10 @@ layer or part of a media file. `content` is one of `{"media": {"mediaID":
 {"insertClip": {"trackID": "trk_text", "clip": {"content": {"text": {"text": "TIP 1", "preset": "callout"}}, "start": 12, "duration": 3}}}
 ```
 
+`{"graphic": {"template": "sectionCard", "props": {...}}}` is Mike's section
+card, drawn by Tandem ([Add a section card](#add-a-section-card)); other
+graphic templates aren't rendered yet.
+
 #### removeClips
 
 Removes clips. Without `ripple` they leave a gap (a lift); with `ripple` the
@@ -618,14 +623,15 @@ split, follow tracks move).
 
 Expands a template (a section card, Like and Subscribe, Comment Below, a
 saved segment) into linked clips at a time, filling `{{field}}`
-placeholders from `values`. Templates come from packs as JSON. Media a
-template uses is matched by path (`mediaPath`); a clip that carries its
-media item under `media` adds it when the project has nothing at that path
-yet, and reuses what's there otherwise. Saved segments carry theirs, which
-is how `tandem segments insert` works; without one, the file must already
-be in the project. `transitions` joins its clips by their place in `clips`
-(`{"from": 0, "to": 1, "type": "dissolve"}`, or only `to` for a fade in at
-a clip's head).
+placeholders in text clips and a graphic's text props from `values`.
+Templates come from packs as JSON. Media a template uses is matched by
+path (`mediaPath`); a clip that carries its media item under `media` adds
+it when the project has nothing at that path yet, and reuses what's there
+otherwise. Saved segments carry theirs, which is how `tandem segments
+insert` works, and so does the Section card tile for its whooshes; without
+one, the file must already be in the project. `transitions` joins its
+clips by their place in `clips` (`{"from": 0, "to": 1, "type":
+"dissolve"}`, or only `to` for a fade in at a clip's head).
 
 ```json
 {"insertTemplate": {"template": {"id": "sectionCard", "name": "Section card", "duration": 3, "fields": [{"key": "title", "label": "Title"}], "clips": [{"track": "Text", "clip": {"content": {"text": {"text": "{{title}}", "preset": "sectionHeader"}}, "duration": 3}}]}, "at": 60, "values": {"title": "CURSOR DOCS"}}}
@@ -635,6 +641,31 @@ A clip that carries its file:
 
 ```json
 {"insertTemplate": {"template": {"id": "segment:Sting", "name": "Sting", "duration": 1.2, "clips": [{"track": "SFX", "trackKind": "audio", "clip": {"duration": 1.2, "audio": {"gainDB": -15}}, "mediaPath": "/Users/m5-mike/Movies/Tandem Library/Segments/Sting/sting.wav", "media": {"path": "sting.wav", "kind": "audio", "role": "sfx", "duration": 1.2, "hasAudio": true}}]}, "at": 42, "mode": "overwrite"}}
+```
+
+#### addSectionCards
+
+Puts a numbered section card at every section marker after 0:00 (a marker
+at the very start is the cold open, which gets none), or at `markerIDs`
+(any kind). Cards are numbered in time order (`01`, `02`...), `total` is
+the count, the title is the marker's name and the subtitle its note. Each
+card starts just early enough to hide the whole frame from its marker on,
+so the cut between sections is never seen. A section card already over a
+marker is renumbered (and gets `kicker` if you pass one) but keeps its own
+words, colours and sounds, so run it again after adding a section.
+
+`mode` `overwrite` (the default) lays the cards over the timeline on
+Graphics (`trackID` for another video track). `insert` also makes room at
+each marker, so the card is a pause and its wipes show the last shot of one
+section and the first of the next; the whole take moves. `soundIn` and
+`soundOut` put a sound on SFX (or SFX 2... where SFX is taken) for each
+sweep, linked to its card: a media item already in the project, its gain
+(default -15 dB) and `offset`, seconds after its sweep starts (default 0.2
+in, 0 out). `tandem cards` fills them in with the section card whooshes
+from the asset library.
+
+```json
+{"addSectionCards": {"kicker": "Section", "soundIn": {"mediaID": "med_whooshin", "gainDB": -14}, "soundOut": {"mediaID": "med_whooshout", "gainDB": -19}}}
 ```
 
 ### Cutting and trimming
@@ -1087,23 +1118,61 @@ back to the preset's.
 
 ### Add a section card
 
-Section cards and calls to action are templates: a group of text, graphics
-and sound effects that go in together, linked. Put the sound effect files
-in the project first (`tandem media --refresh`), then insert the template
-with its fields filled in:
+Mike's section card is one clip, the built-in `sectionCard` graphic, about
+three seconds between the cold open, the intro and each section. Convex's
+yellow, red and purple bands sweep across to wipe it in; the dark card holds
+a number chip, the title (Anton, upper case), a letter-spaced subtitle and
+progress bars (a bar for each section up to six, then one bar in proportion
+with a count like `3 / 14`); and the bands sweep across again to wipe it
+out, showing the next shot. It lasts 3.2 s; a longer or shorter card holds
+longer or shorter and the wipes stay the same.
+
+The usual way is a card at every section marker. Mark where each section
+starts (`addMarker` with `"kind": "section"`, or a marker's Kind menu in the
+app): the marker's name is the card's title and its note, if it has one,
+the subtitle. Then:
+
+```bash
+tandem cards                              # the plan: numbers, titles, where each card goes
+tandem cards --kicker Section --apply     # SECTION 1 OF 9 beside each number
+tandem frame 0:33 -o /tmp/card.png        # look at one
+```
+
+The cards go on Graphics, each starting 0.43 s before its marker so the
+card hides the whole frame from the marker on. The section keeps playing
+under it (Mike's voice too). With `--insert` each marker gets room instead:
+the take moves on by the card's hold, so the card is a pause and its wipes
+show the last shot of one section and the first of the next. A marker at
+0:00 marks the cold open and gets no card. Run `tandem cards` again after
+adding or moving a section: cards already at a marker are renumbered and
+keep their words. `--kicker Tip` suits a list video. It's one undo step,
+and in the app it's Timeline > Add section cards at section markers
+(Option-M).
+
+A whoosh goes with each sweep: two ElevenLabs sounds made for the card, kept
+in the asset library (docs/ASSETS.md). `tandem cards --apply` copies them
+into the project's `assets/sfx/` and puts them on SFX, linked to their card:
+the one in 0.2 s after the card starts at -14 dB, the one out as the out
+sweep starts, 0.88 s before the end, at -19 dB. A Mac whose library doesn't
+have them makes silent cards and says so; `--no-sounds` leaves them out.
+
+One card by hand, anywhere:
 
 ```json
-{"label": "Section card: Cursor docs", "commands": [
-  {"insertTemplate": {"at": 180, "values": {"number": "3", "title": "CURSOR DOCS"}, "template": {
-    "id": "sectionCard", "name": "Section card", "duration": 3.3,
-    "fields": [{"key": "number", "label": "Number", "defaultValue": "1"}, {"key": "title", "label": "Title"}],
-    "clips": [
-      {"track": "Graphics", "clip": {"content": {"solid": {"color": {"r": 0.1, "g": 0.1, "b": 0.1}}}, "duration": 3.3}},
-      {"track": "Text", "offset": 0.2, "clip": {"content": {"text": {"text": "TIP {{number}}", "preset": "label"}}, "duration": 3}},
-      {"track": "SFX", "trackKind": "audio", "clip": {"duration": 1, "audio": {"gainDB": -15}}, "mediaPath": "sfx/whoosh.wav"}
-    ]}}}
+{"label": "Section card: Results", "commands": [
+  {"insertClip": {"trackID": "trk_graphics", "clip": {"content": {"graphic": {"template": "sectionCard", "props": {"number": "02", "title": "Results", "subtitle": "Finally!", "total": 3, "kicker": "Section"}}}, "start": 95, "duration": 3.2}}}
 ]}
 ```
+
+Props: `title`, `subtitle`, `number` (what the chip says; a number is
+written `02`), `total` (how many sections, for the progress bars; 0 hides
+them), `kicker` (`Section` or `Tip`, shown as `SECTION 2 OF 3` beside the
+chip), and the colours `accent` (the first band, the chip, the subtitle and
+the lit bars), `band2`, `band3` and `background`, as `{"r", "g", "b"}` or a
+hex string like `"#F3B01C"`. A missing word leaves that part out; colours
+default to Convex's. Change them later with a patch, for example
+`{"updateClip": {"clipID": "clip_...", "patch": {"content": {"graphic": {"props": {"subtitle": "Let's keep it fair"}}}}}}`
+(`null` removes one). `tandem frame` shows the result.
 
 ### Set the PiP layout
 
@@ -1449,6 +1518,7 @@ still when it's beside it. It's one undo step.
 | tighten | `tandem tighten [--min] [--keep] [--apply]` | `POST /v1/tighten {"min", "keep", "apply"}` | `tighten` |
 | captions | `tandem captions [--from] [--to] [--max-words] [--y] [--apply]` | `POST /v1/captions {"from", "to", "words", "y", "apply"}` | `captions` |
 | short | `tandem short [--apply]` | `POST /v1/short {"apply"}` | `short` |
+| cards | `tandem cards [--kicker] [--duration] [--insert] [--no-sounds] [--marker]... [--apply]` | `POST /v1/cards {"markers", "kicker", "duration", "insert", "sounds", "apply"}` | `cards` |
 | apply | `tandem apply <file or ->` | `POST /v1/apply <batch>` | `apply` |
 | undo, redo | `tandem undo`, `tandem redo` | `POST /v1/undo`, `/v1/redo` | `undo`, `redo` |
 | history | `tandem history` | `POST /v1/history` | `history` |
