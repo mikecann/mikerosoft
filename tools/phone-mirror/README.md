@@ -1,5 +1,7 @@
 # phone-mirror
 
+![Three iPhones and iPads cabled to a Mac, each mirrored in its own frosted window while a pointer taps one screen](docs/header.webp)
+
 Mirror and control several iPhones and iPads at once from your Mac, over USB.
 Each phone gets its own window. Click to tap, drag to swipe, scroll to scroll,
 and type to type.
