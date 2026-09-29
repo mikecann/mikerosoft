@@ -63,13 +63,18 @@ public struct TemplateClip: Codable, Equatable, Sendable {
     /// The clip's `mediaID` is looked up from it, so a template doesn't need
     /// to know the project's media IDs.
     public var mediaPath: String?
+    /// For media clips: the media item to add when the project has nothing
+    /// at `mediaPath` yet (its path is used when `mediaPath` is left out),
+    /// so a template can bring its own sounds.
+    public var media: MediaItem?
 
-    public init(track: String, trackKind: TrackKind = .video, offset: Time = .zero, clip: Clip, mediaPath: String? = nil) {
+    public init(track: String, trackKind: TrackKind = .video, offset: Time = .zero, clip: Clip, mediaPath: String? = nil, media: MediaItem? = nil) {
         self.track = track
         self.trackKind = trackKind
         self.offset = offset
         self.clip = clip
-        self.mediaPath = mediaPath
+        self.mediaPath = mediaPath ?? media?.path
+        self.media = media
     }
 
     public init(from decoder: Decoder) throws {
@@ -77,7 +82,8 @@ public struct TemplateClip: Codable, Equatable, Sendable {
         track = try c.decode(String.self, forKey: .track)
         trackKind = try c.decode(.trackKind, or: .video)
         offset = try c.decode(.offset, or: .zero)
-        mediaPath = try c.decodeIfPresent(String.self, forKey: .mediaPath)
+        media = try c.decodeIfPresent(MediaItem.self, forKey: .media)
+        mediaPath = try c.decodeIfPresent(String.self, forKey: .mediaPath) ?? media?.path
         // Media clips name their file with `mediaPath`, so let them leave
         // `content` out.
         var raw = try c.decode(JSONValue.self, forKey: .clip)
@@ -90,18 +96,27 @@ public struct TemplateClip: Codable, Equatable, Sendable {
 }
 
 extension Template {
-    /// Replaces `{{key}}` in every text clip with `values`, falling back to
-    /// each field's default.
+    /// Replaces `{{key}}` in every text clip, and in a graphic's text
+    /// props, with `values`, falling back to each field's default.
     func filled(with values: [String: String]) -> [TemplateClip] {
         var lookup = Dictionary(uniqueKeysWithValues: fields.map { ($0.key, $0.defaultValue) })
         for (key, value) in values { lookup[key] = value }
+        func fill(_ text: String) -> String {
+            lookup.reduce(text) { $0.replacingOccurrences(of: "{{\($1.key)}}", with: $1.value) }
+        }
         return clips.map { item in
             var item = item
-            if case .text(var text) = item.clip.content {
-                for (key, value) in lookup {
-                    text.text = text.text.replacingOccurrences(of: "{{\(key)}}", with: value)
-                }
+            switch item.clip.content {
+            case .text(var text):
+                text.text = fill(text.text)
                 item.clip.content = .text(text)
+            case .graphic(var graphic):
+                for (key, value) in graphic.props {
+                    if case .string(let text) = value { graphic.props[key] = .string(fill(text)) }
+                }
+                item.clip.content = .graphic(graphic)
+            default:
+                break
             }
             return item
         }
@@ -129,10 +144,19 @@ extension Editing {
             clip.linkGroup = group
             if !clip.tags.contains("template:\(template.id)") { clip.tags.append("template:\(template.id)") }
             if let path = item.mediaPath {
-                guard let media = p.media.first(where: { $0.path == path }) else {
+                if let media = p.media.first(where: { $0.path == path }) {
+                    clip.content = .media(mediaID: media.id)
+                } else if var media = item.media {
+                    // The template brings its own file: add it once.
+                    media.path = path
+                    if let other = p.media(media.id), other.path != path {
+                        throw EditError.invalid("template \(template.id) adds media \(media.id), but that ID is already \(other.path)")
+                    }
+                    if p.media(media.id) == nil { try addMedia(&p, media) }
+                    clip.content = .media(mediaID: media.id)
+                } else {
                     throw EditError.notFound("media \(path) for template \(template.id); add it to the project first")
                 }
-                clip.content = .media(mediaID: media.id)
             }
             try requireUnlocked(p[location])
             try checkContent(clip, fits: p[location], in: p)

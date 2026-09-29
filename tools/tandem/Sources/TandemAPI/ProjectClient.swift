@@ -324,6 +324,7 @@ extension ServiceCall {
         case let tighten as TightenRequest: return tighten.apply == true
         case let captions as CaptionsRequest: return captions.apply == true
         case let short as ShortRequest: return short.apply == true
+        case let cards as CardsRequest: return cards.apply == true
         default: return false
         }
     }

@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import TandemCore
 import TandemMedia
+import TandemAssets
 import TandemRender
 
 /// The operations agents use, on one open project. The HTTP server, the
@@ -40,6 +41,22 @@ public final class TandemService: @unchecked Sendable {
     /// Reports a call to `onCall`.
     public func noteCall(_ operation: String, author: String) {
         onCall?(operation, author)
+    }
+
+    /// Where the section cards' whooshes come from (`cards`). Nil, the
+    /// default, opens the per-user asset library the first time a card
+    /// needs them; tests set their own.
+    public var soundLibrary: AssetLibrary? {
+        get { hookLock.withLock { library } }
+        set { hookLock.withLock { library = newValue } }
+    }
+    private var library: AssetLibrary?
+
+    func cardSoundLibrary() -> AssetLibrary? {
+        if let soundLibrary { return soundLibrary }
+        guard let opened = try? AssetService.standard().library else { return nil }
+        soundLibrary = opened
+        return opened
     }
 
     public var coordinator: ProjectCoordinator { session.coordinator }

@@ -189,7 +189,12 @@ struct FrameComposer {
             video.transform.scale = video.transform.scale * state.scale / renderScale
             video.transform.position.y += state.offsetY
             opacity *= state.opacity
-        case .graphic, .adjustment:
+        case .graphic(let graphic):
+            // Drawn at the canvas size, so it fits at scale 1 and the clip's
+            // own placement, effects and opacity apply as to any picture.
+            guard let drawn = BuiltInGraphics.image(graphic, clipTime: clipTime, clipDuration: clip.duration, canvas: canvas) else { return nil }
+            image = drawn
+        case .adjustment:
             return nil
         }
         guard opacity > 0 else { return nil }

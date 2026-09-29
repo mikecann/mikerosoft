@@ -576,6 +576,23 @@ enum MCPTools {
             readOnly: false
         ),
         Tool(
+            name: "cards", title: "Add section cards",
+            description: "Puts a numbered section card at every section marker after the start (or at markers): Convex's bands wipe in, the card holds the number, the marker's name as the title, its note as the subtitle and progress bars for the count, and the bands wipe out, with a whoosh on each sweep from the asset library. A card already at a marker is renumbered and keeps its words. A dry run that returns the plan and the commands unless apply: true.",
+            operation: .cards,
+            properties: [
+                "markers": S.ids("Marker IDs to put cards at. Default: every section marker after 0:00."),
+                "kicker": S.string("Words beside the number, like Section or Tip, shown as SECTION 1 OF 3."),
+                "duration": time("Card length. Default 3.2 s; the wipes keep their length."),
+                "track": S.string("Video track ID for the cards. Default Graphics."),
+                "insert": S.boolean("Make room at each marker so the card is a pause and its wipes show the shots either side (the whole take moves)."),
+                "sounds": S.boolean("A whoosh on each sweep, from the asset library. Default true."),
+                "apply": S.boolean("Add them. Without it nothing changes."),
+                "label": S.string("Undo label."), "author": S.string("Who made the edit."),
+                "expectedRevision": S.integer("Refuse unless the project is at this revision.")
+            ],
+            readOnly: false
+        ),
+        Tool(
             name: "apply", title: "Edit the project",
             description: "Applies a batch of edit commands atomically as one undo step. If any command fails nothing changes and the error says which one and why. Returns the new revision, created IDs and warnings. See the command list in the schema; times are seconds.",
             operation: .apply, properties: applyProperties, required: ["commands"], readOnly: false

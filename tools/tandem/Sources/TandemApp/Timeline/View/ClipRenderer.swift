@@ -371,6 +371,8 @@ struct ClipRenderer {
         case .text(let text):
             return text.text.split(separator: "\n").first.map(String.init) ?? "Text"
         case .graphic(let graphic):
+            // A section card goes by its number and title: "01 Methodology".
+            if graphic.template == SectionCard.template, let card = SectionCard.props(of: clip) { return card.label }
             return clip.name ?? graphic.template
         case .solid:
             return clip.name ?? "Solid"

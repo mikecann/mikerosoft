@@ -8,7 +8,7 @@ import TandemCore
 public enum CommandCase: String, CaseIterable, Codable, Sendable {
     case updateProject, updateSettings, addTrack, removeTrack, moveTrack, updateTrack
     case addMedia, updateMedia, removeMedia
-    case placeMedia, insertClip, removeClips, rippleDeleteRange, closeGap, insertTime, insertTemplate
+    case placeMedia, insertClip, removeClips, rippleDeleteRange, closeGap, insertTime, insertTemplate, addSectionCards
     case blade, trim, roll, slip, slide, setSpeed
     case moveClips, updateClip, link, unlink, applyLayout, zoomToRegion, setFormatLayout, addMotion
     case addTransition, updateTransition, removeTransition
@@ -36,6 +36,7 @@ extension EditCommand {
         case .closeGap: return .closeGap
         case .insertTime: return .insertTime
         case .insertTemplate: return .insertTemplate
+        case .addSectionCards: return .addSectionCards
         case .blade: return .blade
         case .trim: return .trim
         case .roll: return .roll
@@ -90,6 +91,9 @@ public enum CommandText {
         case .closeGap(_, let at): return "Close gap at \(at)"
         case .insertTime(let at, let duration, _): return "Insert \(TimeText.duration(duration)) at \(at)"
         case .insertTemplate(let template, let at, _, _): return "Insert \(template.name) at \(at)"
+        case .addSectionCards(let markerIDs, _, _, _, let mode, _, _):
+            let markers = markerIDs.map { count($0.count, "marker") } ?? "section markers"
+            return mode == .insert ? "Add section cards at \(markers), making room" : "Add section cards at \(markers)"
         case .blade(let at, _, _): return "Cut at \(at)"
         case .trim(_, let edge, _, let ripple, _): return ripple == true ? "Ripple trim \(edge.rawValue)" : "Trim \(edge.rawValue)"
         case .roll: return "Roll edit"

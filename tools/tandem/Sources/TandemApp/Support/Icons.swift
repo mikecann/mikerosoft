@@ -66,6 +66,15 @@ enum Icons {
     static let keys = "keyboard"
     static let selectAClip = "cursorarrow.click.2"
 
+    // A section card's fields, in the Video tab.
+    static let sectionCard = "rectangle.stack"
+    static let cardTitle = "textformat"
+    static let cardSubtitle = "text.alignleft"
+    static let cardNumber = "number"
+    static let cardProgress = "chart.bar.xaxis"
+    static let cardKicker = "tag"
+    static let cardColours = "paintpalette"
+
     // The Colour tab.
     /// What the grade applies to: every clip of the take, or this one.
     static let wholeTake = "film.stack"
@@ -119,6 +128,7 @@ enum Icons {
         case .link: return "link"
         case .addMarker: return "bookmark"
         case .addTransition: return transition
+        case .addSectionCards: return "rectangle.stack.badge.plus"
         case .toggleKeyframe: return animation
         case .previousKeyframe: return "chevron.left"
         case .nextKeyframe: return "chevron.right"

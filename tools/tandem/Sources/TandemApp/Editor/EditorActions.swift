@@ -39,6 +39,7 @@ final class EditorActions {
         case .nudgeLeft, .nudgeRight, .nudgeLeftFive, .nudgeRightFive, .link: return !model.selection.isEmpty
         case .deselectAll: return !model.selection.isEmpty || AssetLibraryHost.shared.previewing != nil
         case .liftInOut, .extractInOut: return model.inOutRange != nil
+        case .addSectionCards: return SectionCardBatches.canAddAtMarkers(model.project)
         default: return true
         }
     }
@@ -127,6 +128,8 @@ final class EditorActions {
             return apply(TimelineEdits.toggleLink(project, selection: model.selection), otherwise: "Select two or more clips to link.")
         case .addMarker:
             return apply(TimelineEdits.addMarker(project, at: playhead), otherwise: "")
+        case .addSectionCards:
+            SectionCardActions.addAtMarkers(in: model)
         case .addTransition:
             return apply(TimelineEdits.addDefaultTransition(project, playhead: playhead, selection: model.selection), otherwise: "Put the playhead on a cut between two clips.")
         case .toggleKeyframe: return model.toggleKeyframes()

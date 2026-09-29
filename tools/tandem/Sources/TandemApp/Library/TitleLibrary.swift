@@ -59,13 +59,22 @@ struct TitleLibrary: View {
                 LazyVGrid(columns: TileGrid.columns(width: 130), alignment: .leading, spacing: 12) {
                     if showTemplates {
                         ForEach(BuiltInTemplates.all) { template in
+                            let isCard = template.id == BuiltInTemplates.sectionCard.id
                             LibraryTile(title: template.name, selected: selected == template.id, width: 130, height: 73, drag: .template(template.id)) {
                                 TemplatePreview(template: template)
                             } select: {
                                 selected = template.id
                             } add: {
-                                model.apply(LibraryDrops.template(template, at: model.playback.time))
+                                if isCard {
+                                    SectionCardActions.insert(at: model.playback.time, in: model)
+                                } else {
+                                    model.apply(LibraryDrops.template(template, at: model.playback.time))
+                                }
+                            } dragStarted: {
+                                // Its whooshes, copied in before the drop.
+                                if isCard { SectionCardActions.prepareForDrop(in: model) }
                             }
+                            .help(isCard ? "Section card: Convex's bands wipe in, the card holds the number, title, subtitle and progress, and they wipe out, with a whoosh on each sweep. Edit the words in the inspector, or add one at every section marker from the Timeline menu." : template.name)
                         }
                     } else {
                         ForEach(TitlePresets.builtIn, id: \.id) { preset in
@@ -159,19 +168,23 @@ private struct TitlePreview: View {
 private struct TemplatePreview: View {
     let template: Template
 
+    /// The section card drawn by the renderer, as the sweep out begins, so
+    /// the tile shows the bands and the words.
+    static let sectionCardArt: CGImage? = {
+        let props = SectionCard.Props(title: "Methodology", subtitle: "Let's keep it fair", number: "01", total: 3)
+        let duration = SectionCard.defaultDuration.seconds
+        let motion = SectionCard.Motion(duration: duration)
+        return SectionCardArt.image(props, size: CGSize(width: 520, height: 292.5), time: motion.outStart(0) + 0.22, duration: duration)
+    }()
+
     var body: some View {
         switch template.id {
         case "sectionCard":
-            VStack(alignment: .leading, spacing: 3) {
-                Text("SECTION 1")
-                    .font(.system(size: 8.5, weight: .heavy))
-                    .foregroundStyle(Color(.sRGB, red: 1, green: 0.8, blue: 0.16))
-                Text("THE LEADERBOARD")
-                    .font(.system(size: 12, weight: .black))
-                    .foregroundStyle(Theme.text.color)
+            if let art = Self.sectionCardArt {
+                Image(decorative: art, scale: 4)
+                    .resizable()
+                    .aspectRatio(16 / 9, contentMode: .fill)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
         default:
             HStack(spacing: 5) {
                 Image(systemName: template.id == "commentBelow" ? "text.bubble.fill" : "circle.fill")
@@ -216,6 +229,8 @@ struct LibraryTile<Preview: View>: View {
     @ViewBuilder var preview: () -> Preview
     let select: () -> Void
     let add: () -> Void
+    /// Called as a drag to the timeline starts.
+    var dragStarted: (() -> Void)? = nil
     @State private var hovering = false
 
     var body: some View {
@@ -241,7 +256,10 @@ struct LibraryTile<Preview: View>: View {
         .onHover { hovering = $0 }
         .onTapGesture(count: 2, perform: add)
         .onTapGesture(count: 1, perform: select)
-        .onDrag { NSItemProvider(object: drag.payload as NSString) }
+        .onDrag {
+            dragStarted?()
+            return NSItemProvider(object: drag.payload as NSString)
+        }
     }
 }
 
