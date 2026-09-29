@@ -16,6 +16,11 @@ BUNDLE_ID="com.mikecann.phonemirror.WebDriverAgentRunner"
 SUPPORT_DIR="${PHONE_MIRROR_SUPPORT_DIR:-$HOME/Library/Application Support/Phone Mirror}"
 WDA_DIR="$SUPPORT_DIR/WebDriverAgent"
 DERIVED_DIR="$SUPPORT_DIR/DerivedData"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Phone Mirror's fast touch routes, compiled into WebDriverAgent (see the file's header).
+FAST_INPUT="$SCRIPT_DIR/wda/PMFastInputCommands.m"
+# Records which version of the fast routes the current build contains.
+BUILT_STAMP="$DERIVED_DIR/phone-mirror-routes.sha"
 
 usage() {
   echo "Usage: agent.sh build|run <udid>" >&2
@@ -49,6 +54,16 @@ fetch_source() {
   fi
   # The stock bundle ID belongs to another team, so the runner gets its own.
   sed -i '' "s/com\.facebook\.WebDriverAgentRunner/$BUNDLE_ID/g" "$WDA_DIR/WebDriverAgent.xcodeproj/project.pbxproj"
+  # Compile the fast touch routes into WebDriverAgentLib by including them from a file it builds.
+  local commands="$WDA_DIR/WebDriverAgentLib/Commands"
+  cp "$FAST_INPUT" "$commands/PMFastInputCommands.m"
+  if ! grep -q 'PMFastInputCommands.m' "$commands/FBCustomCommands.m"; then
+    printf '\n#include "PMFastInputCommands.m"\n' >> "$commands/FBCustomCommands.m"
+  fi
+}
+
+routes_version() {
+  shasum "$FAST_INPUT" | cut -d ' ' -f 1
 }
 
 xctestrun_file() {
@@ -82,11 +97,16 @@ case "$COMMAND" in
       CODE_SIGN_STYLE=Automatic \
       DEVELOPMENT_TEAM="$TEAM"
     echo "$TEAM" > "$SUPPORT_DIR/team-id"
+    routes_version > "$BUILT_STAMP"
     ;;
   run)
     XCTESTRUN="$(xctestrun_file)"
     if [[ -z "$XCTESTRUN" ]]; then
       echo "ERROR: WebDriverAgent isn't built yet. Run: agent.sh build $UDID" >&2
+      exit 3
+    fi
+    if [[ "$(cat "$BUILT_STAMP" 2>/dev/null || true)" != "$(routes_version)" ]]; then
+      echo "ERROR: WebDriverAgent was built without the current fast touch routes. Run: agent.sh build $UDID" >&2
       exit 3
     fi
     exec xcodebuild test-without-building -xctestrun "$XCTESTRUN" -destination "id=$UDID"

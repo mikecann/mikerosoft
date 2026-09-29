@@ -32,6 +32,8 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BINARY" "$APP_BIN"
 cp "$SCRIPT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$SCRIPT_DIR/agent.sh" "$APP_DIR/Contents/Resources/agent.sh"
+mkdir -p "$APP_DIR/Contents/Resources/wda"
+cp "$SCRIPT_DIR/wda/PMFastInputCommands.m" "$APP_DIR/Contents/Resources/wda/"
 chmod +x "$APP_BIN" "$APP_DIR/Contents/Resources/agent.sh"
 
 if [[ -f "$ICON_SOURCE" ]]; then

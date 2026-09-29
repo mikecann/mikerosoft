@@ -163,6 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc private func toggleFloating(_ sender: Any?) { keyMirror?.toggleFloating() }
     @objc private func showActualSize(_ sender: Any?) { keyMirror?.showActualSize() }
     @objc private func pressHome(_ sender: Any?) { keyMirror?.pressHome() }
+    @objc private func toggleKeepAwake(_ sender: Any?) { KeepAwake.isOn.toggle() }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
@@ -171,6 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return keyMirror != nil
         case #selector(showActualSize(_:)), #selector(pressHome(_:)):
             return keyMirror != nil
+        case #selector(toggleKeepAwake(_:)):
+            menuItem.state = KeepAwake.isOn ? .on : .off
+            return true
         case #selector(showAllPhones(_:)):
             return !phones.devices.isEmpty
         default:
@@ -198,7 +202,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         phonesMenu.addItem(.separator())
         phonesMenu.addItem(withTitle: "Show All Phones", action: #selector(showAllPhones(_:)), keyEquivalent: "n")
         let home = phonesMenu.addItem(withTitle: "Home", action: #selector(pressHome(_:)), keyEquivalent: "h")
-        home.keyEquivalentModifierMask = [.command, .shift]    }
+        home.keyEquivalentModifierMask = [.command, .shift]
+        phonesMenu.addItem(.separator())
+        phonesMenu.addItem(withTitle: "Keep Phones Awake", action: #selector(toggleKeepAwake(_:)), keyEquivalent: "")
+    }
 
     private func makeMainMenu() -> NSMenu {
         let main = NSMenu()

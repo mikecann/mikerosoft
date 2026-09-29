@@ -16,6 +16,8 @@ final class PhoneAgent: @unchecked Sendable {
     private let lock = NSLock()
     private var sessionID: String?
     private var size: CGSize = .zero
+    /// The active app's UIInterfaceOrientation, which touches are placed in. 1 is portrait.
+    private var orientation = 1
     private var tail: Task<Void, Never>?
     private var pendingText = ""
     private var typingQueued = false
@@ -30,8 +32,8 @@ final class PhoneAgent: @unchecked Sendable {
         http = URLSession(configuration: configuration)
     }
 
-    /// Opens a session that doesn't wait for apps to settle before each gesture, which is
-    /// what makes taps feel immediate.
+    /// Opens the session typing needs. Touches don't use it: they go through Phone Mirror's
+    /// own route, which skips WebDriverAgent's slow app lookups entirely.
     func connect() async throws {
         let response = try await request("POST", "session", [
             "capabilities": ["alwaysMatch": ["shouldWaitForQuiescence": false]],
@@ -54,8 +56,13 @@ final class PhoneAgent: @unchecked Sendable {
               let height = (value["height"] as? NSNumber)?.doubleValue else {
             throw AgentError(errorDescription: "The phone helper didn't report its screen size")
         }
-        lock.withLock { size = CGSize(width: width, height: height) }
-        Log.info("agent screen \(Int(width))x\(Int(height)) points")
+        let orientationResponse = try await request("GET", "phonemirror/orientation")
+        let interfaceOrientation = (orientationResponse["value"] as? NSNumber)?.intValue ?? 1
+        lock.withLock {
+            size = CGSize(width: width, height: height)
+            orientation = interfaceOrientation
+        }
+        Log.info("agent screen \(Int(width))x\(Int(height)) points, orientation \(interfaceOrientation)")
     }
 
     /// Whether the phone is showing its lock screen, when touches and typing do nothing.
@@ -67,21 +74,22 @@ final class PhoneAgent: @unchecked Sendable {
     // MARK: - Commands
 
     func tap(_ point: CGPoint) {
-        enqueue { [self] in
-            _ = try await request("POST", try sessionPath("wda/tap"), ["x": point.x, "y": point.y])
-        }
+        touch([TimedPoint(point: point, time: 0)], hold: FastTouch.tapHold)
     }
 
     func longPress(_ point: CGPoint, duration: TimeInterval) {
-        enqueue { [self] in
-            _ = try await request("POST", try sessionPath("wda/touchAndHold"), ["x": point.x, "y": point.y, "duration": duration])
-        }
+        touch([TimedPoint(point: point, time: 0)], hold: duration)
     }
 
     func drag(_ path: [TimedPoint], holdAtEnd: TimeInterval = 0) {
         guard path.count > 1 else { return }
+        touch(path, hold: holdAtEnd)
+    }
+
+    private func touch(_ path: [TimedPoint], hold: TimeInterval) {
         enqueue { [self] in
-            _ = try await request("POST", try sessionPath("actions"), TouchActions.drag(path, holdAtEnd: holdAtEnd))
+            let orientation = lock.withLock { self.orientation }
+            _ = try await request("POST", "phonemirror/touch", FastTouch.payload(path, hold: hold, orientation: orientation))
         }
     }
 
@@ -101,6 +109,13 @@ final class PhoneAgent: @unchecked Sendable {
             }
             guard !text.isEmpty else { return }
             _ = try await request("POST", try sessionPath("wda/keys"), ["value": [text]])
+        }
+    }
+
+    /// A Shift press that resets the phone's auto-lock timer. See `KeepAwake`.
+    func nudge() {
+        enqueue { [self] in
+            _ = try await request("POST", "phonemirror/nudge", [:])
         }
     }
 

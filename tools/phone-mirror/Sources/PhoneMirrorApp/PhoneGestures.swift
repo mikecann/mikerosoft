@@ -67,31 +67,17 @@ enum GestureClassifier {
     }
 }
 
-/// W3C WebDriver pointer actions, which WebDriverAgent replays as a real touch.
-enum TouchActions {
-    static func drag(_ path: [TimedPoint], holdAtEnd: TimeInterval = 0) -> [String: Any] {
-        guard let start = path.first else { return ["actions": []] }
-        var steps: [[String: Any]] = [
-            move(to: start.point, duration: 0),
-            ["type": "pointerDown", "button": 0],
-        ]
-        for (previous, next) in zip(path, path.dropFirst()) {
-            steps.append(move(to: next.point, duration: next.time - previous.time))
-        }
-        if holdAtEnd > 0 {
-            steps.append(["type": "pause", "duration": Int((holdAtEnd * 1000).rounded())])
-        }
-        steps.append(["type": "pointerUp", "button": 0])
-        return ["actions": [[
-            "type": "pointer",
-            "id": "finger",
-            "parameters": ["pointerType": "touch"],
-            "actions": steps,
-        ] as [String: Any]]]
-    }
+/// The body for Phone Mirror's `/phonemirror/touch` route in WebDriverAgent (wda/PMFastInputCommands.m):
+/// a finger path in phone points with times in seconds, lifted `hold` seconds after the last point.
+enum FastTouch {
+    static let tapHold: TimeInterval = 0.05
 
-    private static func move(to point: CGPoint, duration: TimeInterval) -> [String: Any] {
-        ["type": "pointerMove", "duration": Int((duration * 1000).rounded()), "x": Int(point.x), "y": Int(point.y)]
+    static func payload(_ path: [TimedPoint], hold: TimeInterval, orientation: Int) -> [String: Any] {
+        [
+            "points": path.map { ["x": Double($0.point.x), "y": Double($0.point.y), "t": $0.time] },
+            "hold": hold,
+            "orientation": orientation,
+        ]
     }
 }
 

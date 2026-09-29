@@ -488,9 +488,28 @@ tail -f ~/Library/Logs/"Phone Mirror"/phone-mirror.log
   restarts the helper whenever a command fails.
 - The app reaches WDA at `http://[tunnelIPAddress]:8100`, the USB tunnel address
   from `xcrun devicectl list devices`. No usbmux forwarding is needed.
-- Sessions use `shouldWaitForQuiescence: false` and `waitForIdleTimeout: 0`.
-  Without them each tap waits for the app to go idle, which takes seconds on
-  animated screens.
+- Touches go through `POST /phonemirror/touch`, a route in
+  `tools/phone-mirror/wda/PMFastInputCommands.m`. `agent.sh` copies it into
+  WDA's `Commands/` folder and `#include`s it from `FBCustomCommands.m`, so the
+  Xcode project isn't edited. WDA registers any `FBCommandHandler` class
+  automatically. Do not move taps back to `/wda/tap`, `/wda/touchAndHold` or
+  `/actions`: they snapshot the app's accessibility tree around every gesture,
+  and a single tap took over 3 seconds on an iPhone XS Max.
+- `agent.sh build` writes the route file's SHA to
+  `DerivedData/phone-mirror-routes.sha`. `agent.sh run` exits 3 when it doesn't
+  match, which makes `AgentRunner` rebuild. Edit the `.m` file and the next
+  launch rebuilds the helper by itself.
+- `GET /phonemirror/orientation` returns the raw UIInterfaceOrientation.
+  WDA's `/orientation` reports both landscapes as `LANDSCAPE`, which isn't
+  enough to place touches. It snapshots the app, so it's only called on connect
+  and rotation.
+- `POST /phonemirror/nudge` presses and releases Shift. `AgentRunner` sends it
+  every 20 seconds while the phone is unlocked (`KeepAwake`), which stops
+  auto-lock. Tested on an iPhone XS Max with 30-second Auto-Lock: it stayed
+  unlocked through 93 idle seconds, with nothing typed or opened. Never nudge a
+  locked phone: it would wake the lock screen.
+- The session (used for typing and `window/size`) is created with
+  `shouldWaitForQuiescence: false` and `waitForIdleTimeout: 0`.
 - A Bluetooth HID approach was tried and dropped. macOS 26 never got a classic
   Bluetooth link to the phone from a third-party app, and the iPhone only accepts
   a mouse through AssistiveTouch.
@@ -504,7 +523,8 @@ tail -f ~/Library/Logs/"Phone Mirror"/phone-mirror.log
 | `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneGestures.swift` | Click/drag/scroll/key to gesture translation (pure) |
 | `tools/phone-mirror/Sources/PhoneMirrorApp/PhoneAgent.swift` | WDA HTTP client with an ordered command queue |
 | `tools/phone-mirror/Sources/PhoneMirrorApp/AgentRunner.swift` | Builds, starts and restarts WDA per phone |
-| `tools/phone-mirror/agent.sh` | Fetches, signs, builds and runs WDA |
+| `tools/phone-mirror/agent.sh` | Fetches, patches, signs, builds and runs WDA |
+| `tools/phone-mirror/wda/PMFastInputCommands.m` | Fast touch and orientation routes compiled into WDA |
 
 ---
 

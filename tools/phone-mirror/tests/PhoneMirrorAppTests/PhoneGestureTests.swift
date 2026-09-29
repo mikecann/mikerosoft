@@ -48,22 +48,25 @@ final class GestureClassifierTests: XCTestCase {
     }
 }
 
-final class TouchActionsTests: XCTestCase {
-    func testReplaysADragWithItsTimingAndHoldsBeforeLifting() throws {
-        let payload = TouchActions.drag([
+final class FastTouchTests: XCTestCase {
+    func testSendsThePathWithItsTimingHoldAndOrientation() throws {
+        let payload = FastTouch.payload([
             TimedPoint(point: CGPoint(x: 10, y: 500), time: 0),
             TimedPoint(point: CGPoint(x: 10, y: 300), time: 0.12),
-        ], holdAtEnd: 0.1)
-        let pointer = try XCTUnwrap((payload["actions"] as? [[String: Any]])?.first)
-        XCTAssertEqual(pointer["type"] as? String, "pointer")
-        XCTAssertEqual((pointer["parameters"] as? [String: String])?["pointerType"], "touch")
-        let steps = try XCTUnwrap(pointer["actions"] as? [[String: Any]])
-        XCTAssertEqual(steps.map { $0["type"] as? String }, ["pointerMove", "pointerDown", "pointerMove", "pause", "pointerUp"])
-        XCTAssertEqual(steps[0]["x"] as? Int, 10)
-        XCTAssertEqual(steps[0]["y"] as? Int, 500)
-        XCTAssertEqual(steps[2]["duration"] as? Int, 120)
-        XCTAssertEqual(steps[2]["y"] as? Int, 300)
-        XCTAssertEqual(steps[3]["duration"] as? Int, 100)
+        ], hold: 0.1, orientation: 3)
+        let points = try XCTUnwrap(payload["points"] as? [[String: Double]])
+        XCTAssertEqual(points, [["x": 10, "y": 500, "t": 0], ["x": 10, "y": 300, "t": 0.12]])
+        XCTAssertEqual(payload["hold"] as? Double, 0.1)
+        XCTAssertEqual(payload["orientation"] as? Int, 3)
+    }
+
+    func testEncodesAsJSONTheHelperCanRead() throws {
+        let payload = FastTouch.payload([TimedPoint(point: CGPoint(x: 60, y: 12), time: 0)], hold: FastTouch.tapHold, orientation: 1)
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(decoded["hold"] as? Double ?? 0, 0.05, accuracy: 0.0001)
+        XCTAssertEqual(decoded["orientation"] as? Int, 1)
+        XCTAssertEqual(decoded["points"] as? [[String: Double]], [["x": 60, "y": 12, "t": 0]])
     }
 }
 
