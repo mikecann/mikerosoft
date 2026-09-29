@@ -63,7 +63,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         }
         documents.isTerminating = true
         documents.closeAll()
-        return .terminateNow
+        // Closing makes each project's icon; give them a moment to land.
+        // A run loop timer, not a task: if quitting started inside a main
+        // queue block, main actor work can't run until it's over, and the
+        // timer still ends the wait.
+        guard ProjectIcons.shared.isBusy else { return .terminateNow }
+        let deadline = Date().addingTimeInterval(3)
+        let timer = Timer(timeInterval: 0.05, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                guard !ProjectIcons.shared.isBusy || Date() >= deadline else { return }
+                timer.invalidate()
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        return .terminateLater
     }
 
     /// Set when SIGTERM asked Tandem to quit.
@@ -77,7 +91,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         source.setEventHandler { [weak self] in
             MainActor.assumeIsolated {
                 self?.quittingOnSignal = true
-                NSApp.terminate(nil)
+                // From the run loop, not from inside this main queue
+                // block, so work queued on the main actor can still run
+                // while Tandem quits.
+                NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
             }
         }
         source.resume()
@@ -148,6 +165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             if gesture.heldKey == "z" { front.model.zoomKeyHeld = true }
             InputSimulator.run(gesture, in: window)
             if gesture.heldKey == "z" { front.model.zoomKeyHeld = false }
+        case .windowSize(let width, let height):
+            guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
+            let size = NSSize(width: max(width, window.contentMinSize.width), height: max(height, window.contentMinSize.height))
+            window.setContentSize(size)
         case .debug(let out):
             guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
             try? WindowSnapshot.describe(window).write(toFile: out, atomically: true, encoding: .utf8)

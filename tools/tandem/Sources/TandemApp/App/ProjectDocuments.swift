@@ -216,6 +216,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
             item.target = self
             item.representedObject = url
             item.toolTip = url.path
+            item.image = ProjectIcons.shared.menuImage(for: url)
             menu.addItem(item)
         }
         if urls.isEmpty {

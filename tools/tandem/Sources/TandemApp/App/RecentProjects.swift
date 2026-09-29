@@ -31,11 +31,11 @@ struct RecentProjects: Equatable {
         paths.filter(exists).map { URL(fileURLWithPath: $0) }
     }
 
-    static func load(_ defaults: UserDefaults = .standard) -> RecentProjects {
+    static func load(_ defaults: UserDefaults = AppDefaults.store) -> RecentProjects {
         RecentProjects(paths: defaults.stringArray(forKey: defaultsKey) ?? [])
     }
 
-    func save(_ defaults: UserDefaults = .standard) {
+    func save(_ defaults: UserDefaults = AppDefaults.store) {
         defaults.set(paths, forKey: Self.defaultsKey)
     }
 }

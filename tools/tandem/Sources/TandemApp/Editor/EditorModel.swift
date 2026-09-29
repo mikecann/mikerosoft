@@ -161,7 +161,12 @@ final class EditorModel {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let dirty = self.session.isDirty
-                if dirty != self.isDirty { self.isDirty = dirty }
+                if dirty != self.isDirty {
+                    let saved = self.isDirty && !dirty
+                    self.isDirty = dirty
+                    // Now and then, a save refreshes the project's icon.
+                    if saved { ProjectIcons.shared.refresh(.saved, for: self) }
+                }
                 self.noteSaveProblem(self.session.saveProblem)
             }
         }
@@ -254,6 +259,7 @@ final class EditorModel {
             try session.save()
             isDirty = session.isDirty
             noteSaveProblem(nil)
+            ProjectIcons.shared.refresh(.saved, for: self)
             show(.info, "Saved \(fileName).")
         } catch {
             noteSaveProblem(session.saveProblem ?? Self.describe(error), announce: false)

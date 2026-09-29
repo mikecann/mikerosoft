@@ -206,6 +206,8 @@ final class AppURLCommandTests: XCTestCase {
         )
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://simulate?drop=hello&at=600,700")!), "only library payloads")
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/tmp/Shot.PNG")!), .screenshot(out: "/tmp/Shot.PNG"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://window?width=900&height=620")!), .windowSize(width: 900, height: 620))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://window?width=0&height=620")!))
         XCTAssertEqual(
             AppURLCommand.parse(URL(string: "tandem://simulate?type=Guest%20mic%0A")!),
             .simulate(InputSimulator.Gesture(kind: .type("Guest mic\n"), at: .zero, modifiers: []))

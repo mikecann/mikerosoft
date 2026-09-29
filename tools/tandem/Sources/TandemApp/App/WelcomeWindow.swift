@@ -1,15 +1,18 @@
 import AppKit
 import SwiftUI
 
-/// Shown when no project is open: new, open and recent projects.
+/// Shown when no project is open: new, open and recent projects. It can be
+/// resized, and opens at the size it was left at.
 @MainActor
-final class WelcomeWindowController: NSWindowController {
+final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
     private let state = WelcomeState()
 
     init(documents: ProjectDocuments) {
+        let visible = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1_440, height: 900)
+        let size = WelcomeSize.restore(AppDefaults.store.string(forKey: WelcomeSize.defaultsKey), fitting: visible)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 400),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -20,17 +23,51 @@ final class WelcomeWindowController: NSWindowController {
         window.appearance = NSAppearance(named: .darkAqua)
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
+        window.contentMinSize = WelcomeSize.minimum
         window.center()
         super.init(window: window)
+        window.delegate = self
         state.documents = documents
-        window.contentView = NSHostingView(rootView: WelcomeView(state: state).ignoresSafeArea())
+        let hosting = NSHostingView(rootView: WelcomeView(state: state).ignoresSafeArea())
+        // The window sets the size; the view fills it.
+        hosting.sizingOptions = []
+        window.contentView = hosting
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    func windowDidEndLiveResize(_ notification: Notification) {
+        rememberSize()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        rememberSize()
+    }
+
+    private func rememberSize() {
+        guard let window else { return }
+        AppDefaults.store.set(NSStringFromSize(window.contentRect(forFrameRect: window.frame).size), forKey: WelcomeSize.defaultsKey)
+    }
+
     func refresh() {
         state.recent = ProjectDocuments.shared.recent.existing()
+    }
+}
+
+/// The project list's size: what it was left at, kept on screen and no
+/// smaller than its layout needs.
+enum WelcomeSize {
+    static let minimum = CGSize(width: 560, height: 400)
+    static let defaultsKey = "welcomeWindowSize"
+
+    static func restore(_ saved: String?, fitting visible: CGSize) -> CGSize {
+        let size = saved.map { NSSizeFromString($0) } ?? .zero
+        guard size.width > 0, size.height > 0 else { return minimum }
+        return CGSize(
+            width: max(minimum.width, min(size.width, visible.width)),
+            height: max(minimum.height, min(size.height, visible.height))
+        )
     }
 }
 
@@ -85,12 +122,17 @@ struct WelcomeView: View {
                         .foregroundStyle(Theme.textFaint.color)
                         .padding(.horizontal, 10)
                 }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(state.recent, id: \.self) { url in
-                            RecentRow(url: url) { state.documents?.open(url) }
+                GeometryReader { geometry in
+                    // Bigger frames when the window is made bigger.
+                    let iconWidth: CGFloat = geometry.size.width > 520 ? 112 : 64
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(state.recent, id: \.self) { url in
+                                RecentRow(url: url, iconWidth: iconWidth) { state.documents?.open(url) }
+                            }
                         }
                     }
+                    .scrollIndicators(.automatic)
                 }
                 Spacer(minLength: 0)
             }
@@ -127,20 +169,25 @@ private struct WelcomeButton: View {
 
 private struct RecentRow: View {
     let url: URL
+    var iconWidth: CGFloat = 64
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(url.deletingPathExtension().lastPathComponent)
-                    .font(.ui(12.5, .semibold))
-                    .foregroundStyle(Theme.text.color)
-                Text(url.deletingLastPathComponent().path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                    .font(.ui(11))
-                    .foregroundStyle(Theme.textFaint.color)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            HStack(spacing: 12) {
+                ProjectIconView(url: url, width: iconWidth)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(url.deletingPathExtension().lastPathComponent)
+                        .font(.ui(12.5, .semibold))
+                        .foregroundStyle(Theme.text.color)
+                        .lineLimit(1)
+                    Text(url.deletingLastPathComponent().path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                        .font(.ui(11))
+                        .foregroundStyle(Theme.textFaint.color)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
@@ -150,5 +197,33 @@ private struct RecentRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+}
+
+/// A project's icon in the list: a frame from it, or a quiet placeholder
+/// until there is one. Reading it never waits on the disk.
+struct ProjectIconView: View {
+    let url: URL
+    var width: CGFloat = 64
+
+    var body: some View {
+        let icons = ProjectIcons.shared
+        _ = icons.revision
+        let height = (width * 9 / 16).rounded()
+        return ZStack {
+            RoundedRectangle(cornerRadius: 5).fill(Theme.field.color)
+            if let image = icons.image(for: url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: "film")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.textFainter.color)
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.border.color, lineWidth: 1))
     }
 }

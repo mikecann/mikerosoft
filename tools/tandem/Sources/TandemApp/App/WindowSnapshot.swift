@@ -59,7 +59,10 @@ enum WindowSnapshot {
     static func describe(_ window: NSWindow) -> String {
         // Whether Tandem is the active app, to check that background
         // commands (`open -g`) leave focus alone.
-        var lines: [String] = ["app active: \(NSApp.isActive ? "yes" : "no"), window key: \(window.isKeyWindow ? "yes" : "no")"]
+        var lines: [String] = [
+            "app active: \(NSApp.isActive ? "yes" : "no"), window key: \(window.isKeyWindow ? "yes" : "no")",
+            "window frame: \(NSStringFromRect(window.frame)), resizable: \(window.styleMask.contains(.resizable) ? "yes" : "no")"
+        ]
         func visit(_ view: NSView, depth: Int) {
             let pad = String(repeating: "  ", count: depth)
             let layer = view.layer.map { " layer=\(type(of: $0)) sublayers=\($0.sublayers?.count ?? 0)" } ?? ""
@@ -126,6 +129,8 @@ enum AppURLCommand: Equatable {
     /// Shows an asset library section, with search text, and optionally
     /// asks the online sources.
     case assets(section: AssetSection, search: String?, scope: AssetScope?, online: Bool)
+    /// Sizes the front window (or the project list), for checking layouts.
+    case windowSize(width: Double, height: Double)
 
     static func parse(_ url: URL) -> AppURLCommand? {
         guard url.scheme?.lowercased() == "tandem", let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
@@ -177,6 +182,9 @@ enum AppURLCommand: Equatable {
         case "version", "saveas":
             guard let out = path(query["out"], extension: ProjectFile.fileExtension) else { return nil }
             return .saveVersion(out: out)
+        case "window":
+            guard let width = query["width"].flatMap(Double.init), let height = query["height"].flatMap(Double.init), width > 0, height > 0 else { return nil }
+            return .windowSize(width: width, height: height)
         case "inout":
             let start = query["in"].flatMap(Double.init).map { Time(seconds: $0) }
             let end = query["out"].flatMap(Double.init).map { Time(seconds: $0) }

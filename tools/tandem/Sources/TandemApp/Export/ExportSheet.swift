@@ -228,7 +228,7 @@ struct ExportSheetOverlay: View {
     /// How long it should take, from the speed of the last export.
     private var estimate: (title: String, detail: String) {
         let seconds = (useRange ? model.inOutRange?.duration : nil)?.seconds ?? model.project.duration.seconds
-        let speed = UserDefaults.standard.double(forKey: ExportSpeed.defaultsKey)
+        let speed = AppDefaults.store.double(forKey: ExportSpeed.defaultsKey)
         guard speed > 0 else {
             return ("\(Timecode.clock(seconds)) of video", "Runs in the background; the status bar shows progress.")
         }
@@ -267,7 +267,7 @@ enum ExportSpeed {
 
     static func record(_ result: ExportResult) {
         guard result.elapsed > 0.5, result.duration.seconds > 1 else { return }
-        UserDefaults.standard.set(result.duration.seconds / result.elapsed, forKey: defaultsKey)
+        AppDefaults.store.set(result.duration.seconds / result.elapsed, forKey: defaultsKey)
     }
 }
 

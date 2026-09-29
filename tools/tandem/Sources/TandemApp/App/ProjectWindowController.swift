@@ -34,7 +34,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         window.tabbingMode = .disallowed
         // The controller owns the window; AppKit mustn't release it too.
         window.isReleasedWhenClosed = false
-        window.setFrameAutosaveName("Tandem project")
+        if !AppDefaults.isolated { window.setFrameAutosaveName("Tandem project") }
         super.init(window: window)
         window.delegate = self
         actions.controller = self
@@ -54,6 +54,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // same here as on the Mac that made them.
         let folder = model.folder
         Task.detached(priority: .utility) { await AssetLibrary.registerFonts(in: folder) }
+        // A project opened without an icon gets one once it has settled.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, self.window?.isVisible == true else { return }
+            ProjectIcons.shared.refresh(.opened, for: self.model)
+        }
     }
 
     @available(*, unavailable)
@@ -134,7 +139,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func windowWillClose(_ notification: Notification) {
         router.uninstall()
         model.tearDown()
+        let (project, revision) = model.session.coordinator.snapshot()
         model.session.close()
+        // The project list shows this frame next time.
+        ProjectIcons.shared.refresh(.closed, project: project, revision: revision, fileURL: model.fileURL, folder: model.folder, analysis: model.session.analysis)
         onClose?(self)
     }
 
