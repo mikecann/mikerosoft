@@ -285,6 +285,35 @@ enum TimelineEdits {
         ])
     }
 
+    /// Media placed on a track made for it in the same edit: a video track
+    /// on top for picture, or an audio track at the bottom for sound. Nil
+    /// when the media has nothing for that kind of track.
+    static func placeMediaOnNewTrack(
+        _ project: Project,
+        mediaIDs: [String],
+        at time: Time,
+        kind: TrackKind,
+        insert: Bool,
+        trackID: String = IDs.make("trk")
+    ) -> EditBatch? {
+        let items = mediaIDs.compactMap { project.media($0) }
+        let fits = kind == .video ? items.contains { $0.hasVideo || $0.kind == .image } : items.contains(where: \.hasAudio)
+        guard fits, let place = placeMedia(project, mediaIDs: items.map(\.id), at: time, trackID: nil, insert: insert) else { return nil }
+        return EditBatch(label: place.label + (kind == .video ? " on a new video track" : " on a new audio track"), commands: [
+            .addTrack(kind: kind, id: trackID),
+            .placeMedia(
+                mediaIDs: items.map(\.id), at: max(.zero, time), mode: insert ? .insert : .overwrite,
+                videoTrackID: kind == .video ? trackID : nil, audioTrackID: kind == .audio ? trackID : nil
+            )
+        ])
+    }
+
+    /// Where a click on a clip puts the playhead: its start, unless the
+    /// playhead is on the clip already. Nil leaves it where it is.
+    static func playheadForClick(on clip: Clip, playhead: Time) -> Time? {
+        clip.start <= playhead && playhead < clip.end ? nil : clip.start
+    }
+
     // MARK: - Helpers
 
     /// IDs that exist, in timeline order, so batches read the same way twice.
@@ -306,5 +335,22 @@ extension TransitionType {
         case .wipe: return "Wipe"
         case .zoom: return "Zoom"
         }
+    }
+}
+
+/// Where a drop lands among the tracks. On a lane it's that track. Above the
+/// top video track, or below the last track, it makes a track for what's
+/// dropped, as Filmora does, instead of picking one of the existing ones.
+enum DropTarget: Equatable {
+    /// The track under the pointer, or nil on the transcript lane's gaps.
+    case track(String?)
+    case newVideoTrackOnTop
+    case newAudioTrackAtBottom
+
+    static func at(y: CGFloat, in layout: TimelineLayout) -> DropTarget {
+        let tracks = layout.lanes.filter { $0.trackID != nil }
+        if let top = tracks.first(where: { $0.kind == .video }) ?? tracks.first, y < top.y { return .newVideoTrackOnTop }
+        if let last = tracks.last, y >= last.maxY { return .newAudioTrackAtBottom }
+        return .track(layout.lane(atY: y)?.trackID)
     }
 }

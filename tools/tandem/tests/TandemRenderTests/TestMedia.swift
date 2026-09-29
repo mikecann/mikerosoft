@@ -92,9 +92,18 @@ final class TestMedia {
                         group.leave()
                         return
                     }
+                    // Our own buffer, not the adaptor's pool: a writer that
+                    // fails under load tears its pool down while this block
+                    // can still be using it (a crash in CVPixelBufferPool).
+                    // Failing here ends the video, and the assertion below
+                    // reports the writer's error.
                     var buffer: CVPixelBuffer?
-                    if let pool = adaptor.pixelBufferPool { CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer) }
-                    guard let buffer else { continue }
+                    CVPixelBufferCreate(nil, Int(size.width), Int(size.height), kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
+                    guard let buffer else {
+                        video.markAsFinished()
+                        group.leave()
+                        return
+                    }
                     CVPixelBufferLockBaseAddress(buffer, [])
                     let context = CGContext(
                         data: CVPixelBufferGetBaseAddress(buffer), width: Int(size.width), height: Int(size.height),
