@@ -25,6 +25,9 @@ enum InputSimulator {
             case drag(to: CGPoint, steps: Int)
             /// Lists the context menu's items into a file instead of showing it.
             case menu(out: String)
+            /// Picks an item from the context menu by its title, as if
+            /// clicked. Items in submenus are found too.
+            case choose(String)
             case scroll(dx: CGFloat, dy: CGFloat)
             case drop(payload: String)
             /// Files dropped as if from Finder.
@@ -32,6 +35,8 @@ enum InputSimulator {
             /// Moves the pointer to the point and leaves it there, for
             /// hover previews.
             case hover
+            /// Types into whatever has the keys; a newline presses Return.
+            case type(String)
         }
         var kind: Kind
         var at: CGPoint
@@ -70,9 +75,15 @@ enum InputSimulator {
            out.hasPrefix("/"), URL(fileURLWithPath: out).pathExtension.lowercased() == "txt" {
             return Gesture(kind: .menu(out: out), at: CGPoint(x: menu[0], y: menu[1]), modifiers: flags)
         }
+        if menu.count == 2, let title = query["choose"], !title.isEmpty {
+            return Gesture(kind: .choose(title), at: CGPoint(x: menu[0], y: menu[1]), modifiers: flags)
+        }
         let scroll = numbers(query["scroll"])
         if scroll.count == 4 {
             return Gesture(kind: .scroll(dx: scroll[2], dy: scroll[3]), at: CGPoint(x: scroll[0], y: scroll[1]), modifiers: flags)
+        }
+        if let text = query["type"], !text.isEmpty {
+            return Gesture(kind: .type(text), at: .zero, modifiers: flags)
         }
         let hover = numbers(query["hover"])
         if hover.count == 2 {
@@ -89,10 +100,25 @@ enum InputSimulator {
         return nil
     }
 
+    /// True while a gesture is being replayed, for views that would hand
+    /// a real mouse to the window server (window drags).
+    static private(set) var isReplaying = false
+
     static func run(_ gesture: Gesture, in window: NSWindow) {
         guard let frame = window.contentView?.superview ?? window.contentView else { return }
+        isReplaying = true
+        defer { isReplaying = false }
         func windowPoint(_ point: CGPoint) -> NSPoint {
             NSPoint(x: point.x, y: frame.bounds.height - point.y)
+        }
+        if case .type(let text) = gesture.kind {
+            // Typing goes to the first responder, not the view under a point.
+            guard let responder = window.firstResponder else { return }
+            for part in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                if part.offset > 0 { responder.doCommand(by: #selector(NSResponder.insertNewline(_:))) }
+                if !part.element.isEmpty { responder.insertText(String(part.element)) }
+            }
+            return
         }
         let start = windowPoint(gesture.at)
         guard let target = frame.hitTest(frame.convert(start, from: nil)) else { return }
@@ -121,6 +147,19 @@ enum InputSimulator {
             guard let event = mouse(.rightMouseDown, start) else { return }
             let menu = target.menu(for: event)
             try? describe(menu).write(toFile: out, atomically: true, encoding: .utf8)
+        case .choose(let title):
+            guard let event = mouse(.rightMouseDown, start), let menu = target.menu(for: event) else { return }
+            func pick(in menu: NSMenu) -> Bool {
+                for (index, item) in menu.items.enumerated() {
+                    if item.title == title, item.isEnabled, item.submenu == nil {
+                        menu.performActionForItem(at: index)
+                        return true
+                    }
+                    if let submenu = item.submenu, pick(in: submenu) { return true }
+                }
+                return false
+            }
+            if !pick(in: menu) { NSLog("Tandem: no enabled menu item called %@", title) }
         case .scroll(let dx, let dy):
             guard let cgEvent = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0) else { return }
             cgEvent.location = CGPoint(x: window.frame.minX + start.x, y: (NSScreen.screens.first?.frame.height ?? 0) - (window.frame.minY + start.y))
@@ -137,6 +176,8 @@ enum InputSimulator {
                 if current is NSHostingViewMarker { break }
                 view = current.superview
             }
+        case .type:
+            break
         case .drop, .dropFiles:
             // The nearest view up the chain that takes drops.
             var view: NSView? = target

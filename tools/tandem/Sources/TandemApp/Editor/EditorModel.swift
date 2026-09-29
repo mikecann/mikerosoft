@@ -459,6 +459,9 @@ final class TimelineViewState {
     var fitPending = true
     /// Lane heights the user has dragged, by track ID.
     var trackHeights: [String: CGFloat] = [:]
+    /// A track whose name the headers should open for typing, set when a
+    /// new track is added.
+    var renamingTrackID: String?
 
     /// Zoom as 0...1 for the slider, on a log scale.
     var zoomFraction: Double {

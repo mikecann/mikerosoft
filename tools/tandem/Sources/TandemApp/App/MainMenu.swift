@@ -77,6 +77,10 @@ enum MainMenu {
             add(timeline, command, keymap)
         }
         timeline.addItem(.separator())
+        for command: EditorCommand in [.addVideoTrack, .addAudioTrack] {
+            add(timeline, command, keymap)
+        }
+        timeline.addItem(.separator())
         for command: EditorCommand in [.addTransition, .link, .nudgeLeft, .nudgeRight] {
             add(timeline, command, keymap)
         }

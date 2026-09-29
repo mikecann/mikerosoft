@@ -45,7 +45,8 @@ final class KeymapTests: XCTestCase {
             "cmd+=": .zoomIn, "cmd+-": .zoomOut, "s": .toggleSnapping, "cmd+l": .link, "m": .addMarker,
             "cmd+z": .undo, "cmd+shift+z": .redo, "cmd+s": .save, "cmd+e": .export,
             "1": .layoutFull, "2": .layoutPipRight, "3": .layoutPipLeft, "4": .layoutSplit,
-            "option+k": .toggleKeyframe, "shift+j": .previousKeyframe, "shift+k": .nextKeyframe
+            "option+k": .toggleKeyframe, "shift+j": .previousKeyframe, "shift+k": .nextKeyframe,
+            "cmd+option+v": .addVideoTrack, "cmd+option+a": .addAudioTrack
         ]
         for (text, command) in expected {
             XCTAssertEqual(keymap.command(for: KeyChord(text)!), command, text)

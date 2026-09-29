@@ -11,7 +11,7 @@ final class TimelineContainerView: NSView {
     let ruler = TimelineRulerView()
     let headers = TimelineHeaderView()
     let lanes = TimelineLanesView()
-    private let corner = NSView()
+    let corner = TimelineCornerView()
     private let playheadView = PlayheadView()
     private(set) var artwork: MediaArtwork
     private var loops: [ObservationLoop] = []
@@ -30,11 +30,10 @@ final class TimelineContainerView: NSView {
         // fills its dirty rects, so it has to clip.
         clipsToBounds = true
         layer?.backgroundColor = Theme.window.cg
-        for view in [ruler, headers, lanes] as [TimelineChildView] {
+        for view in [ruler, headers, lanes, corner] as [TimelineChildView] {
             view.container = self
             addSubview(view)
         }
-        addSubview(corner)
         addSubview(playheadView)
         model.timeline.playheadX = { [weak self] in
             guard let self else { return nil }
@@ -77,12 +76,15 @@ final class TimelineContainerView: NSView {
         _ = model.timeline.verticalOffset
         _ = model.timeline.trackHeights
         _ = model.draggedMediaIDs
+        _ = model.timeline.renamingTrackID
     }
 
     private func modelChanged() {
         relayoutLanes()
         setAllNeedsDisplay()
         positionPlayhead()
+        // A new track opens its name for typing.
+        if model.timeline.renamingTrackID != nil { headers.syncRename() }
     }
 
     func setAllNeedsDisplay() {

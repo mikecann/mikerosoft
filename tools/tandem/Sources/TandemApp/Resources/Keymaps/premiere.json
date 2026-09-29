@@ -32,6 +32,8 @@
     "option+k": "toggleKeyframe",
     "shift+j": "previousKeyframe",
     "shift+k": "nextKeyframe",
+    "cmd+option+v": "addVideoTrack",
+    "cmd+option+a": "addAudioTrack",
     "delete": "lift",
     "forwarddelete": "lift",
     "shift+delete": "rippleDelete",

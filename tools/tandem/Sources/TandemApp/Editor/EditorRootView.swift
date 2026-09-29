@@ -113,6 +113,8 @@ struct TopBar: View {
                         .truncationMode(.middle)
                 }
                 .frame(maxWidth: 260, alignment: .leading)
+                // The title drags the window like the rest of the bar.
+                .allowsHitTesting(false)
                 Spacer(minLength: 12)
                 AgentChip(model: model)
                 Button {
@@ -142,8 +144,15 @@ struct TopBar: View {
         .padding(.leading, 16)
         .padding(.trailing, 14)
         .frame(height: Theme.Metrics.topBarHeight)
-        .background(Theme.panel.color)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
+        // Every empty part of the bar moves the window; the buttons and
+        // tabs sit in front and keep their clicks.
+        .background {
+            ZStack {
+                Theme.panel.color
+                WindowDragArea()
+            }
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1).allowsHitTesting(false) }
     }
 }
 

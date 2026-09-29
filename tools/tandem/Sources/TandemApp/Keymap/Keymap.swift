@@ -16,6 +16,7 @@ enum EditorCommand: String, CaseIterable, Codable {
     case nudgeLeft, nudgeRight, nudgeLeftFive, nudgeRightFive
     case link, addMarker, addTransition
     case toggleKeyframe, previousKeyframe, nextKeyframe
+    case addVideoTrack, addAudioTrack
     case layoutFull, layoutPipRight, layoutPipLeft, layoutSplit
     // Selection
     case selectAll, deselectAll, selectForward
@@ -69,6 +70,8 @@ enum EditorCommand: String, CaseIterable, Codable {
         case .toggleKeyframe: return "Add or remove keyframe"
         case .previousKeyframe: return "Previous keyframe"
         case .nextKeyframe: return "Next keyframe"
+        case .addVideoTrack: return "Add video track"
+        case .addAudioTrack: return "Add audio track"
         case .layoutFull: return "Layout: full"
         case .layoutPipRight: return "Layout: PiP right"
         case .layoutPipLeft: return "Layout: PiP left"

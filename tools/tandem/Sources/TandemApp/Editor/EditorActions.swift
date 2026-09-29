@@ -130,6 +130,11 @@ final class EditorActions {
         case .addTransition:
             return apply(TimelineEdits.addDefaultTransition(project, playhead: playhead, selection: model.selection), otherwise: "Put the playhead on a cut between two clips.")
         case .toggleKeyframe: return model.toggleKeyframes()
+        case .addVideoTrack, .addAudioTrack:
+            let kind: TrackKind = command == .addVideoTrack ? .video : .audio
+            // Beside the track of the clip in hand, when it's the same kind.
+            let reference = model.primaryClipID.flatMap { project.track(containingClip: $0) }.flatMap { $0.kind == kind ? $0.id : nil }
+            return model.addTrack(kind, beside: reference, side: kind == .video ? .above : .below)
         case .previousKeyframe: return model.seekKeyframe(forward: false)
         case .nextKeyframe: return model.seekKeyframe(forward: true)
         case .layoutFull: return layout(.full)

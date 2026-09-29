@@ -3,12 +3,19 @@ import QuartzCore
 import TandemCore
 
 /// Track names down the left, with lock, mute and hide toggles and a menu
-/// for track settings.
+/// for track settings. Drag a name up or down to reorder, double-click it
+/// to rename, and right-click to add, move or delete tracks.
 @MainActor
-final class TimelineHeaderView: TimelineChildView {
+final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
     private var model: EditorModel? { container?.model }
     private var hoverTrackID: String?
     private var trackingArea: NSTrackingArea?
+    /// A name pressed, which becomes a reorder once it moves.
+    private var press: (trackID: String, kind: TrackKind, y: CGFloat)?
+    /// The track being dragged and where it would show among its kind.
+    private var reorder: (trackID: String, kind: TrackKind, position: Int)?
+    private var renameField: NSTextField?
+    private var renamingTrackID: String?
 
     private enum Toggle: CaseIterable { case lock, visibility }
 
@@ -41,14 +48,32 @@ final class TimelineHeaderView: TimelineChildView {
     private var resizing: (trackID: String, startY: CGFloat, startHeight: CGFloat)?
 
     override func mouseDragged(with event: NSEvent) {
-        guard let resizing, let model else { return }
         let y = convert(event.locationInWindow, from: nil).y
-        let height = min(max(resizing.startHeight + y - resizing.startY, 16), 160)
-        model.timeline.trackHeights[resizing.trackID] = height.rounded()
+        if let resizing, let model {
+            let height = min(max(resizing.startHeight + y - resizing.startY, 16), 160)
+            model.timeline.trackHeights[resizing.trackID] = height.rounded()
+            return
+        }
+        guard let press, let container else { return }
+        guard reorder != nil || abs(y - press.y) > 4 else { return }
+        let position = TrackEdits.position(forDropAt: y + offset, dragging: press.trackID, kind: press.kind, lanes: container.layoutCache.lanes)
+        if reorder?.position != position || reorder == nil {
+            reorder = (press.trackID, press.kind, position)
+            needsDisplay = true
+        }
+        NSCursor.closedHand.set()
     }
 
     override func mouseUp(with event: NSEvent) {
         resizing = nil
+        press = nil
+        guard let reorder, let model else { return }
+        self.reorder = nil
+        needsDisplay = true
+        NSCursor.arrow.set()
+        if let batch = TrackEdits.move(reorder.trackID, toPosition: reorder.position, in: model.project) {
+            model.apply(batch)
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -96,7 +121,13 @@ final class TimelineHeaderView: TimelineChildView {
             // Names use the full width unless the toggles are showing.
             let togglesShown = hovering || track.locked || track.hidden || (track.kind == .audio && track.muted)
             let nameMaxX = bounds.width - (togglesShown ? 44 : 6)
-            draw(track.name, at: CGPoint(x: 14, y: nameY), font: nameFont, color: dimmed ? Theme.textFaint : Theme.textStrong, maxX: nameMaxX)
+            if reorder?.trackID == trackID {
+                context.setFillColor(Theme.rowSelected.cg)
+                context.fill(rect)
+            }
+            if renamingTrackID != trackID {
+                draw(track.name, at: CGPoint(x: 14, y: nameY), font: nameFont, color: dimmed ? Theme.textFaint : Theme.textStrong, maxX: nameMaxX)
+            }
             if showSubtitle, let subtitle {
                 draw(subtitle, at: CGPoint(x: 14, y: nameY + 16), font: Theme.Fonts.ui(10), color: Theme.textFaint, maxX: nameMaxX)
             }
@@ -110,6 +141,20 @@ final class TimelineHeaderView: TimelineChildView {
                 drawIcon(toggle, kind: track.kind, active: active, in: box, context: context)
             }
         }
+        if let reorder, let y = insertionY(for: reorder) {
+            context.setFillColor(Theme.amber.cg)
+            context.fill(CGRect(x: 4, y: y - offset - 1, width: bounds.width - 8, height: 2))
+        }
+    }
+
+    /// Where the amber line goes while dragging a track: between the tracks
+    /// of its kind it would land between.
+    private func insertionY(for reorder: (trackID: String, kind: TrackKind, position: Int)) -> CGFloat? {
+        guard let container else { return nil }
+        let others = container.layoutCache.lanes.filter { $0.kind == reorder.kind && $0.trackID != nil && $0.trackID != reorder.trackID }
+        guard !others.isEmpty else { return nil }
+        if reorder.position < others.count { return others[reorder.position].y - Theme.Metrics.trackGap / 2 }
+        return others[others.count - 1].maxY + Theme.Metrics.trackGap / 2
     }
 
     /// What the design shows under a track name: "cutout · look",
@@ -200,6 +245,10 @@ final class TimelineHeaderView: TimelineChildView {
         }
         guard let model, let lane = lane(at: event), let trackID = lane.trackID, let track = model.project.track(trackID) else { return }
         let point = convert(event.locationInWindow, from: nil)
+        if event.clickCount == 2, !toggleRects(lane).contains(where: { $0.1.insetBy(dx: -3, dy: -3).contains(point) }) {
+            beginRename(trackID)
+            return
+        }
         for (toggle, box) in toggleRects(lane) where box.insetBy(dx: -3, dy: -3).contains(point) {
             switch toggle {
             case .lock:
@@ -213,8 +262,10 @@ final class TimelineHeaderView: TimelineChildView {
             }
             return
         }
-        // Clicking a name selects everything on the track.
+        // Clicking a name selects everything on the track; dragging it
+        // moves the track.
         model.selection = Set(track.clips.map(\.id))
+        press = (trackID, track.kind, point.y)
     }
 
     private func update(_ track: Track, _ fields: [String: JSONValue], label: String) {
@@ -222,7 +273,11 @@ final class TimelineHeaderView: TimelineChildView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let model, let lane = lane(at: event), let trackID = lane.trackID, let track = model.project.track(trackID) else { return nil }
+        guard let model else { return nil }
+        guard let lane = lane(at: event), let trackID = lane.trackID, let track = model.project.track(trackID) else {
+            // Below the tracks, or on the transcript lane.
+            return Self.addMenu(model: model)
+        }
         let menu = NSMenu()
         menu.add(track.locked ? "Unlock" : "Lock", checked: track.locked) {
             model.apply(EditBatch(label: track.locked ? "Unlock track" : "Lock track", commands: [.updateTrack(trackID: trackID, patch: .object(["locked": .bool(!track.locked)]))]))
@@ -251,31 +306,178 @@ final class TimelineHeaderView: TimelineChildView {
             }
         }
         menu.addItem(.separator())
-        menu.add("Rename…") { [weak self] in self?.rename(track) }
-        let index = (track.kind == .video ? model.project.videoTracks : model.project.audioTracks).firstIndex { $0.id == trackID } ?? 0
-        // Video tracks are listed bottom to top, so "above" is a higher index.
-        menu.add(track.kind == .video ? "Add video track above" : "Add audio track below") {
-            model.apply(EditBatch(label: "Add track", commands: [.addTrack(kind: track.kind, index: index + 1)]))
+        menu.add("Rename…") { [weak self] in self?.beginRename(trackID) }
+        if track.kind == .video {
+            menu.add("Add video track above") { model.addTrack(.video, beside: trackID, side: .above) }
+            menu.add("Add video track below") { model.addTrack(.video, beside: trackID, side: .below) }
+            menu.add("Add audio track at the bottom") { model.addTrack(.audio) }
+        } else {
+            menu.add("Add audio track above") { model.addTrack(.audio, beside: trackID, side: .above) }
+            menu.add("Add audio track below") { model.addTrack(.audio, beside: trackID, side: .below) }
+            menu.add("Add video track on top") { model.addTrack(.video) }
         }
-        menu.add("Delete track", enabled: track.clips.isEmpty) {
-            model.apply(EditBatch(label: "Delete track", commands: [.removeTrack(trackID: trackID)]))
-        }
+        menu.addItem(.separator())
+        let up = TrackEdits.move(trackID, up: true, in: model.project)
+        let down = TrackEdits.move(trackID, up: false, in: model.project)
+        menu.add("Move up", enabled: up != nil) { model.apply(up) }
+        menu.add("Move down", enabled: down != nil) { model.apply(down) }
+        menu.addItem(.separator())
+        let remove = TrackEdits.remove(trackID, in: model.project)
+        menu.add(TrackEdits.removeTitle(for: track), enabled: remove != nil) { model.apply(remove) }
         return menu
     }
 
-    private func rename(_ track: Track) {
-        guard let model else { return }
-        let alert = NSAlert()
-        alert.messageText = "Rename track"
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(string: track.name)
-        field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, name != track.name else { return }
-        model.apply(EditBatch(label: "Rename track", commands: [.updateTrack(trackID: track.id, patch: .object(["name": .string(name)]))]))
+    /// Adding a track where no track was clicked: the header corner's
+    /// button and the space below the tracks.
+    static func addMenu(model: EditorModel) -> NSMenu {
+        let menu = NSMenu()
+        menu.add("Add video track on top") { model.addTrack(.video) }
+        menu.add("Add audio track at the bottom") { model.addTrack(.audio) }
+        return menu
+    }
+
+    // MARK: - Renaming
+
+    /// Opens a new track's name for typing once it's on the timeline.
+    func syncRename() {
+        guard let model, let trackID = model.timeline.renamingTrackID else { return }
+        model.timeline.renamingTrackID = nil
+        beginRename(trackID)
+    }
+
+    /// Turns a track's name into a text field: Return keeps the new name,
+    /// Escape leaves it, clicking away keeps it.
+    func beginRename(_ trackID: String) {
+        endRename(keep: true)
+        guard let model, let container, let track = model.project.track(trackID) else { return }
+        container.relayoutLanes()
+        guard let lane = container.layoutCache.lane(forTrack: trackID) else { return }
+        // Scroll the lane into view first.
+        if lane.y < offset || lane.maxY > offset + bounds.height {
+            model.timeline.verticalOffset = max(0, lane.maxY - bounds.height + 8)
+            container.clampVerticalOffset()
+        }
+        // Over the name: centred in the lane, or its upper line when the
+        // lane is tall enough for a subtitle.
+        let height: CGFloat = 18
+        let hasSubtitle = Self.subtitle(for: track, in: model.project) != nil && lane.height >= 34
+        let nameMid = lane.y - offset + lane.height / 2 - (hasSubtitle ? 7 : 0)
+        let field = NSTextField(frame: CGRect(x: 10, y: nameMid - height / 2, width: bounds.width - 16, height: height))
+        field.stringValue = track.name
+        field.font = Theme.Fonts.ui(11, .semibold)
+        field.textColor = Theme.text.ns
+        field.backgroundColor = Theme.field.ns
+        field.drawsBackground = true
+        field.isBordered = false
+        field.isBezeled = false
+        field.focusRingType = .none
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.isScrollable = true
+        field.delegate = self
+        field.wantsLayer = true
+        field.layer?.cornerRadius = 4
+        field.layer?.borderWidth = 1
+        field.layer?.borderColor = Theme.amber.cg
+        addSubview(field)
+        renameField = field
+        renamingTrackID = trackID
+        needsDisplay = true
+        window?.makeFirstResponder(field)
+        field.currentEditor()?.selectAll(nil)
+    }
+
+    private func endRename(keep: Bool) {
+        guard let field = renameField, let trackID = renamingTrackID else { return }
+        renameField = nil
+        renamingTrackID = nil
+        let name = field.stringValue
+        field.delegate = nil
+        field.removeFromSuperview()
+        needsDisplay = true
+        if window?.firstResponder == nil || window?.firstResponder is NSTextView { window?.makeFirstResponder(self) }
+        guard keep, let model, let batch = TrackEdits.rename(trackID, to: name, in: model.project) else { return }
+        model.apply(batch)
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField, field === renameField else { return }
+        endRename(keep: true)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard control === renameField else { return false }
+        if selector == #selector(NSResponder.cancelOperation(_:)) {
+            endRename(keep: false)
+            return true
+        }
+        return false
+    }
+}
+
+/// The corner above the track headers, left of the ruler: "+ Track" adds a
+/// video or audio track.
+@MainActor
+final class TimelineCornerView: TimelineChildView {
+    private var hovering = false
+    private var trackingArea: NSTrackingArea?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        toolTip = "Add a video or audio track"
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        needsDisplay = true
+    }
+
+    /// The button's box: text and plus, left aligned under the tools.
+    private var buttonRect: CGRect { CGRect(x: 8, y: (bounds.height - 18) / 2, width: 62, height: 18) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.setFillColor(Theme.window.cg)
+        context.fill(bounds)
+        let box = buttonRect
+        if hovering {
+            context.addPath(CGPath(roundedRect: box, cornerWidth: 4, cornerHeight: 4, transform: nil))
+            context.setFillColor(Theme.rowSelected.cg)
+            context.fillPath()
+        }
+        let colour = hovering ? Theme.text : Theme.textMuted
+        context.setStrokeColor(colour.cg)
+        context.setLineWidth(1.4)
+        context.setLineCap(.round)
+        let centre = CGPoint(x: box.minX + 9, y: box.midY)
+        context.move(to: CGPoint(x: centre.x - 4, y: centre.y))
+        context.addLine(to: CGPoint(x: centre.x + 4, y: centre.y))
+        context.move(to: CGPoint(x: centre.x, y: centre.y - 4))
+        context.addLine(to: CGPoint(x: centre.x, y: centre.y + 4))
+        context.strokePath()
+        ("Track" as NSString).draw(at: CGPoint(x: box.minX + 17, y: box.midY - 7.5), withAttributes: [.font: Theme.Fonts.ui(11, .medium), .foregroundColor: colour.ns])
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let menu = menu(for: event) else { return }
+        let box = buttonRect
+        menu.popUp(positioning: nil, at: CGPoint(x: box.minX, y: box.maxY + 4), in: self)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let model = container?.model else { return nil }
+        return TimelineHeaderView.addMenu(model: model)
     }
 }
