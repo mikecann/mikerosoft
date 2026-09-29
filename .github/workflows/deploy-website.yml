@@ -6,8 +6,8 @@ on:
       - main
     paths:
       - 'website/**'
-      - 'tools/**/icons/**'
-      - 'tools/**/docs/**'
+      # Any tool change moves its "updated" date on the site.
+      - 'tools/**'
   workflow_dispatch:
 
 jobs:
@@ -17,6 +17,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Tool dates come from git history, which a shallow clone lacks.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4

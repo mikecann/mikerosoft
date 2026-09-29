@@ -562,6 +562,26 @@ tail -f ~/Library/Logs/mikey-mouse.log
 
 ---
 
+## website specifics
+
+The mikerosoft.app site in `website/` deploys from `main` through
+`.github/workflows/deploy-website.yml` whenever `website/` or `tools/` changes.
+
+- Tool cards come from `website/src/tools.ts`. Give every tool a
+  `tools/<name>/docs/header.webp` (1376x768, subject in the middle band because
+  the card crops it to a 180px strip) and reference it as `header`.
+- The added and updated dates on each card come from git history.
+  `npm run dates` (run automatically before `dev` and `build`) writes the
+  ignored `website/src/toolDates.generated.ts`. Added dates follow renames, so
+  tools that moved from the repo root keep their first commit. Updated dates
+  ignore `docs/` and the tool's `README.md`, since those describe a tool
+  rather than change it.
+- CI checks out with `fetch-depth: 0`. The generator refuses a shallow clone
+  because every tool would get the same date.
+- `npm test` in `website/` runs the tool list, sorting and git-history tests.
+
+---
+
 ## scale-monitor specifics
 
 - Monitor: HG584T05, "Display 4", AMD Radeon Graphics

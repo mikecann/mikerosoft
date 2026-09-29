@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Badge, Button, Card, Group, Image, Text } from '@mantine/core';
 import { PLATFORM_COLOR, PLATFORM_LABEL, sortPlatforms, type Tool } from './tools';
+import type { ToolDates } from './gitHistory';
+import { formatToolDate } from './toolDates';
 
 const CDN_ASSET_REF = import.meta.env.VITE_GITHUB_SHA || 'main';
 
@@ -31,7 +33,30 @@ function ScreenshotSection({ screenshots, name }: { screenshots: string[]; name:
   );
 }
 
-export function ToolCard({ tool }: { tool: Tool }) {
+function DateLabel({ label, iso, isHighlighted }: { label: string; iso: string; isHighlighted: boolean }) {
+  return (
+    <Text
+      span
+      inherit
+      fw={isHighlighted ? 700 : undefined}
+      c={isHighlighted ? 'gray.3' : undefined}
+      title={new Date(iso).toLocaleString('en-AU')}
+    >
+      {label} {formatToolDate(iso)}
+    </Text>
+  );
+}
+
+export function ToolCard({
+  tool,
+  dates,
+  highlight,
+}: {
+  tool: Tool;
+  dates?: ToolDates;
+  /** Which date the grid is sorted by, so it stands out. */
+  highlight?: keyof ToolDates;
+}) {
   const hasScreenshot = tool.screenshots.length > 0;
 
   return (
@@ -73,6 +98,14 @@ export function ToolCard({ tool }: { tool: Tool }) {
       <Text size="sm" c="dimmed" lh={1.6} style={{ flex: 1 }}>
         {tool.desc}
       </Text>
+
+      {dates && (
+        <Text size="xs" c="dimmed" mt="sm">
+          <DateLabel label="Added" iso={dates.added} isHighlighted={highlight === 'added'} />
+          {' · '}
+          <DateLabel label="Updated" iso={dates.updated} isHighlighted={highlight === 'updated'} />
+        </Text>
+      )}
 
       <Button
         component="a"
