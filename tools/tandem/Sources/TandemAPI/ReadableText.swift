@@ -53,6 +53,7 @@ extension MediaResult: ReadableResult {
             if let duration = item.duration { parts.append(duration.description) }
             if let w = item.width, let h = item.height { parts.append("\(w)x\(h)") }
             if let codec = item.undecodableCodec { parts.append(MediaItem.codecName(codec)) }
+            if let clip = item.livePhotoVideo { parts.append("Live Photo, motion clip \((clip as NSString).lastPathComponent)") }
             if let take = item.takeID { parts.append("take \(take) +\(TimeText.duration(item.takeOffset ?? .zero))") }
             parts.append(item.clips == 1 ? "1 clip" : "\(item.clips) clips")
             if !item.exists { parts.append("MISSING FILE") }

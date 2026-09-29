@@ -1205,7 +1205,8 @@ final class TimelineLanesView: TimelineChildView {
             drop = nil
             previewProject = nil
             snapLine = time
-            let what = files.count == 1 ? files[0].lastPathComponent : "\(files.count) files"
+            let counted = FileImport.countedFiles(files)
+            let what = counted.count == 1 ? counted[0].lastPathComponent : "\(counted.count) files"
             dragLabel = ((newTrack != nil ? "New track · " : "") + "Add \(what) at \(Timecode.string(time, rate: model.frameRate))", point)
             container.previewChanged()
             return .copy

@@ -249,21 +249,28 @@ public final class ProjectSession: @unchecked Sendable {
     /// changes in between.
     @discardableResult
     public func refreshMedia() async throws -> [String] {
+        try await refreshMediaReport().added
+    }
+
+    /// `refreshMedia`, also saying which of the files it added are camera
+    /// takes and why, for `tandem new` to tell Mike.
+    public func refreshMediaReport() async throws -> MediaRefresh {
         let project = coordinator.project
-        let scanned = try await MediaScanner.scan(folder, known: project.media)
+        let report = try await MediaScanner.scanReport(folder, known: project.media)
         var attempt = 0
         while true {
             attempt += 1
             let (current, revision) = coordinator.snapshot()
-            let (commands, added) = Self.refreshCommands(scanned, scannedFrom: project, into: current, folder: folder)
-            guard !commands.isEmpty else { return [] }
+            let (commands, added) = Self.refreshCommands(report.items, scannedFrom: project, into: current, folder: folder)
+            guard !commands.isEmpty else { return MediaRefresh(added: [], cameraTakes: []) }
             do {
                 try coordinator.apply(EditBatch(label: "Found new media", author: "system", commands: commands, expectedRevision: revision))
             } catch EditError.staleRevision where attempt < 20 {
                 continue
             }
             analysis.requestNeeded(for: coordinator.project)
-            return added
+            let ids = Set(added)
+            return MediaRefresh(added: added, cameraTakes: report.cameraTakes.filter { ids.contains($0.mediaID) })
         }
     }
 
@@ -481,5 +488,18 @@ final class LockHandle: @unchecked Sendable {
             unlink(path)
         }
         close(fd)
+    }
+}
+
+/// What a media refresh added.
+public struct MediaRefresh: Sendable {
+    /// IDs of the media it added.
+    public var added: [String]
+    /// The camera takes among them, and why each is one.
+    public var cameraTakes: [CameraTakeNote]
+
+    public init(added: [String], cameraTakes: [CameraTakeNote]) {
+        self.added = added
+        self.cameraTakes = cameraTakes
     }
 }

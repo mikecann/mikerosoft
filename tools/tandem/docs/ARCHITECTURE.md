@@ -30,7 +30,7 @@ change the code and the tests with it.
 | Target | Owns | May import |
 | --- | --- | --- |
 | `TandemCore` | Model, time, commands, editing, validation, undo, journal, effect registry | Foundation |
-| `TandemMedia` | Folder scanning, probing, take pairing, analysis jobs and cache | Core, AVFoundation, Vision, Speech, VideoToolbox, Accelerate |
+| `TandemMedia` | Folder scanning, probing, take pairing, analysis jobs and cache | Core, AVFoundation, Vision, Speech, SoundAnalysis, VideoToolbox, Accelerate |
 | `TandemRender` | Composition building, compositor, text, transitions, audio mix, frame grabs, export | Core, Media, AVFoundation, Core Image, Metal |
 | `TandemAPI` | `ProjectSession`, the service (status, timeline, apply, frame, clip, export...), local HTTP server, MCP tool definitions | Core, Media, Render |
 | `TandemApp` | The macOS app (SwiftUI shell, AppKit timeline and viewer) | everything |
@@ -91,6 +91,10 @@ no forks or branches inside a project.
   it); its picture comes from the `converted` analysis. An older build that
   drops it only makes the next scan look again, so it didn't need a schema
   version.
+- `MediaItem.livePhotoVideo` is a Live Photo still's motion clip, the movie
+  beside it, which isn't media of its own. An older build drops it on save
+  and its next scan adds the movie as a video, as scans did before, so it
+  didn't need a schema version either.
 - Keyframe times are relative to the clip start and move with the clip.
 - Adding a field that matters means bumping `Project.currentSchemaVersion`
   (with a `ProjectFile.migrate` step if old files need it). Lenient decoding
@@ -176,7 +180,10 @@ centre lands on the canvas centre.
 takes by base name (`<base>-camera.mov` with `<base>-screen.mov`), setting a
 shared `takeID` and each file's `takeOffset`. When record-it writes a
 `<base>.take.json` with each file's start host time, pairing uses that;
-otherwise it uses file creation times.
+otherwise it uses file creation times. A Live Photo's still and movie are
+one item, the still. A new video nothing names is the camera take when it's
+a recording (a camera's make and model in its metadata, or in `source/`)
+with speech and a face in it. MEDIA.md has both.
 
 `MediaAnalysis` runs background jobs through one scheduler with priorities
 (`interactive`, `timeline`, `background`) and an encoder lock, so proxy builds
