@@ -70,6 +70,26 @@ enum Icons {
     /// The shared library folder.
     static let sharedLibrary = "books.vertical"
 
+    // Library sub-tabs.
+    static let titles = "textformat"
+    static let templates = "rectangle.stack"
+    static let fonts = "character"
+    static let transitions = "arrow.left.arrow.right"
+    static let looks = "camera.filters"
+
+    /// The asset library's sections.
+    static func assetSection(_ section: AssetSection) -> String {
+        switch section {
+        case .music: return "music.note"
+        case .sfx: return "speaker.wave.2"
+        case .stickers: return "face.smiling"
+        case .icons: return "star"
+        case .broll: return "film"
+        case .looks: return looks
+        case .fonts: return fonts
+        }
+    }
+
     // The Colour tab.
     /// What the grade applies to: every clip of the take, or this one.
     static let wholeTake = "film.stack"

@@ -24,10 +24,6 @@ struct SegmentLibrary: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
                 tabs
-                Text("Bits of timeline saved to reuse. Double-click to add at the playhead, or drag to the timeline.")
-                    .font(.ui(11.5))
-                    .foregroundStyle(Theme.textFaint.color)
-                    .fixedSize(horizontal: false, vertical: true)
                 if host.segments.count > 6 {
                     SearchField(text: $search, prompt: "Search segments")
                 }

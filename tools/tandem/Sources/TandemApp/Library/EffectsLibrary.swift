@@ -28,15 +28,15 @@ struct EffectsLibrary: View {
     private func tabs(count: Int?) -> some View {
         let host = AssetLibraryHost.shared
         return HStack(spacing: 16) {
-            SubTab(title: "Effects", selected: !host.looksShown && !showTransitions) {
+            SubTab(title: "Effects", icon: Icons.effects, selected: !host.looksShown && !showTransitions) {
                 host.looksShown = false
                 showTransitions = false
             }
-            SubTab(title: "Transitions", selected: !host.looksShown && showTransitions) {
+            SubTab(title: "Transitions", icon: Icons.transitions, selected: !host.looksShown && showTransitions) {
                 host.looksShown = false
                 showTransitions = true
             }
-            SubTab(title: "Looks", selected: host.looksShown) { host.looksShown = true }
+            SubTab(title: "Looks", icon: Icons.looks, selected: host.looksShown) { host.looksShown = true }
             Spacer(minLength: 4)
             if let count {
                 Text(verbatim: String(count))
@@ -80,28 +80,6 @@ struct EffectsLibrary: View {
                                     addEffect(definition)
                                 }
                                 .help("\(definition.summary)\nDouble-click for the selected clips, or drag onto a clip.")
-                            }
-                        }
-                    }
-                    let used = TransitionUse.mostUsed(in: model.project, limit: 6)
-                    if !used.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Transitions you use most")
-                                .font(.ui(11.5, .semibold))
-                                .foregroundStyle(Theme.textMuted.color)
-                            FlowLayout(spacing: 6) {
-                                ForEach(used, id: \.self) { type in
-                                    Button { addTransition(type) } label: {
-                                        Text(type.displayName)
-                                            .font(.ui(11.5))
-                                            .foregroundStyle(Theme.text.color)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 5)
-                                            .background(RoundedRectangle(cornerRadius: 6).fill(Theme.field.color))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .onDrag { NSItemProvider(object: LibraryDrag.transition(type).payload as NSString) }
-                                }
                             }
                         }
                     }

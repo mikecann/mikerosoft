@@ -42,7 +42,7 @@ struct TimelineToolbar: View {
             }
             ToggleText(title: "Snap", on: model.snapping, help: Shortcuts.help("Snapping: clips and the playhead snap to edges and markers", .toggleSnapping)) { model.snapping.toggle() }
             ToggleText(title: "Ripple", on: model.rippleTrims, help: Shortcuts.help("Ripple trims: dragging an edge moves everything after it", .toggleRipple)) { model.rippleTrims.toggle() }
-            ToggleText(title: model.linkedSelection ? "Linked camera + screen" : "Linked selection off", on: model.linkedSelection, help: Shortcuts.help("Linked selection: clicking a clip selects its linked picture and sound. Option-click picks one side", .toggleLinkedSelection)) {
+            ToggleText(title: "Linked", on: model.linkedSelection, help: Shortcuts.help("Linked selection: clicking a clip selects its linked picture and sound. Option-click picks one side", .toggleLinkedSelection)) {
                 model.linkedSelection.toggle()
             }
             if let range = model.inOutRange {
@@ -63,7 +63,7 @@ struct TimelineToolbar: View {
             .popover(isPresented: $showTighten, arrowEdge: .top) {
                 TightenPausesPopover(model: model) { showTighten = false }
             }
-            ToggleText(title: "Transcript lane", on: model.showTranscript, help: Shortcuts.help("Transcript lane: show what's said above the tracks", .toggleTranscriptLane)) { model.showTranscript.toggle() }
+            ToggleText(title: "Transcript", on: model.showTranscript, help: Shortcuts.help("Transcript lane: show what's said above the tracks", .toggleTranscriptLane)) { model.showTranscript.toggle() }
             GraphiteSlider(
                 value: Binding(get: { model.timeline.zoomFraction }, set: { model.timeline.zoomFraction = $0 }),
                 range: 0...1,

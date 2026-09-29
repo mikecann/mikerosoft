@@ -49,11 +49,6 @@ struct EffectStack: View {
             .fixedSize()
             .disabled(available.isEmpty)
         }) {
-            if shown.isEmpty {
-                Text(domain == .video ? "No effects on this clip." : "No sound effects on this clip.")
-                    .font(.ui(11.5))
-                    .foregroundStyle(Theme.textFaint.color)
-            }
             ForEach(shown) { effect in
                 EffectRow(
                     effect: effect,

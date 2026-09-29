@@ -76,7 +76,7 @@ struct MediaBrowser: View {
         }
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                PanelHeader(title: title, detail: "from \(model.folderName)/") {
+                PanelHeader(title: title, detail: nil) {
                     Button {
                         rescan()
                     } label: {
@@ -434,14 +434,11 @@ private struct TakeStatus: View {
                 }
             }
         } else if let item, TranscriptPresence.isTranscribed(item, in: model) {
-            HStack(spacing: 5) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Theme.green.color)
-                Text("Transcribed")
-                    .font(.ui(10.5))
-                    .foregroundStyle(Theme.textMuted.color)
-            }
+            // Done is the usual state, so a tick is enough.
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Theme.green.color)
+                .help("Transcribed: search finds what's said in it")
         } else if jobs.contains(where: { $0.state == .queued }) {
             Text("Queued")
                 .font(.ui(10.5))

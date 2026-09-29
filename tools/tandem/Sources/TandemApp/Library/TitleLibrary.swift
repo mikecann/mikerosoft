@@ -37,21 +37,21 @@ struct TitleLibrary: View {
     private func tabRow(count: Int?, spacing: CGFloat, size: CGFloat) -> some View {
         let host = AssetLibraryHost.shared
         return HStack(spacing: spacing) {
-            SubTab(title: "Titles", selected: !host.fontsShown && !host.segmentsShown && !showTemplates, size: size) {
+            SubTab(title: "Titles", icon: Icons.titles, selected: !host.fontsShown && !host.segmentsShown && !showTemplates, size: size) {
                 host.fontsShown = false
                 host.segmentsShown = false
                 showTemplates = false
             }
-            SubTab(title: "Templates", selected: !host.fontsShown && !host.segmentsShown && showTemplates, size: size) {
+            SubTab(title: "Templates", icon: Icons.templates, selected: !host.fontsShown && !host.segmentsShown && showTemplates, size: size) {
                 host.fontsShown = false
                 host.segmentsShown = false
                 showTemplates = true
             }
-            SubTab(title: "Segments", selected: host.segmentsShown, size: size) {
+            SubTab(title: "Segments", icon: Icons.segment, selected: host.segmentsShown, size: size) {
                 host.fontsShown = false
                 host.segmentsShown = true
             }
-            SubTab(title: "Fonts", selected: host.fontsShown, size: size) {
+            SubTab(title: "Fonts", icon: Icons.fonts, selected: host.fontsShown, size: size) {
                 host.segmentsShown = false
                 host.fontsShown = true
             }
@@ -68,12 +68,6 @@ struct TitleLibrary: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
                 tabs(count: showTemplates ? BuiltInTemplates.all.count : TitlePresets.builtIn.count)
-                Text(showTemplates
-                     ? "A group of clips that go in together, linked. Edit the words in the inspector."
-                     : "Styles from Mike's Filmora titles. Double-click to add at the playhead, or drag to the timeline.")
-                    .font(.ui(11.5))
-                    .foregroundStyle(Theme.textFaint.color)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 14)
             .padding(.top, 14)
@@ -211,18 +205,27 @@ private struct TemplatePreview: View {
     }
 }
 
-/// A sub-tab label in a library header: bold when selected.
+/// A sub-tab label in a library header, with its icon: bold when
+/// selected.
 struct SubTab: View {
     let title: String
+    var icon: String? = nil
     let selected: Bool
     var size: CGFloat = 13
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.ui(size, selected ? .bold : .regular))
-                .foregroundStyle(selected ? Theme.text.color : Theme.textFaint.color)
+            HStack(spacing: 5) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: size - 2, weight: selected ? .semibold : .regular))
+                }
+                Text(title)
+                    .font(.ui(size, selected ? .bold : .regular))
+            }
+            .foregroundStyle(selected ? Theme.text.color : Theme.textFaint.color)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

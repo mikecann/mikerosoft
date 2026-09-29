@@ -12,20 +12,6 @@ struct ActivityFeed: View {
         let entries = model.activity.recent
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Activity")
-                    .font(.ui(13, .bold))
-                    .foregroundStyle(Theme.text.color)
-                Text("Edits by you and your agents. Each one is a single undo step.")
-                    .font(.ui(11.5))
-                    .foregroundStyle(Theme.textMuted.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
-
-            VStack(alignment: .leading, spacing: 2) {
                 if let redo = model.redoLabel {
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 3) {
@@ -43,7 +29,7 @@ struct ActivityFeed: View {
                     .padding(8)
                 }
                 if entries.isEmpty && model.redoLabel == nil {
-                    Text("Edits show here as they happen, including ones agents make through the tandem CLI and MCP.")
+                    Text("No edits yet.")
                         .font(.ui(12))
                         .foregroundStyle(Theme.textFaint.color)
                         .fixedSize(horizontal: false, vertical: true)
@@ -59,9 +45,6 @@ struct ActivityFeed: View {
             .padding(.vertical, 10)
 
             HStack(spacing: 8) {
-                Text("Any agent can connect")
-                    .font(.ui(11.5))
-                    .foregroundStyle(Theme.textMuted.color)
                 Spacer()
                 Button {
                     NSPasteboard.general.clearContents()

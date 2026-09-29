@@ -172,7 +172,7 @@ enum MediaCatalog {
             guard !members.isEmpty else { continue }
             if kind != .recordings { members.sort { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
             let folders = Set(members.flatMap(\.mediaIDs).compactMap { project.media($0) }.map { ($0.path as NSString).deletingLastPathComponent })
-            let detail: String? = kind == .recordings ? "camera + screen" : (folders.count == 1 ? folders.first.flatMap { $0.isEmpty || $0.hasPrefix("/") ? nil : $0 } : nil)
+            let detail: String? = kind == .recordings ? nil : (folders.count == 1 ? folders.first.flatMap { $0.isEmpty || $0.hasPrefix("/") ? nil : $0 } : nil)
             groups.append(MediaGroup(kind: kind, detail: detail, entries: members))
         }
         return groups

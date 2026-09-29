@@ -413,7 +413,7 @@ final class AgentPresenceTests: XCTestCase {
     func testChipFollowsTheLastContact() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         XCTAssertEqual(AgentChipState.of(nil, serving: true, now: now), .idle(serving: true))
-        XCTAssertEqual(AgentChipState.of(nil, serving: true, now: now).detail, "not connected")
+        XCTAssertEqual(AgentChipState.of(nil, serving: true, now: now).detail, "", "the grey dot says it")
         XCTAssertEqual(AgentChipState.of(nil, serving: false, now: now).detail, "API off")
 
         // A screenshot a minute ago.
