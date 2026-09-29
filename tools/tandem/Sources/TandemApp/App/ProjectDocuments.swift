@@ -73,6 +73,8 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         noteRecent(url)
         // Pick up files added to the folder while Tandem was closed.
         controller.model.rescanMedia(ifOlderThan: 0)
+        // A project from another Mac, or a tidied folder, may have lost some.
+        RelinkPrompt.checkAfterOpening(controller)
         return controller
     }
 

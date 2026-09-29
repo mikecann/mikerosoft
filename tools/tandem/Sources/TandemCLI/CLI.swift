@@ -83,6 +83,18 @@ struct CLI {
             return try await ImportCommand(directory: directory).run(args)
         case "assets":
             return try await AssetsCommand(directory: directory, environment: environment).run(args, author: author(args)) { try project(args) }
+        case "archive":
+            try args.expectPositionals(atMost: 1, command: name)
+            if args.has("with-cache"), args.options["to"] == nil {
+                throw UsageError(message: "--with-cache keeps proxies and mattes in a copy made with --to <folder>; without --to the cache stays where it is.")
+            }
+            let request = ArchiveRequest(
+                to: args.options["to"].map(absolute), withCache: args.has("with-cache") ? true : nil,
+                dryRun: args.has("dry-run") ? true : nil, label: args.options["label"]
+            )
+            // The project can be named straight after the command.
+            let url = try ProjectLocator.find(args.positionals.first ?? args.options["project"], in: directory, environment: environment)
+            return show(try await ProjectClient(projectURL: url, author: author(args)).call(request), json: json)
         default:
             break
         }
@@ -180,6 +192,11 @@ struct CLI {
         case "loudness":
             try args.expectPositionals(atMost: 1, command: name)
             return show(try await client().call(LoudnessRequest(mediaID: args.positionals.first)), json: json)
+        case "relink":
+            try args.expectPositionals(atMost: 0, command: name)
+            let search = args.values("search").map(absolute)
+            let request = RelinkRequest(search: search.isEmpty ? nil : search, dryRun: args.has("dry-run") ? true : nil, label: args.options["label"])
+            return show(try await client().call(request), json: json)
         case "watch":
             try args.expectPositionals(atMost: 0, command: name)
             if args.has("once") {

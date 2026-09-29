@@ -44,13 +44,18 @@ drawing into its own bitmap off the main thread.
 ## Project folder
 
 A project is a `.tandem` JSON file in the video's folder. Media paths are
-relative to that folder.
+relative to that folder when the file is inside it; a file used from
+somewhere else (an import, another video's folder) has an absolute path
+until the project is archived (see Archiving).
 
 ```
 <video folder>/
   <name>.tandem            the project (pretty JSON, sorted keys)
   source/                  record-it takes: <base>-camera.mov, <base>-screen.mov
-  broll/ music/ sfx/ graphics/ assets/
+  broll/ music/ sfx/ graphics/
+  assets/                  library assets in use (assets/<kind>/), and LUTs and fonts
+  media/                   files an archive brought in from outside the folder
+  archive.json             where those came from, once the project is archived
   exports/                 renders, each with a .tandem snapshot beside it
   .tandem/
     backups/               the previous 20 saves
@@ -232,9 +237,101 @@ itself.
 
 Operations: `status`, `media`, `transcript`, `search`, `timeline`, `apply`,
 `undo`, `redo`, `frame`, `screenshot`, `clip`, `export`, `loudness`,
-`validate`, `watch`. `tandem mcp` exposes the same operations as MCP tools
-over stdio. Every edit an agent makes shows up in the app's activity feed and
-undo menu under the agent's name.
+`validate`, `watch`, `archive`, `relink`. `tandem mcp` exposes the same
+operations as MCP tools over stdio. Every edit an agent makes shows up in the
+app's activity feed and undo menu under the agent's name.
+
+## Archiving
+
+A project folder is standalone when everything the project uses is inside
+it, so it opens on another Mac (Bruce, where finished videos live) with
+nothing missing. `ProjectArchiver` in TandemAPI makes it so, for `tandem
+archive`, the `archive` operation (HTTP and MCP) and File > Archive
+project… in the app. It works on an open `ProjectSession`: the project is
+saved first, and the one change it makes to a project is an edit through the
+coordinator, so the lock, journal, undo and autosave rules hold. It looks at
+the open project and every other `.tandem` file in the folder (versions).
+
+What counts as outside:
+
+- a media file whose real path (links followed) isn't in the folder, which
+  includes a link in the folder to a file somewhere else;
+- the file a `lut` effect reads (`path`), on a clip or in a media look;
+- a font a title uses (its own or its preset's) that doesn't come with macOS
+  and isn't in `assets/font/`, found through Core Text and then in the asset
+  library's downloaded fonts;
+- a record-it take's `<base>.take.json`, which goes with its take.
+
+A reference to a file inside the folder written as an absolute path (or
+with `..`) is made relative. Graphic templates, title presets and effects are
+data, not files, so there's nothing to collect for them.
+
+Where files go: `media/<the folder it was in>/<name>` (a take's files and
+sidecar stay together, and `music/` or `sfx/` still say what's inside),
+`assets/lut/<name>` and `assets/font/<name>`, which the app registers when it
+opens a project. A file keeps the name the project used, even when that was
+a link to a file called something else.
+
+Two modes:
+
+- **Consolidate** (no destination): the copies go into the project's own
+  folder and the project points at them, as one undo step ("Bring 12 files
+  into the project folder"). Other versions in the folder are pointed at them
+  too, unless one is open somewhere else. Undo points the project back; the
+  copies stay.
+- **Archive** (`--to <folder>`): a standalone copy of the whole folder goes
+  to `<folder>/<project folder name>` (`<name> 2` if that's taken by
+  something else; an earlier archive of the same project is brought up to
+  date), with the outside files brought in and the project files written
+  with relative paths. The original folder is left as it was. Left out:
+  proxies, mattes, thumbnails and isolated voice, which Tandem makes again
+  for what the edit uses (`--with-cache` keeps them); `node_modules`; lock
+  files, cache temporaries, and the archived projects' journals and headless
+  undo history (they describe the old paths); links to things outside the
+  folder. Transcripts, waveforms and loudness always go. Their cache keys
+  come from the media fingerprints, which survive because copies keep
+  modification dates.
+
+Copying:
+
+- `copyfile` with `COPYFILE_CLONE`: an APFS clone on the same volume (instant,
+  no extra space until one side changes), a full copy otherwise, then data
+  and dates alone when a file system refuses ACLs or extended attributes.
+- Each file is copied once however many references it has, and files with
+  the same content share one destination.
+- A different file already at the destination is never replaced; the copy
+  goes beside it (`bed 2.m4a`). A file with the same content is used as it
+  is (the manifest's checksum and date spare reading it again).
+- Every copy is checked: the original's SHA-256, the copy's size, and for a
+  copy that isn't a clone its SHA-256 read back without the page cache, so a
+  file on a network share is really read.
+- Copies are written under a hidden name (`.name.tandem-copy`) and moved into
+  place once checked. Consolidating keeps them hidden until all are done,
+  then moves them and edits the project straight away, so the folder watcher
+  never adds one as new media first.
+- The destination is checked for room first (files that will clone don't
+  count).
+
+Stopping part way (Cancel, a crash, a share going away) changes nothing in
+the project; whole hidden copies are kept and the next run carries on from
+them. An archive elsewhere writes its manifest first, marked unfinished, and
+the project files last, so a cut-short archive can't be opened as if it were
+whole and the next run knows the folder is this project's.
+
+`archive.json` in the standalone folder records the project (id, name, file),
+every run (date, mode, from, to, machine, user, counts, finished or not), and
+per file its path, original location, kind, size, SHA-256, modification date
+and when it was archived. Consolidating lists what it brought in; archiving
+elsewhere lists every file it copied except the analysis cache, and carries
+over the project folder's own manifest. An `archive.json` that isn't
+Tandem's is never written over. Missing files are listed there and in the
+result, and left pointing where they did; everything else is archived.
+
+When a project opens in the app with media missing, files moved within its
+folder are relinked straight away and Mike is asked for a folder to search
+for the rest. `MediaRelinker` takes a file with the same name and, when the
+item has a fingerprint, the same content; `tandem relink --search <folder>`
+does the same for agents.
 
 ## Packs
 
@@ -261,6 +358,9 @@ a pack gets UI for free.
 - Render: golden frames with a tolerance, a sync test (beep and flash),
   loudness within 0.5 LU of the target.
 - API: session, lock, recovery, and the CLI end to end in headless mode.
+- Archive: on temporary folders, both modes, copies checked byte for byte,
+  runs stopped part way and run again, the copy opened with the original
+  gone.
 - Real footage: the decision-models project rebuilt from its EDL.
 
 Run everything with `swift test --package-path tools/tandem`.

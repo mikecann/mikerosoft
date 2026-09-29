@@ -12,6 +12,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     private let router: KeyboardRouter
     /// Called once the window has closed and the session is released.
     var onClose: ((ProjectWindowController) -> Void)?
+    /// File > Archive project…, while its sheet is up.
+    private var archiveSheet: ArchiveSheetController?
 
     init(model: EditorModel, keymap: Keymap, frame: NSRect? = nil) {
         self.model = model
@@ -100,6 +102,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(revealProject(_:)) { return true }
+        if item.action == #selector(archiveProject(_:)) { return archiveSheet == nil }
         guard let command = MainMenu.command(of: item) else { return true }
         switch command {
         case .undo:
@@ -123,6 +126,21 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         NSWorkspace.shared.activateFileViewerSelecting([model.fileURL])
     }
 
+    /// Opens the archive sheet (see `ArchiveSheet.swift`).
+    @objc func archiveProject(_ sender: Any?) {
+        guard archiveSheet == nil, let window, window.attachedSheet == nil else { return }
+        let sheetModel = ArchiveSheetModel(session: model.session, projectName: model.project.name)
+        sheetModel.onFinished = { [weak self] result in
+            guard let self else { return }
+            self.model.refresh()
+            self.model.show(.info, result.mode == .archive ? "Archived to \(result.folder)." : "\(self.model.fileName) is standalone now.")
+        }
+        let sheet = ArchiveSheetController(model: sheetModel, parent: window)
+        sheet.onDismiss = { [weak self] in self?.archiveSheet = nil }
+        archiveSheet = sheet
+        sheet.present()
+    }
+
     // MARK: - API
 
     /// Captures this window for the API's `screenshot`. It waits a moment
@@ -143,6 +161,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     func windowWillClose(_ notification: Notification) {
+        // An archive stops between chunks; running it again carries on.
+        archiveSheet?.model.stop()
         router.uninstall()
         model.tearDown()
         let (project, revision) = model.session.coordinator.snapshot()
@@ -171,6 +191,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func windowDidBecomeKey(_ notification: Notification) {
         (window as? EditorWindow)?.layoutTrafficLights()
         model.rescanMedia()
+        RelinkPrompt.windowBecameKey(self)
     }
 
     func windowDidResignKey(_ notification: Notification) {
