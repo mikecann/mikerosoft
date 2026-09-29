@@ -57,7 +57,7 @@ struct TransportBar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 18) {
-                TransportIcon(name: "backward.end.fill", help: "Previous edit (↑)") { actions.perform(.previousEdit) }
+                TransportIcon(name: "backward.end.fill", help: Shortcuts.help("Previous edit", .previousEdit)) { actions.perform(.previousEdit) }
                 Button {
                     actions.perform(.playPause)
                 } label: {
@@ -69,8 +69,8 @@ struct TransportBar: View {
                         .background(Circle().fill(Theme.text.color))
                 }
                 .buttonStyle(.plain)
-                .help("Play or pause (Space). J, K and L shuttle.")
-                TransportIcon(name: "forward.end.fill", help: "Next edit (↓)") { actions.perform(.nextEdit) }
+                .help(Shortcuts.help("Play or pause", .playPause) + ". J, K and L shuttle backwards, stop and forwards.")
+                TransportIcon(name: "forward.end.fill", help: Shortcuts.help("Next edit", .nextEdit)) { actions.perform(.nextEdit) }
             }
 
             HStack(spacing: 12) {
@@ -82,8 +82,8 @@ struct TransportBar: View {
                         .foregroundStyle(model.showSafeMargins ? Theme.text.color : Theme.textMuted.color)
                 }
                 .buttonStyle(.plain)
-                .help("Safe margins")
-                ToggleText(title: "Proxy", on: playback.useProxies, help: "Play from 1080p proxies where they're ready. Off plays the original files.") {
+                .help(Shortcuts.help("Safe margins: show the title-safe and action-safe areas", .toggleSafeMargins))
+                ToggleText(title: "Proxy", on: playback.useProxies, help: Shortcuts.help("Proxies: play from 1080p copies where they're ready; off plays the original files", .toggleProxy)) {
                     playback.useProxies.toggle()
                 }
                 Menu {
@@ -102,6 +102,7 @@ struct TransportBar: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .help("Viewer zoom: fit the frame, or look closer")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }

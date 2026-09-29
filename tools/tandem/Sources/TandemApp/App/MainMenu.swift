@@ -14,7 +14,7 @@ enum MainMenu {
     static let recentMenuTitle = "Open recent"
 
     static func build(keymap: Keymap, recentDelegate: NSMenuDelegate) -> NSMenu {
-        let main = NSMenu()
+        let main = EditorMainMenu()
 
         let app = submenu(main, "Tandem")
         app.addItem(withTitle: "About Tandem", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
@@ -150,11 +150,12 @@ enum MainMenu {
     private static func add(_ menu: NSMenu, _ command: EditorCommand, _ keymap: Keymap) -> NSMenuItem {
         let item = NSMenuItem(title: command.title, action: #selector(EditorCommandHandling.performEditorCommand(_:)), keyEquivalent: "")
         item.representedObject = command.rawValue
-        if let chord = keymap.menuChord(for: command), let equivalent = chord.menuKeyEquivalent {
+        if let icon = Icons.command(command) { item.image = Icons.menuImage(icon) }
+        // Every key shows, plain ones too (B, I, J); `EditorMainMenu`
+        // leaves plain keys to the keyboard router.
+        if let chord = keymap.menuChord(for: command), let equivalent = chord.displayKeyEquivalent {
             item.keyEquivalent = equivalent.key
             item.keyEquivalentModifierMask = equivalent.modifiers
-        } else if let chord = keymap.chords(for: command).first {
-            item.toolTip = "Key: \(chord.symbol)"
         }
         menu.addItem(item)
         return item
@@ -163,5 +164,18 @@ enum MainMenu {
     static func command(of sender: Any?) -> EditorCommand? {
         guard let item = sender as? NSMenuItem, let raw = item.representedObject as? String else { return nil }
         return EditorCommand(rawValue: raw)
+    }
+}
+
+/// The menu bar. It shows plain-key shortcuts (B for the blade, I and O for
+/// in and out) so they're easy to learn, but doesn't act on them: AppKit
+/// offers the menu bar every key before the window, so a plain B there
+/// would stop a text field getting its b. Keys without Command go on to
+/// the window, where the keyboard router runs them (and text
+/// fields get them while you type). Only Command keys act here, as before.
+final class EditorMainMenu: NSMenu {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) else { return false }
+        return super.performKeyEquivalent(with: event)
     }
 }

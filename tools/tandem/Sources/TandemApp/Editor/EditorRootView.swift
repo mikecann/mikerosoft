@@ -197,7 +197,7 @@ struct TopBar: View {
                         .background(RoundedRectangle(cornerRadius: 7).fill(Theme.amber.color))
                 }
                 .buttonStyle(.plain)
-                .help("Export (⌘E)")
+                .help(Shortcuts.help("Export the video", .export))
             }
             HStack(spacing: 2) {
                 ForEach(LibraryTab.allCases) { tab in
@@ -245,6 +245,18 @@ private struct LibraryTabButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private var help: String {
+        switch tab {
+        case .media: return "Media: the project's recordings, graphics, B-roll and music"
+        case .text: return "Text: titles, captions and fonts"
+        case .transitions: return "Transitions: drag one onto a cut"
+        case .effects: return "Effects: drag one onto a clip"
+        case .graphics: return "Graphics: icons, logos, stickers and templates"
+        case .audio: return "Audio: music and sound effects"
+        }
     }
 }
 
