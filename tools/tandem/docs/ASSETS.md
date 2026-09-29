@@ -104,6 +104,18 @@ usage and licence tables) can still be followed from an archived copy.
   convert to HEVC with alpha via `AVAssetExportPresetHEVCHighestQualityWithAlpha`
   (a 5 s sticker: 520 KB WebM, 23 MB ProRes 4444, 386 KB HEVC-alpha). Don't use
   ffmpeg's `hevc_videotoolbox` for alpha; its output fails to decode.
+- WebM colour: sticker WebMs are usually untagged YUV made with the BT.601
+  matrix, ffmpeg's and browsers' default for RGB (all 51 Filmora sticker
+  WebMs on this Mac, 37 VP8 and 14 VP9, are). Left untagged, the export
+  guesses wrong: a small red square came out (245, 33, 0), and one Filmora
+  sticker's greens averaged 25 levels high. So the ProRes frames are tagged
+  with ffmpeg `setparams`, keeping the WebM's own tags where AVFoundation
+  reads them and otherwise using BT.709 primaries and transfer (web stickers
+  are sRGB) with the BT.601 matrix. VP9's BT.601 flag shows up as `bt470bg`,
+  a matrix code AVFoundation doesn't read, so it becomes `smpte170m`, the
+  same matrix. Full range is scaled to limited, since a MOV can't mark ProRes
+  full range. The HEVC copy keeps the BT.601 matrix, and the compositor
+  reads it: the red square renders (251, 0, 0).
 - QuickTime Animation and PNG in a MOV (Storyblocks, Motion Array and older
   VideoHive sticker packs): macOS 26 can't decode either, so they go the
   WebM way through ffmpeg and ProRes 4444 to HEVC with alpha

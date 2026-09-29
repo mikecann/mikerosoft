@@ -61,12 +61,19 @@ enum WindowSnapshot {
         // commands (`open -g`) leave focus alone.
         var lines: [String] = [
             "app active: \(NSApp.isActive ? "yes" : "no"), window key: \(window.isKeyWindow ? "yes" : "no")",
-            "window frame: \(NSStringFromRect(window.frame)), resizable: \(window.styleMask.contains(.resizable) ? "yes" : "no")"
+            "window frame: \(NSStringFromRect(window.frame)), resizable: \(window.styleMask.contains(.resizable) ? "yes" : "no")",
+            // What the last hover set, so a simulated hover can be checked.
+            "cursor: \(CursorKind.describe(NSCursor.current))"
         ]
+        // Where each view is in the coordinates `tandem://simulate` takes:
+        // window points from the top left.
+        let windowHeight = (window.contentView?.superview ?? window.contentView)?.bounds.height ?? 0
         func visit(_ view: NSView, depth: Int) {
             let pad = String(repeating: "  ", count: depth)
             let layer = view.layer.map { " layer=\(type(of: $0)) sublayers=\($0.sublayers?.count ?? 0)" } ?? ""
-            lines.append("\(pad)\(type(of: view)) \(NSStringFromRect(view.frame))\(view.isHidden ? " hidden" : "")\(layer)")
+            let box = view.convert(view.bounds, to: nil)
+            let at = String(format: " at %.0f,%.0f %.0fx%.0f", box.minX, windowHeight - box.maxY, box.width, box.height)
+            lines.append("\(pad)\(type(of: view)) \(NSStringFromRect(view.frame))\(at)\(view.isHidden ? " hidden" : "")\(layer)")
             for subview in view.subviews { visit(subview, depth: depth + 1) }
         }
         if let root = window.contentView?.superview ?? window.contentView { visit(root, depth: 0) }
@@ -118,8 +125,9 @@ enum AppURLCommand: Equatable {
     case zoom(pixelsPerSecond: Double?, scrollSeconds: Double?)
     case tool(TimelineTool)
     case inOut(start: Time?, end: Time?)
-    /// Writes the window's view and layer tree to a text file.
-    case debug(out: String)
+    /// Writes the window's view and layer tree and the draw timings to a
+    /// text file, then optionally clears the timings.
+    case debug(out: String, resetTimings: Bool = false)
     /// Replays a mouse gesture; see `InputSimulator`.
     case simulate(InputSimulator.Gesture)
     /// Makes a project in a folder, or opens the one already there.
@@ -131,9 +139,21 @@ enum AppURLCommand: Equatable {
     case assets(section: AssetSection, search: String?, scope: AssetScope?, online: Bool)
     /// Sizes the front window (or the project list), for checking layouts.
     case windowSize(width: Double, height: Double)
+    /// Brings the front window in front of other apps' windows, or sends
+    /// it behind them, without activating Tandem.
+    case windowOrder(toFront: Bool)
+
+    /// `tandem`, plus any scheme the app's bundle registers, so a copy of the
+    /// app built under another bundle ID (for measuring beside the installed
+    /// one) answers its own links.
+    static var schemes: Set<String> {
+        let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? []
+        let registered = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }.map { $0.lowercased() }
+        return Set(registered).union(["tandem"])
+    }
 
     static func parse(_ url: URL) -> AppURLCommand? {
-        guard url.scheme?.lowercased() == "tandem", let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        guard let scheme = url.scheme?.lowercased(), schemes.contains(scheme), let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         let action = (url.host ?? components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))).lowercased()
         var query: [String: String] = [:]
         for item in components.queryItems ?? [] { query[item.name.lowercased()] = item.value ?? "" }
@@ -172,7 +192,7 @@ enum AppURLCommand: Equatable {
             return .simulate(gesture)
         case "debug":
             guard let out = path(query["out"], extension: "txt") else { return nil }
-            return .debug(out: out)
+            return .debug(out: out, resetTimings: query["reset"] == "1")
         case "new":
             guard let folder = path(query["folder"]) else { return nil }
             return .newProject(folder: folder)
@@ -183,6 +203,10 @@ enum AppURLCommand: Equatable {
             guard let out = path(query["out"], extension: ProjectFile.fileExtension) else { return nil }
             return .saveVersion(out: out)
         case "window":
+            if let order = query["order"] {
+                guard order == "front" || order == "back" else { return nil }
+                return .windowOrder(toFront: order == "front")
+            }
             guard let width = query["width"].flatMap(Double.init), let height = query["height"].flatMap(Double.init), width > 0, height > 0 else { return nil }
             return .windowSize(width: width, height: height)
         case "inout":

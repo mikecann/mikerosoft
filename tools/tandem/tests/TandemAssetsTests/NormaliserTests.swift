@@ -160,6 +160,45 @@ final class NormaliserTests: XCTestCase {
         XCTAssertLessThan(clear, 10)
     }
 
+    /// Web stickers are sRGB colours that ffmpeg and browsers make into YUV
+    /// with the BT.601 matrix, usually untagged. Untagged, the HEVC export
+    /// guessed SMPTE-C for the small picture and red came out (245, 33, 0).
+    /// Tags a WebM does carry are kept.
+    func testWebMKeepsItsColours() async throws {
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        // Solid red on the left. Red clips whatever the range, so the right
+        // half is a duller orange that shows a wrong range up too.
+        let picture = "color=c=black:s=64x64:d=0.5:r=30,format=rgba,"
+            + "geq=r='if(lt(X,32),255,192)':g='if(lt(X,32),0,64)':b='if(lt(X,32),0,32)':a='255'"
+        let webms = [
+            (name: "untagged VP9", encoder: "libvpx-vp9", filter: "format=yuva420p"),
+            (name: "untagged VP8", encoder: "libvpx", filter: "format=yuva420p"),
+            // VP9's own BT.601 flag, which ffprobe calls bt470bg.
+            (name: "flagged BT.601", encoder: "libvpx-vp9", filter: "scale=out_color_matrix=bt601,format=yuva420p"),
+            (name: "tagged BT.709", encoder: "libvpx-vp9",
+             filter: "scale=out_color_matrix=bt709,format=yuva420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709"),
+            (name: "full range", encoder: "libvpx-vp9", filter: "scale=out_range=pc,format=yuva420p,setparams=range=pc")
+        ]
+        for webm in webms {
+            let folder = tempFolder("webm-colour")
+            let input = folder.appendingPathComponent("original.webm")
+            try ffmpeg.run([
+                "-y", "-v", "error", "-f", "lavfi", "-i", "\(picture),\(webm.filter)",
+                "-c:v", webm.encoder, "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", input.path
+            ])
+
+            _ = try await AssetNormaliser(ffmpeg: ffmpeg).normalise(input, into: folder)
+
+            let movie = folder.appendingPathComponent("normalised.mov")
+            for (x, expected) in [(16, [255, 0, 0]), (48, [192, 64, 32])] {
+                let pixel = try await Generated.pixel(of: movie, x: x, y: 32)
+                let rgb = [pixel.red, pixel.green, pixel.blue]
+                XCTAssertTrue(zip(rgb, expected).allSatisfy { abs($0 - $1) <= 4 }, "\(webm.name): \(rgb), not about \(expected)")
+                XCTAssertGreaterThan(pixel.alpha, 240, webm.name)
+            }
+        }
+    }
+
     /// Stock sticker packs (Storyblocks, Motion Array, older VideoHive)
     /// ship QuickTime Animation and PNG-in-MOV files, which AVFoundation
     /// can't decode. They go the WebM way: ffmpeg, ProRes 4444, HEVC with

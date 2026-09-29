@@ -147,7 +147,7 @@ struct ClipHeader: View {
     private var trackName: String { model.project.track(containingClip: clip.id)?.name ?? "" }
 
     private var title: String {
-        let name = ClipRenderer(project: model.project, scale: model.timeline.scale, artwork: nil, visible: 0...0).name(of: clip)
+        let name = ClipRenderer.name(of: clip, in: model.project)
         let count = model.selection.count
         let suffix = count > 1 ? " and \(count - 1) more" : ""
         return "\(trackName) · \(name)\(suffix)"

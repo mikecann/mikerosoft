@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
     func applicationDidFinishLaunching(_ notification: Notification) {
         launched = true
         quitCleanlyOnSIGTERM()
+        MainThreadMeter.install()
         // Opens the asset library in the background, adding the starter
         // emoji, icons and logos the first time.
         AssetLibraryHost.shared.open()
@@ -174,9 +175,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
             let size = NSSize(width: max(width, window.contentMinSize.width), height: max(height, window.contentMinSize.height))
             window.setContentSize(size)
-        case .debug(let out):
+        case .windowOrder(let toFront):
+            // Without activating the app, so whatever Mike is typing into
+            // keeps the keys.
+            guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
+            if toFront { window.orderFrontRegardless() } else { window.orderBack(nil) }
+        case .debug(let out, let resetTimings):
             guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
             try? WindowSnapshot.describe(window).write(toFile: out, atomically: true, encoding: .utf8)
+            if resetTimings { DrawTiming.reset() }
         case .newProject(let folder):
             var isFolder: ObjCBool = false
             guard FileManager.default.fileExists(atPath: folder, isDirectory: &isFolder), isFolder.boolValue else {

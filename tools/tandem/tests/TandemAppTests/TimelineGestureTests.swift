@@ -92,6 +92,11 @@ final class SimulatedGestureTests: XCTestCase {
         XCTAssertNil(InputSimulator.parse(["drag": "1,2,3,4", "button": "fifth"]), "unknown buttons are refused")
         XCTAssertNil(InputSimulator.parse(["drag": "1,2,3,4", "interval": "5000"]), "a step can't wait more than a second")
     }
+
+    func testHoverCanHoldAKey() {
+        // Z held over the viewer shows the zoom cursor, so a hover can hold it too.
+        XCTAssertEqual(InputSimulator.parse(["hover": "600,400", "hold": "z"]), InputSimulator.Gesture(kind: .hover, at: CGPoint(x: 600, y: 400), modifiers: [], heldKey: "z"))
+    }
 }
 
 final class MarqueeOutlineTests: XCTestCase {
