@@ -88,6 +88,8 @@ public enum Editing {
             try moveEffect(&project, clipID, effectID, index)
         case .setKeyframes(let clipID, let parameter, let keyframes):
             try setKeyframes(&project, clipID, parameter, keyframes, &context)
+        case .normalizeSpeech:
+            try normalizeSpeech(&project, &context)
         case .addMarker(let marker):
             try addMarker(&project, marker, &context)
         case .updateMarker(let markerID, let patch):
@@ -163,7 +165,72 @@ public enum Editing {
         if settings.frameRate != old.frameRate {
             context.warn("Frame rate changed to \(settings.frameRate.framesPerSecond) fps. Existing cuts keep their times, so some may fall between frames.")
         }
+        if settings.speechLoudness != old.speechLoudness {
+            let range = AudioLevels.speechLoudnessRange
+            guard range.contains(settings.speechLoudness) else {
+                throw EditError.invalid("the speech level must be between \(AudioLevels.number(range.lowerBound)) and \(AudioLevels.number(range.upperBound)) LUFS")
+            }
+            moveNormalizedClips(&p, from: old.speechLoudness, to: settings.speechLoudness, &context)
+        }
         p.settings = settings
+    }
+
+    /// Clips normalised to the old speech level move to the new one, so
+    /// changing the setting moves the voice. Other levels (a clip set to
+    /// -24 by hand, Filmora's own) stay.
+    static func moveNormalizedClips(_ p: inout Project, from old: Double, to new: Double, _ context: inout EditContext) {
+        for location in p.trackLocations where location.kind == .audio {
+            var track = p[location]
+            let indices = track.clips.indices.filter { track.clips[$0].audio?.normalizeTo == old }
+            guard !indices.isEmpty else { continue }
+            if track.locked {
+                context.warn("Locked track \"\(track.name)\" keeps its clips at \(AudioLevels.number(old)) LUFS.")
+                continue
+            }
+            for i in indices { track.clips[i].audio?.normalizeTo = new }
+            p[location] = track
+        }
+    }
+
+    // MARK: - Levelling speech
+
+    /// Sets every speech clip (`AudioLevels.isSpeech`) to the project's
+    /// speech level with no clip gain. Fades, mutes, voice isolation,
+    /// effects and gain keyframes stay; music and sound effects aren't
+    /// touched. Locked tracks are left as they are, with a warning.
+    static func normalizeSpeech(_ p: inout Project, _ context: inout EditContext) throws {
+        let level = p.settings.speechLoudness
+        var speech = 0
+        var changed = 0
+        var animated = 0
+        for location in p.trackLocations where location.kind == .audio {
+            var track = p[location]
+            let indices = track.clips.indices.filter { AudioLevels.isSpeech(track.clips[$0], on: track, in: p) }
+            speech += indices.count
+            let unlevelled = indices.filter { !AudioLevels.isLevelled(track.clips[$0], at: level) }
+            animated += indices.filter { track.clips[$0].keyframes["audio.gainDB"]?.isEmpty == false }.count
+            guard !unlevelled.isEmpty else { continue }
+            if track.locked {
+                context.warn("Locked track \"\(track.name)\" was left as it was.")
+                continue
+            }
+            for i in unlevelled {
+                var audio = track.clips[i].audio ?? AudioProperties()
+                audio.normalizeTo = level
+                audio.gainDB = 0
+                track.clips[i].audio = audio
+            }
+            changed += unlevelled.count
+            p[location] = track
+        }
+        if speech == 0 {
+            context.warn("There are no speech clips to normalise: camera or voice sound, or clips on a take track like Voice.")
+        } else if changed == 0 {
+            context.warn("Every speech clip is already at \(AudioLevels.number(level)) LUFS with no gain.")
+        }
+        if animated > 0 {
+            context.warn("\(animated == 1 ? "1 speech clip keeps its" : "\(animated) speech clips keep their") gain animation, which plays on top of the level.")
+        }
     }
 
     static func addTrack(_ p: inout Project, kind: TrackKind, name: String?, index: Int?, id: String?, _ context: inout EditContext) throws {
@@ -393,7 +460,7 @@ public enum Editing {
                     sourceStart: item.kind == .image ? .zero : start
                 )
                 if kind == .audio {
-                    clip.audio = defaultAudio(for: item.role, settings: p.settings)
+                    clip.audio = AudioLevels.placedAudio(role: item.role, on: p[location], settings: p.settings)
                 }
                 planned.append((location, clip))
             }
@@ -419,17 +486,6 @@ public enum Editing {
         for (location, clip) in planned {
             p[location].add(clip)
             context.createdIDs.append(clip.id)
-        }
-    }
-
-    /// Mike's usual levels: music bed about -31 dB with a 2 s fade out, sound
-    /// effects about -15 dB, dialogue levelled to the loudness target.
-    static func defaultAudio(for role: MediaRole, settings: ProjectSettings) -> AudioProperties? {
-        switch role {
-        case .music: return AudioProperties(gainDB: -31, fadeOut: Time(seconds: 2))
-        case .sfx: return AudioProperties(gainDB: -15)
-        case .camera, .other: return AudioProperties(normalizeTo: settings.loudnessTarget)
-        default: return nil
         }
     }
 

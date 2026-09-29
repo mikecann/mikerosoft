@@ -110,7 +110,7 @@ final class CLITests: XCTestCase {
 
         let timeline = try tandem("timeline", in: folder.url)
         XCTAssertEqual(timeline.status, 0)
-        XCTAssertTrue(timeline.stdout.contains("t1-camera.mov [00:00.000-01:00.000]  linked #1  level -14 LUFS"), timeline.stdout)
+        XCTAssertTrue(timeline.stdout.contains("t1-camera.mov [00:00.000-01:00.000]  linked #1  level -20 LUFS"), timeline.stdout)
 
         let cut = try tandem("apply", "-", "--author", "claude", in: folder.url, stdin: #"{"blade": {"at": "0:10"}}"#)
         XCTAssertEqual(cut.status, 0, cut.stderr)

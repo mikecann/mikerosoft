@@ -84,6 +84,9 @@ no forks or branches inside a project.
   (with a `ProjectFile.migrate` step if old files need it). Lenient decoding
   lets an older build open a newer file, and it would silently drop the new
   field when it saves; the version check makes it refuse instead.
+  `settings.speechLoudness` didn't need one: every clip stores its own
+  `normalizeTo`, so an older build that drops it only resets the level new
+  clips get to -20 LUFS, and the project sounds the same.
 - Backups live in `.tandem/backups/`: one at most every minute of saving,
   everything from the last hour, one per ten minutes for a day, one per day
   for 30 days (`BackupPolicy`). Exports only replace earlier Tandem exports
@@ -199,7 +202,16 @@ VideoToolbox (speed priority) into `AVAssetWriter`.
 Audio rules:
 
 - Clip gain, fades and volume keyframes become volume ramps.
-- `normalizeTo` levels a clip using its file's measured loudness.
+- `normalizeTo` levels a clip using its file's measured loudness: the
+  target minus the measurement, within ±30 dB, nothing for a silent file.
+  The clip gain is added after it (`AudioLevels`).
+- Speech (a camera's sound, a file with no clearer role, anything on a
+  `cut` audio track like Voice) is levelled per take to the project's
+  speech level, `settings.speechLoudness` (-20 LUFS): placing sets it with
+  no gain, `normalizeSpeech` sets every speech clip to it, and changing the
+  setting moves the clips at the old level. Music (-31 dB) and sound
+  effects (-15 dB) keep plain gains set against that voice. RENDER.md has
+  why -20.
 - `voiceIsolation` mixes the cached isolated voice with the original.
 - Every hard cut on an audio track gets a 3 ms micro-fade so nothing clicks.
 - Export measures the mix and applies gain to hit the master loudness target

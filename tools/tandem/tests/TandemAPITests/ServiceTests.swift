@@ -192,9 +192,38 @@ final class ServiceTests: XCTestCase {
         h.analysis.measured["med_camera"] = Loudness(integratedLUFS: -21.5, truePeakDBTP: -3, loudnessRange: 6)
         let result = try h.service.loudness(mediaID: nil)
         XCTAssertEqual(result.target, -14)
+        XCTAssertEqual(result.speechLoudness, -20)
         let voice = try XCTUnwrap(result.clips.first { $0.clipID == "clip_voc1" })
         XCTAssertEqual(voice.normalizeGainDB ?? 0, 7.5, accuracy: 1e-9)
+        XCTAssertTrue(voice.speech)
+        XCTAssertEqual(result.clips.first { $0.clipID == "clip_mus1" }?.speech, false)
         XCTAssertEqual(result.media.first { $0.mediaID == "med_music" }?.state, "none")
+        // The fixture's voice is on the old -14 default, not the speech level.
+        XCTAssertTrue(result.readableText.contains("2 of 2 speech clips aren't at the speech level"), result.readableText)
+
+        // The same sum the render makes: at most 30 dB, nothing for silence.
+        h.analysis.measured["med_camera"] = Loudness(integratedLUFS: -60, truePeakDBTP: -40, loudnessRange: 6)
+        XCTAssertEqual(try h.service.loudness(mediaID: "med_camera").clips.first?.normalizeGainDB, 30)
+        h.analysis.measured["med_camera"] = Loudness(integratedLUFS: -.infinity, truePeakDBTP: -.infinity, loudnessRange: 0)
+        XCTAssertEqual(try h.service.loudness(mediaID: "med_camera").clips.first?.normalizeGainDB, 0)
+    }
+
+    func testNormalizeSpeechFromJSONLevelsTheVoiceAndLeavesTheMusic() throws {
+        let h = try ServiceHarness()
+        defer { h.close() }
+        let command = try CommandJSON.decode(try json(#"{"normalizeSpeech": {}}"#))
+        XCTAssertEqual(command, .normalizeSpeech)
+        let result = try h.apply(command)
+        XCTAssertEqual(result.label, "Normalise speech clips")
+        XCTAssertEqual(Set(result.changed), ["clip_voc1", "clip_voc2"])
+        let project = h.service.coordinator.project
+        XCTAssertEqual(project.clip("clip_voc1")?.audio?.normalizeTo, -20)
+        XCTAssertEqual(project.clip("clip_mus1")?.audio?.gainDB, -31)
+
+        // Changing the speech level moves them.
+        let moved = try h.apply(.updateSettings(patch: .object(["speechLoudness": .number(-18)])))
+        XCTAssertEqual(Set(moved.changed), ["clip_voc1", "clip_voc2"])
+        XCTAssertEqual(h.service.coordinator.project.clip("clip_voc2")?.audio?.normalizeTo, -18)
     }
 
     func testTimelineJSONFiltersToTheRange() throws {

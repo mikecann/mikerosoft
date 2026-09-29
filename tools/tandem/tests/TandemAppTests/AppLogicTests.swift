@@ -327,7 +327,7 @@ final class SmallPieceTests: XCTestCase {
         XCTAssertEqual(f.clip("Camera").video?.effects.first?.params["opacity"], .number(70))
         try f.apply(InspectorEdits.audio([f.clip("Voice").id], ["gainDB": .number(-3)], label: "Gain"))
         XCTAssertEqual(f.clip("Voice").audio?.gainDB, -3)
-        XCTAssertEqual(f.clip("Voice").audio?.normalizeTo, -14, "untouched fields stay")
+        XCTAssertEqual(f.clip("Voice").audio?.normalizeTo, -20, "untouched fields stay")
         let look = [Effect(id: "fx_look", type: "colorAdjust", params: ["contrast": .number(8)])]
         try f.apply(InspectorEdits.look("med_camera", look, label: "Look"))
         let item = try XCTUnwrap(f.project.media("med_camera"))

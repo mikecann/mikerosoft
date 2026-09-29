@@ -138,6 +138,15 @@ public enum EditCommand: Codable, Equatable, Sendable {
     /// `video.transform.scale`. An empty list removes the animation.
     case setKeyframes(clipID: String, parameter: String, keyframes: [Keyframe])
 
+    // MARK: Sound
+
+    /// Levels every speech clip (camera and voice sound, and anything on a
+    /// take track like Voice) to the project's speech level
+    /// (`settings.speechLoudness`) and clears its clip gain, so the voice
+    /// sits at one level whatever gains it came with. Music and sound
+    /// effects keep theirs. JSON: `{"normalizeSpeech": {}}`.
+    case normalizeSpeech
+
     // MARK: Markers
 
     case addMarker(marker: Marker)

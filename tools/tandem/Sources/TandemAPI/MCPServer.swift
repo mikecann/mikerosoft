@@ -643,7 +643,7 @@ enum MCPTools {
         ),
         Tool(
             name: "loudness", title: "Loudness",
-            description: "Measured loudness of each file with sound, the project's target, and the gain each levelled clip gets.",
+            description: "Measured loudness of each file with sound, the project's speech level (-20 LUFS unless changed) and master target (-14 LUFS), the gain each levelled clip gets, and how many speech clips aren't at the speech level (apply normalizeSpeech to level them).",
             operation: .loudness, properties: ["mediaID": S.string("Just this file.")], readOnly: true, idempotent: true
         ),
         Tool(

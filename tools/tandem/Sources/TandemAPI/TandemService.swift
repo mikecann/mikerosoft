@@ -703,19 +703,20 @@ public final class TandemService: @unchecked Sendable {
             for clip in track.clips {
                 guard let id = clip.mediaID, wanted.contains(id) else { continue }
                 let audio = clip.audio ?? AudioProperties()
-                var normalizeGain: Double?
-                if let target = audio.normalizeTo, let lufs = measured[id]?.integratedLUFS, lufs.isFinite {
-                    normalizeGain = target - lufs
+                // The same sum the render makes, so this is what plays.
+                let normalizeGain = audio.normalizeTo.flatMap {
+                    AudioLevels.normalizeGainDB(target: $0, measuredLUFS: measured[id]?.integratedLUFS)
                 }
                 clips.append(ClipLevel(
                     clipID: clip.id, mediaID: id, track: track.name, gainDB: audio.gainDB,
-                    normalizeTo: audio.normalizeTo, normalizeGainDB: normalizeGain
+                    normalizeTo: audio.normalizeTo, normalizeGainDB: normalizeGain,
+                    speech: AudioLevels.isSpeech(clip, on: track, in: project)
                 ))
             }
         }
         return LoudnessResult(
             target: project.settings.loudnessTarget, truePeakCeiling: project.settings.truePeakCeiling,
-            media: media, clips: clips
+            speechLoudness: project.settings.speechLoudness, media: media, clips: clips
         )
     }
 
