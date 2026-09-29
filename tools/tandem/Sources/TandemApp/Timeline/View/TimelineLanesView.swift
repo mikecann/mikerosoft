@@ -504,26 +504,8 @@ final class TimelineLanesView: TimelineChildView {
         // A transcript that lands changes the phrases without an edit.
         let artworkRevision = container.drawState.artworkRevision
         if let cache = phraseCache, cache.revision == revision, cache.artwork == artworkRevision, revision >= 0 { return cache.phrases }
-        var words: [(text: String, start: Time, end: Time)] = []
-        // Where a track above already had words, so the same speech heard
-        // on two tracks (camera and screen microphones) isn't listed twice.
-        var covered: [TimeRange] = []
-        // Transcripts live on the take's sound, on the tracks the take cuts.
-        for track in project.audioTracks where track.rippleMode == .cut && !track.muted {
-            var spoken: [TimeRange] = []
-            for clip in track.clips where clip.enabled {
-                guard let item = clip.mediaID.flatMap({ project.media($0) }), let transcript = artwork.transcript(for: item) else { continue }
-                spoken.append(clip.range)
-                for word in transcript.words where word.end > clip.sourceStart && word.start < clip.sourceEnd {
-                    let start = clip.start + Time(seconds: max(0, (word.start - clip.sourceStart).seconds) / clip.speed)
-                    let end = clip.start + Time(seconds: max(0, (word.end - clip.sourceStart).seconds) / clip.speed)
-                    if covered.contains(where: { $0.start <= start && start < $0.end }) { continue }
-                    words.append((word.text, start, min(end, clip.end)))
-                }
-            }
-            covered += spoken
-        }
-        let phrases = TranscriptPhrase.group(words.sorted { $0.start < $1.start })
+        let words = TranscriptPhrase.words(in: project) { artwork.transcript(for: $0) }
+        let phrases = TranscriptPhrase.group(words)
         phraseCache = (revision, artworkRevision, phrases)
         groupCache = nil
         return phrases
@@ -1328,6 +1310,34 @@ struct TranscriptPhrase: Equatable {
     var text: String
     var start: Time
     var end: Time
+
+    /// The take's words on the timeline, in order: from the unmuted tracks
+    /// the take cuts, each word placed by the rule captions and pauses use
+    /// (`Transcript.placements(on:)`), so a word a cut runs through shows
+    /// once and a word cut out doesn't show.
+    static func words(in project: Project, transcript: (MediaItem) -> Transcript?) -> [(text: String, start: Time, end: Time)] {
+        var words: [(text: String, start: Time, end: Time)] = []
+        // Where a track above already had words, so the same speech heard
+        // on two tracks (camera and screen microphones) isn't listed twice.
+        var covered: [TimeRange] = []
+        for track in project.audioTracks where track.rippleMode == .cut && !track.muted {
+            var spoken: [TimeRange] = []
+            var byMedia: [String: [Clip]] = [:]
+            for clip in track.clips where clip.enabled {
+                if let mediaID = clip.mediaID { byMedia[mediaID, default: []].append(clip) }
+            }
+            for (mediaID, clips) in byMedia {
+                guard let item = project.media(mediaID), let transcript = transcript(item) else { continue }
+                spoken += clips.map(\.range)
+                for placed in transcript.placements(on: clips) {
+                    if covered.contains(where: { $0.start <= placed.start && placed.start < $0.end }) { continue }
+                    words.append((transcript.words[placed.index].text, placed.start, placed.end))
+                }
+            }
+            covered += spoken
+        }
+        return words.sorted { ($0.start, $0.end) < ($1.start, $1.end) }
+    }
 
     /// Groups words into phrases, breaking at pauses and long runs.
     static func group(_ words: [(text: String, start: Time, end: Time)], pause: Time = Time(seconds: 0.35), maxWords: Int = 9) -> [TranscriptPhrase] {

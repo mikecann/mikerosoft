@@ -175,7 +175,7 @@ copies of a file share a job):
 | waveform | `waveform.json`, `peaks.f32` | header plus little-endian Float32 peaks, 100 a second, the loudest sample over all channels, placed by sample time |
 | loudness | `loudness.json` | `Loudness`; silence is `-inf` (written as the string "-inf") |
 | proxy | `proxy.mov` | 1080p box, aspect kept, HEVC with a keyframe every 15 frames and P-frames between (no reordering) at quality 0.78, video only, every frame at its exact source time and duration, source colour tags and rotation. Video with alpha gets HEVC with alpha, straight or premultiplied as the source is |
-| transcript | `transcript.json` | `Transcript`, engine "SpeechAnalyzer", en-US, word times in media time |
+| transcript | `transcript.json` | `Transcript`, engine "SpeechAnalyzer", en-US, the engine's own word times in media time (aligned to the waveform when read) |
 | matte | `matte.mov` | 1080p box, HEVC, keyframe every 10 frames; luma of full-range (420f) frames is the alpha (0 background, 255 person), chroma neutral, BT.709 tags, source frame times and rotation |
 | isolatedVoice | `voice.caf` | 48 kHz ALAC, source channels (max 2), same length as the source, lined up to the sample |
 | converted | `video.mov` | Only for `undecodableCodec` files: HEVC, with alpha when the source has it, BT.709 tags, the source's size and frame times, video only |
@@ -226,14 +226,50 @@ Notes on each:
 - **Transcript.** Audio streams from the file a second at a time as the
   analyzer pulls it (the whole 24 minute take peaks at 53 MB). The model
   works although AssetInventory says only "supported"; if analysis ever
-  fails for that reason the job installs the model and retries once.
-  SpeechAnalyzer's word ranges swallow surrounding silence (in the spike
-  they covered 8.7 of 11.7 s of pauses), so words are trimmed to their
-  voiced part using a 100 Hz loudness envelope of the same audio: a word
-  starting or ending in 100 ms or more of quiet moves in, with 20 ms / 40 ms
-  of padding. On the test minute that finds 5 pauses over 0.3 s (5.4 s),
-  against 1 (3.1 s) without and 8 (6.9 s) for Whisper medium.en; word
-  starts stay within 80 ms of Whisper's (median).
+  fails for that reason the job installs the model and retries once. The
+  cache keeps SpeechAnalyzer's own word times.
+
+  Those times run end to end, so every pause is swallowed by the word
+  before it or the word after (in the spike they covered 8.7 of 11.7 s of
+  pauses). `MediaAnalysis.transcript(for:)` aligns them to the file's
+  waveform when it reads them (`TranscriptAlignment`, kept in memory, keyed
+  by both results and the pass's version), so transcripts made before the
+  pass get it too and nothing is transcribed again;
+  `rawTranscript(for:)` gives the engine's times. Until the waveform exists
+  the transcript comes back as the engine timed it.
+
+  The waveform is fine enough: at 100 peaks a second, a peak under a
+  threshold is what ffmpeg's silencedetect calls silence, and on the
+  workbench short's phone take it finds the same 45 silences of 0.2 s or
+  more as silencedetect at -32 dB, to 10 ms. So there's no separate RMS
+  envelope. The pass puts a threshold 10 dB over the take's noise floor
+  (its quietest tenth; -32.6 dB on that take), takes 100 ms under it as
+  silence, and gives each word to the voiced run its own range overlaps
+  most, leaning past the pause after a sentence or clause ends; each run's
+  words then fill it. Voice no word lands in (a breath, a click, an "um"
+  SpeechAnalyzer left out) stays in the pause. `TranscriptAlignment`'s
+  comment has the details.
+
+  On the phone take (87 s, 263 words) the engine's times left 4 pauses of
+  0.45 s or more (2.15 s); aligned there are 21 (13.2 s). They hold all 16
+  silences of 0.45 s or more that silencedetect finds between words (it
+  also counts the lead-in and the tail), 15 of them within 35 ms at both
+  ends; the other starts 0.23 s earlier, where a 20 ms click splits
+  silencedetect's silence in two. The other 5 are pauses silencedetect
+  splits at a breath or click into pieces under 0.45 s.
+
+  On the decision-models minute against Whisper medium.en, word starts
+  are within 80 ms (median) and 190 ms (p90, was 220), and ends stay
+  within 80 ms (median; p90 220, was 200). Pauses over 0.3 s go from 1
+  (3.1 s) to 15 (11.1 s), which include all 8 of Whisper's and all 13 that
+  silencedetect finds at the same threshold
+  (`RealMediaTests.testTranscriptOfAMinute` lists them).
+
+  Until 2026-09-29 the job trimmed only the edges of a word that started
+  or ended in 100 ms of quiet, using its own 100 Hz envelope. A pause with
+  voice on both sides inside one word's range ("of" from 28.14 to 29.22 s
+  over a silence from 28.26 to 29.05, the next word's first sound inside
+  it) stayed hidden, which is why `pauses` missed most of them.
 - **Matte (version 2, Vision).** RVM (below) is the default now; this is
   what it falls back to. Per frame, accurate person segmentation
   (2016x1512) and the foreground subject mask

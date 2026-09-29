@@ -7,6 +7,11 @@ import TandemCore
 /// Word-level transcript with SpeechAnalyzer (macOS 26), word times in media
 /// time. The audio streams from the file a second at a time as the analyzer
 /// asks for it, so a long take never sits in memory.
+///
+/// The cache keeps the engine's own word times. They run end to end and
+/// swallow the pauses; `TranscriptAlignment` pulls them in to the voice
+/// when the transcript is read, so transcripts made before it existed get
+/// it too.
 enum TranscriptJob {
     static let file = "transcript.json"
 
@@ -27,16 +32,14 @@ enum TranscriptJob {
 enum SpeechTranscription {
     static let engine = "SpeechAnalyzer"
 
-    /// - Parameter snapWords: pull word edges in to the voice (see
-    ///   `SpeechEnvelope`). Off only to measure what it changes.
-    static func transcribe(source: URL, localeID: String, context: JobContext, timeRange: CMTimeRange?, snapWords: Bool = true) async throws -> Transcript {
+    static func transcribe(source: URL, localeID: String, context: JobContext, timeRange: CMTimeRange?) async throws -> Transcript {
         guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: localeID)) else {
             throw MediaError.notApplicable("SpeechAnalyzer doesn't support \(localeID)")
         }
         let status = await AssetInventory.status(forModules: [makeTranscriber(locale)])
         guard status != .unsupported else { throw MediaError.notApplicable("SpeechAnalyzer can't transcribe \(localeID) on this Mac") }
         do {
-            return try await attempt(source: source, locale: locale, context: context, timeRange: timeRange, snapWords: snapWords)
+            return try await attempt(source: source, locale: locale, context: context, timeRange: timeRange)
         } catch let error where status < .installed && !context.isCancelled && !(error is CancellationError) {
             // The model usually works even when the inventory only says
             // "supported"; if it didn't, install it and try once more.
@@ -45,7 +48,7 @@ enum SpeechTranscription {
                 context.progress(0, message: "Installing the \(locale.identifier) speech model")
                 try await request.downloadAndInstall()
             }
-            return try await attempt(source: source, locale: locale, context: context, timeRange: timeRange, snapWords: snapWords)
+            return try await attempt(source: source, locale: locale, context: context, timeRange: timeRange)
         }
     }
 
@@ -53,7 +56,7 @@ enum SpeechTranscription {
         SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange, .transcriptionConfidence])
     }
 
-    static func attempt(source: URL, locale: Locale, context: JobContext, timeRange: CMTimeRange?, snapWords: Bool) async throws -> Transcript {
+    static func attempt(source: URL, locale: Locale, context: JobContext, timeRange: CMTimeRange?) async throws -> Transcript {
         let transcriber = makeTranscriber(locale)
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw MediaError.failed("SpeechAnalyzer has no audio format for \(locale.identifier)")
@@ -87,7 +90,7 @@ enum SpeechTranscription {
         }
         let words = try await collector.value
         try context.checkCancellation()
-        return Transcript(language: locale.identifier(.bcp47), engine: engine, words: snapWords ? feed.envelope.snap(words) : words)
+        return Transcript(language: locale.identifier(.bcp47), engine: engine, words: words)
     }
 
     /// One word per run with a time range; runs carry their leading space.
@@ -121,8 +124,6 @@ final class AnalyzerFeed: @unchecked Sendable {
     private var finished = false
     /// Media time the audio should start at (0, or a range's start).
     private let origin: Double
-    /// Loudness of the audio as it goes past, to tidy word edges afterwards.
-    private(set) var envelope: SpeechEnvelope
 
     init(reader: AudioReader, format: AVAudioFormat, context: JobContext, origin: Double) throws {
         guard format.channelCount == AVAudioChannelCount(reader.channels) else {
@@ -133,7 +134,6 @@ final class AnalyzerFeed: @unchecked Sendable {
         self.context = context
         chunkFrames = Int(format.sampleRate)
         self.origin = origin
-        envelope = SpeechEnvelope(origin: origin, sampleRate: reader.sampleRate)
     }
 
     func next() throws -> AnalyzerInput? {
@@ -152,7 +152,6 @@ final class AnalyzerFeed: @unchecked Sendable {
                 let keptStart = dropped > 0 ? CMTime(seconds: origin, preferredTimescale: CMTimeScale(reader.sampleRate)) : start
                 if pendingStart == nil || pending.isEmpty { pendingStart = keptStart }
                 pending.append(contentsOf: kept)
-                if reader.channels == 1 { envelope.add(kept, at: keptStart.seconds) }
             }
             if !more { finished = true }
         }
@@ -236,85 +235,3 @@ struct AnalyzerInputs: AsyncSequence, Sendable {
     }
 }
 
-
-/// A 100 Hz loudness envelope of the speech audio, used to pull word edges
-/// in to where the voice actually is.
-///
-/// SpeechAnalyzer's word ranges swallow the silence around them (in the
-/// transcription spike they covered 8.7 of 11.7 s of pauses; Whisper 5.1),
-/// which would hide the pauses Tandem tightens. A word that starts or ends
-/// in 100 ms or more of quiet is trimmed to its loud part, with a little
-/// padding so no consonant is clipped.
-struct SpeechEnvelope {
-    static let rate = 100.0
-    let origin: Double
-    let sampleRate: Double
-    private(set) var energy: [Double] = []
-    private(set) var counts: [Int] = []
-
-    init(origin: Double, sampleRate: Double) {
-        self.origin = origin
-        self.sampleRate = sampleRate
-    }
-
-    mutating func add(_ samples: UnsafeBufferPointer<Float>, at start: Double) {
-        var position = Int(((start - origin) * sampleRate).rounded())
-        let perBucket = sampleRate / Self.rate
-        var offset = 0
-        while offset < samples.count {
-            let bucket = Int(Double(max(0, position)) / perBucket)
-            let bucketEnd = Int((Double(bucket + 1) * perBucket).rounded())
-            let count = max(1, min(samples.count - offset, bucketEnd - max(0, position)))
-            var sum: Float = 0
-            vDSP_svesq(samples.baseAddress! + offset, 1, &sum, vDSP_Length(count))
-            if bucket >= energy.count {
-                energy.append(contentsOf: repeatElement(0, count: bucket - energy.count + 1))
-                counts.append(contentsOf: repeatElement(0, count: bucket - counts.count + 1))
-            }
-            energy[bucket] += Double(sum)
-            counts[bucket] += count
-            offset += count
-            position += count
-        }
-    }
-
-    /// Level of each 10 ms in dBFS (RMS), -120 for digital silence.
-    var levels: [Double] {
-        zip(energy, counts).map { energy, count in
-            count > 0 && energy > 0 ? 10 * log10(energy / Double(count)) : -120
-        }
-    }
-
-    /// Between the room's noise and the voice: 10 dB over the quietest
-    /// tenth, and never more than 30 dB under the loud tenth.
-    static func threshold(for levels: [Double]) -> Double {
-        let sorted = levels.sorted()
-        guard !sorted.isEmpty else { return -120 }
-        let floor = sorted[sorted.count / 10]
-        let loud = sorted[min(sorted.count - 1, sorted.count * 9 / 10)]
-        return max(floor + 10, loud - 30)
-    }
-
-    func snap(_ words: [TranscriptWord]) -> [TranscriptWord] {
-        let levels = self.levels
-        guard levels.count > 10 else { return words }
-        let threshold = Self.threshold(for: levels)
-        let quiet = 0.1
-        let padBefore = 0.02
-        let padAfter = 0.04
-        return words.map { word in
-            let first = max(0, Int(((word.start.seconds - origin) * Self.rate).rounded(.down)))
-            let last = min(levels.count - 1, Int(((word.end.seconds - origin) * Self.rate).rounded(.up)) - 1)
-            guard last >= first,
-                  let loudFirst = (first...last).first(where: { levels[$0] > threshold }),
-                  let loudLast = (first...last).last(where: { levels[$0] > threshold })
-            else { return word }
-            var snapped = word
-            let voiceStart = origin + Double(loudFirst) / Self.rate - padBefore
-            if voiceStart - word.start.seconds >= quiet { snapped.start = Time(seconds: voiceStart) }
-            let voiceEnd = origin + Double(loudLast + 1) / Self.rate + padAfter
-            if word.end.seconds - voiceEnd >= quiet { snapped.end = Time(seconds: voiceEnd) }
-            return snapped
-        }
-    }
-}

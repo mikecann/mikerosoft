@@ -25,7 +25,8 @@ public final class MediaAnalysis: @unchecked Sendable {
     private var afterConversion: [String: [(kind: AnalysisKind, item: MediaItem, priority: JobPriority, settings: AnalysisSettings?)]] = [:]
     /// Fingerprints computed for items that didn't carry one, by path.
     private var fingerprints: [String: (stat: FileStat, value: String)] = [:]
-    /// Decoded transcripts and waveforms, by cache key.
+    /// Decoded transcripts and waveforms by cache key, and transcripts
+    /// aligned to their waveforms.
     private let decoded = NSCache<NSString, DecodedResult>()
 
     public convenience init(folder: ProjectFolder) {
@@ -67,7 +68,28 @@ public final class MediaAnalysis: @unchecked Sendable {
 
     // MARK: - Cached results
 
+    /// The transcript with its word edges pulled in to the voice by the
+    /// file's waveform (`TranscriptAlignment`), which is what everything
+    /// that finds pauses or places words on the timeline wants. Until the
+    /// waveform is made, the transcript as the engine timed it.
     public func transcript(for item: MediaItem) -> Transcript? {
+        guard let raw = rawTranscript(for: item) else { return nil }
+        // Keyed by both results, so a replaced transcript or a waveform that
+        // lands later makes a fresh copy, and by the pass's version.
+        guard let transcriptKey = cacheKey(.transcript, for: item), let waveformKey = cacheKey(.waveform, for: item),
+              let waveform = waveform(for: item) else { return raw }
+        let memoKey = "aligned-\(TranscriptAlignment.version)/\(transcriptKey)/\(waveformKey)" as NSString
+        // The copy remembers what it was made from, so it follows a
+        // transcript replaced under the same key.
+        if let hit = decoded.object(forKey: memoKey)?.value as? (raw: Transcript, aligned: Transcript), hit.raw == raw { return hit.aligned }
+        let aligned = raw.aligned(to: waveform)
+        decoded.setObject(DecodedResult((raw: raw, aligned: aligned)), forKey: memoKey)
+        return aligned
+    }
+
+    /// The transcript exactly as it's cached: the engine's own word times,
+    /// which run end to end and swallow the pauses.
+    public func rawTranscript(for item: MediaItem) -> Transcript? {
         decodedResult(.transcript, for: item) { TranscriptJob.read(from: $0) }
     }
 
@@ -163,6 +185,9 @@ public final class MediaAnalysis: @unchecked Sendable {
     @discardableResult
     public func submit(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .background, settings requested: AnalysisSettings? = nil) -> String? {
         guard kind.applies(to: item), let fingerprint = fingerprint(for: item) else { return nil }
+        // A transcript is read aligned to the file's waveform, so asking for
+        // one asks for that too (it's quick, and usually made already).
+        if kind == .transcript { submit(.waveform, for: item, priority: priority) }
         let settings = requested ?? self.settings
         let canonical = settings.canonical(for: kind, item: item)
         let key = AnalysisCache.key(fingerprint: fingerprint, kind: kind, algorithmVersion: kind.algorithmVersion, settings: canonical)
@@ -244,6 +269,10 @@ public final class MediaAnalysis: @unchecked Sendable {
     /// answer.
     @discardableResult
     public func waitFor(_ kind: AnalysisKind, for item: MediaItem, priority: JobPriority = .interactive, settings: AnalysisSettings? = nil) async -> ResultState {
+        // A transcript isn't aligned to the voice until the waveform is made.
+        if kind == .transcript, AnalysisKind.waveform.applies(to: item) {
+            await waitFor(.waveform, for: item, priority: priority)
+        }
         if kind.readsPicture, kind.applies(to: item), AnalysisKind.converted.applies(to: item) {
             let conversion = await waitFor(.converted, for: item, priority: priority)
             guard conversion == .ready else { return conversion }

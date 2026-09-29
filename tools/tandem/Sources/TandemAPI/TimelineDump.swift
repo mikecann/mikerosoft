@@ -171,6 +171,23 @@ public enum TimelineDump {
             let heads = Dictionary(track.transitions.filter { $0.fromClipID == nil }.compactMap { t in t.toClipID.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
             let tails = Dictionary(track.transitions.compactMap { t in t.fromClipID.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
             var previousEnd: Time? = range ? nil : .zero
+            // The words each clip plays, placed among all of the track's
+            // clips at once, so a word a cut runs through shows on one side.
+            var spoken: [String: [TranscriptTools.SpokenWord]] = [:]
+            var transcribed = Set<String>()
+            if let transcripts = options.transcripts, speechTrackIDs.contains(track.id) {
+                var byMedia: [String: [Clip]] = [:]
+                for clip in track.clips where TranscriptTools.isHeard(clip) || clips.contains(where: { $0.id == clip.id }) {
+                    if let mediaID = clip.mediaID { byMedia[mediaID, default: []].append(clip) }
+                }
+                for (mediaID, group) in byMedia {
+                    guard let item = project.media(mediaID), item.hasAudio, let transcript = transcripts(item) else { continue }
+                    transcribed.insert(mediaID)
+                    for word in TranscriptTools.words(transcript, playedBy: group, mediaID: mediaID) {
+                        spoken[word.clipID, default: []].append(word)
+                    }
+                }
+            }
             for (clip, own) in zip(clips, settings) {
                 if track.rippleMode == .cut, let previousEnd, clip.start > previousEnd {
                     out.append("    gap \(previousEnd)-\(clip.start) (\(TimeText.duration(clip.start - previousEnd)))")
@@ -194,11 +211,11 @@ public enum TimelineDump {
                     let target = transition.toClipID.map { " into \($0)" } ?? " out"
                     out.append("    ~ \(transition.type.rawValue)\(direction(transition)) \(TimeText.duration(transition.duration))\(target)  \(transition.id)")
                 }
-                if let transcripts = options.transcripts, speechTrackIDs.contains(track.id),
+                if options.transcripts != nil, speechTrackIDs.contains(track.id),
                    let mediaID = clip.mediaID, let item = project.media(mediaID), item.hasAudio {
-                    if let transcript = transcripts(item) {
+                    if transcribed.contains(mediaID) {
                         // With a range, only the words inside it, marked where they're cut short.
-                        let all = TranscriptTools.words(transcript, playedBy: clip)
+                        let all = spoken[clip.id] ?? []
                         let shown = all.filter { overlaps($0.start, $0.end) }
                         var words = shown.map(\.text).joined(separator: " ")
                         if !words.isEmpty {

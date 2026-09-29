@@ -1,4 +1,5 @@
 import Foundation
+import TandemAPI
 import TandemCore
 import TandemMedia
 
@@ -6,9 +7,12 @@ import TandemMedia
 /// with ripple deletes, so the camera, screen and voice stay in sync and
 /// B-roll and music follow.
 enum PauseTightening {
-    /// Timeline ranges to remove: gaps between words longer than `minimum`,
-    /// less `keep` of breathing room on each side, only inside `within` if
-    /// given. Sorted and merged.
+    /// Timeline ranges to remove: pauses between words longer than
+    /// `minimum` (found the way `tandem pauses` finds them, from words
+    /// trimmed to the voice and placed through the cuts), less `keep` of
+    /// breathing room on each side, only inside `within` if given. Sorted
+    /// and merged. Locked tracks aren't tightened, so their words don't
+    /// count.
     static func ranges(
         in project: Project,
         transcript: (MediaItem) -> Transcript?,
@@ -16,28 +20,23 @@ enum PauseTightening {
         keep: Time,
         within: TimeRange? = nil
     ) -> [TimeRange] {
+        var unlocked = project
+        for index in unlocked.audioTracks.indices where unlocked.audioTracks[index].locked {
+            unlocked.audioTracks[index].clips = []
+        }
+        let map = TranscriptTools.speechMap(unlocked, transcripts: transcript)
+        let frameRate = project.settings.frameRate
         var ranges: [TimeRange] = []
-        for track in project.audioTracks where track.rippleMode == .cut && !track.locked {
-            for clip in track.clips {
-                guard let item = clip.mediaID.flatMap({ project.media($0) }), let words = transcript(item)?.words, words.count > 1 else { continue }
-                let inside = words.filter { $0.end > clip.sourceStart && $0.start < clip.sourceEnd }.sorted { $0.start < $1.start }
-                for (a, b) in zip(inside, inside.dropFirst()) {
-                    guard b.start - a.end >= minimum else { continue }
-                    let start = a.end + keep
-                    let end = b.start - keep
-                    guard end > start else { continue }
-                    let timelineStart = clip.start + Time(seconds: (start - clip.sourceStart).seconds / clip.speed)
-                    let timelineEnd = clip.start + Time(seconds: (end - clip.sourceStart).seconds / clip.speed)
-                    var range = TimeRange(start: max(timelineStart, clip.start), end: min(timelineEnd, clip.end))
-                    range.start = range.start.roundedToFrame(project.settings.frameRate)
-                    range.duration = (range.end.roundedToFrame(project.settings.frameRate)) - range.start
-                    if let within {
-                        guard let clipped = range.intersection(within) else { continue }
-                        range = clipped
-                    }
-                    if !range.isEmpty { ranges.append(range) }
-                }
+        for pause in TranscriptTools.pauses(in: map, minimum: minimum) {
+            let start = (pause.start + keep).roundedToFrame(frameRate)
+            let end = (pause.end - keep).roundedToFrame(frameRate)
+            guard end > start else { continue }
+            var range = TimeRange(start: start, end: end)
+            if let within {
+                guard let clipped = range.intersection(within) else { continue }
+                range = clipped
             }
+            if !range.isEmpty { ranges.append(range) }
         }
         return TimeRange.union(ranges)
     }

@@ -306,12 +306,26 @@ clips in the range).
 - `transcript <clip ID>` gives word timings in timeline time;
   `transcript <media ID>` gives the whole file in file time; with no ID you
   get everything said on the timeline.
+- Word times are trimmed to the voice. SpeechAnalyzer times its words end
+  to end, so each pause hides inside a word; Tandem pulls every word in to
+  where the take's waveform is over its noise floor (about what ffmpeg's
+  silencedetect hears at -32 dB on a phone take) when it reads the
+  transcript, including transcripts made before it did.
+- A word a cut runs through shows once, on the side where most of it
+  plays, and a word with less than half of it left doesn't show: it was
+  cut. Captions, `pauses`, `tighten`, `search`, `transcript` and `timeline
+  --words` all follow this, and so does the app's transcript lane, so
+  cutting a pause never doubles a word and cutting out a stumble takes its
+  words with it.
 - `search "phrase"` gives timeline ranges and the clips that play them. It
-  ignores case and punctuation, marks hits a cut runs through as partial,
-  and also lists matches in material that was cut out.
-- `pauses --min 0.6` lists silences between words in timeline time. Only
+  ignores case and punctuation, marks hits a cut runs through as partial
+  (one hit for each side, covering the phrase's words there), and also
+  lists matches in material that was cut out.
+- `pauses --min 0.6` lists the gaps between words in timeline time. Only
   gaps fully covered by transcribed speech count, so a hole in the take or a
-  clip still waiting for its transcript is never reported as a pause.
+  clip still waiting for its transcript is never reported as a pause. A
+  breath, click or "um" between two words (SpeechAnalyzer leaves ums out)
+  is part of the pause, so `tighten` cuts it with the silence.
 - `media` shows each file's analysis state. Transcripts, loudness, proxies
   and cutout mattes are made in the background; tools that need a
   transcript say which files don't have one yet.
@@ -840,7 +854,10 @@ tandem undo                                  # if it's too tight
 
 Each pause of at least `--min` is shortened to `--keep`, cut from the
 middle so half the kept silence stays after the last word and half before
-the next one, with the cut edges on frame boundaries. The plan is a batch of
+the next one, with the cut edges on frame boundaries. Word edges come from
+the voice, so a pause is the real gap between words (breaths and clicks in
+it included), not what's left between the transcript's stretched word
+times. The plan is a batch of
 `rippleDeleteRange` commands (latest first, so every range is in the
 current timeline's times); `--json` prints it if you'd rather adjust it and
 `apply` it yourself. `--from` and `--to` limit it to part of the video. In
@@ -862,7 +879,9 @@ Mike's shorts use). They go on a "Captions" video track that follows ripple
 edits, so tightening pauses afterwards keeps them in sync. `--y` moves them:
 the default 0.42 sits between the screen and the camera in a 9:16 short;
 use about 0.85 for landscape. Run it again over the same range to redo them
-(it overwrites what's on the track there).
+(it overwrites what's on the track there). After cutting pauses or
+stumbles, a word shows once, on the side of the cut where most of it plays,
+and words that were cut out don't show.
 
 ### Make a short
 

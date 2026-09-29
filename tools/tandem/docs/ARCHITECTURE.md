@@ -196,13 +196,26 @@ edits, so placing a take or pressing 2 for the PiP queues its work. Results are 
 | Kind | Result | Notes |
 | --- | --- | --- |
 | thumbnails | JPEG strip | for the timeline and browser |
-| waveform | peak envelope | drawn on audio clips |
+| waveform | peak envelope | drawn on audio clips; transcripts are aligned to it |
 | loudness | integrated LUFS, true peak, LRA | per file; dialogue is levelled per take, not per cut |
 | proxy | 1080p HEVC, a keyframe every 15 frames; HEVC with alpha for video with alpha | used for motion; paused frames decode the original |
-| transcript | words with media times | SpeechAnalyzer first; Whisper medium.en as the careful pass |
+| transcript | words with media times | SpeechAnalyzer first; Whisper medium.en as the careful pass; the engine's times are kept and trimmed to the voice when read |
 | matte | greyscale HEVC person matte | Vision person segmentation, blended with the instance mask to keep a handheld mic |
 | isolatedVoice | audio file | AUSoundIsolation, shifted back by its 3,665-sample latency |
 | converted | HEVC copy, alpha kept | only for video macOS can't decode (QuickTime Animation, PNG in a MOV); made with ffmpeg; the picture, thumbnails, proxy and matte come from it |
+
+### Words on the timeline
+
+Transcript word times are pulled in to the voice when a transcript is read
+(`TranscriptAlignment`, from the file's waveform), because SpeechAnalyzer's
+run end to end and swallow the pauses. Everything that puts words on the
+timeline (captions, pauses, tighten, search, `transcript`, `timeline
+--words`, the app's transcript lane and its Tighten pauses) places them
+with one rule, `Transcript.placements(on:)`: among the clips of one track
+that play the file, a word shows once, on the clip that plays most of it
+(measured in media time, so speed doesn't change it), and not at all when
+less than half of it is left, because it was cut. A clip that plays the
+same stretch again shows its words again.
 
 ## Rendering
 

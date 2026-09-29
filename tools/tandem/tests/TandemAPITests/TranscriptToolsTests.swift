@@ -13,8 +13,9 @@ final class TranscriptToolsTests: XCTestCase {
         ])
         // Plays file 10...20 at double speed, starting at 100 on the timeline.
         let clip = Clip(id: "clip_fast", content: .media(mediaID: "med_a"), start: t(100), duration: t(5), sourceStart: t(10), speed: 2)
-        let words = TranscriptTools.words(transcript, playedBy: clip)
-        XCTAssertEqual(words.map(\.text), ["straddles", "inside"])
+        let track = Track(id: "trk_voice", kind: .audio, name: "Voice", clips: [clip], rippleMode: .cut)
+        let words = TranscriptTools.words(transcript, playedBy: clip, on: track)
+        XCTAssertEqual(words.map(\.text), ["straddles", "inside"], "half of \"straddles\" plays, so it stays")
         XCTAssertEqual(words[0].start, t(100), "clamped to the clip's start")
         XCTAssertEqual(words[0].end, t(100.25))
         XCTAssertEqual(words[1].start, t(101))
@@ -81,7 +82,87 @@ final class TranscriptToolsTests: XCTestCase {
         XCTAssertEqual(result.hits.count, 1)
         XCTAssertTrue(result.hits[0].partial)
         XCTAssertEqual(result.hits[0].start, t(29.45))
-        XCTAssertEqual(result.hits[0].end, t(30), "clamped to the end of the first piece")
+        XCTAssertEqual(result.hits[0].end, t(29.9), "the end of \"section.\", the last of its words that plays")
+        XCTAssertEqual(Set(result.hits[0].clipIDs), ["clip_voc1", "clip_cam1"])
+    }
+
+    func testAWordACutRunsThroughIsSaidOnce() throws {
+        let h = try ServiceHarness()
+        defer { h.close() }
+        // Cut 29.6-29.7 out of "section." (file 29.45-29.9): 0.15 s of it
+        // before the cut, 0.2 s after.
+        try h.apply(.rippleDeleteRange(range: TimeRange(start: t(29.6), end: t(29.7)), trackIDs: nil))
+        let spoken = try h.service.transcript(id: nil, from: nil, to: nil).words
+        XCTAssertEqual(spoken.filter { $0.text == "section." }.count, 1)
+        let section = try XCTUnwrap(spoken.first { $0.text == "section." })
+        XCTAssertEqual(section.start, t(29.6), "on the piece after the cut, where most of it plays")
+        XCTAssertEqual(section.end, t(29.8))
+        XCTAssertNotEqual(section.clipID, "clip_voc1")
+        let captions = try h.service.captions(CaptionsRequest(), context: h.context)
+        let text = captions.captions.map(\.text).joined(separator: " ")
+        XCTAssertEqual(text.components(separatedBy: "section.").count - 1, 1, text)
+        // Each clip's words in the dump show it once too.
+        let dump = try h.service.timeline(from: t(25), to: t(35), format: .text, words: true).text ?? ""
+        XCTAssertEqual(dump.components(separatedBy: "section.").count - 1, 1, dump)
+        let search = try h.service.search(phrase: "second section", limit: nil)
+        XCTAssertEqual(search.hits.count, 2, "\"second\" before the cut, \"section.\" after it")
+        XCTAssertTrue(search.hits.allSatisfy(\.partial))
+    }
+
+    func testAWordMostlyCutOutIsGone() throws {
+        let h = try ServiceHarness()
+        defer { h.close() }
+        // "decision" is file (and timeline) 2.55-3.0; cut 2.6-2.95 out of it.
+        try h.apply(.rippleDeleteRange(range: TimeRange(start: t(2.6), end: t(2.95)), trackIDs: nil))
+        let text = try h.service.transcript(id: nil, from: nil, to: t(10)).words.map(\.text).joined(separator: " ")
+        XCTAssertTrue(text.hasPrefix("So today we talk about models. They help you choose"), text)
+        let clip = try h.service.transcript(id: "clip_voc1", from: nil, to: nil).words.map(\.text)
+        XCTAssertFalse(clip.contains("decision"), "\(clip)")
+    }
+
+    /// The workbench short's numbers from end to end: "of" ran from 28.14
+    /// to 29.22 over a silence from 28.26 to 29.05, "and" from 30.18 to
+    /// 31.50 over one from 30.74 to 31.40. Trimmed to the voice, both pauses
+    /// show, and a cut in the first one says "of" once.
+    func testTheWorkbenchPausesAndTheCutAfterWorkbench() throws {
+        var peaks = [Float](repeating: 0.001, count: 3500)
+        for (start, end) in [(27.66, 28.26), (29.05, 30.74), (31.40, 31.68)] {
+            for index in Int((start * 100).rounded())..<Int((end * 100).rounded()) { peaks[index] = 0.25 }
+        }
+        let raw = Transcript(language: "en-US", engine: "SpeechAnalyzer", words: [
+            TranscriptWord(text: "a", start: t(27.48), end: t(27.66)),
+            TranscriptWord(text: "workbench", start: t(27.66), end: t(28.14)),
+            TranscriptWord(text: "of", start: t(28.14), end: t(29.22)),
+            TranscriptWord(text: "this", start: t(29.22), end: t(29.40)),
+            TranscriptWord(text: "size", start: t(29.40), end: t(30.18)),
+            TranscriptWord(text: "and", start: t(30.18), end: t(31.50)),
+            TranscriptWord(text: "then", start: t(31.50), end: t(31.68))
+        ])
+        var project = APIFixture.project()
+        // The take from file 25 at the start of the timeline, uncut.
+        project.videoTracks = project.videoTracks.map { track in
+            var track = track
+            if track.rippleMode == .cut { track.clips = [] }
+            return track
+        }
+        project.audioTracks[0].clips = [
+            Clip(id: "clip_voc", content: .media(mediaID: "med_camera"), start: t(0), duration: t(10), sourceStart: t(25))
+        ]
+        let h = try ServiceHarness(project: project)
+        defer { h.close() }
+        h.analysis.transcripts["med_camera"] = raw
+        XCTAssertTrue(try h.service.pauses(minimum: t(0.45), from: nil, to: nil).pauses.isEmpty, "the engine's times hide them")
+
+        h.analysis.transcripts["med_camera"] = raw.aligned(to: Waveform(samplesPerSecond: 100, peaks: peaks))
+        let pauses = try h.service.pauses(minimum: t(0.45), from: nil, to: nil).pauses
+        XCTAssertEqual(pauses.map(\.start), [t(3.26), t(5.74)])
+        XCTAssertEqual(pauses.map(\.end), [t(4.05), t(6.40)])
+        XCTAssertEqual(pauses.map(\.before), ["a workbench", "of this size and"])
+
+        // Cut file 28.35-28.95 (timeline 3.35-3.95), inside the first pause.
+        try h.apply(.rippleDeleteRange(range: TimeRange(start: t(3.35), end: t(3.95)), trackIDs: nil))
+        let text = try h.service.captions(CaptionsRequest(), context: h.context).captions.map(\.text).joined(separator: " ")
+        XCTAssertEqual(text, "a workbench of this size and then")
     }
 
     func testSearchIgnoresCaseAndPunctuation() {
