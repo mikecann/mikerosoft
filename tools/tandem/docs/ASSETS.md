@@ -149,7 +149,11 @@ selection as segment… (or right-click a clip), `tandem segments save` or
 `segments_save`; they're in the Text tab under Segments. Inserting one is a
 single `insertTemplate` whose media clips carry their media items, pointing
 at the files in the segment's folder, so a project that lacks them gets them
-added and one that has them reuses them. See AGENTS.md for the commands.
+added and one that has them reuses them. A clip whose file or look came from
+the asset library carries the asset's ID as an `asset:<id>` tag, and the
+credits count every asset a clip on the timeline names that way, so a Noto
+sticker in an intro is still credited in every video the intro goes into.
+See AGENTS.md for the commands.
 
 ## Shared files and archived projects
 

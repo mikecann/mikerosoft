@@ -1163,8 +1163,10 @@ Before publishing:
   - No licence on record for "Glitch Hit 02". Add a tandem-licence.json to their import folder, or replace them.
 ```
 
-It counts the assets still in the project's media, so run it last, after
-removing media the cut no longer uses. Sort out everything under "Before
+It counts the assets still in the project's media, and any a clip names in
+an `asset:<id>` tag (a saved segment's clips carry them for the library
+assets they came from), so run it last, after removing media the cut no
+longer uses. Sort out everything under "Before
 publishing" first. `--optional` adds courtesy credits nobody requires
 (Pexels creators).
 

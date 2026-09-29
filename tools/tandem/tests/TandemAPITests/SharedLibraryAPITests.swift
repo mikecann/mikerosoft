@@ -446,6 +446,9 @@ final class SegmentTests: XCTestCase {
         try FileManager.default.removeItem(at: intro.f.library("Segments/Intro"))
         let library = try AssetLibrary(root: intro.f.assetsRoot, transport: OfflineTransport(), secrets: StaticSecretStore(), sharedLibrary: intro.f.shared.root)
         let assets = AssetService(library: library)
+        // The sticker came from the shared library, as far as the credits know.
+        try await library.rescanSharedLibrary()
+        try library.catalog.recordUsage(AssetUsage(assetID: "shared:Stickers/Star.mov", projectID: "prj_intro", mediaID: "med_star", mediaPath: intro.f.library("Stickers/Star.mov").path))
 
         let saved = try await assets.saveSegment(SegmentSaveRequest(name: "Intro", from: t(10), to: t(13), fields: [SegmentMaker.Field.parse("clip_title=Title")]), project: intro.client)
         XCTAssertEqual(Set(saved.clipIDs), Set(intro.ids))
@@ -463,7 +466,11 @@ final class SegmentTests: XCTestCase {
         XCTAssertEqual(inserted.applied.author, "claude")
         XCTAssertEqual(inserted.applied.label, "Add segment Intro")
         XCTAssertTrue(inserted.readableText.hasPrefix("Put the segment \"Intro\" at 00:05.000 as revision 2"), inserted.readableText)
-        XCTAssertEqual(try ProjectFile.load(from: other).project.track(named: "Graphics")?.clips.first?.start, t(5))
+        let otherProject = try ProjectFile.load(from: other).project
+        XCTAssertEqual(otherProject.track(named: "Graphics")?.clips.first?.start, t(5))
+        // Its sticker still shows up in the credits of the video it went into.
+        XCTAssertEqual(otherProject.track(named: "B-roll")?.clips.first?.tags.filter { $0.hasPrefix("asset:") }, ["asset:shared:Stickers/Star.mov"])
+        XCTAssertEqual(try library.credits(for: otherProject).assets.map(\.id), ["shared:Stickers/Star.mov"])
 
         do {
             _ = try await assets.insertSegment(SegmentInsertRequest(name: "Intro", at: t(5)), project: client)

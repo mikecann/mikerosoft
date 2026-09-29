@@ -250,10 +250,17 @@ extension AssetLibrary {
 
     // MARK: - Credits
 
+    /// The tag a clip carries for the catalogue asset its file or look came
+    /// from when it arrived some other way than being used from the
+    /// library (in a saved segment): `asset:<id>`.
+    public static let assetTagPrefix = "asset:"
+
     /// Credits for every asset the project uses now: assets recorded as
-    /// used in this project whose media is still in it. Fonts and LUTs have
-    /// no media item, so they count while their copy is still in the
-    /// project folder (or always, when no folder is given).
+    /// used in this project whose media is still in it, and assets a clip
+    /// still on the timeline names in an `asset:` tag (a segment's sticker
+    /// or sound). Fonts and LUTs have no media item, so they count while
+    /// their copy is still in the project folder (or always, when no folder
+    /// is given).
     public func credits(for project: Project, in folder: ProjectFolder? = nil) throws -> ProjectCredits {
         let mediaIDs = Set(project.media.map(\.id))
         let mediaPaths = Set(project.media.map(\.path))
@@ -268,6 +275,10 @@ extension AssetLibrary {
                 current = true
             }
             if current, !ids.contains(use.assetID) { ids.append(use.assetID) }
+        }
+        for tag in project.allTracks.flatMap(\.clips).flatMap(\.tags) where tag.hasPrefix(Self.assetTagPrefix) {
+            let id = String(tag.dropFirst(Self.assetTagPrefix.count))
+            if !id.isEmpty, !ids.contains(id) { ids.append(id) }
         }
         return try credits(assetIDs: ids)
     }

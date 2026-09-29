@@ -293,6 +293,33 @@ public enum SegmentMaker {
         public var files: [FileCopy]
     }
 
+    /// Which asset library assets a project's files and looks came from,
+    /// so the segment's clips carry them (`asset:<id>` tags) and the
+    /// description credits of every video it goes into still list them.
+    public struct AssetLookup: Sendable {
+        public var byMediaID: [String: String]
+        public var byPath: [String: String]
+
+        public init(byMediaID: [String: String] = [:], byPath: [String: String] = [:]) {
+            self.byMediaID = byMediaID
+            self.byPath = byPath
+        }
+
+        /// From what the catalogue recorded the project using.
+        public init(usage: [AssetUsage]) {
+            self.init()
+            for use in usage {
+                if let mediaID = use.mediaID { byMediaID[mediaID] = use.assetID }
+                if let path = use.mediaPath { byPath[path] = use.assetID }
+            }
+        }
+
+        /// For `project`, from `library`'s catalogue.
+        public init(project: Project, library: AssetLibrary?) {
+            self.init(usage: (try? library?.catalog.usage(forProject: project.id)) ?? [])
+        }
+    }
+
     /// Makes a segment called `name` of the clips `clipIDs` (exactly those:
     /// the app's selection brings linked clips along), starting where the
     /// first of them starts. Each clip goes on a track of the same name and
@@ -300,7 +327,7 @@ public enum SegmentMaker {
     /// (a converted shared sticker named after its original), and LUTs
     /// with them. `fields` turn titles into words asked for on insert; any
     /// `{{key}}` already in a title is a field too.
-    public static func draft(name: String, clipIDs: [String], in project: Project, folder: ProjectFolder, fields: [Field] = [], assetsRoot: URL? = AssetLibrary.root()) throws -> Draft {
+    public static func draft(name: String, clipIDs: [String], in project: Project, folder: ProjectFolder, fields: [Field] = [], assets: AssetLookup = AssetLookup(), assetsRoot: URL? = AssetLibrary.root()) throws -> Draft {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !SegmentStore.folderName(for: name).isEmpty else { throw ServiceError(.badRequest, "A segment needs a name.") }
         var seen = Set<String>()
@@ -346,6 +373,15 @@ public enum SegmentMaker {
             clip.start = .zero
             clip.linkGroup = nil
             clip.tags.removeAll { $0.hasPrefix("template:") }
+            // The library assets it plays or grades with, for the credits.
+            var sources = (clip.video?.effects ?? []).compactMap(ProjectArchiver.lutPath).compactMap { assets.byPath[$0] }
+            if let mediaID = original.mediaID, let item = project.media(mediaID) {
+                sources += [assets.byMediaID[mediaID] ?? assets.byPath[item.path]].compactMap { $0 }
+                sources += item.look.compactMap(ProjectArchiver.lutPath).compactMap { assets.byPath[$0] }
+            }
+            for id in sources where !clip.tags.contains(AssetLibrary.assetTagPrefix + id) {
+                clip.tags.append(AssetLibrary.assetTagPrefix + id)
+            }
             var mediaPath: String?
             if let mediaID = original.mediaID {
                 guard let item = project.media(mediaID) else { throw ServiceError(.notFound, "Clip \(original.id) plays media \(mediaID), which isn't in the project.") }

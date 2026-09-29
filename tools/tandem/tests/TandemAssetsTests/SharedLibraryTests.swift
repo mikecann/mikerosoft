@@ -243,6 +243,24 @@ final class SharedLibraryTests: XCTestCase {
         XCTAssertThrowsError(try library.remove("shared:Music/Bed.wav"))
     }
 
+    /// A saved segment's clips name the library assets they came from, so
+    /// the credits of a video the segment goes into list them.
+    func testCreditsFollowAssetTagsOnClips() async throws {
+        let (library, shared) = try makeShared()
+        try Generated.sineWAV(at: file(shared, "Music/Sting.wav"), seconds: 0.2)
+        try FolderLicence(source: "Test Sounds", licence: "CC BY 4.0", licenceClass: .creditNeeded, credit: "Sting by Test Sounds (CC BY 4.0)").write(in: file(shared, "Music"))
+        try await library.rescanSharedLibrary()
+        var project = Project(id: "prj_tags", name: "Tagged")
+        // What matters is the tag, whatever the clip is.
+        project.videoTracks = [Track(id: "trk_text", kind: .video, name: "Text", clips: [
+            Clip(id: "clip_title", content: .text(TextContent(text: "Intro")), start: .zero, duration: Time(seconds: 1), tags: ["template:segment:Intro", "asset:shared:Music/Sting.wav"])
+        ])]
+        let credits = try library.credits(for: project)
+        XCTAssertEqual(credits.entries.map(\.line), ["Sting by Test Sounds (CC BY 4.0)"])
+        project.videoTracks[0].clips = []
+        XCTAssertEqual(try library.credits(for: project).entries, [], "gone with its clip")
+    }
+
     func testSharedFontsAreFoundForRegistering() throws {
         guard let font = Generated.systemFont() else { throw XCTSkip("no system TTF found") }
         let (library, shared) = try makeShared()

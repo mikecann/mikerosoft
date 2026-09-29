@@ -190,7 +190,10 @@ extension AssetService {
         } else {
             throw ServiceError(.badRequest, "Say which clips to save: clipIDs, or from and to.")
         }
-        let draft = try SegmentMaker.draft(name: request.name, clipIDs: ids, in: project, folder: folder, fields: request.fields ?? [], assetsRoot: library.root)
+        let draft = try SegmentMaker.draft(
+            name: request.name, clipIDs: ids, in: project, folder: folder, fields: request.fields ?? [],
+            assets: SegmentMaker.AssetLookup(project: project, library: library), assetsRoot: library.root
+        )
         let store = segmentStore
         let stored = try await ProjectArchiver.onBackgroundThread { try store.save(draft, replace: request.replace ?? false) }
         return SegmentSaveResult(segment: stored.summary, clipIDs: ids, copied: draft.files.map(\.name), notes: draft.segment.notes)

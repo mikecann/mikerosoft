@@ -113,7 +113,11 @@ final class SaveSegmentModel {
         let replace = stage == .exists
         let draft: SegmentMaker.Draft
         do {
-            draft = try SegmentMaker.draft(name: setup.name, clipIDs: clipIDs, in: project, folder: folder, fields: setup.fields)
+            let library = AssetLibraryHost.shared.library
+            draft = try SegmentMaker.draft(
+                name: setup.name, clipIDs: clipIDs, in: project, folder: folder, fields: setup.fields,
+                assets: SegmentMaker.AssetLookup(project: project, library: library), assetsRoot: library?.root ?? AssetLibrary.root()
+            )
         } catch {
             stage = .failed(ServiceError.wrap(error).message)
             return
