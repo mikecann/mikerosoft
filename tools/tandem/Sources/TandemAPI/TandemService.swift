@@ -278,7 +278,10 @@ public final class TandemService: @unchecked Sendable {
             guard let transcript = analysis.transcript(for: item) else {
                 throw ServiceError(.unavailable, "\(item.path) has no transcript yet. Transcripts are made in the background; `tandem media` shows progress.")
             }
-            let words = TranscriptTools.words(transcript, playedBy: clip).filter { keep($0.start, $0.end) }.map {
+            guard let track = project.allTracks.first(where: { $0.clips.contains { $0.id == id } }) else {
+                throw ServiceError(.notFound, "No media or clip with ID \(id).")
+            }
+            let words = TranscriptTools.words(transcript, playedBy: clip, on: track).filter { keep($0.start, $0.end) }.map {
                 WordTiming(text: $0.text, start: $0.start, end: $0.end, clipID: $0.clipID, confidence: $0.confidence)
             }
             return TranscriptResult(revision: revision, scope: "clip", id: id, timelineTimes: true, words: words, missing: [])

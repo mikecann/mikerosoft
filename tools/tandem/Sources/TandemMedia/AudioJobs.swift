@@ -4,7 +4,9 @@ import Foundation
 import TandemCore
 
 /// Mono peak envelope for drawing audio: the loudest absolute sample over
-/// all channels, `rate` times a second of media.
+/// all channels, `rate` times a second of media. At the default 100 a second
+/// it's also what `TranscriptAlignment` finds the voice in: a peak under a
+/// threshold is exactly what ffmpeg's silencedetect calls silence.
 ///
 /// Stored as `waveform.json` (a small header) beside `peaks.f32` (raw
 /// little-endian Float32 peaks), so drawing a 24 minute take reads 580 KB

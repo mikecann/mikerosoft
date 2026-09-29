@@ -271,6 +271,15 @@ final class PauseTighteningTests: XCTestCase {
         assertValid(f.project)
     }
 
+    func testAPauseACutRunsThroughIsFoundOnce() throws {
+        let f = try AppFixture()
+        // Cut 2.5-3.0 out of the pause between "have" (ends 2) and "evals"
+        // (starts 3.5): what's left of it is still one pause.
+        try f.apply(EditBatch(label: "Cut", commands: [.rippleDeleteRange(range: TimeRange(start: t(2.5), end: t(3)))]))
+        let ranges = PauseTightening.ranges(in: f.project, transcript: { $0.id == "med_camera" ? self.transcript() : nil }, minimum: t(0.9), keep: t(0.2))
+        XCTAssertEqual(ranges.first, TimeRange(start: t(2.2), end: t(2.8)))
+    }
+
     func testRespectsTheInOutRange() throws {
         let f = try AppFixture()
         let ranges = PauseTightening.ranges(in: f.project, transcript: { _ in self.transcript() }, minimum: t(1), keep: t(0.2), within: TimeRange(start: t(0), end: t(5)))
@@ -318,6 +327,27 @@ final class CanvasGeometryTests: XCTestCase {
 }
 
 final class SmallPieceTests: XCTestCase {
+    func testTheTranscriptLaneShowsAWordACutRunsThroughOnce() throws {
+        let f = try AppFixture()
+        let transcript = Transcript(language: "en", engine: "test", words: [
+            TranscriptWord(text: "so", start: t(1), end: t(1.4)),
+            TranscriptWord(text: "I", start: t(1.4), end: t(2)),
+            TranscriptWord(text: "had", start: t(2.5), end: t(2.9)),
+            TranscriptWord(text: "um", start: t(4), end: t(4.3)),
+            TranscriptWord(text: "a", start: t(5), end: t(5.2))
+        ])
+        // A cut from 1.7 to 1.9 leaves half of "I" before it and a sixth
+        // after; one from 3.9 to 4.25 leaves a sixth of "um".
+        try f.apply(EditBatch(label: "Cuts", commands: [
+            .rippleDeleteRange(range: TimeRange(start: t(3.9), end: t(4.25))),
+            .rippleDeleteRange(range: TimeRange(start: t(1.7), end: t(1.9)))
+        ]))
+        let words = TranscriptPhrase.words(in: f.project) { $0.id == "med_camera" ? transcript : nil }
+        XCTAssertEqual(words.map(\.text), ["so", "I", "had", "a"])
+        XCTAssertEqual(words[1].end, t(1.7), "clamped to the piece it plays on")
+        XCTAssertEqual(words[2].start, t(2.3))
+    }
+
     func testTranscriptPhrasesBreakAtPauses() {
         let words: [(text: String, start: Time, end: Time)] = [
             ("so", t(0), t(0.2)), ("here", t(0.25), t(0.5)), ("we", t(1.5), t(1.6)), ("go", t(1.62), t(1.9))

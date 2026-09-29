@@ -5,9 +5,13 @@ import TandemMedia
 /// Transcript maths: mapping words from media time onto the timeline,
 /// finding phrases, finding pauses and planning how to tighten them.
 ///
-/// Transcripts are in media time (seconds into the file). A clip plays media
-/// from `sourceStart` at `speed`, so a word at media time `m` plays at
-/// `clip.start + (m - sourceStart) / speed`, if the clip reaches it.
+/// Transcripts are in media time (seconds into the file), with their word
+/// edges pulled in to the voice when they're read (`TranscriptAlignment`).
+/// A clip plays media from `sourceStart` at `speed`, so a word at media time
+/// `m` plays at `clip.start + (m - sourceStart) / speed`, if the clip reaches
+/// it. Which clip shows a word a cut runs through follows one rule,
+/// `Transcript.placements(on:)`: the clip that plays most of it, and none
+/// when less than half of it is left.
 public enum TranscriptTools {
     public static let defaultMinimum = 0.6
     public static let defaultKeep = 0.15
@@ -48,28 +52,38 @@ public enum TranscriptTools {
         clip.start + Time(seconds: (media - clip.sourceStart).seconds / clip.speed)
     }
 
-    /// The words of `transcript` that `clip` plays, clamped to the clip and
-    /// mapped to timeline time.
-    public static func words(_ transcript: Transcript, playedBy clip: Clip) -> [SpokenWord] {
-        guard !clip.freezeFrame, clip.speed > 0, let mediaID = clip.mediaID else { return [] }
-        let sourceStart = clip.sourceStart
-        let sourceEnd = clip.sourceEnd
-        return transcript.words.compactMap { word in
-            guard word.end > sourceStart, word.start < sourceEnd else { return nil }
-            let start = max(word.start, sourceStart)
-            let end = min(word.end, sourceEnd)
+    /// Whether a clip's sound is heard: enabled, not muted, not a freeze.
+    static func isHeard(_ clip: Clip) -> Bool {
+        clip.enabled && !(clip.audio?.muted ?? false) && !clip.freezeFrame
+    }
+
+    /// The words of `transcript` that `clips` play, in timeline order.
+    /// `clips` are one track's clips of the transcript's file; a word shows
+    /// once, on the clip that plays most of it, clamped to that clip, and not
+    /// at all when less than half of it is left (`Transcript.placements(on:)`).
+    public static func words(_ transcript: Transcript, playedBy clips: [Clip], mediaID: String) -> [SpokenWord] {
+        transcript.placements(on: clips).map { placed in
+            let word = transcript.words[placed.index]
             return SpokenWord(
-                text: word.text,
-                start: timelineTime(ofMediaTime: start, in: clip),
-                end: timelineTime(ofMediaTime: end, in: clip),
-                clipID: clip.id,
-                mediaID: mediaID,
-                confidence: word.confidence
+                text: word.text, start: placed.start, end: placed.end,
+                clipID: placed.clipID, mediaID: mediaID, confidence: word.confidence
             )
         }
     }
 
+    /// The words one clip plays, placed among the clips of `track` that play
+    /// the same file, so a word a cut runs through shows on one side only.
+    public static func words(_ transcript: Transcript, playedBy clip: Clip, on track: Track) -> [SpokenWord] {
+        guard let mediaID = clip.mediaID else { return [] }
+        let siblings = track.clips.filter { $0.mediaID == mediaID && ($0.id == clip.id || isHeard($0)) }
+        return words(transcript, playedBy: siblings, mediaID: mediaID).filter { $0.clipID == clip.id }
+    }
+
     public static func speechMap(_ project: Project, analysis: AnalysisSource) -> SpeechMap {
+        speechMap(project) { analysis.transcript(for: $0) }
+    }
+
+    public static func speechMap(_ project: Project, transcripts: (MediaItem) -> Transcript?) -> SpeechMap {
         var words: [SpokenWord] = []
         var covered: [TimeRange] = []
         var unknown: [TimeRange] = []
@@ -77,23 +91,32 @@ public enum TranscriptTools {
         var clips: [Clip] = []
         var cache: [String: Transcript?] = [:]
         for track in speechTracks(project) {
-            for clip in track.clips where clip.enabled && !(clip.audio?.muted ?? false) {
-                guard let mediaID = clip.mediaID, let item = project.media(mediaID), !clip.freezeFrame else { continue }
+            // Each file's words are placed among all of its clips on the
+            // track at once, so a cut between two of them shows a word once.
+            var byMedia: [String: [Clip]] = [:]
+            var order: [String] = []
+            for clip in track.clips where isHeard(clip) {
+                guard let mediaID = clip.mediaID, project.media(mediaID) != nil else { continue }
                 clips.append(clip)
+                if byMedia[mediaID] == nil { order.append(mediaID) }
+                byMedia[mediaID, default: []].append(clip)
+            }
+            for mediaID in order {
+                guard let item = project.media(mediaID), let group = byMedia[mediaID] else { continue }
                 let transcript: Transcript?
                 if let cached = cache[mediaID] {
                     transcript = cached
                 } else {
-                    transcript = analysis.transcript(for: item)
+                    transcript = transcripts(item)
                     cache[mediaID] = transcript
                 }
                 guard let transcript else {
                     missing.insert(mediaID)
-                    unknown.append(clip.range)
+                    unknown += group.map(\.range)
                     continue
                 }
-                covered.append(clip.range)
-                words += Self.words(transcript, playedBy: clip)
+                covered += group.map(\.range)
+                words += Self.words(transcript, playedBy: group, mediaID: mediaID)
             }
         }
         words.sort { ($0.start, $0.end) < ($1.start, $1.end) }
@@ -213,39 +236,56 @@ public enum TranscriptTools {
         var hits: [SearchHit] = []
         var unused: [UnusedHit] = []
         var missing: [String] = []
-        let clips = project.allTracks.flatMap(\.clips).filter { $0.mediaID != nil && !$0.freezeFrame && $0.speed > 0 }
         let speechMedia = Set(speechTracks(project).flatMap(\.clips).compactMap(\.mediaID))
         for item in project.media where item.hasAudio {
             guard let transcript = analysis.transcript(for: item) else {
                 if speechMedia.contains(item.id) { missing.append(item.id) }
                 continue
             }
-            for match in matches(of: phrase, in: transcript) {
-                let words = transcript.words
+            let found = matches(of: phrase, in: transcript)
+            guard !found.isEmpty else { continue }
+            // Where each word plays, track by track (the camera picture and
+            // its sound both play it), by the same rule as everything else.
+            var placed: [Int: [PlacedWord]] = [:]
+            var rank: [String: Int] = [:]
+            for track in project.allTracks {
+                let clips = track.clips.filter { $0.mediaID == item.id }
+                for clip in clips { rank[clip.id] = rank.count }
+                for word in transcript.placements(on: clips) { placed[word.index, default: []].append(word) }
+            }
+            let words = transcript.words
+            for match in found {
                 let mediaStart = words[match.lowerBound].start
                 let mediaEnd = words[match.upperBound].end
                 let text = words[match].map(\.text).joined(separator: " ")
                 let before = words[max(0, match.lowerBound - 4)..<match.lowerBound].map(\.text).joined(separator: " ")
                 let after = words[(match.upperBound + 1)..<min(words.count, match.upperBound + 5)].map(\.text).joined(separator: " ")
-                var byRange: [TimeRange: (clipIDs: [String], partial: Bool)] = [:]
-                for clip in clips where clip.mediaID == item.id && clip.sourceEnd > mediaStart && clip.sourceStart < mediaEnd {
-                    let start = max(mediaStart, clip.sourceStart)
-                    let end = min(mediaEnd, clip.sourceEnd)
-                    let range = TimeRange(
-                        start: timelineTime(ofMediaTime: start, in: clip),
-                        end: timelineTime(ofMediaTime: end, in: clip)
-                    )
-                    let partial = start > mediaStart || end < mediaEnd
-                    var entry = byRange[range] ?? ([], false)
-                    entry.clipIDs.append(clip.id)
-                    entry.partial = entry.partial || partial
-                    byRange[range] = entry
+                // The phrase's words on each clip: a cut through the phrase
+                // leaves part of it on each side, each marked partial.
+                var byClip: [String: (start: Time, end: Time, count: Int)] = [:]
+                for index in match {
+                    for word in placed[index] ?? [] {
+                        if let entry = byClip[word.clipID] {
+                            byClip[word.clipID] = (min(entry.start, word.start), max(entry.end, word.end), entry.count + 1)
+                        } else {
+                            byClip[word.clipID] = (word.start, word.end, 1)
+                        }
+                    }
                 }
-                if byRange.isEmpty {
+                if byClip.isEmpty {
                     unused.append(UnusedHit(
                         mediaID: item.id, path: item.path, text: text,
                         mediaStart: mediaStart, mediaEnd: mediaEnd, before: before, after: after
                     ))
+                }
+                var byRange: [TimeRange: (clipIDs: [String], partial: Bool)] = [:]
+                for clipID in byClip.keys.sorted(by: { rank[$0, default: 0] < rank[$1, default: 0] }) {
+                    let entry = byClip[clipID]!
+                    let range = TimeRange(start: entry.start, end: entry.end)
+                    var hit = byRange[range] ?? ([], false)
+                    hit.clipIDs.append(clipID)
+                    hit.partial = hit.partial || entry.count < match.count
+                    byRange[range] = hit
                 }
                 for (range, entry) in byRange {
                     hits.append(SearchHit(
