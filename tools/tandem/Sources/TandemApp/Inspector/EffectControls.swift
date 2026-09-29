@@ -194,12 +194,13 @@ struct ParamControls: View {
             SliderRow(
                 label: param.name, value: value.number ?? 0, range: lower...upper, bipolar: lower < 0 && upper > 0,
                 format: { ParamFormatting.format($0, param) },
-                parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-0123456789.".contains($0) }) },
+                parse: SliderRow.plainNumber,
+                defaultValue: param.defaultValue.number,
+                help: ParamHelp.text(definition, param),
+                step: param.step,
                 accessory: param.animatable ? keyframe?(param) : nil
             ) { newValue in
-                let step = param.step ?? 0
-                let snapped = step > 0 ? (newValue / step).rounded() * step : newValue
-                commit(param.key, .number(snapped), param.name)
+                commit(param.key, .number(newValue), param.name)
             }
         case .bool:
             HStack {
@@ -301,79 +302,25 @@ private struct StringParamRow: View {
     }
 }
 
-// MARK: - Colour tab
-
-/// The file's look (the grade every clip of the file gets) and the clip's
-/// own colour effects.
-struct ColourInspector: View {
-    let model: EditorModel
-    let clip: Clip
-    @State private var expanded: Set<String> = []
-
-    var body: some View {
-        let isVideo = model.project.location(ofClip: clip.id)?.track.kind == .video
-        if !isVideo {
-            Text("Colour applies to picture. Select a video clip.")
-                .font(.ui(12))
-                .foregroundStyle(Theme.textMuted.color)
-                .padding(16)
-        } else {
-            if let item = model.media(for: clip) {
-                lookSection(item)
-            }
-            EffectStack(model: model, clip: clip, domain: .video, title: "This clip only", onlyCategories: ["Colour"])
-        }
+/// What an effect's parameter does, for its control's tooltip. Effects
+/// without a line here (a pack's) get their summary.
+enum ParamHelp {
+    static func text(_ definition: EffectDefinition, _ param: ParamDefinition) -> String {
+        if let line = lines["\(definition.type).\(param.key)"] { return line }
+        return "\(definition.name) \(param.name.lowercased()). \(definition.summary)"
     }
 
-    private func lookSection(_ item: MediaItem) -> some View {
-        let colourTypes = EffectRegistry.standard.sorted.filter { $0.domain == .video && $0.category == "Colour" }
-        let users = model.project.videoTracks.flatMap(\.clips).filter { $0.mediaID == item.id }.count
-        return InspectorSection(title: "Look", icon: Icons.look, accessory: {
-            Menu {
-                ForEach(colourTypes, id: \.type) { definition in
-                    Button(definition.name, systemImage: Icons.effect(definition.type)) {
-                        let effect = Effect(type: definition.type)
-                        if model.apply(InspectorEdits.look(item.id, item.look + [effect], label: "Add \(definition.name.lowercased()) to the look")) != nil {
-                            expanded.insert(effect.id)
-                        }
-                    }
-                }
-            } label: {
-                Text("+ Add").font(.ui(11.5)).foregroundStyle(Theme.amber.color)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-        }) {
-            Text(verbatim: "Applies to every clip from \(MediaCatalog.fileName(item)) (\(users) on the timeline).")
-                .font(.ui(11.5))
-                .foregroundStyle(Theme.textMuted.color)
-                .fixedSize(horizontal: false, vertical: true)
-            if item.look.isEmpty {
-                Text("No grade yet. Add Colour to start one.")
-                    .font(.ui(11.5))
-                    .foregroundStyle(Theme.textFaint.color)
-            }
-            ForEach(item.look) { effect in
-                EffectRow(
-                    effect: effect,
-                    expanded: expanded.contains(effect.id),
-                    toggleExpanded: {
-                        if expanded.contains(effect.id) { expanded.remove(effect.id) } else { expanded.insert(effect.id) }
-                    },
-                    setEnabled: { enabled in
-                        var look = item.look
-                        if let index = look.firstIndex(where: { $0.id == effect.id }) { look[index].enabled = enabled }
-                        model.apply(InspectorEdits.look(item.id, look, label: enabled ? "Turn on look effect" : "Turn off look effect"))
-                    },
-                    remove: {
-                        model.apply(InspectorEdits.look(item.id, item.look.filter { $0.id != effect.id }, label: "Remove from the look"))
-                    },
-                    commit: { key, value, name in
-                        model.apply(InspectorEdits.lookParam(item, effectID: effect.id, key: key, value: value, label: "Look: \(name.lowercased())"))
-                    }
-                )
-            }
-        }
-    }
+    static let lines: [String: String] = [
+        "dropShadow.distance": "How far the shadow falls from the picture, in pixels at 1080p.",
+        "dropShadow.angle": "Where the light comes from, degrees anticlockwise from the right: 135 casts the shadow down and right.",
+        "dropShadow.blur": "How soft the shadow's edge is, in pixels at 1080p.",
+        "dropShadow.opacity": "How dark the shadow is.",
+        "dropShadow.color": "The shadow's colour.",
+        "border.width": "How thick the outline is, in pixels at 1080p.",
+        "border.color": "The outline's colour.",
+        "roundedCorners.radius": "How round the corners are, in pixels at 1080p.",
+        "blur.radius": "How blurred the picture is, in pixels at 1080p.",
+        "pixelate.scale": "How big the blocks are, in pixels at 1080p. Big enough to hide keys and emails.",
+        "pitchShift.semitones": "Moves the pitch up or down without changing the speed. 12 is an octave."
+    ]
 }

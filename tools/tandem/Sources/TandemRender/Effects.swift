@@ -64,6 +64,9 @@ enum EffectRenderer {
             if values.allSatisfy({ $0 == 0 }) { return image }
             return kernel.apply(extent: extent, arguments: [image] + vectors("Hue") + vectors("Saturation") + vectors("Luminance")) ?? image
 
+        case "colorWheels":
+            return ColourWheelGrade(number).apply(to: image)
+
         case "vignette":
             guard let kernel = Kernels.vignette else { return image }
             let amount = number("amount") / 100

@@ -232,9 +232,17 @@ extension CommandSchema {
 
     static let paramValue = S.anyOf([S.number(), S.boolean(), S.string(), S.ref("Color"), S.ref("Point")])
 
+    /// The registry's effect types, "a, b or c", so a new one is listed
+    /// without editing this file.
+    static var effectTypes: String {
+        let types = EffectRegistry.standard.sorted.map(\.type)
+        guard let last = types.last else { return "" }
+        return types.count == 1 ? last : types.dropLast().joined(separator: ", ") + " or " + last
+    }
+
     static let effect = S.object([
         "id": S.string("Optional; set one to refer to it in the same batch."),
-        "type": S.string("colorAdjust, hsl, vignette, sharpen, lut, dropShadow, border, roundedCorners, blur, pixelate or pitchShift (see `effects`)."),
+        "type": S.string("\(effectTypes) (see `effects`)."),
         "enabled": S.boolean(),
         "params": S.map(S.ref("ParamValue"), "Missing ones use the defaults.")
     ], required: ["type"])

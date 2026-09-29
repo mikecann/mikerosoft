@@ -30,6 +30,7 @@ enum Icons {
     static func effect(_ type: String) -> String {
         switch type {
         case "colorAdjust": return "slider.horizontal.3"
+        case "colorWheels": return "scope"
         case "hsl": return "paintpalette"
         case "vignette": return "circle.dashed"
         case "sharpen": return "triangle.lefthalf.filled"
@@ -62,6 +63,28 @@ enum Icons {
     static let project = "film"
     static let keys = "keyboard"
     static let selectAClip = "cursorarrow.click.2"
+
+    // The Colour tab.
+    /// What the grade applies to: every clip of the take, or this one.
+    static let wholeTake = "film.stack"
+    static let thisClip = "film"
+    /// A section's reset arrow.
+    static let reset = "arrow.counterclockwise"
+    static let expanded = "chevron.down"
+    static let collapsed = "chevron.right"
+    static let otherColourEffects = "sparkles"
+    static let lutFile = "doc"
+    static let clearFile = "xmark.circle.fill"
+
+    /// A Colour tab section. Sections backed by one effect type use that
+    /// effect's icon; Light and Colour share one, so they get their own.
+    static func colourSection(_ section: ColourSection) -> String {
+        switch section {
+        case .light: return "sun.max"
+        case .colour: return "thermometer.medium"
+        default: return effect(section.effectType)
+        }
+    }
 
     /// A symbol sized for menu items, or nil if the name is unknown.
     static func menuImage(_ name: String) -> NSImage? {

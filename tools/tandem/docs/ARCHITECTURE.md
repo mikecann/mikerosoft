@@ -78,7 +78,10 @@ no forks or branches inside a project.
 - Video-track clips are silent. Sound always lives on audio tracks, linked to
   its picture with a shared `linkGroup`.
 - A camera file's colour grade lives on the media (`MediaItem.look`), so every
-  clip from that file gets it. Clip effects come after the look.
+  clip from that file gets it. Clip effects come after the look. The Colour
+  tab edits one or the other ("Whole take" or "This clip") as fixed
+  sections over the built-in colour effects; AGENTS.md has how it reads
+  and writes them.
 - Keyframe times are relative to the clip start and move with the clip.
 - Adding a field that matters means bumping `Project.currentSchemaVersion`
   (with a `ProjectFile.migrate` step if old files need it). Lenient decoding
@@ -240,7 +243,10 @@ packs/<name>/
 ```
 
 The inspector builds its controls from parameter definitions, so an effect in
-a pack gets UI for free.
+a pack gets UI for free. The built-in colour effects are the exception: the
+Colour tab shows them as fixed sections with their own controls (colour
+wheels, a colour mixer, gradient sliders), and a pack's colour effects get
+the generic controls after them.
 
 ## Testing
 

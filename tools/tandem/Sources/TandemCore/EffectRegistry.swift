@@ -144,7 +144,9 @@ public struct EffectRegistry: Sendable {
     /// The built-in effects, chosen from what Mike used in 51 Filmora
     /// projects: the camera grade (contrast, black level, temperature, red
     /// saturation, vignette, sharpen), the PiP drop shadow and border, and
-    /// a few utilities. No colour wheels or curves; he never touched them.
+    /// a few utilities. He never touched colour wheels in Filmora, but
+    /// they're what a grade in any other editor starts from, so the Colour
+    /// tab has them. No curves yet.
     public static let standard = EffectRegistry(builtIn)
 
     public static let builtIn: [EffectDefinition] = [
@@ -177,6 +179,20 @@ public struct EffectRegistry: Sendable {
                     ParamDefinition("\(colour)Hue", "\(colour.capitalized) hue", default: .number(0), min: -100, max: 100, step: 1),
                     ParamDefinition("\(colour)Saturation", "\(colour.capitalized) saturation", default: .number(0), min: -100, max: 100, step: 1),
                     ParamDefinition("\(colour)Luminance", "\(colour.capitalized) luminance", default: .number(0), min: -100, max: 100, step: 1)
+                ]
+            }
+        ),
+        EffectDefinition(
+            type: "colorWheels",
+            name: "Colour wheels",
+            category: "Colour",
+            domain: .video,
+            summary: "Shadows, midtones and highlights wheels (lift, gamma and gain). Each has a hue in degrees (0 red, 60 yellow, 120 green, 180 cyan, 240 blue, 300 magenta), an amount (how far towards that colour, 100 is strong) and a brightness.",
+            params: ColourWheels.Wheel.allCases.flatMap { wheel in
+                [
+                    ParamDefinition(wheel.hueKey, "\(wheel.name) hue", default: .number(0), min: 0, max: 360, step: 1, unit: "degrees"),
+                    ParamDefinition(wheel.amountKey, "\(wheel.name) amount", default: .number(0), min: 0, max: 100, step: 1, unit: "%"),
+                    ParamDefinition(wheel.brightnessKey, "\(wheel.name) brightness", default: .number(0), min: -100, max: 100, step: 1)
                 ]
             }
         ),

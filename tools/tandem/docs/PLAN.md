@@ -92,6 +92,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
 - [ ] Stickers: Lottie and HEVC with alpha
 - [x] Word-by-word captions from the transcripts (`tandem captions`, MCP `captions`) [integration]
+- [x] Colour tab like other editors': whole take or this clip, then Light, Colour, colour wheels (the new `colorWheels` effect), a Lightroom-style colour mixer, vignette, sharpen and LUT; sliders with gradient tracks, reset, scrubbing and typing [app, render]
 - [x] Portrait short from the same edit: `setFormatLayout`, `tandem short`, portrait frames and the short export preset [integration]
 - [ ] Segment render cache for fast re-exports
 - [ ] Remotion graphics clips with props, rendered in the background
@@ -99,6 +100,8 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 ## Not building
 
-Colour wheels, curves, HDR, chroma key, blend modes, stabilisation, tracking,
-video denoise, reverse, EQ, auto reframe, auto ducking, in-app music
-generation. Mike used none of these in 51 projects, or used them once.
+Curves, HDR, chroma key, blend modes, stabilisation, tracking, video
+denoise, reverse, EQ, auto reframe, auto ducking, in-app music generation.
+Mike used none of these in 51 projects, or used them once. (Colour wheels
+were on this list too; they're in the Colour tab because they're what any
+other editor's grade starts from.)

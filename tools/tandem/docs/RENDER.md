@@ -26,7 +26,8 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
 | `CompositionAssembler.swift` | Plan to AVFoundation: source loading, speed, freeze, hold, base track, audio mix |
 | `Compositor.swift` | `TandemInstruction`, `TandemCompositor` (4:2:0 video range) and `TandemRGBCompositor` (grabs) |
 | `FrameComposer.swift` | The per-layer pipeline, cutout, repair masks, text layers, still image cache |
-| `Effects.swift` | Colour, HSL, vignette, sharpen, LUT and Core Image bindings; rounded corners, border, drop shadow |
+| `Effects.swift` | Colour, colour wheels, HSL, vignette, sharpen, LUT and Core Image bindings; rounded corners, border, drop shadow |
+| `ColourWheelGrade.swift` | The colour wheels as per-channel lift, gain and gamma, and the same maths on the CPU for tests |
 | `Kernels.swift` | Runtime-compiled Metal Core Image kernels |
 | `Transitions.swift` | All transition types |
 | `TextRenderer.swift`, `TitlePresets.swift` | Core Text titles, presets, animations, word captions |
@@ -86,6 +87,23 @@ apply their effects to everything below, mixed in by their opacity.
 - **HSL.** Eight ranges (red 0, orange 30, yellow 60, green 120, aqua 180,
   blue 240, purple 270, magenta 300 degrees); a pixel blends its two
   neighbours; near-greys are untouched. Hue ±100 is ±30 degrees.
+- **Colour wheels.** Shadows, midtones and highlights as lift, gamma and
+  gain per channel: `x + lift * (1 - x)`, times `gain`, raised to `power`.
+  `ColourWheelGrade` works the three out on the CPU and one kernel applies
+  them. A wheel's colour is its amount (0 to 1) times its hue's direction,
+  the change in R'G'B' with no BT.709 luma and one unit of chroma
+  (`ColourWheels`, in Core, which the inspector's wheels use too), so a
+  puck changes a range's colour but not its brightness, and moves it on a
+  BT.709 vectorscope the way the puck points. Hues are HSV degrees, the
+  same as the HSL ranges. At amount 100, black (shadows) and white
+  (highlights) move 0.1 of chroma and mid grey about half that for each
+  wheel; brightness 100 lifts black by 0.15, raises white by 25% or takes
+  mid grey from 0.5 to 0.61 (an exponent of 2^-0.5). Nothing is
+  clamped and the exponent is odd about zero, so values below black or
+  above white (extended range, or an earlier effect's overshoot) stay
+  finite and in order, and a later effect can still bring them back.
+  `ColourWheelsRenderTests` checks all of this on patches read back in
+  float.
 - **LUT.** `.cube` 3D or 1D (1D is expanded to 33 points), path relative to
   the project folder, parsed once and cached.
 - **Cutout.** The matte multiplies alpha (its luma, full range). Feather,

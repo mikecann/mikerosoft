@@ -132,6 +132,27 @@ enum Kernels {
     }}
     """
 
+    static let colorWheelsSource = header + """
+    extern "C" { namespace coreimage {
+    // The colour wheels as lift, gain and gamma per channel, worked out on
+    // the CPU (ColourWheelGrade): x + lift * (1 - x), times gain, then
+    // raised to power, odd about zero. Nothing is clamped, so values
+    // outside 0...1 (super-whites, extended range) come through finite and
+    // in order, and a later effect can still bring them back.
+    [[stitchable]] float4 tandemColorWheels(sample_t s, float4 lift, float4 gain, float4 power) {
+        float alpha = s.a;
+        if (alpha <= 0.0) return s;
+        float3 x = s.rgb / alpha;
+        x = x + lift.rgb * (1.0 - x);
+        x = x * gain.rgb;
+        if (any(power.rgb != float3(1.0))) {
+            x = sign(x) * pow(abs(x), power.rgb);
+        }
+        return float4(x * alpha, alpha);
+    }
+    }}
+    """
+
     static let vignetteSource = header + """
     extern "C" { namespace coreimage {
     // Darkens (amount < 0) or lightens the edges, by a radial mask that is
@@ -160,6 +181,7 @@ enum Kernels {
     static let colorScale = compile(colorScaleSource, "tandemColorScale")
     static let colorAdjust = compile(colorAdjustSource, "tandemColorAdjust")
     static let hsl = compile(hslSource, "tandemHSL")
+    static let colorWheels = compile(colorWheelsSource, "tandemColorWheels")
     static let vignette = compile(vignetteSource, "tandemVignette")
 }
 

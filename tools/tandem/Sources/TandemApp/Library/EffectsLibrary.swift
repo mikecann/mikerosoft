@@ -4,6 +4,7 @@ import CoreImage.CIFilterBuiltins
 import SwiftUI
 import TandemCore
 import TandemMedia
+import TandemRender
 
 /// The Effects and Transitions tabs, one panel with two halves as in the
 /// design, and looks (LUTs from the asset library) beside them. Effect
@@ -288,6 +289,10 @@ enum EffectPreviewRenderer {
             hue.inputImage = input
             hue.angle = 0.45
             output = hue.outputImage
+        case "colorWheels":
+            // Teal shadows and warm highlights, the look the wheels are for.
+            let sample: [String: Double] = ["shadowsHue": 190, "shadowsAmount": 45, "highlightsHue": 35, "highlightsAmount": 40]
+            output = ColourWheelGrade { sample[$0] ?? 0 }.apply(to: input)
         case "vignette":
             let vignette = CIFilter.vignette()
             vignette.inputImage = input
