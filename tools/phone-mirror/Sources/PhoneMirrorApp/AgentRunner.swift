@@ -32,6 +32,7 @@ final class AgentRunner {
     private var builtThisLaunch = false
     private var connecting = false
     private var lockCheck: Timer?
+    private var lastNudge: Date?
 
     init(phoneName: String) {
         self.phoneName = phoneName
@@ -75,7 +76,7 @@ final class AgentRunner {
     }
 
     /// The helper keeps running while the phone is locked, but touches do nothing then,
-    /// so the window says so.
+    /// so the window says so. While the phone is unlocked this also keeps it awake.
     private func startLockCheck() {
         stopLockCheck()
         lockCheck = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
@@ -83,6 +84,10 @@ final class AgentRunner {
                 guard let self, let agent = self.agent, let locked = try? await agent.isLocked() else { return }
                 guard self.agent === agent else { return }
                 self.state = locked ? .locked : .ready
+                if KeepAwake.shouldNudge(isOn: KeepAwake.isOn, isReady: self.state == .ready, lastNudge: self.lastNudge, now: Date()) {
+                    self.lastNudge = Date()
+                    agent.nudge()
+                }
             }
         }
     }

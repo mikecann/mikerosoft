@@ -17,6 +17,8 @@ final class MirrorView: NSView {
     var onPaste: (() -> Void)?
 
     private let status = NSTextField(wrappingLabelWithString: "")
+    private let notice = NSTextField(wrappingLabelWithString: "")
+    private var noticeHide: DispatchWorkItem?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -35,6 +37,33 @@ final class MirrorView: NSView {
             status.centerYAnchor.constraint(equalTo: centerYAnchor),
             status.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -40),
         ])
+
+        notice.alignment = .center
+        notice.textColor = .white
+        notice.font = .systemFont(ofSize: 13, weight: .medium)
+        notice.drawsBackground = true
+        notice.backgroundColor = NSColor.black.withAlphaComponent(0.75)
+        notice.wantsLayer = true
+        notice.layer?.cornerRadius = 8
+        notice.layer?.masksToBounds = true
+        notice.isHidden = true
+        notice.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(notice)
+        NSLayoutConstraint.activate([
+            notice.centerXAnchor.constraint(equalTo: centerXAnchor),
+            notice.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24),
+            notice.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -32),
+        ])
+    }
+
+    /// Briefly shows a message over the phone's screen, e.g. why a click did nothing.
+    func flash(_ message: String) {
+        notice.stringValue = "  \(message)  "
+        notice.isHidden = false
+        noticeHide?.cancel()
+        let hide = DispatchWorkItem { [weak self] in self?.notice.isHidden = true }
+        noticeHide = hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: hide)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -250,24 +279,37 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     private func connectInput() {
         mirrorView.onTouch = { [weak self] phase, sample in self?.touch(phase, sample) }
         mirrorView.onRightClick = { [weak self] sample in
-            guard let agent = self?.runner.agent else { return }
+            guard let agent = self?.readyAgent() else { return }
             agent.longPress(GestureClassifier.phonePoint(sample.point, on: agent.screenSize), duration: 0.8)
         }
         mirrorView.onScroll = { [weak self] event, fraction in self?.scroll(event, at: fraction) }
         mirrorView.onKey = { [weak self] event in
             guard let text = PhoneKeys.text(keyCode: event.keyCode, characters: event.characters) else { return }
-            self?.runner.agent?.type(text)
+            self?.readyAgent()?.type(text)
         }
         mirrorView.onPaste = { [weak self] in
             guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
-            self?.runner.agent?.type(text)
+            self?.readyAgent()?.type(text)
         }
+    }
+
+    /// The phone's helper, or nil after telling the user why their input isn't reaching the phone.
+    private func readyAgent() -> PhoneAgent? {
+        if let agent = runner.agent, runner.state == .ready { return agent }
+        switch runner.state {
+        case .starting, .ready: mirrorView.flash("Touch control is starting. It's ready a few seconds after the phone unlocks")
+        case .building: mirrorView.flash("Setting up touch control for this phone. The first time takes about a minute")
+        case .locked: mirrorView.flash("Unlock the phone to control it")
+        case .failed(let message): mirrorView.flash(message)
+        case .idle: mirrorView.flash("Touch control isn't running")
+        }
+        return nil
     }
 
     private func touch(_ phase: MirrorView.TouchPhase, _ sample: TouchSample) {
         switch phase {
         case .began:
-            touchSamples = [sample]
+            touchSamples = readyAgent() == nil ? [] : [sample]
         case .moved:
             // Presses that started outside the phone's screen (in the letterbox) are ignored.
             guard !touchSamples.isEmpty else { return }
@@ -289,7 +331,7 @@ final class MirrorWindowController: NSWindowController, NSWindowDelegate {
     /// Collects scrolling for a moment, then sends it as one finger drag. The drag holds still
     /// before lifting so the phone scrolls exactly that far instead of flinging.
     private func scroll(_ event: NSEvent, at fraction: CGPoint) {
-        guard let agent = runner.agent, videoSize.width > 0 else { return }
+        guard videoSize.width > 0, let agent = readyAgent() else { return }
         let screen = agent.screenSize
         let shownWidth = MirrorSizing.videoRect(in: mirrorView.bounds.size, video: videoSize).width
         // Trackpads report view points; mouse wheels report lines.

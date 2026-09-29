@@ -20,6 +20,9 @@ or AssistiveTouch.
   WebDriverAgent, Apple's UI-testing runner, over the same cable
 - Shows a ripple where each click landed, so you can see where the tap went while
   the phone catches up
+- Keeps each mirrored phone from auto-locking while it's unlocked, by pressing
+  Shift every 20 seconds. That types nothing, but it counts as input. Turn it off
+  with **Phones > Keep Phones Awake**. A locked phone is left alone
 - The status bar reads 9:41 with full signal and battery while a phone is
   mirrored. iOS does this for any cabled screen capture, which suits recordings
 
@@ -85,9 +88,16 @@ screen as a camera.
   `xcodebuild build-for-testing` for your team. `agent.sh run` starts it with
   `xcodebuild test-without-building`. Phone Mirror talks to it over the USB
   tunnel Xcode keeps open to the phone, found through `xcrun devicectl`
-- **Gestures.** A click becomes `/wda/tap`. A drag is replayed as W3C touch
-  actions with its original timing. Scrolling is collected for 80 ms and sent as
-  one drag that holds still before lifting, so the phone scrolls exactly that far
+- **Gestures.** WebDriverAgent's own tap route snapshots the app's accessibility
+  tree before and after each gesture, which took over 3 seconds per tap on an
+  iPhone XS Max. So `agent.sh` compiles in a small route of Phone Mirror's own,
+  [`wda/PMFastInputCommands.m`](wda/PMFastInputCommands.m), that hands a finger
+  path straight to XCTest's event synthesizer at screen coordinates. A click is a
+  one-point path, a drag keeps its original timing, and scrolling is collected
+  for 80 ms and sent as one drag that holds still before lifting, so the phone
+  scrolls exactly that far
+- **Typing** goes through WebDriverAgent's `/wda/keys`, which already uses the
+  same fast event path
 
 The helper's source and build output live in
 `~/Library/Application Support/Phone Mirror`. Logs are in
