@@ -105,10 +105,52 @@ struct ColourInspector: View {
                 .font(.ui(11.5))
                 .foregroundStyle(Theme.textMuted.color)
                 .fixedSize(horizontal: false, vertical: true)
+            if target == .take, !item.look.isEmpty {
+                let others = ColourCopy.candidates(for: item, in: model.project)
+                if !others.isEmpty { copyMenu(item, others: others) }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
+    }
+
+    /// Copies this take's grade to the other files like it, one or all at
+    /// once. Files that have it already are ticked.
+    private func copyMenu(_ item: MediaItem, others: [MediaItem]) -> some View {
+        let kind = item.role == .camera ? "camera files" : "files like this"
+        let missing = others.filter { !ColourCopy.hasSameLook($0, as: item) }
+        return Menu {
+            if others.count > 1 {
+                Button("Every other \(item.role == .camera ? "camera file" : "file like this") (\(others.count))", systemImage: Icons.wholeTake) {
+                    copy(item, to: others)
+                }
+                .disabled(missing.isEmpty)
+                Divider()
+            }
+            ForEach(others) { other in
+                let has = ColourCopy.hasSameLook(other, as: item)
+                Button(MediaCatalog.fileName(other), systemImage: has ? "checkmark" : Icons.thisClip) {
+                    copy(item, to: [other])
+                }
+                .disabled(has)
+            }
+        } label: {
+            Label(missing.isEmpty ? "Every other \(kind) has this grade" : "Copy grade to…", systemImage: "square.on.square")
+                .font(.ui(11.5))
+                .foregroundStyle(Theme.amber.color)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Give other \(kind) from this shoot the same grade, replacing theirs")
+    }
+
+    private func copy(_ item: MediaItem, to targets: [MediaItem]) {
+        guard let source = model.project.media(item.id) else { return }
+        let current = targets.compactMap { model.project.media($0.id) }
+        guard let batch = ColourCopy.copy(from: source, to: current) else { return }
+        model.apply(batch)
     }
 
     private func caption(_ text: String) -> some View {
