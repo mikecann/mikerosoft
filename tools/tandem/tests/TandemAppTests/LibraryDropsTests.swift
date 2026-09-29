@@ -68,3 +68,72 @@ final class LibraryDropsTests: XCTestCase {
         }
     }
 }
+
+/// Drops land on the track under the pointer, and above the top video
+/// track or below the last track they make a track for what's dropped, as
+/// Filmora does.
+final class DropTargetTests: XCTestCase {
+    func testWhereTheDropLands() throws {
+        let f = try AppFixture()
+        let layout = TimelineLayout.make(project: f.project, showTranscript: true)
+        let tracks = layout.lanes.filter { $0.trackID != nil }
+        let topVideo = try XCTUnwrap(tracks.first { $0.kind == .video })
+        let last = try XCTUnwrap(tracks.last)
+        XCTAssertEqual(DropTarget.at(y: topVideo.y - 2, in: layout), .newVideoTrackOnTop, "the transcript lane and above")
+        XCTAssertEqual(DropTarget.at(y: topVideo.midY, in: layout), .track(topVideo.trackID))
+        XCTAssertEqual(DropTarget.at(y: last.maxY + 10, in: layout), .newAudioTrackAtBottom)
+        let broll = try XCTUnwrap(layout.lane(forTrack: f.track("B-roll").id))
+        XCTAssertEqual(DropTarget.at(y: broll.midY, in: layout), .track(broll.trackID))
+    }
+
+    func testMediaOnANewVideoTrackGoesOnTop() throws {
+        let f = try AppFixture()
+        let before = f.project.videoTracks.count
+        let batch = try XCTUnwrap(TimelineEdits.placeMediaOnNewTrack(f.project, mediaIDs: ["med_broll"], at: t(40), kind: .video, insert: false, trackID: "trk_new"))
+        _ = try f.apply(batch)
+        XCTAssertEqual(f.project.videoTracks.count, before + 1)
+        XCTAssertEqual(f.project.videoTracks.last?.id, "trk_new", "on top of the video tracks")
+        XCTAssertEqual(f.project.track("trk_new")?.clips.first?.mediaID, "med_broll")
+        XCTAssertNil(TimelineEdits.placeMediaOnNewTrack(f.project, mediaIDs: ["med_music"], at: t(40), kind: .video, insert: false), "music has no picture")
+    }
+
+    func testSoundOnANewAudioTrackGoesAtTheBottom() throws {
+        let f = try AppFixture()
+        let batch = try XCTUnwrap(TimelineEdits.placeMediaOnNewTrack(f.project, mediaIDs: ["med_music"], at: t(70), kind: .audio, insert: false, trackID: "trk_sound"))
+        _ = try f.apply(batch)
+        XCTAssertEqual(f.project.audioTracks.last?.id, "trk_sound", "below the other audio tracks")
+        XCTAssertEqual(f.project.track("trk_sound")?.clips.first?.mediaID, "med_music")
+    }
+
+    /// A title goes on the video track it's dropped on, not always Text.
+    func testTitlesGoWhereTheyreDropped() throws {
+        let f = try AppFixture()
+        let preset = try XCTUnwrap(TitlePresets.builtIn.first)
+        let broll = f.track("B-roll")
+        _ = try f.apply(try XCTUnwrap(LibraryDrops.title(preset, at: t(40), in: f.project, target: .track(broll.id))))
+        XCTAssertTrue(f.track("B-roll").clips.contains { if case .text = $0.content { return true } else { return false } })
+
+        let tracks = f.project.videoTracks.count
+        _ = try f.apply(try XCTUnwrap(LibraryDrops.title(preset, at: t(44), in: f.project, target: .newVideoTrackOnTop)))
+        XCTAssertEqual(f.project.videoTracks.count, tracks + 1)
+        guard case .text = f.project.videoTracks.last?.clips.first?.content else { return XCTFail("the title on the new top track") }
+
+        // Dropped on a sound track, a title falls back to the Text track.
+        let voice = try XCTUnwrap(f.project.audioTracks.first)
+        let fallback = try XCTUnwrap(LibraryDrops.title(preset, at: t(50), in: f.project, target: .track(voice.id)))
+        guard case .insertClip(let trackID, _, _) = fallback.commands.first else { return XCTFail("expected insertClip") }
+        XCTAssertEqual(f.project.track(trackID)?.kind, .video)
+    }
+}
+
+final class ClickPlayheadTests: XCTestCase {
+    /// Clicking a clip takes the playhead to its start, unless the playhead
+    /// is on it already.
+    func testClickMovesThePlayheadToTheClip() {
+        let clip = Clip(id: "clip_a", content: .solid(color: RGBA(r: 0, g: 0, b: 0)), start: t(10), duration: t(5))
+        XCTAssertEqual(TimelineEdits.playheadForClick(on: clip, playhead: t(2)), t(10))
+        XCTAssertEqual(TimelineEdits.playheadForClick(on: clip, playhead: t(15)), t(10), "the end belongs to the next clip")
+        XCTAssertNil(TimelineEdits.playheadForClick(on: clip, playhead: t(12)))
+        XCTAssertNil(TimelineEdits.playheadForClick(on: clip, playhead: t(10)))
+    }
+}

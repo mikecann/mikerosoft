@@ -282,25 +282,25 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
             return Self.addMenu(model: model)
         }
         let menu = NSMenu()
-        menu.add(track.locked ? "Unlock" : "Lock", checked: track.locked) {
+        menu.add(track.locked ? "Unlock" : "Lock", icon: track.locked ? "lock.open" : "lock", checked: track.locked) {
             model.apply(EditBatch(label: track.locked ? "Unlock track" : "Lock track", commands: [.updateTrack(trackID: trackID, patch: .object(["locked": .bool(!track.locked)]))]))
         }
         if track.kind == .video {
-            menu.add("Hidden", checked: track.hidden) {
+            menu.add("Hidden", icon: "eye.slash", checked: track.hidden) {
                 model.apply(EditBatch(label: track.hidden ? "Show track" : "Hide track", commands: [.updateTrack(trackID: trackID, patch: .object(["hidden": .bool(!track.hidden)]))]))
             }
         } else {
-            menu.add("Muted", checked: track.muted) {
+            menu.add("Muted", icon: "speaker.slash", checked: track.muted) {
                 model.apply(EditBatch(label: track.muted ? "Unmute track" : "Mute track", commands: [.updateTrack(trackID: trackID, patch: .object(["muted": .bool(!track.muted)]))]))
             }
-            menu.add("Solo", checked: track.solo) {
+            menu.add("Solo", icon: "headphones", checked: track.solo) {
                 model.apply(EditBatch(label: track.solo ? "Unsolo track" : "Solo track", commands: [.updateTrack(trackID: trackID, patch: .object(["solo": .bool(!track.solo)]))]))
             }
         }
-        menu.add("Targeted for cuts", checked: track.targeted) {
+        menu.add("Targeted for cuts", icon: "scope", checked: track.targeted) {
             model.apply(EditBatch(label: track.targeted ? "Untarget track" : "Target track", commands: [.updateTrack(trackID: trackID, patch: .object(["targeted": .bool(!track.targeted)]))]))
         }
-        menu.addSubmenu("Ripple") { sub in
+        menu.addSubmenu("Ripple", icon: "arrow.right.to.line") { sub in
             let options: [(RippleMode, String)] = [(.cut, "Cut with the take"), (.follow, "Follow the take"), (.off, "Stay put")]
             for (mode, title) in options {
                 sub.add(title, checked: track.rippleMode == mode) {
@@ -309,24 +309,24 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
             }
         }
         menu.addItem(.separator())
-        menu.add("Rename…") { [weak self] in self?.beginRename(trackID) }
+        menu.add("Rename…", icon: "pencil") { [weak self] in self?.beginRename(trackID) }
         if track.kind == .video {
-            menu.add("Add video track above") { model.addTrack(.video, beside: trackID, side: .above) }
-            menu.add("Add video track below") { model.addTrack(.video, beside: trackID, side: .below) }
-            menu.add("Add audio track at the bottom") { model.addTrack(.audio) }
+            menu.add("Add video track above", icon: "plus.rectangle") { model.addTrack(.video, beside: trackID, side: .above) }
+            menu.add("Add video track below", icon: "plus.rectangle") { model.addTrack(.video, beside: trackID, side: .below) }
+            menu.add("Add audio track at the bottom", icon: "waveform.badge.plus") { model.addTrack(.audio) }
         } else {
-            menu.add("Add audio track above") { model.addTrack(.audio, beside: trackID, side: .above) }
-            menu.add("Add audio track below") { model.addTrack(.audio, beside: trackID, side: .below) }
-            menu.add("Add video track on top") { model.addTrack(.video) }
+            menu.add("Add audio track above", icon: "waveform.badge.plus") { model.addTrack(.audio, beside: trackID, side: .above) }
+            menu.add("Add audio track below", icon: "waveform.badge.plus") { model.addTrack(.audio, beside: trackID, side: .below) }
+            menu.add("Add video track on top", icon: "plus.rectangle") { model.addTrack(.video) }
         }
         menu.addItem(.separator())
         let up = TrackEdits.move(trackID, up: true, in: model.project)
         let down = TrackEdits.move(trackID, up: false, in: model.project)
-        menu.add("Move up", enabled: up != nil) { model.apply(up) }
-        menu.add("Move down", enabled: down != nil) { model.apply(down) }
+        menu.add("Move up", icon: "arrow.up", enabled: up != nil) { model.apply(up) }
+        menu.add("Move down", icon: "arrow.down", enabled: down != nil) { model.apply(down) }
         menu.addItem(.separator())
         let remove = TrackEdits.remove(trackID, in: model.project)
-        menu.add(TrackEdits.removeTitle(for: track), enabled: remove != nil) { model.apply(remove) }
+        menu.add(TrackEdits.removeTitle(for: track), icon: "trash", enabled: remove != nil) { model.apply(remove) }
         return menu
     }
 
@@ -334,8 +334,8 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
     /// button and the space below the tracks.
     static func addMenu(model: EditorModel) -> NSMenu {
         let menu = NSMenu()
-        menu.add("Add video track on top") { model.addTrack(.video) }
-        menu.add("Add audio track at the bottom") { model.addTrack(.audio) }
+        menu.add("Add video track on top", icon: "plus.rectangle") { model.addTrack(.video) }
+        menu.add("Add audio track at the bottom", icon: "waveform.badge.plus") { model.addTrack(.audio) }
         return menu
     }
 

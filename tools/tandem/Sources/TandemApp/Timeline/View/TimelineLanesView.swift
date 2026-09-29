@@ -115,7 +115,7 @@ final class TimelineLanesView: TimelineChildView {
     private struct DropKey: Equatable {
         var payload: LibraryDrag
         var time: Time
-        var laneID: String?
+        var target: DropTarget
         var insert: Bool
         var clipID: String?
     }
@@ -836,6 +836,11 @@ final class TimelineLanesView: TimelineChildView {
                     // A plain click on a selected clip picks just that clip
                     // (and its links), like Premiere.
                     model.selection = SelectionRules.members(of: id, in: model.project, linkedSelection: model.linkedSelection, option: pressModifiers.option)
+                    // And takes the playhead to its start, so the viewer
+                    // shows what was picked, unless it's on the clip already.
+                    if let clip = model.project.clip(id), let target = TimelineEdits.playheadForClick(on: clip, playhead: model.playback.time) {
+                        model.playback.seek(to: target)
+                    }
                 }
             }
             pendingCommandToggle = nil
@@ -891,13 +896,13 @@ final class TimelineLanesView: TimelineChildView {
             model.selectedTransitionID = id
             buildTransitionMenu(menu, transitionID: id)
         case .emptyTrack(let trackID, let at):
-            menu.add("Close gap") {
+            menu.add("Close gap", icon: "arrow.right.and.line.vertical.and.arrow.left") {
                 model.apply(EditBatch(label: "Close gap", commands: [.closeGap(trackID: trackID, at: at)]))
             }
-            menu.add("Add marker here") { model.apply(TimelineEdits.addMarker(model.project, at: at)) }
-            menu.add("Move playhead here") { model.playback.seek(to: at) }
+            menu.add("Add marker here", icon: "bookmark") { model.apply(TimelineEdits.addMarker(model.project, at: at)) }
+            menu.add("Move playhead here", icon: "arrow.down.to.line") { model.playback.seek(to: at) }
         case .transcript(let at):
-            menu.add("Move playhead here") { model.playback.seek(to: at) }
+            menu.add("Move playhead here", icon: "arrow.down.to.line") { model.playback.seek(to: at) }
         case .nothing:
             return nil
         }
@@ -907,42 +912,44 @@ final class TimelineLanesView: TimelineChildView {
     private func buildClipMenu(_ menu: NSMenu, clipID: String, trackID: String, at time: Time) {
         guard let model, let clip = model.project.clip(clipID), let track = model.project.track(trackID) else { return }
         let selection = model.selection
-        menu.add("Cut here", enabled: clip.start < time && time < clip.end) {
+        // Keys show only where the item does exactly what the key does:
+        // Cut here cuts at the pointer, the key at the playhead.
+        menu.add("Cut here", icon: "scissors", enabled: clip.start < time && time < clip.end) {
             model.apply(TimelineEdits.blade(model.project, clipID: clipID, at: time, allTracks: false))
         }
-        menu.add("Delete") { model.apply(TimelineEdits.remove(model.project, clipIDs: selection, ripple: false)) }
-        menu.add("Ripple delete") { model.apply(TimelineEdits.remove(model.project, clipIDs: selection, ripple: true)) }
+        menu.add("Delete", command: .lift) { model.apply(TimelineEdits.remove(model.project, clipIDs: selection, ripple: false)) }
+        menu.add("Ripple delete", command: .rippleDelete) { model.apply(TimelineEdits.remove(model.project, clipIDs: selection, ripple: true)) }
         menu.addItem(.separator())
         let linked = clip.linkGroup != nil
-        menu.add(linked ? "Unlink" : "Link", enabled: linked || selection.count > 1) {
+        menu.add(linked ? "Unlink" : "Link", command: .link, enabled: linked || selection.count > 1) {
             model.apply(TimelineEdits.toggleLink(model.project, selection: selection))
         }
         if linked {
-            menu.add("Select linked clips") { model.selection = Set(model.project.linkedClipIDs(of: clipID)) }
+            menu.add("Select linked clips", icon: "link.badge.plus") { model.selection = Set(model.project.linkedClipIDs(of: clipID)) }
         }
-        menu.add(clip.enabled ? "Disable" : "Enable") {
+        menu.add(clip.enabled ? "Disable" : "Enable", icon: clip.enabled ? "eye.slash" : "eye") {
             let ids = TimelineEdits.ordered(selection, in: model.project)
             model.apply(EditBatch(label: clip.enabled ? "Disable clip" : "Enable clip", commands: ids.map {
                 .updateClip(clipID: $0, patch: .object(["enabled": .bool(!clip.enabled)]))
             }))
         }
         if track.kind == .video {
-            menu.addSubmenu("Layout") { sub in
+            menu.addSubmenu("Layout", icon: Icons.layoutSection) { sub in
                 for preset in LayoutPreset.allCases {
-                    sub.add(preset.name, checked: clip.video?.layoutPreset == preset.rawValue) {
+                    sub.add(preset.name, icon: Icons.layout(preset), command: Self.layoutCommand(preset), checked: clip.video?.layoutPreset == preset.rawValue) {
                         model.apply(TimelineEdits.applyLayout(model.project, preset: preset, playhead: model.playback.time, selection: selection))
                     }
                 }
             }
         } else {
             let muted = clip.audio?.muted == true
-            menu.add(muted ? "Unmute" : "Mute") {
+            menu.add(muted ? "Unmute" : "Mute", icon: muted ? "speaker.wave.2" : "speaker.slash") {
                 model.apply(EditBatch(label: muted ? "Unmute clip" : "Mute clip", commands: [
                     .updateClip(clipID: clipID, patch: .object(["audio": .object(["muted": .bool(!muted)])]))
                 ]))
             }
         }
-        menu.addSubmenu("Speed") { sub in
+        menu.addSubmenu("Speed", icon: "speedometer") { sub in
             for speed in [0.5, 0.75, 1, 1.25, 1.5, 2] {
                 sub.add("\(Int(speed * 100))%", checked: abs(clip.speed - speed) < 0.001) {
                     model.apply(EditBatch(label: "Speed \(Int(speed * 100))%", commands: [.setSpeed(clipID: clipID, speed: speed, ripple: true)]))
@@ -950,24 +957,35 @@ final class TimelineLanesView: TimelineChildView {
             }
         }
         if let left = track.clip(endingAt: clip.start, excluding: clip.id) {
-            menu.add("Add dissolve at start") {
+            menu.add("Add dissolve at start", icon: Icons.transition) {
                 model.apply(EditBatch(label: "Add dissolve", commands: [.addTransition(trackID: trackID, transition: Transition(type: .dissolve, duration: TransitionType.dissolve.defaultDuration, fromClipID: left.id, toClipID: clip.id))]))
             }
         }
         if let right = track.clip(startingAt: clip.end, excluding: clip.id) {
-            menu.add("Add dissolve at end") {
+            menu.add("Add dissolve at end", icon: Icons.transition) {
                 model.apply(EditBatch(label: "Add dissolve", commands: [.addTransition(trackID: trackID, transition: Transition(type: .dissolve, duration: TransitionType.dissolve.defaultDuration, fromClipID: clip.id, toClipID: right.id))]))
             }
         }
         menu.addItem(.separator())
-        menu.add("Mark in and out around clip") {
+        menu.add("Mark in and out around clip", command: .markClip) {
             model.inPoint = clip.start
             model.outPoint = clip.end
         }
         if let item = model.media(for: clip) {
-            menu.add("Show media in Finder") {
+            menu.add("Show media in Finder", icon: "folder") {
                 NSWorkspace.shared.activateFileViewerSelecting([model.folder.url(for: item)])
             }
+        }
+    }
+
+    /// The keymap command that applies a layout, where there is one.
+    static func layoutCommand(_ preset: LayoutPreset) -> EditorCommand? {
+        switch preset {
+        case .full: return .layoutFull
+        case .pipRight: return .layoutPipRight
+        case .pipLeft: return .layoutPipLeft
+        case .split: return .layoutSplit
+        case .fill: return nil
         }
     }
 
@@ -983,11 +1001,11 @@ final class TimelineLanesView: TimelineChildView {
             }
         }
         menu.addItem(.separator())
-        menu.add("Delete keyframe") {
+        menu.add("Delete keyframe", icon: "trash") {
             model.apply(EditBatch(label: "Remove keyframe", commands: KeyframeEdits.removeKeyframes(in: clip, at: diamond.time, parameters: diamond.parameters, tolerance: tolerance)))
             model.selectedKeyframe = nil
         }
-        menu.add("Stop animating \(KeyframeEdits.summary(of: diamond.parameters, in: clip).lowercased())") {
+        menu.add("Stop animating \(KeyframeEdits.summary(of: diamond.parameters, in: clip).lowercased())", icon: "xmark.circle") {
             // Every keyframe of these parameters goes; each keeps the value
             // it has at this keyframe.
             var commands: [EditCommand] = []
@@ -1004,14 +1022,14 @@ final class TimelineLanesView: TimelineChildView {
     private func buildTransitionMenu(_ menu: NSMenu, transitionID: String) {
         guard let model, let location = model.project.location(ofTransition: transitionID) else { return }
         let transition = model.project[location.track].transitions[location.index]
-        menu.addSubmenu("Type") { sub in
+        menu.addSubmenu("Type", icon: Icons.transition) { sub in
             for type in TransitionType.allCases {
                 sub.add(type.displayName, checked: transition.type == type) {
                     model.apply(EditBatch(label: "Change transition", commands: [.updateTransition(transitionID: transitionID, patch: .object(["type": .string(type.rawValue)]))]))
                 }
             }
         }
-        menu.addSubmenu("Duration") { sub in
+        menu.addSubmenu("Duration", icon: "timer") { sub in
             for seconds in [0.25, 0.5, 0.75, 1.0, 1.5] {
                 sub.add(String(format: "%.2f s", seconds), checked: abs(transition.duration.seconds - seconds) < 0.01) {
                     model.apply(EditBatch(label: "Transition length", commands: [.updateTransition(transitionID: transitionID, patch: .object(["duration": .number(seconds)]))]))
@@ -1019,7 +1037,7 @@ final class TimelineLanesView: TimelineChildView {
             }
         }
         menu.addItem(.separator())
-        menu.add("Delete transition") {
+        menu.add("Delete transition", icon: "trash") {
             model.apply(EditBatch(label: "Remove transition", commands: [.removeTransition(transitionID: transitionID)]))
         }
     }
@@ -1159,8 +1177,11 @@ final class TimelineLanesView: TimelineChildView {
             snapLine = snapped
         }
         let lane = container.layoutCache.lane(atY: point.y)
+        // Above the top video track or below the last track, the drop
+        // makes a track for itself.
+        let target = DropTarget.at(y: point.y, in: container.layoutCache)
         let key = DropKey(
-            payload: dragged, time: time, laneID: lane?.trackID, insert: NSEvent.modifierFlags.contains(.command),
+            payload: dragged, time: time, target: target, insert: NSEvent.modifierFlags.contains(.command),
             clipID: tester(for: model.project)?.hit(point).clipID
         )
         if let lastDrop, lastDrop.key == key {
@@ -1171,14 +1192,14 @@ final class TimelineLanesView: TimelineChildView {
             container.previewChanged()
             return lastDrop.operation
         }
-        let operation = workOutDrop(dragged, at: time, lane: lane, point: point, model: model)
+        let operation = workOutDrop(dragged, at: time, lane: lane, target: target, point: point, model: model)
         lastDrop = (key, operation, snapLine)
         container.previewChanged()
         return operation
     }
 
     /// The edit a library drag would make at `time` on `lane`, previewed.
-    private func workOutDrop(_ dragged: LibraryDrag, at time: Time, lane: TimelineLane?, point: CGPoint, model: EditorModel) -> NSDragOperation {
+    private func workOutDrop(_ dragged: LibraryDrag, at time: Time, lane: TimelineLane?, target: DropTarget, point: CGPoint, model: EditorModel) -> NSDragOperation {
         let at = Timecode.string(time, rate: model.frameRate)
         let batch: EditBatch?
         var label: String
@@ -1187,8 +1208,17 @@ final class TimelineLanesView: TimelineChildView {
         switch dragged {
         case .media(let ids):
             let insert = NSEvent.modifierFlags.contains(.command)
-            batch = TimelineEdits.placeMedia(model.project, mediaIDs: ids, at: time, trackID: lane?.trackID, insert: insert)
-            label = (insert ? "Insert at " : "Place at ") + at
+            var onNewTrack: EditBatch?
+            switch target {
+            case .newVideoTrackOnTop:
+                onNewTrack = TimelineEdits.placeMediaOnNewTrack(model.project, mediaIDs: ids, at: time, kind: .video, insert: insert)
+            case .newAudioTrackAtBottom:
+                onNewTrack = TimelineEdits.placeMediaOnNewTrack(model.project, mediaIDs: ids, at: time, kind: .audio, insert: insert)
+            case .track:
+                break
+            }
+            batch = onNewTrack ?? TimelineEdits.placeMedia(model.project, mediaIDs: ids, at: time, trackID: lane?.trackID, insert: insert)
+            label = (onNewTrack != nil ? "New track · " : "") + (insert ? "Insert at " : "Place at ") + at
         case .asset(let id):
             let host = AssetLibraryHost.shared
             // Drags from the browser say what they carry; anything else is
@@ -1226,7 +1256,7 @@ final class TimelineLanesView: TimelineChildView {
             let name = clipID.flatMap { model.project.clip($0) }.map { ClipRenderer.name(of: $0, in: model.project) }
             label = batch.map { "\($0.label) to \(name ?? "clip")" } ?? "Drop on a clip"
         case .title(let id):
-            batch = TitlePresets.preset(id).flatMap { LibraryDrops.title($0, at: time, in: model.project) }
+            batch = TitlePresets.preset(id).flatMap { LibraryDrops.title($0, at: time, in: model.project, target: target == .newAudioTrackAtBottom ? .track(nil) : target) }
             label = (batch?.label ?? "Add title") + " at " + at
         case .template(let id):
             batch = BuiltInTemplates.template(id).map { LibraryDrops.template($0, at: time) }
