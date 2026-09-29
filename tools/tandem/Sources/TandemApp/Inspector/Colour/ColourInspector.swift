@@ -246,12 +246,15 @@ struct ColourEditor: Equatable, Sendable {
     }
 
     /// Shows values in the viewer while they're dragged, before they're
-    /// committed; nil ends it. A clip's own grade goes through the viewer's
-    /// drag preview (`model.videoPreview`), which the player draws from. A
-    /// look shows once it's committed.
+    /// committed; nil ends it. It goes through the viewer's drag preview
+    /// (`model.videoPreview`), which the player draws from on every frame:
+    /// a clip's own grade as part of the clip's properties, a look as a
+    /// stand-in for the file's (`LiveVideoOverrides.setLooks`) that the
+    /// clip's properties, unchanged, carry to the viewer. Either stays
+    /// until the committed edit is on screen, so the picture doesn't flick
+    /// back in between.
     @MainActor
     func preview(_ section: ColourSection, _ values: [String: ParamValue]?) {
-        guard !isLook else { return }
         guard let values else {
             if model.videoPreview[clipID] != nil { model.videoPreview[clipID] = nil }
             return
@@ -260,7 +263,10 @@ struct ColourEditor: Equatable, Sendable {
         // From the clip as it is at the playhead, so animated values hold.
         // A drag back to where it started changes nothing, and shows that.
         var video = clip.resolvedVideo(at: model.clipTime(of: clip))
-        if let change = ColourGrade(video.effects).setting(section, values, label: "", newID: { "fx_preview" }) {
+        if isLook, let item = model.media(for: clip) {
+            let change = ColourGrade(item.look).setting(section, values, label: "", newID: { "fx_preview" })
+            model.playback.liveOverrides.setLooks([item.id: change?.effects ?? item.look])
+        } else if let change = ColourGrade(video.effects).setting(section, values, label: "", newID: { "fx_preview" }) {
             video.effects = change.effects
         }
         model.videoPreview[clipID] = video

@@ -115,6 +115,13 @@ apply their effects to everything below, mixed in by their opacity.
   finite and in order, and a later effect can still bring them back.
   `ColourWheelsRenderTests` checks all of this on patches read back in
   float.
+- **Live previews.** While something is dragged, `LiveVideoOverrides` in
+  the render scene stands in for what isn't committed yet, read for every
+  layer on every frame: clips' video properties (a viewer drag, the
+  inspector's sliders, a clip's own colour) and files' looks (the Colour
+  tab's whole take, for every clip of the file). A paused player
+  composites its frame again. `set([:])` ends a preview, looks included,
+  once the composition with the committed edit is on screen.
 - **LUT.** `.cube` 3D or 1D (1D is expanded to 33 points), path relative to
   the project folder, parsed once and cached.
 - **Cutout.** The matte multiplies alpha (its luma, full range). Feather,

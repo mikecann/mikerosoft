@@ -38,20 +38,39 @@ struct SceneClip {
 /// Video properties the viewer is dragging, standing in for clips' own
 /// until the edit is committed. The player reads them on every frame, so a
 /// picture-in-picture moves under the pointer instead of only its outline.
+/// Looks dragged in the Colour tab's whole take stand in for files' own the
+/// same way (`setLooks`).
 public final class LiveVideoOverrides: @unchecked Sendable {
     private let lock = NSLock()
     private var values: [String: VideoProperties] = [:]
+    private var looks: [String: [Effect]] = [:]
 
     public init() {}
 
+    /// Clips' properties by clip ID. An empty set ends the preview, the
+    /// looks' too.
     public func set(_ overrides: [String: VideoProperties]) {
-        lock.withLock { values = overrides }
+        lock.withLock {
+            values = overrides
+            if overrides.isEmpty { looks = [:] }
+        }
     }
 
-    public var isEmpty: Bool { lock.withLock { values.isEmpty } }
+    /// Files' looks by media ID, while the Colour tab's whole take is
+    /// dragged. They stand in for every clip of the file, and go with the
+    /// next `set([:])`, once the committed look is on screen.
+    public func setLooks(_ overrides: [String: [Effect]]) {
+        lock.withLock { looks = overrides }
+    }
+
+    public var isEmpty: Bool { lock.withLock { values.isEmpty && looks.isEmpty } }
 
     public func video(for clipID: String) -> VideoProperties? {
         lock.withLock { values[clipID] }
+    }
+
+    public func look(for mediaID: String) -> [Effect]? {
+        lock.withLock { looks[mediaID] }
     }
 }
 
@@ -183,7 +202,8 @@ struct FrameComposer {
         // whatever the layer's scale.
         let unit = scene.pixelScale / total
         let env = EffectEnvironment(registry: scene.registry, folder: scene.folder, pixelsPerUnit: unit)
-        image = EffectRenderer.apply((sceneClip.media?.look ?? []) + video.effects, to: image, env)
+        let look = sceneClip.media.flatMap { scene.overrides?.look(for: $0.id) } ?? sceneClip.media?.look ?? []
+        image = EffectRenderer.apply(look + video.effects, to: image, env)
 
         if !video.crop.isIdentity {
             let visible = LayerMath.coreImageRect(LayerMath.cropRect(source: size, crop: video.crop), height: size.height)

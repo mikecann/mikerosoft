@@ -103,6 +103,7 @@ final class ColourControlsInteractionTests: XCTestCase {
     override func tearDown() async throws {
         for host in hosts { host.close() }
         hosts = []
+        settleMainThread()
     }
 
     private func host(_ content: some View, size: CGSize) -> Host {

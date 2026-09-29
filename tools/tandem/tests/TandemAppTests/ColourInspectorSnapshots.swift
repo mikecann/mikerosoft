@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -50,6 +51,7 @@ final class ColourInspectorSnapshots: XCTestCase {
         _ = model.session.close()
         try? FileManager.default.removeItem(at: folder)
         AppDefaults.store.removeObject(forKey: "colourCollapsedSections")
+        settleMainThread()
     }
 
     private var cameraClips: [Clip] {
@@ -190,6 +192,7 @@ final class ColourEditorTests: XCTestCase {
         model.tearDown()
         _ = model.session.close()
         try? FileManager.default.removeItem(at: folder)
+        settleMainThread()
     }
 
     private var clip: Clip { model.project.track(named: "Camera")!.clips[0] }
@@ -272,8 +275,14 @@ final class ColourEditorTests: XCTestCase {
         editor(.clip).preview(.colour, ["temperature": .number(10)])
         XCTAssertEqual(model.videoPreview[clip.id]?.effects.first?.params["temperature"], .number(10))
         editor(.clip).preview(.colour, nil)
-        // A look isn't previewed.
+        // A look is previewed as a stand-in for the file's, which the
+        // clip's own properties, unchanged, carry to the viewer.
+        let before = model.revision
         editor(.take).preview(.colour, ["temperature": .number(40)])
+        XCTAssertEqual(model.playback.liveOverrides.look(for: "med_camera")?.first?.params["temperature"], .number(40))
+        XCTAssertEqual(model.videoPreview[clip.id]?.effects, clip.video?.effects)
+        XCTAssertEqual(model.revision, before)
+        editor(.take).preview(.colour, nil)
         XCTAssertNil(model.videoPreview[clip.id])
     }
 
@@ -285,4 +294,13 @@ final class ColourEditorTests: XCTestCase {
         editor(.take).set(.light, ["contrast": .number(10)], label: "Contrast")
         XCTAssertEqual(ColourInspector.defaultTarget(for: clip, item: model.media(for: clip)!), .take, "both: the take, as Mike grades")
     }
+}
+
+/// Lets what a test left for the main thread (an editor model's player
+/// layers committing, a closed window's last updates) happen now, not in
+/// the middle of a later test that times its run loop.
+@MainActor
+func settleMainThread() {
+    CATransaction.flush()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
 }
