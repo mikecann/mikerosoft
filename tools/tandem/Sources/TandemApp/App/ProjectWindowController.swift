@@ -241,8 +241,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 }
 
-/// The project window. Its titlebar is as tall as the design's 48 pt top
-/// bar, with the traffic lights centred in it.
+/// The project window. Its titlebar is as tall as the top bar, with the
+/// traffic lights centred in it.
 final class EditorWindow: NSWindow {
     func layoutTrafficLights() {
         guard !styleMask.contains(.fullScreen),

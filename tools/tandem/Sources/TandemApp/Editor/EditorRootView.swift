@@ -164,46 +164,34 @@ struct TopBar: View {
     let actions: EditorActions
 
     var body: some View {
-        // The library tabs sit in the middle of the window, so they stay put
-        // when the title or the agent chip changes width.
-        ZStack {
-            HStack(spacing: 14) {
-                // The window's own traffic lights sit here.
-                Color.clear.frame(width: 52, height: 12)
-                // Just the video's name: it autosaves, and the status bar
-                // says when a save fails.
-                Text(model.project.name)
-                    .font(.ui(13, .bold))
-                    .foregroundStyle(Theme.text.color)
-                    .lineLimit(1)
-                    .frame(maxWidth: 260, alignment: .leading)
+        // The library's tabs are on the library panel, which is all they
+        // change; the bar keeps the name and the buttons for the project.
+        HStack(spacing: 14) {
+            // The window's own traffic lights sit here.
+            Color.clear.frame(width: 52, height: 12)
+            // Just the video's name: it autosaves, and the status bar
+            // says when a save fails.
+            Text(model.project.name)
+                .font(.ui(13, .bold))
+                .foregroundStyle(Theme.text.color)
+                .lineLimit(1)
+                .frame(maxWidth: 260, alignment: .leading)
                 // The title drags the window like the rest of the bar.
                 .allowsHitTesting(false)
-                Spacer(minLength: 12)
-                AgentChip(model: model)
-                Button {
-                    model.showExportSheet = true
-                } label: {
-                    Text("Export")
-                        .font(.ui(12.5, .bold))
-                        .foregroundStyle(Theme.onAmber.color)
-                        .padding(.horizontal, 14)
-                        .frame(height: 28)
-                        .background(RoundedRectangle(cornerRadius: 7).fill(Theme.amber.color))
-                }
-                .buttonStyle(.plain)
-                .help(Shortcuts.help("Export the video", .export))
+            Spacer(minLength: 12)
+            AgentChip(model: model)
+            Button {
+                model.showExportSheet = true
+            } label: {
+                Text("Export")
+                    .font(.ui(12.5, .bold))
+                    .foregroundStyle(Theme.onAmber.color)
+                    .padding(.horizontal, 14)
+                    .frame(height: 28)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Theme.amber.color))
             }
-            HStack(spacing: 2) {
-                ForEach(LibraryTab.allCases) { tab in
-                    LibraryTabButton(tab: tab, selected: model.libraryTab == tab) {
-                        model.libraryTab = tab
-                        // A tab opens on its own items, not looks or fonts.
-                        AssetLibraryHost.shared.looksShown = false
-                        AssetLibraryHost.shared.fontsShown = false
-                    }
-                }
-            }
+            .buttonStyle(.plain)
+            .help(Shortcuts.help("Export the video", .export))
         }
         .padding(.leading, 16)
         .padding(.trailing, 14)
@@ -220,9 +208,47 @@ struct TopBar: View {
     }
 }
 
+/// The library panel's tabs, across its top: icons and names when the
+/// panel is wide enough, icons alone (with their names as tooltips) when
+/// it's narrow.
+struct LibraryTabBar: View {
+    let model: EditorModel
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            row(labels: true)
+            row(labels: false)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
+    }
+
+    private func row(labels: Bool) -> some View {
+        HStack(spacing: 2) {
+            ForEach(LibraryTab.shown) { tab in
+                LibraryTabButton(tab: tab, selected: model.libraryTab.shownTab == tab, showsLabel: labels) {
+                    select(tab)
+                }
+                .frame(minWidth: labels ? 54 : 34, maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func select(_ tab: LibraryTab) {
+        guard model.libraryTab.shownTab != tab else { return }
+        model.libraryTab = tab == .effects ? model.lastEffectsTab : tab
+        // A tab opens on its own items, not looks or fonts.
+        AssetLibraryHost.shared.looksShown = false
+        AssetLibraryHost.shared.fontsShown = false
+    }
+}
+
 private struct LibraryTabButton: View {
     let tab: LibraryTab
     let selected: Bool
+    var showsLabel = true
     let action: () -> Void
 
     var body: some View {
@@ -230,12 +256,16 @@ private struct LibraryTabButton: View {
             VStack(spacing: 3) {
                 LibraryIcon(tab: tab, color: selected ? Theme.text.color : Theme.textMuted.color)
                     .frame(width: 16, height: 14)
-                Text(tab.title)
-                    .font(.ui(10.5, selected ? .semibold : .regular))
-                    .foregroundStyle(selected ? Theme.text.color : Theme.textMuted.color)
+                if showsLabel {
+                    Text(tab.title)
+                        .font(.ui(10.5, selected ? .semibold : .regular))
+                        .foregroundStyle(selected ? Theme.text.color : Theme.textMuted.color)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
-            .padding(.vertical, 5)
-            .frame(width: 62)
+            .padding(.vertical, showsLabel ? 5 : 7)
+            .frame(maxWidth: .infinity)
             .background(RoundedRectangle(cornerRadius: 7).fill(selected ? Theme.tabSelected.color : .clear))
             .contentShape(Rectangle())
         }
@@ -248,7 +278,7 @@ private struct LibraryTabButton: View {
         case .media: return "Media: the project's recordings, graphics, B-roll and music"
         case .text: return "Text: titles, templates, saved segments and fonts"
         case .transitions: return "Transitions: drag one onto a cut"
-        case .effects: return "Effects: drag one onto a clip"
+        case .effects: return "Effects, transitions and looks: drag one onto a clip or a cut"
         case .graphics: return "Graphics: icons, logos, stickers and templates"
         case .audio: return "Audio: music and sound effects"
         }
