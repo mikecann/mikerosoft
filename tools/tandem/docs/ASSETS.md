@@ -129,8 +129,11 @@ the library improves every project that uses it the next time it plays or
 renders. Files a project can't play as they are (WebM, Lottie, SVG, TIFF,
 FLAC, Ogg, animated GIF, WebP and PNG, QuickTime Animation) play from the
 library's converted copy in `~/Library/Application Support/Tandem/Assets/
-shared/<file>/`, which the watcher makes again when the file changes and a
-project uses it (`refreshChangedSharedFiles`). Audio is measured for
+shared/<file>/`, which is made again when the file changes and a project
+uses it (`refreshChangedSharedFiles`, run by every rescan: the app's
+watcher, its scan at launch, a CLI search). The new copy is made beside the
+old one and only replaces it once it's whole, so a change that can't be
+converted leaves projects the last good one. Audio is measured for
 loudness and a waveform but never copied to a 48 kHz WAV; LUTs and fonts
 are used from the library too.
 
@@ -147,7 +150,9 @@ every file those clips play and their LUTs, beside `segment.json` in
 `Segments/<name>/`, so it keeps working whatever happens to the project it
 came from. Save one with Timeline > Save
 selection as segment… (or right-click a clip), `tandem segments save` or
-`segments_save`; they're in the Text tab under Segments. Inserting one is a
+`segments_save`; they're in the Text tab under Segments. Saving again
+under the same name replaces it but keeps every file only the old version
+had, since projects it went into play them from there. Inserting one is a
 single `insertTemplate` whose media clips carry their media items, pointing
 at the files in the segment's folder, so a project that lacks them gets them
 added and one that has them reuses them. A clip whose file or look came from

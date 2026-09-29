@@ -1191,7 +1191,9 @@ title's words a field: they're asked for on insert, and the words it has now
 are the default. A `{{key}}` already in a title is a field too.
 Transitions come along when every clip they join is saved: a dissolve
 between two of the clips, a fade at one's head or tail. Saving under a name
-that's taken fails unless `--replace` (the old one goes to the Trash).
+that's taken fails unless `--replace`. Projects the old version went into
+play its files from the library, so the new version keeps every file only
+the old one had, and the rest of the old one goes to the Trash.
 
 Then put one on the timeline, as one undo step:
 
@@ -1299,7 +1301,8 @@ for a file with the same name, and takes it only when its content matches
 what the project knew (its fingerprint). A file with no fingerprint is taken
 when it's the only one with that name. Then it looks in this Mac's shared
 library for whatever's still missing, so a project that used stickers and
-sounds from the library on another Mac finds them here. It's one undo step.
+sounds from the library on another Mac finds them here; there, only a file
+whose content matches is taken. It's one undo step.
 
 ### Work alongside Mike
 
@@ -1391,8 +1394,11 @@ when it's open).
   checksum and was thrown away, and nothing in the project changed. Run it
   again; if it keeps failing, the destination disk is suspect.
 - **"There's already a segment called ..."**: pick another name, or pass
-  `--replace` (`replace: true`) to save over it; the old one goes to the
-  Trash.
+  `--replace` (`replace: true`) to save over it; files only the old one had
+  stay, and the rest of it goes to the Trash.
+- **"Several segments are called ..."**: two segment folders give the same
+  name; use the folder's name (`tandem segments list --json` has each
+  `id`).
 - **"... is missing ... from .../Segments/..., so it wasn't inserted"**: a
   file was deleted from the segment's folder. Put it back, or save the
   segment again from a project that has it.

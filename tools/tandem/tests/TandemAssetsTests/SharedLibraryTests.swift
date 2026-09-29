@@ -195,13 +195,22 @@ final class SharedLibraryTests: XCTestCase {
 
         try Generated.animatedGIF(at: gif, size: 96, frames: 12)
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: gif.path)
+        // The rescan converts it again itself, whoever notices the change.
         let rescanned = try await library.rescanSharedLibrary()
         let report = try XCTUnwrap(rescanned)
         XCTAssertEqual(report.updatedIDs, ["shared:Stickers/Spin.gif"])
-        let refreshed = await library.refreshChangedSharedFiles(report)
-        XCTAssertEqual(refreshed, ["shared:Stickers/Spin.gif"])
-        XCTAssertNotEqual(try Data(contentsOf: URL(fileURLWithPath: path)), before, "the same path, the new sticker")
+        let after = try Data(contentsOf: URL(fileURLWithPath: path))
+        XCTAssertNotEqual(after, before, "the same path, the new sticker")
         XCTAssertEqual(library.playableURL(for: try XCTUnwrap(library.asset("shared:Stickers/Spin.gif")))?.path, path)
+
+        // A change that can't be converted leaves projects the last good copy.
+        try Data("not a gif".utf8).write(to: gif)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 120)], ofItemAtPath: gif.path)
+        let broken = try await library.rescanSharedLibrary()
+        XCTAssertEqual(broken?.updatedIDs, ["shared:Stickers/Spin.gif"])
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), after, "still there, still whole")
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: URL(fileURLWithPath: path).deletingLastPathComponent().path).filter { $0.hasPrefix(".normalising") }
+        XCTAssertEqual(leftovers, [])
     }
 
     func testMovingTheLibraryPointsItsFilesAtTheNewFolder() async throws {

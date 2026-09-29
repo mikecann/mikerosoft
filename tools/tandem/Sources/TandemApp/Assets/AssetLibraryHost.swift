@@ -175,18 +175,17 @@ final class AssetLibraryHost {
 
     /// Rescans the shared library when anything in it changes: new files
     /// show up in their tabs, changed ones a project uses are converted
-    /// again, fonts are registered, and the segments list reloads.
+    /// again (the rescan does that), fonts are registered, and the segments
+    /// list reloads.
     private func watchSharedLibrary() {
         guard let library else { return }
-        sharedWatcher = library.watchSharedLibrary { report in
+        sharedWatcher = library.watchSharedLibrary { _ in
             Task.detached(priority: .utility) {
                 await MainActor.run {
                     AssetLibraryHost.shared.revision += 1
                     AssetLibraryHost.shared.reloadSegments()
                 }
-                let refreshed = await library.refreshChangedSharedFiles(report)
                 _ = await library.registerSharedFonts()
-                if !refreshed.isEmpty { await MainActor.run { AssetLibraryHost.shared.revision += 1 } }
             }
         }
     }
@@ -242,14 +241,28 @@ final class AssetLibraryHost {
         }
     }
 
-    /// Moves a saved segment's folder to the Trash.
+    /// Moves a saved segment's folder to the Trash, once Mike says so:
+    /// projects that inserted it play its files from there.
     func trash(_ segment: StoredSegment, report: @escaping (String) -> Void) {
-        do {
-            try FileManager.default.trashItem(at: segment.folder, resultingItemURL: nil)
-            reloadSegments()
-            report("Moved \(segment.name) to the Trash.")
-        } catch {
-            report("Couldn't move \(segment.name) to the Trash: \(error.localizedDescription)")
+        let alert = NSAlert()
+        alert.messageText = "Move \u{201C}\(segment.name)\u{201D} to the Trash?"
+        alert.informativeText = "Projects it went into play its files from the shared library, so they'll be missing there until it's back. Projects you've archived have their own copies."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            do {
+                try FileManager.default.trashItem(at: segment.folder, resultingItemURL: nil)
+                self?.reloadSegments()
+                report("Moved \(segment.name) to the Trash.")
+            } catch {
+                report("Couldn't move \(segment.name) to the Trash: \(error.localizedDescription)")
+            }
+        }
+        if let window = NSApp.keyWindow, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window) { response in MainActor.assumeIsolated { finish(response) } }
+        } else {
+            finish(alert.runModal())
         }
     }
 

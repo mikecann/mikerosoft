@@ -181,15 +181,21 @@ public struct SegmentStore: Sendable {
         return (segments, problems)
     }
 
-    /// A segment by its folder's name or its own name, ignoring case.
+    /// A segment by its folder's name, or else its own name, ignoring
+    /// case. A name several segments share has to be given as a folder.
     public func load(_ name: String) throws -> StoredSegment {
         let wanted = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        // The folder as it's spelled on disk, which a case-insensitive
-        // volume would otherwise answer to however it's typed.
+        // Folders as they're spelled on disk, which a case-insensitive
+        // volume would otherwise answer to however they're typed.
         let all = list().segments
-        if let found = all.first(where: { $0.id == wanted })
-            ?? all.first(where: { $0.id.caseInsensitiveCompare(wanted) == .orderedSame || $0.name.caseInsensitiveCompare(wanted) == .orderedSame }) {
-            return found
+        if let exact = all.first(where: { $0.id == wanted }) { return exact }
+        let byFolder = all.filter { $0.id.caseInsensitiveCompare(wanted) == .orderedSame }
+        if byFolder.count == 1 { return byFolder[0] }
+        let exactName = all.filter { $0.name == wanted }
+        let byName = exactName.isEmpty ? all.filter { $0.name.caseInsensitiveCompare(wanted) == .orderedSame } : exactName
+        if byName.count == 1 { return byName[0] }
+        if byName.count > 1 {
+            throw ServiceError(.invalid, "Several segments are called \"\(wanted)\" (in the folders \(byName.map(\.id).joined(separator: ", "))). Name one by its folder.")
         }
         let names = all.map(\.name)
         let known = names.isEmpty ? "There are no segments yet." : "Segments: \(names.joined(separator: ", "))."
@@ -203,32 +209,48 @@ public struct SegmentStore: Sendable {
     }
 
     /// The folder name for a segment called `name`: the name, less what a
-    /// folder name can't have.
+    /// folder name can't have, and never hidden (so never `.` or `..`).
     public static func folderName(for name: String) -> String {
-        var safe = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-        while safe.hasPrefix(".") { safe.removeFirst() }
-        return String(safe.prefix(80)).trimmingCharacters(in: .whitespaces)
+        var safe = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        while true {
+            var next = Substring(safe.trimmingCharacters(in: .whitespacesAndNewlines))
+            while next.hasPrefix(".") { next = next.dropFirst() }
+            let tidied = String(next.prefix(80))
+            if tidied == safe { return safe }
+            safe = tidied
+        }
     }
 
     /// Writes a drafted segment into `Segments/<name>/` with copies of its
     /// files (APFS clones where they can be, dates kept), making the
-    /// library's folders if they aren't there. A segment already called
-    /// that is refused unless `replace`, which moves the old one to the
-    /// Trash. The segment appears whole or not at all: it's put together
-    /// in a hidden folder and moved into place.
+    /// library's folders if they aren't there. The segment appears whole or
+    /// not at all: it's put together in a hidden folder and moved into
+    /// place.
+    ///
+    /// A segment already called that is refused unless `replace`. Projects
+    /// that inserted the old version play its files where they are, so the
+    /// new folder keeps every file the new version doesn't have, and the
+    /// old folder, with its segment.json and the files the new version
+    /// replaced, goes to the Trash once the new one is in. A save cut short
+    /// is tidied up by the next: a replaced segment whose successor never
+    /// arrived goes back in its place.
     @discardableResult
     public func save(_ draft: SegmentMaker.Draft, replace: Bool = false) throws -> StoredSegment {
         let name = Self.folderName(for: draft.segment.name)
         guard !name.isEmpty else { throw ServiceError(.badRequest, "A segment needs a name.") }
         try library.create()
         let target = folder.appendingPathComponent(name, isDirectory: true)
+        // Only ever a folder directly in Segments.
+        guard target.deletingLastPathComponent().standardizedFileURL.path == folder.standardizedFileURL.path else {
+            throw ServiceError(.badRequest, "\"\(draft.segment.name)\" can't be a segment's name.")
+        }
+        recover(name)
         let exists = FileCopier.anythingAt(target)
         if exists && !replace {
-            throw ServiceError(.invalid, "There's already a segment called \"\(name)\" in \(folder.path). Save it under another name, or replace it (the old one goes to the Trash).")
+            throw ServiceError(.invalid, "There's already a segment called \"\(name)\" in \(folder.path). Save it under another name, or replace it (files only the old one had stay; the rest goes to the Trash).")
         }
-        let staging = folder.appendingPathComponent(".\(name).tandem-saving-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        let tag = UUID().uuidString.prefix(8)
+        let staging = folder.appendingPathComponent(".\(name)\(Self.savingMark)\(tag)", isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         do {
             for file in draft.files {
@@ -244,21 +266,60 @@ public struct SegmentStore: Sendable {
             }
             let data = try ServiceJSON.encoder(pretty: true).encode(draft.segment)
             try data.write(to: staging.appendingPathComponent(Segment.fileName), options: .atomic)
-            if exists {
-                do {
-                    try discard(target)
-                } catch {
-                    throw ServiceError(.unavailable, "The old \"\(name)\" couldn't go to the Trash, so it's still there: \(error.localizedDescription)")
+            guard exists else {
+                guard try FileCopier.moveIntoPlace(staging, target) else {
+                    throw ServiceError(.invalid, "Something else is at \(target.path) now; nothing was saved.")
                 }
+                return try read(target)
             }
-            guard try FileCopier.moveIntoPlace(staging, target) else {
-                throw ServiceError(.invalid, "Something else is at \(target.path) now; nothing was saved.")
+            // Files only the old version has stay, for the projects that
+            // play them (clones: the old folder is untouched until the end).
+            let taken = Set(((try? FileManager.default.contentsOfDirectory(atPath: staging.path)) ?? []).map { $0.lowercased() })
+            for old in (try? FileManager.default.contentsOfDirectory(at: target, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [] {
+                guard !taken.contains(old.lastPathComponent.lowercased()) else { continue }
+                try FileManager.default.copyItem(at: old, to: staging.appendingPathComponent(old.lastPathComponent))
             }
+            let backup = folder.appendingPathComponent(".\(name)\(Self.replacedMark)\(tag)", isDirectory: true)
+            guard try FileCopier.moveIntoPlace(target, backup) else {
+                throw ServiceError(.invalid, "Couldn't move the old \"\(name)\" aside; nothing was saved.")
+            }
+            do {
+                guard try FileCopier.moveIntoPlace(staging, target) else {
+                    throw ServiceError(.invalid, "Something else is at \(target.path) now; nothing was saved.")
+                }
+            } catch {
+                // The old one goes back.
+                _ = try? FileCopier.moveIntoPlace(backup, target)
+                throw error
+            }
+            // What's left of the old one: its segment.json and the files the
+            // new version replaced. If the Trash refuses it, it stays hidden.
+            try? discard(backup)
         } catch {
             try? FileManager.default.removeItem(at: staging)
             throw error
         }
         return try read(target)
+    }
+
+    static let savingMark = ".tandem-saving-"
+    static let replacedMark = ".tandem-replaced-"
+
+    /// After a save of `name` that was cut short: a replaced segment whose
+    /// successor never arrived goes back in its place, and half-made copies
+    /// more than an hour old (a save running now in another process is
+    /// younger) go.
+    private func recover(_ name: String) {
+        let target = folder.appendingPathComponent(name, isDirectory: true)
+        let entries = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey], options: [])) ?? []
+        for entry in entries where entry.lastPathComponent.hasPrefix(".\(name)\(Self.replacedMark)") && !FileCopier.anythingAt(target) {
+            _ = try? FileCopier.moveIntoPlace(entry, target)
+        }
+        let hourAgo = Date().addingTimeInterval(-3600)
+        for entry in entries where entry.lastPathComponent.hasPrefix(".\(name)\(Self.savingMark)") {
+            let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if modified < hourAgo { try? FileManager.default.removeItem(at: entry) }
+        }
     }
 }
 
@@ -392,6 +453,10 @@ public enum SegmentMaker {
                     }
                     var copy = item
                     copy.path = try files.add(url)
+                    // A fresh ID wherever it goes: the source's may be an
+                    // asset's (med_<code>), which `assets use` of that asset
+                    // would then take for its own.
+                    copy.id = ""
                     copy.takeID = nil
                     copy.takeOffset = nil
                     copy.look = try files.luts(in: item.look, folder: folder, notes: &notes)

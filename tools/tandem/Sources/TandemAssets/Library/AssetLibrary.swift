@@ -376,11 +376,18 @@ public final class AssetLibrary: @unchecked Sendable {
         }
 
         let result: NormalisedAsset
+        // Projects play a shared file's converted copy where it is, so a new
+        // one is made beside it and only replaces it once it's whole: a
+        // conversion that fails leaves them the old one.
+        let shared = provider is SharedLibraryProvider
+        let workFolder = shared ? folder.appendingPathComponent(".normalising-\(UUID().uuidString)", isDirectory: true) : folder
         do {
             // Shared files are used where they are, so audio a project plays
             // as it is gets no copy.
-            result = try await normaliser.normalise(original, into: folder, fallbacks: extras, keepingPlayableAudio: provider is SharedLibraryProvider)
+            result = try await normaliser.normalise(original, into: workFolder, fallbacks: extras, keepingPlayableAudio: shared)
+            if shared { try Self.moveContents(of: workFolder, into: folder) }
         } catch {
+            if shared { try? FileManager.default.removeItem(at: workFolder) }
             // Keep what was downloaded, so the next fetch retries the
             // normalising without downloading again.
             asset.state = .original
@@ -414,6 +421,22 @@ public final class AssetLibrary: @unchecked Sendable {
         try catalog.upsert(asset)
         try writeMeta(asset, normalised: result)
         return try catalog.asset(id: id) ?? asset
+    }
+
+    /// Moves everything in `source` into `destination`, each file replacing
+    /// the one of the same name (in one step, where the file system can),
+    /// then removes `source`.
+    static func moveContents(of source: URL, into destination: URL) throws {
+        let fileManager = FileManager.default
+        for item in try fileManager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) {
+            let target = destination.appendingPathComponent(item.lastPathComponent)
+            if fileManager.fileExists(atPath: target.path) {
+                _ = try fileManager.replaceItemAt(target, withItemAt: item)
+            } else {
+                try fileManager.moveItem(at: item, to: target)
+            }
+        }
+        try? fileManager.removeItem(at: source)
     }
 
     /// What `meta.json` holds: enough to rebuild the catalogue row.
@@ -626,27 +649,34 @@ public final class AssetLibrary: @unchecked Sendable {
         return try await rescanSharedLibrary()
     }
 
-    /// Indexes the shared library's files. Nil when its folder isn't there
-    /// (nothing is removed from the index then).
+    /// Indexes the shared library's files, and converts again the changed
+    /// ones projects use (see `refreshChangedSharedFiles`), whoever notices
+    /// the change first: the app's watcher, its scan at launch, or a CLI
+    /// search. Nil when its folder isn't there (nothing is removed from the
+    /// index then).
     @discardableResult
     public func rescanSharedLibrary() async throws -> ImportScanReport? {
         guard let provider = sharedProvider, provider.library.exists else { return nil }
-        let report = try await provider.scanLibrary()
+        return await finishSharedScan(try await provider.scanLibrary())
+    }
+
+    private func finishSharedScan(_ report: ImportScanReport) async -> ImportScanReport {
         deleteFolders(of: report.removedIDs)
+        await refreshChangedSharedFiles(report)
         return report
     }
 
-    /// Watches the shared library and rescans it when anything in it
-    /// changes, calling back with the report. Keep the watcher; dropping it
-    /// stops watching. Nil when the folder isn't there.
+    /// Watches the shared library and rescans it (see
+    /// `rescanSharedLibrary`) when anything in it changes, calling back with
+    /// the report. Keep the watcher; dropping it stops watching. Nil when
+    /// the folder isn't there.
     public func watchSharedLibrary(onChange: @escaping @Sendable (ImportScanReport) -> Void) -> ImportFolderWatcher? {
         guard let provider = sharedProvider, provider.library.exists else { return nil }
         let handled = HandledScans()
         return ImportFolderWatcher(paths: [provider.library.root.path]) { _ in
             Task {
                 guard let report = try? await provider.scanLibrary(), handled.claim(report.scanID) else { return }
-                self.deleteFolders(of: report.removedIDs)
-                onChange(report)
+                onChange(await self.finishSharedScan(report))
             }
         }
     }

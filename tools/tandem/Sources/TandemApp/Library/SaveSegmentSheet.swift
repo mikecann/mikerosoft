@@ -263,7 +263,7 @@ struct SaveSegmentView: View {
         HStack(spacing: 12) {
             switch model.stage {
             case .exists:
-                Text("There's already a segment called \u{201C}\(SegmentStore.folderName(for: model.setup.name))\u{201D}. Replace it? The old one goes to the Trash.")
+                Text("There's already a segment called \u{201C}\(SegmentStore.folderName(for: model.setup.name))\u{201D}. Replace it? Files only the old one had stay, for the projects that use them; the rest goes to the Trash.")
                     .font(.ui(11.5))
                     .foregroundStyle(Theme.amber.color)
                     .fixedSize(horizontal: false, vertical: true)

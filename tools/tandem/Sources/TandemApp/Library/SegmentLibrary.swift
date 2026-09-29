@@ -79,7 +79,7 @@ struct SegmentLibrary: View {
             Button("Add at the playhead", systemImage: "plus.rectangle.on.rectangle") { host.insert(segment, at: model.playback.time, in: model) }
             Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([segment.folder]) }
             Divider()
-            Button("Move to the Trash", systemImage: "trash") { host.trash(segment) { model.show(.info, $0) } }
+            Button("Move to the Trash…", systemImage: "trash") { host.trash(segment) { model.show(.info, $0) } }
         }
     }
 

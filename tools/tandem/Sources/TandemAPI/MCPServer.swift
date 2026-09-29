@@ -740,7 +740,7 @@ enum MCPTools {
                 "from": time("Or: every clip wholly after this time..."),
                 "to": time("...and before this one."),
                 "fields": S.array(S.object(["clipID": S.string(), "key": S.string(), "label": S.string()], required: ["clipID"]), "Titles whose words are asked for on insert; the words now are the default."),
-                "replace": S.boolean("Replace a segment already called that (the old one goes to the Trash).")
+                "replace": S.boolean("Replace a segment already called that. Files only the old one had stay (projects play them); the rest goes to the Trash.")
             ],
             required: ["name"], readOnly: false
         ),

@@ -245,6 +245,18 @@ final class SharedLibraryRelinkTests: XCTestCase {
         XCTAssertFalse(again.searched.contains(f.shared.root.path))
     }
 
+    /// Nobody picked the shared library, so a name alone isn't enough there.
+    func testTheLibraryOnlyGivesFilesWhoseContentMatches() {
+        let f = try! SharedFixture()
+        var item = try! f.archive.item("med_loose", f.library("Stickers/Star.mov"), stored: "/Gone/Star.mov", role: .sticker)
+        item.fingerprint = nil
+        let (found, ambiguous) = MediaRelinker.search(for: [item], in: [f.video], then: [f.shared.root], folder: ProjectFolder(root: f.video))
+        XCTAssertEqual(found, [])
+        XCTAssertEqual(ambiguous, [])
+        item = try! f.archive.item("med_known", f.library("Stickers/Star.mov"), stored: "/Gone/Star.mov", role: .sticker)
+        XCTAssertEqual(MediaRelinker.search(for: [item], in: [f.video], then: [f.shared.root], folder: ProjectFolder(root: f.video)).found.map(\.mediaID), ["med_known"])
+    }
+
     func testAnUndecidedFileIsntSettledByTheLibrary() {
         let f = try! SharedFixture()
         var item = try! f.archive.item("med_twice", f.library("Sound effects/Whoosh.wav"), stored: "/Gone/Whoosh.wav", kind: .audio, role: .sfx)
@@ -349,7 +361,10 @@ final class SegmentTests: XCTestCase {
         let result = try session.coordinator.apply(loaded.insertBatch(at: t(20), values: ["title": "Hello again"]))
         let project = session.coordinator.project
         XCTAssertEqual(result.createdIDs.filter { $0.hasPrefix("clip_") }.count, 4)
+        XCTAssertEqual(saved.segment.media.map(\.id), ["", "", ""], "no source IDs carried")
         let card = try XCTUnwrap(project.media.first { $0.path.hasSuffix("/Segments/Intro/card.mov") }, "\(project.media.map(\.path))")
+        XCTAssertNotEqual(card.id, "med_card")
+        XCTAssertTrue(card.id.hasPrefix("med_"))
         XCTAssertEqual(card.path, folder.appendingPathComponent("card.mov").standardizedFileURL.path)
         XCTAssertEqual(card.fingerprint, try ProjectFile.load(from: intro.f.projectURL).project.media("med_card")?.fingerprint)
         let placedCard = try XCTUnwrap(project.track(named: "Graphics")?.clips.first)
@@ -383,6 +398,74 @@ final class SegmentTests: XCTestCase {
         let standalone = try ProjectFile.load(from: other).project
         XCTAssertTrue(standalone.media.allSatisfy { $0.path.hasPrefix("media/Tandem Library/Segments/Intro/") }, "\(standalone.media.map(\.path))")
         XCTAssertEqual(standalone.track(named: "Graphics")?.clips.first?.video?.effects.first?.params["path"], .string("assets/lut/warm.cube"))
+    }
+
+    /// Projects that inserted a segment play its files where they are, so
+    /// replacing it keeps the files the new version drops, and a replace cut
+    /// short puts the old one back.
+    func testReplacingKeepsTheOldFilesAndRecoversFromACrash() throws {
+        let intro = try Intro()
+        try FileManager.default.removeItem(at: intro.f.library("Segments/Intro"))
+        let discarded = DiscardLog()
+        intro.store.discard = { url in
+            discarded.add(url)
+            try FileManager.default.removeItem(at: url)
+        }
+        try intro.store.save(try intro.draft())
+        let folder = intro.f.library("Segments/Intro")
+        let project = try ProjectFile.load(from: intro.f.projectURL).project
+        let cardOnly = try SegmentMaker.draft(name: "Intro", clipIDs: ["clip_card"], in: project, folder: ProjectFolder(projectFile: intro.f.projectURL), assetsRoot: intro.f.assetsRoot)
+        let replaced = try intro.store.save(cardOnly, replace: true)
+        XCTAssertEqual(replaced.segment.media.map(\.path), ["card.mov"])
+        XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: folder.path)), ["segment.json", "card.mov", "whoosh.wav", "Star.mov", "warm.cube"], "the old files stay for the projects that play them")
+        XCTAssertEqual(discarded.urls.count, 1)
+        XCTAssertTrue(discarded.urls.first?.lastPathComponent.hasPrefix(".Intro.tandem-replaced-") == true)
+
+        // A replace that stopped after moving the old one aside.
+        let aside = intro.store.folder.appendingPathComponent(".Intro.tandem-replaced-crashed", isDirectory: true)
+        try FileManager.default.moveItem(at: folder, to: aside)
+        XCTAssertThrowsError(try intro.store.save(cardOnly)) { error in
+            XCTAssertTrue((error as? ServiceError)?.message.contains("already a segment") == true, "\(error)")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("segment.json").path), "put back")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: aside.path))
+    }
+
+    func testANameCantReachOutsideTheSegmentsFolder() throws {
+        XCTAssertEqual(SegmentStore.folderName(for: ". .."), "")
+        XCTAssertEqual(SegmentStore.folderName(for: ". ."), "")
+        XCTAssertEqual(SegmentStore.folderName(for: ".."), "")
+        XCTAssertEqual(SegmentStore.folderName(for: " . . Intro "), "Intro")
+        XCTAssertEqual(SegmentStore.folderName(for: "a/../b"), "a-..-b")
+        let intro = try Intro()
+        let project = try ProjectFile.load(from: intro.f.projectURL).project
+        XCTAssertThrowsError(try SegmentMaker.draft(name: ". ..", clipIDs: ["clip_card"], in: project, folder: ProjectFolder(projectFile: intro.f.projectURL)))
+        var draft = try intro.draft()
+        draft.segment.name = ". .."
+        XCTAssertThrowsError(try intro.store.save(draft, replace: true))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: intro.f.library("README.txt").path), "the library is untouched")
+    }
+
+    func testTwoSegmentsWithOneNameAreNamedByFolder() throws {
+        let intro = try Intro()
+        try FileManager.default.removeItem(at: intro.f.library("Segments/Intro"))
+        try intro.store.save(try intro.draft())
+        var other = try intro.draft()
+        other.segment.name = "Intro 2"
+        try intro.store.save(other)
+        // Renamed in Finder so both say "Intro".
+        let second = intro.f.library("Segments/Intro 2/segment.json")
+        var segment = try ServiceJSON.decoder().decode(Segment.self, from: Data(contentsOf: second))
+        segment.name = "Intro"
+        try ServiceJSON.encoder(pretty: true).encode(segment).write(to: second)
+        XCTAssertEqual(try intro.store.load("Intro").id, "Intro", "the folder's name first")
+        XCTAssertEqual(try intro.store.load("Intro 2").id, "Intro 2")
+        XCTAssertEqual(try intro.store.load("intro 2").id, "Intro 2")
+        try FileManager.default.moveItem(at: intro.f.library("Segments/Intro"), to: intro.f.library("Segments/First"))
+        XCTAssertEqual(try intro.store.load("first").id, "First")
+        XCTAssertThrowsError(try intro.store.load("Intro")) { error in
+            XCTAssertTrue((error as? ServiceError)?.message.contains("Several segments are called") == true, "\(error)")
+        }
     }
 
     func testSavingAgainNeedsReplaceAndPlaceholdersBecomeFields() throws {
@@ -588,4 +671,16 @@ final class SegmentCLITests: XCTestCase {
     }
 
     typealias Intro = SegmentTests.Intro
+}
+
+/// What a segment store threw away, for tests.
+final class DiscardLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [URL] = []
+
+    func add(_ url: URL) {
+        lock.withLock { stored.append(url) }
+    }
+
+    var urls: [URL] { lock.withLock { stored } }
 }

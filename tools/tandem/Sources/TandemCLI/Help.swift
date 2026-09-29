@@ -78,7 +78,7 @@ enum Help {
                     options: ["clips", "from", "to", "field", "replace", "at", "value", "mode", "label"],
                     details: """
                     list     the segments in ~/Movies/Tandem Library/Segments, with their fields
-                    save     save clips as a segment, with copies of the files they play beside it. --clips takes exactly those clips (linked ones aren't added); --from and --to take every clip wholly between them. --field clip_x=Title makes a title's words a field asked for on insert. --replace saves over one of the same name (the old one goes to the Trash)
+                    save     save clips as a segment, with copies of the files they play beside it. --clips takes exactly those clips (linked ones aren't added); --from and --to take every clip wholly between them. --field clip_x=Title makes a title's words a field asked for on insert. --replace saves over one of the same name (files only the old one had stay, for the projects that play them; the rest goes to the Trash)
                     insert   put a segment on the timeline at --at, one undo step. Its files are used where they are in the library; archiving the project copies them in. --value key=text fills a field; --mode overwrite replaces what's in the way
                     The shared library's place is in Tandem's settings; $TANDEM_LIBRARY moves it for one command.
                     """),

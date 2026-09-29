@@ -43,7 +43,8 @@ public struct SegmentSaveRequest: AssetCall {
     public var to: Time?
     /// Titles whose words are asked for when it goes in.
     public var fields: [SegmentMaker.Field]?
-    /// Replace a segment already called that (the old one goes to the Trash).
+    /// Replace a segment already called that. Files only the old one had
+    /// stay (projects play them); the rest goes to the Trash.
     public var replace: Bool?
 
     public init(name: String, clipIDs: [String]? = nil, from: Time? = nil, to: Time? = nil, fields: [SegmentMaker.Field]? = nil, replace: Bool? = nil) {

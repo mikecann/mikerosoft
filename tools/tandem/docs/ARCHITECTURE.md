@@ -383,7 +383,9 @@ straight away, and Mike is asked for a folder to search for the rest.
 fingerprint, the same content; `tandem relink --search <folder>` does the
 same for agents. The shared library is searched last, only for what the
 project folder and the folders given didn't settle, so a file found twice
-by name elsewhere stays undecided rather than being picked from the library.
+by name elsewhere stays undecided rather than being picked from the library,
+and since nobody chose it, a file there is only taken when its content
+matches the item's fingerprint.
 
 ## Packs
 

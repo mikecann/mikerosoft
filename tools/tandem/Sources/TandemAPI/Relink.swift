@@ -57,12 +57,15 @@ public enum MediaRelinker {
     }
 
     /// Looks in `folders` first, then in `fallback` (the shared library) for
-    /// what they didn't have. A file with several candidates in the first
-    /// folders stays undecided rather than being settled by the fallback.
+    /// what they didn't have. The fallback is searched without anyone
+    /// choosing it, so it only gives a file whose content matches the
+    /// item's fingerprint, never one that merely has the name. A file with
+    /// several candidates in the first folders stays undecided rather than
+    /// being settled by the fallback.
     public static func search(for items: [MediaItem], in folders: [URL], then fallback: [URL], folder: ProjectFolder, control: ArchiveControl? = nil) -> (found: [Match], ambiguous: [String]) {
         var (found, ambiguous) = search(for: items, in: folders, folder: folder, control: control)
         let settled = Set(found.map(\.mediaID))
-        let rest = items.filter { !settled.contains($0.id) && !ambiguous.contains($0.path) }
+        let rest = items.filter { !settled.contains($0.id) && !ambiguous.contains($0.path) && $0.fingerprint != nil }
         guard !rest.isEmpty, !fallback.isEmpty else { return (found, ambiguous) }
         let more = search(for: rest, in: fallback, folder: folder, control: control)
         found += more.found
