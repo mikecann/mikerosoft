@@ -119,3 +119,19 @@ final class MarqueeOutlineTests: XCTestCase {
         XCTAssertEqual(both.count, 2)
     }
 }
+
+final class MarqueeLinkTests: XCTestCase {
+    /// With linked selection on, the box takes each clip's whole link
+    /// group; Option turns that off for the drag.
+    func testBoxTakesWholeLinkGroups() throws {
+        let f = try AppFixture()
+        let camera = f.clip("Camera").id
+        let group = Set(f.project.linkedClipIDs(of: camera))
+        XCTAssertGreaterThan(group.count, 1, "the take is linked")
+        XCTAssertEqual(SelectionRules.marquee([camera], in: f.project, current: [], modifiers: .init(), linkedSelection: true), group)
+        XCTAssertEqual(SelectionRules.marquee([camera], in: f.project, current: [], modifiers: .init(option: true), linkedSelection: true), [camera])
+        XCTAssertEqual(SelectionRules.marquee([camera], in: f.project, current: [], modifiers: .init(), linkedSelection: false), [camera])
+        let music = f.clip("Music").id
+        XCTAssertEqual(SelectionRules.marquee([camera, music], in: f.project, current: [], modifiers: .init(), linkedSelection: true), group.union([music]))
+    }
+}

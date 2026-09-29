@@ -69,7 +69,13 @@ extension Project {
     public func linkedClipIDs(of id: String) -> [String] {
         guard let clip = clip(id) else { return [] }
         guard let group = clip.linkGroup else { return [id] }
-        return allTracks.flatMap(\.clips).filter { $0.linkGroup == group }.map(\.id)
+        // A loop rather than flatMap: copying every clip to find a few was
+        // most of a selection box's time on a 500 clip timeline.
+        var ids: [String] = []
+        for track in allTracks {
+            for clip in track.clips where clip.linkGroup == group { ids.append(clip.id) }
+        }
+        return ids
     }
 
     public func location(ofTransition id: String) -> (track: TrackLocation, index: Int)? {

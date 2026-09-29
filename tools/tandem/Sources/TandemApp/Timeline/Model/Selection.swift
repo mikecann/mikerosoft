@@ -54,8 +54,23 @@ enum SelectionRules {
         linkedSelection: Bool
     ) -> Set<String> {
         var picked = Set<String>()
-        for id in clipIDs {
-            picked.formUnion(members(of: id, in: project, linkedSelection: linkedSelection, option: modifiers.option))
+        if linkedSelection != modifiers.option {
+            // Whole link groups, found in two passes over the timeline
+            // rather than one per clip: this runs on every mouse move.
+            let boxed = Set(clipIDs)
+            var groups = Set<String>()
+            for track in project.allTracks {
+                for clip in track.clips where boxed.contains(clip.id) {
+                    if let group = clip.linkGroup { groups.insert(group) } else { picked.insert(clip.id) }
+                }
+            }
+            if !groups.isEmpty {
+                for track in project.allTracks {
+                    for clip in track.clips where clip.linkGroup.map(groups.contains) == true { picked.insert(clip.id) }
+                }
+            }
+        } else {
+            picked = Set(clipIDs)
         }
         if modifiers.shift || modifiers.command { return current.union(picked) }
         return picked

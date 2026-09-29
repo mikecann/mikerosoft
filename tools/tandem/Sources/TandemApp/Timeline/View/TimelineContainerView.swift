@@ -360,13 +360,18 @@ final class ClipOutlineView: NSView {
         for outline in outlines {
             path.addRoundedRect(in: outline.rect, cornerWidth: outline.radius, cornerHeight: outline.radius)
         }
-        // The layer's own coordinates start at the bottom.
-        var flip = CGAffineTransform(translationX: 0, y: bounds.height).scaledBy(x: 1, y: -1)
-        let flipped = (layer?.isGeometryFlipped ?? false) ? path : (path.copy(using: &flip) ?? path)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         shape.frame = bounds
-        shape.path = flipped
+        // The path is in flipped view coordinates. Whether the layer's y
+        // runs down too depends on the flips above it in the layer tree
+        // (the backing layer itself isn't flipped, a parent is).
+        if shape.contentsAreFlipped() {
+            shape.path = path
+        } else {
+            var flip = CGAffineTransform(translationX: 0, y: bounds.height).scaledBy(x: 1, y: -1)
+            shape.path = path.copy(using: &flip)
+        }
         CATransaction.commit()
         isHidden = outlines.isEmpty
     }
