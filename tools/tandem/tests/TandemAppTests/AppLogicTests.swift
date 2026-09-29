@@ -176,6 +176,17 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://new?folder=/videos/static-hosting")!), .newProject(folder: "/videos/static-hosting"))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://version?out=/videos/a/Video%20v2.tandem")!), .saveVersion(out: "/videos/a/Video v2.tandem"))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt")!), .debug(out: "/tmp/tree.txt"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt&reset=1")!), .debug(out: "/tmp/tree.txt", resetTimings: true))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://window?order=back")!), .windowOrder(toFront: false))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://window?order=sideways")!))
+        XCTAssertEqual(
+            AppURLCommand.parse(URL(string: "tandem://simulate?scroll=900,1100,-12,0&steps=90&interval=16")!),
+            .simulate(InputSimulator.Gesture(kind: .scroll(dx: -12, dy: 0, steps: 90), at: CGPoint(x: 900, y: 1_100), modifiers: [], interval: 0.016))
+        )
+        XCTAssertEqual(
+            AppURLCommand.parse(URL(string: "tandem://simulate?scroll=900,1100,0,4&mods=option")!),
+            .simulate(InputSimulator.Gesture(kind: .scroll(dx: 0, dy: 4, steps: 1), at: CGPoint(x: 900, y: 1_100), modifiers: .option))
+        )
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=icons&search=rocket&online=1")!), .assets(section: .icons, search: "rocket", scope: nil, online: true))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=sfx&scope=recent")!), .assets(section: .sfx, search: nil, scope: .recent, online: false))
         XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=looks")!), .assets(section: .looks, search: nil, scope: nil, online: false))
