@@ -217,7 +217,8 @@ final class TimelineLanesView: TimelineChildView {
             pinX: pinned ? origin.x : nil, viewMaxX: pinned ? origin.x + bounds.width : nil,
             phrases: phrases, groups: transcriptGroups(phrases), highlightedGroup: highlightedGroup,
             previewed: previewChangedClipIDs(project, committed: container.drawState.project),
-            dropLaneID: drop?.laneID, keyframeDrag: keyframeDrag.map { ($0.clip.id, $0.time) }
+            dropLaneID: drop?.laneID, keyframeDrag: keyframeDrag.map { ($0.clip.id, $0.time) },
+            colorSpace: window?.colorSpace?.cgColorSpace, backingScale: window?.backingScaleFactor ?? 2
         )
     }
 

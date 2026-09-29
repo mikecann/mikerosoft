@@ -28,6 +28,10 @@ struct ClipRenderer {
     /// When set, labels aren't drawn; how far right they'd reach is noted
     /// here instead (see `labelReach`).
     var reach: LabelReach?
+    /// The colour space and pixels per point of the screen being drawn
+    /// for, so thumbnails come ready to copy (see `MediaArtwork`).
+    var colorSpace: CGColorSpace?
+    var backingScale: CGFloat = 2
 
     // MARK: - Styles
 
@@ -166,7 +170,8 @@ struct ClipRenderer {
             let tile = CGRect(x: x, y: rect.minY, width: tileWidth, height: rect.height)
             if hasThumbnails, let item {
                 let time = scale.time(atX: min(max(x + tileWidth / 2, rect.minX), rect.maxX), rate: project.settings.frameRate)
-                if let cg = artwork?.thumbnail(for: item, at: clip.sourceTime(atTimelineTime: time)) {
+                let pixels = CGSize(width: tile.width * backingScale, height: tile.height * backingScale)
+                if let cg = artwork?.thumbnail(for: item, at: clip.sourceTime(atTimelineTime: time), pixelSize: pixels, colorSpace: colorSpace) {
                     context.saveGState()
                     context.interpolationQuality = .medium
                     context.translateBy(x: tile.minX, y: tile.maxY)
@@ -191,10 +196,9 @@ struct ClipRenderer {
     }
 
     private func drawGraphicThumbnail(_ clip: Clip, rect: CGRect, in context: CGContext) {
-        guard let item = clip.mediaID.flatMap({ project.media($0) }),
-              let cg = artwork?.thumbnail(for: item, at: clip.sourceStart) else { return }
         let width = min(rect.height * 16 / 9, rect.width / 2)
-        guard width > 12 else { return }
+        guard width > 12, let item = clip.mediaID.flatMap({ project.media($0) }),
+              let cg = artwork?.thumbnail(for: item, at: clip.sourceStart, pixelSize: CGSize(width: width * backingScale, height: rect.height * backingScale), colorSpace: colorSpace) else { return }
         context.saveGState()
         context.translateBy(x: rect.minX, y: rect.maxY)
         context.scaleBy(x: 1, y: -1)

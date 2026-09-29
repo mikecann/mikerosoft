@@ -16,12 +16,19 @@ final class MediaArtwork {
     private let analysis: MediaAnalysis
     private let images = NSCache<NSString, CGImage>()
     private var decoding: Set<String> = []
+    /// Thumbnails as the timeline draws them: scaled to the pixels they
+    /// cover, in the screen's colour space. Drawing the decoded JPEGs made
+    /// Core Animation convert every one to the screen's profile and
+    /// resample it on every redraw, which at fit zoom was most of a frame.
+    private let fitted = NSCache<NSString, CGImage>()
+    private var fitting: Set<String> = []
     private var redrawPending = false
     private var strips: [String: (strip: ThumbnailStrip, folder: URL)] = [:]
     /// Each strip's image paths, made once: making them from URLs for
     /// every tile drawn was a tenth of the lanes' drawing time.
     private var stripPaths: [String: [String]] = [:]
     private var waveforms: [String: Waveform] = [:]
+    private var transcripts: [String: Transcript] = [:]
     private var misses: [String: Date] = [:]
     /// Called (at most every 50 ms) when decoded thumbnails are ready.
     var onDecoded: (() -> Void)?
@@ -35,6 +42,8 @@ final class MediaArtwork {
         self.analysis = analysis
         images.countLimit = 900
         images.totalCostLimit = 96 * 1024 * 1024
+        fitted.countLimit = 1_500
+        fitted.totalCostLimit = 64 * 1024 * 1024
     }
 
     /// Looks again for results that weren't there. Results never change
@@ -42,6 +51,8 @@ final class MediaArtwork {
     /// stay.
     func invalidate() {
         misses.removeAll()
+        // A better transcript can replace one (the careful pass).
+        transcripts.removeAll()
     }
 
     private func recentlyMissed(_ key: String) -> Bool {
@@ -62,7 +73,44 @@ final class MediaArtwork {
     }
 
     /// The thumbnail nearest `mediaTime`, or nil while it's still being
-    /// decoded (or doesn't exist).
+    /// decoded (or doesn't exist). Given the pixels it will cover and the
+    /// colour space it will be drawn in, it comes fitted to them once that
+    /// copy is made (off the main thread), and as decoded until then.
+    func thumbnail(for item: MediaItem, at mediaTime: Time, pixelSize: CGSize?, colorSpace: CGColorSpace?) -> CGImage? {
+        guard let (path, image) = decodedThumbnail(for: item, at: mediaTime), let image else { return nil }
+        guard let pixelSize, let colorSpace, pixelSize.width >= 1, pixelSize.height >= 1 else { return image }
+        let width = Int(pixelSize.width.rounded())
+        let height = Int(pixelSize.height.rounded())
+        let key = "\(path)|\(width)x\(height)|\(CFHash(colorSpace))" as NSString
+        if let fit = fitted.object(forKey: key) { return fit }
+        let name = key as String
+        guard fitting.insert(name).inserted else { return image }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let fit = Self.fit(image, width: width, height: height, colorSpace: colorSpace)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.fitting.remove(name)
+                    if let fit { self.fitted.setObject(fit, forKey: key, cost: fit.bytesPerRow * fit.height) }
+                }
+            }
+        }
+        return image
+    }
+
+    /// `image` redrawn at `width` by `height` pixels in `colorSpace`.
+    nonisolated static func fit(_ image: CGImage, width: Int, height: Int, colorSpace: CGColorSpace) -> CGImage? {
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .medium
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+
+    /// The decoded thumbnail nearest `mediaTime`, as `thumbnail(for:at:pixelSize:colorSpace:)`
+    /// without the fitting.
     func thumbnail(for item: MediaItem, at mediaTime: Time) -> CGImage? {
         decodedThumbnail(for: item, at: mediaTime)?.image
     }
@@ -139,7 +187,17 @@ final class MediaArtwork {
         return waveform
     }
 
+    /// The take's transcript, read from the analysis cache once: reading
+    /// it decodes a file, which a drag's preview did for every frame.
     func transcript(for item: MediaItem) -> Transcript? {
-        analysis.transcript(for: item)
+        let key = "words:\(item.id):\(item.fingerprint ?? "")"
+        if let transcript = transcripts[key] { return transcript }
+        guard !recentlyMissed(key) else { return nil }
+        guard let transcript = analysis.transcript(for: item) else {
+            misses[key] = Date()
+            return nil
+        }
+        transcripts[key] = transcript
+        return transcript
     }
 }

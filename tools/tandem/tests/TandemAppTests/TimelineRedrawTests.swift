@@ -409,6 +409,22 @@ final class PinnedReachTests: XCTestCase {
     }
 }
 
+final class FittedThumbnailTests: XCTestCase {
+    /// Thumbnails are redrawn once at the pixels they cover, in the screen's
+    /// colour space, so drawing them is a copy.
+    func testFitsToThePixelsAndColourSpace() throws {
+        let source = try XCTUnwrap(CGContext(
+            data: nil, width: 240, height: 135, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )?.makeImage())
+        let displayP3 = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+        let fitted = try XCTUnwrap(MediaArtwork.fit(source, width: 128, height: 72, colorSpace: displayP3))
+        XCTAssertEqual(fitted.width, 128)
+        XCTAssertEqual(fitted.height, 72)
+        XCTAssertEqual(fitted.colorSpace?.name, CGColorSpace.displayP3)
+    }
+}
+
 @MainActor
 final class FramePacerTests: XCTestCase {
     /// Changes arriving together run once; more within a frame wait for the

@@ -29,6 +29,9 @@ struct LanesPainter {
     var dropLaneID: String?
     /// A keyframe being dragged, drawn at its new time.
     var keyframeDrag: (clipID: String, time: Time)?
+    /// The screen's colour space and pixels per point.
+    var colorSpace: CGColorSpace?
+    var backingScale: CGFloat = 2
 
     var scale: TimelineScale { TimelineScale(pixelsPerSecond: state.scale.pixelsPerSecond, scrollSeconds: 0) }
 
@@ -50,7 +53,9 @@ struct LanesPainter {
             }
         }
 
-        let renderer = ClipRenderer(project: project, scale: scale, artwork: artwork, visible: dirty.minX...dirty.maxX, pinX: pinX ?? -.infinity)
+        var renderer = ClipRenderer(project: project, scale: scale, artwork: artwork, visible: dirty.minX...dirty.maxX, pinX: pinX ?? -.infinity)
+        renderer.colorSpace = colorSpace
+        renderer.backingScale = backingScale
         let selected = state.selection
         let linkedGroups = Set(selected.compactMap { project.clip($0)?.linkGroup })
         for lane in layout.lanes {
