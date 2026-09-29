@@ -50,7 +50,7 @@ enum Help {
                     Without --preset the canvas decides: youtube1080 for a canvas 1080 or less on its short side (1920x1080, 1080x1920), youtube4k for anything bigger.
                     Bitrates are for 16:9 at up to 30 fps. A frame with less area gets proportionally less (1080x1080 gets 11.3 Mbps), and 48 to 60 fps gets half as much again, as YouTube recommends.
                     A preset bigger than the canvas (youtube4k of a 1080x1920 project is 2160x3840) upscales it, with a warning. --format renders an alternate format, like portrait, at the preset's quality.
-                    It prints the preset, size, codec and bitrate it used, and the loudness it measured: -14 LUFS with true peaks under -1 dBTP.
+                    It prints the preset, size, codec and bitrate it used, and the mix's loudness: -14 LUFS, with true peaks limited 0.5 dB under the -1 dBTP ceiling so the AAC file stays under it too.
                     """),
         CommandHelp(name: "archive", usage: "tandem archive [<project>] [--to <folder>] [--with-cache] [--dry-run]", summary: "Make the project standalone: copy what it uses from outside its folder into it, or with --to write a standalone copy of the whole folder somewhere else.", options: ["to", "with-cache", "dry-run", "label"],
                     details: """

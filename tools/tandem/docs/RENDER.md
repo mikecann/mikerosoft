@@ -258,12 +258,13 @@ reading of LoudnessGain; it now uses the speech level.
    are muxed with AVAssetWriter. The mix gets the master gain and the
    true-peak limiter (5 ms lookahead, 4x oversampled detection, 0.1 dB
    margin, delay compensated), then AAC 48 kHz stereo. Timelines without
-   sound get a silent track.
+   sound get a silent track. The limiter aims 0.5 dB under the preset's
+   ceiling, because AAC overshoots the limited mix (see Presets).
 4. `<output>.tandem` is written beside the file: the project with absolute
    media paths and `export.*` metadata.
 
 The preset's `loudnessTarget` and `truePeakCeiling` are used as given (nil
-leaves the mix alone). To follow a project's own settings, build the preset
+leaves the mix alone), less the AAC margin on the ceiling. To follow a project's own settings, build the preset
 from `project.settings`. The encoder lock is held at `.export` priority
 while encoding, released on every exit including cancel and errors (not
 held during the loudness passes, which don't encode). Outputs must be
@@ -318,6 +319,14 @@ and audio went from 256 to 320 kbps, the most Apple's AAC encoder takes at
 48 kHz stereo (it refuses 384). The bug these rules fixed: a 1080x1920
 project exported at the 4K preset's 80 Mbps (752 MB for 76 s), and
 YouTube 1080p laid it out again as 1920x1080.
+
+AAC overshoots the limited mix, so the limiter aims 0.5 dB under the
+ceiling. On synthetic hits that keep the limiter busy, the file measured
+0.1 to 0.4 dB over the mix at 320 kbps and up to 1.1 dB at 256 kbps; with
+the margin it stays under -1 dBTP (`testTheAACFileStaysUnderTheCeiling`).
+The workbench short's file measured -1.01 dBTP with ffmpeg before the
+margin and -1.51 after, at -14.0 LUFS both times. The export reports the
+loudness of the mix before AAC, so its true peak reads about -1.6 dBTP.
 
 ## Proxies
 

@@ -139,8 +139,47 @@ final class ExportTests: XCTestCase {
         var meter = LoudnessMeter(sampleRate: 48_000, channels: 2)
         meter.process(interleaved: try await decodeAudio(out))
         XCTAssertEqual(meter.integrated, -14, accuracy: 0.5)
-        // AAC adds a little overshoot; the limiter's margin keeps it close.
-        XCTAssertLessThanOrEqual(meter.truePeak, -1 + 0.5)
+        XCTAssertLessThanOrEqual(meter.truePeak, -1)
+    }
+
+    /// AAC overshoots the limited mix by a tenth of a dB or more, which put
+    /// finished files over -1 dBTP when measured with ffmpeg. The limiter
+    /// aims under the ceiling by enough that the file itself stays under.
+    func testTheAACFileStaysUnderTheCeiling() async throws {
+        let media = try TestMedia()
+        var seed: UInt64 = 7
+        func noise() -> Double {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let u = max(Double(seed >> 11) / Double(1 << 53), 1e-12)
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return sqrt(-2 * log(u)) * cos(2 * .pi * Double(seed >> 11) / Double(1 << 53))
+        }
+        // Bright snare-like hits ten times a second over a tone: every hit
+        // reaches the limiter, and AAC at the presets' 320 kbps put this
+        // file at -0.73 dBTP before the margin.
+        var previous = 0.0
+        let samples = (0..<(6 * 48_000)).map { i -> Float in
+            let beat = i % 4_800
+            let white = noise()
+            let bright = white - 0.5 * previous
+            previous = white
+            let hit = exp(-Double(beat) / 900) * (0.5 * sin(2 * .pi * 180 * Double(beat) / 48_000) + 0.35 * bright)
+            return Float(hit + 0.12 * sin(2 * .pi * 330 * Double(i) / 48_000))
+        }
+        try await media.movie("hits.mov", seconds: 6, draw: { TestMedia.fill($1, 0, 0, 0) }, sound: { samples[$0] })
+        let item = media.item("med_h", "hits.mov", seconds: 6, audio: true)
+        let sound = Clip(id: "clip_a", content: .media(mediaID: "med_h"), start: .zero, duration: t(6))
+        let project = smallProject(video: [], audio: [Track(kind: .audio, name: "A1", clips: [sound])], media: [item])
+        let out = media.folder.appendingPathComponent("hits.mp4")
+        var loud = preset()
+        loud.audioBitrate = ExportPreset.youtube1080.audioBitrate
+        let result = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: loud, output: out).run()
+        var meter = LoudnessMeter(sampleRate: 48_000, channels: 2)
+        meter.process(interleaved: try await decodeAudio(out))
+        XCTAssertLessThanOrEqual(meter.truePeak, -1, "the file peaks at \(meter.truePeak) dBTP, the mix before AAC at \(result.truePeakDBTP ?? 0)")
+        XCTAssertGreaterThan(meter.truePeak, -2, "still close to the ceiling, not squashed")
+        // So much of it is limited that the loudness falls a little short.
+        XCTAssertEqual(meter.integrated, -14, accuracy: 0.5)
     }
 
     /// Dominant frequency by counting zero crossings on the left channel.

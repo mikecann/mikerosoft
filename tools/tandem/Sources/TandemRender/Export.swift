@@ -93,6 +93,11 @@ final class ExportPipeline: @unchecked Sendable {
         }
     }
 
+    /// AAC can overshoot the limited mix by a few tenths of a dB, which put
+    /// finished files over the ceiling when measured with ffmpeg, so the
+    /// limiter aims this much lower (on top of its own 0.1 dB).
+    static let aacPeakMargin = 0.5
+
     func run() async throws -> ExportResult {
         let started = Date()
         try checkOutput()
@@ -118,7 +123,7 @@ final class ExportPipeline: @unchecked Sendable {
 
         // Loudness passes take the first tenth of the progress bar.
         var gainDB = 0.0
-        let ceiling = preset.truePeakCeiling
+        let ceiling = preset.truePeakCeiling.map { $0 - Self.aacPeakMargin }
         if let target = preset.loudnessTarget, !audioTracks.isEmpty {
             let first = try await timed("loudness") {
                 try await measure(built, tracks: audioTracks, range: range, gains: [0], ceiling: nil) { self.report(0.04 * $0) }[0]
