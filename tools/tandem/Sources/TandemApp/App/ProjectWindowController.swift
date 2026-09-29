@@ -34,8 +34,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         window.tabbingMode = .disallowed
         // The controller owns the window; AppKit mustn't release it too.
         window.isReleasedWhenClosed = false
-        if !AppDefaults.isolated { window.setFrameAutosaveName("Tandem project") }
         super.init(window: window)
+        // It opens where the last one was, unless it's replacing a window
+        // (a new version) and has that one's frame.
+        shouldCascadeWindows = false
+        let others = NSApplication.shared.windows.filter { $0 is EditorWindow && $0 !== window && $0.isVisible }.map(\.frame)
+        if frame == nil, let placed = WindowPlacement.restored(screens: NSScreen.screens.map(\.visibleFrame), occupied: others) {
+            window.setFrame(placed, display: false)
+        }
         window.delegate = self
         actions.controller = self
         let root = EditorRootView(model: model, actions: actions)
@@ -148,6 +154,18 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func windowDidResize(_ notification: Notification) {
         (window as? EditorWindow)?.layoutTrafficLights()
+        saveFrame()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        saveFrame()
+    }
+
+    /// Remembers where the window is for the next one to open, but not a
+    /// full screen or minimised window.
+    private func saveFrame() {
+        guard let window, !window.styleMask.contains(.fullScreen), !window.isMiniaturized else { return }
+        WindowPlacement.save(window.frame)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
