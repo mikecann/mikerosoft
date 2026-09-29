@@ -333,6 +333,96 @@ final class ServiceTests: XCTestCase {
         assertServiceError(.notFound) { _ = try h.service.prepareExport(ExportRequest(preset: "vhs")) }
     }
 
+    /// What reached the fake renderer: preset, size, codec, bitrate, format.
+    func rendered(_ outcome: ExportOutcome) throws -> String {
+        try String(contentsOfFile: outcome.path, encoding: .utf8)
+    }
+
+    /// Presets set the quality and the canvas sets the shape, so a native
+    /// portrait project exports 1080x1920 at the 1080p rate, by default and
+    /// with the short preset, and the result says what it used.
+    func testExportFollowsAPortraitCanvas() async throws {
+        var project = APIFixture.project()
+        project.settings.width = 1080
+        project.settings.height = 1920
+        let h = try ServiceHarness(project: project)
+        defer { h.close() }
+
+        let standard = try await ExportRequest(output: "exports/default.mp4").run(on: h.service, context: h.context)
+        XCTAssertEqual(standard.preset, "YouTube 1080p")
+        XCTAssertEqual(standard.width, 1080)
+        XCTAssertEqual(standard.height, 1920)
+        XCTAssertEqual(standard.codec, .h264)
+        XCTAssertEqual(standard.videoBitrate, 20_000_000)
+        XCTAssertEqual(standard.audioBitrate, 320_000)
+        XCTAssertNil(standard.format)
+        XCTAssertEqual(standard.warnings, [])
+        XCTAssertEqual(try rendered(standard), "fake movie YouTube 1080p 1080x1920 h264 20000000 main")
+        XCTAssertTrue(standard.readableText.hasPrefix("Wrote \(standard.path) (YouTube 1080p: 1080x1920 H.264 at 20 Mbps, 01:00.000 long) in "), standard.readableText)
+
+        let short = try await ExportRequest(preset: "short", output: "exports/short.mp4").run(on: h.service, context: h.context)
+        XCTAssertEqual(short.preset, "Short 9:16")
+        XCTAssertNil(short.format, "the canvas is the short")
+        XCTAssertEqual(try rendered(short), "fake movie Short 9:16 1080x1920 h264 20000000 main")
+
+        let hd = try await ExportRequest(preset: "youtube1080", output: "exports/1080.mp4").run(on: h.service, context: h.context)
+        XCTAssertEqual(try rendered(hd), "fake movie YouTube 1080p 1080x1920 h264 20000000 main", "still portrait")
+
+        let uhd = try await ExportRequest(preset: "youtube4k", output: "exports/4k.mp4").run(on: h.service, context: h.context)
+        XCTAssertEqual(try rendered(uhd), "fake movie YouTube 4K 2160x3840 hevc 80000000 main")
+        XCTAssertEqual(uhd.warnings, ["YouTube 4K upscales the 1080x1920 canvas to 2160x3840, so it's no sharper than the canvas."])
+        XCTAssertTrue(uhd.readableText.contains("\nWarning: YouTube 4K upscales"), uhd.readableText)
+
+        // A review clip keeps the shape too.
+        let clip = try await ClipRequest(start: t(0), end: t(5)).run(on: h.service, context: h.context)
+        XCTAssertEqual(try rendered(clip), "fake movie Review 720p 720x1280 h264 5000000 main")
+
+        // Frames of the portrait format are frames of the canvas.
+        let frame = try await FrameRequest(time: t(1), format: "portrait").run(on: h.service, context: h.context)
+        XCTAssertEqual(frame.bytes, FakeRenderer.png.count)
+    }
+
+    func testTheShortPresetNeedsAPortraitFrame() async throws {
+        let h = try ServiceHarness()
+        defer { h.close() }
+        XCTAssertThrowsError(try h.service.prepareExport(ExportRequest(preset: "short"))) { error in
+            let failure = error as? ServiceError
+            XCTAssertEqual(failure?.code, ServiceError.Code.notFound.rawValue)
+            XCTAssertTrue(failure?.message.contains("`tandem short --apply`") ?? false, "\(error)")
+            XCTAssertTrue(failure?.message.hasSuffix("use --preset youtube4k.") ?? false, "\(error)")
+        }
+        // The landscape project's default is still 4K.
+        let standard = try await ExportRequest(output: "exports/default.mp4").run(on: h.service, context: h.context)
+        XCTAssertEqual(try rendered(standard), "fake movie YouTube 4K 3840x2160 hevc 80000000 main")
+
+        // Once the short is laid out, the short preset renders its format.
+        _ = try h.service.short(ShortRequest(apply: true), context: h.context)
+        let short = try await ExportRequest(preset: "short", output: "exports/short.mp4").run(on: h.service, context: h.context)
+        XCTAssertEqual(short.format, "portrait")
+        XCTAssertEqual(try rendered(short), "fake movie Short 9:16 1080x1920 h264 20000000 portrait")
+        XCTAssertTrue(short.readableText.contains("(Short 9:16: 1080x1920 H.264 at 20 Mbps, portrait format, 01:00.000 long)"), short.readableText)
+        let format = try await ExportRequest(output: "exports/portrait.mp4", format: "portrait").run(on: h.service, context: h.context)
+        XCTAssertEqual(try rendered(format), "fake movie YouTube 1080p 1080x1920 h264 20000000 portrait", "the default follows the format's frame")
+
+        assertServiceError(.notFound) { _ = try h.service.prepareExport(ExportRequest(format: "square")) }
+        XCTAssertThrowsError(try h.service.prepareExport(ExportRequest(preset: "vhs"))) { error in
+            XCTAssertEqual("\(error)", "No export preset \"vhs\". Presets: youtube4k, youtube1080, review, short.")
+        }
+    }
+
+    func testShortRefusesACanvasThatsAlreadyNineBySixteen() throws {
+        var project = APIFixture.project()
+        project.settings.width = 1080
+        project.settings.height = 1920
+        let h = try ServiceHarness(project: project)
+        defer { h.close() }
+        XCTAssertThrowsError(try h.service.short(ShortRequest(apply: true), context: h.context)) { error in
+            XCTAssertEqual((error as? ServiceError)?.code, ServiceError.Code.invalid.rawValue)
+            XCTAssertTrue("\(error)".contains("`tandem export --preset short`"), "\(error)")
+        }
+        XCTAssertEqual(h.service.coordinator.project.settings.alternateFormats, [], "nothing changed")
+    }
+
     func testClipUsesTheReviewPresetAndItsRange() async throws {
         let h = try ServiceHarness()
         defer { h.close() }

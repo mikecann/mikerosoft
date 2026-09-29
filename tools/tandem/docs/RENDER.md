@@ -246,7 +246,8 @@ reading of LoudnessGain; it now uses the speech level.
 
 ## Export
 
-1. Build the composition at the preset's size and format (never proxies).
+1. Plan the preset for the project (see Presets below) and build the
+   composition at the plan's size and format (never proxies).
 2. Measure the mix (audio only, fast). If the gain would push true peaks
    over the ceiling, the limiter will take some loudness with them, so one
    more pass runs four gain and limiter chains side by side (the gain plus
@@ -267,6 +268,56 @@ from `project.settings`. The encoder lock is held at `.export` priority
 while encoding, released on every exit including cancel and errors (not
 held during the loudness passes, which don't encode). Outputs must be
 .mp4, .mov or .m4v and can't be one of the project's media files.
+
+### Presets
+
+A preset sets the quality and the project sets the shape.
+`ExportPreset.plan(for:format:)` (`ExportPlan.swift`) works out what a
+preset renders for a project, and the CLI, the API, the exporter and the
+app's Export dialog all use it, so they agree:
+
+- **Frame.** The main canvas, or an alternate format. "portrait" is the
+  project's 9:16 frame: its portrait format, or the canvas itself when
+  that's 9:16 (`tandem new --portrait`). The short preset asks for it, so
+  on a landscape project without a portrait format it fails with an error
+  that names `tandem short --apply`. `tandem short` refuses a 9:16 canvas,
+  which is already the short.
+- **Size.** A preset's `resolution` is the frame's short side, and the
+  frame keeps its shape: YouTube 1080p is 1920x1080 on a landscape canvas,
+  1080x1920 on a 9:16 one and 1080x1080 on a square; YouTube 4K of a
+  1080x1920 canvas is 2160x3840. Sizes round to even numbers. An exact
+  `width` and `height` win; with neither the frame keeps its size.
+- **Upscales.** Allowed (YouTube serves a 4K upload at higher bitrates)
+  but warned about, since they add no detail.
+- **Bitrate.** A preset's rate is for a 16:9 frame of its class at up to
+  30 fps. It follows the frame's area (1080x1080 gets 56%, 2560x1080 133%)
+  and gets half as much again above 30 fps, as YouTube's table does.
+  Presets without a resolution keep their numbers.
+- **Default.** With no preset named, the frame decides: YouTube 1080p for
+  a frame 1080 or less on its short side (1920x1080, 1080x1920, 1080x1080),
+  YouTube 4K for anything bigger (3840x2160, and 3200x1800 or 5120x2880,
+  scaled to 3840x2160).
+
+| Preset | Codec | Short side | Bitrate (16:9, 30 fps) |
+| --- | --- | --- | --- |
+| youtube4k | HEVC | 2160 | 80 Mbps |
+| youtube1080 | H.264 | 1080 | 20 Mbps |
+| review | H.264 | 720 | 5 Mbps |
+| short | H.264 | 1080, portrait frame | 20 Mbps |
+
+The bitrates were checked against YouTube's recommended upload settings
+in September 2026: 8 Mbps for 1080p and 35 to 45 for 4K at 24 to 30 fps,
+12 and 53 to 68 at 48 to 60 fps, all for H.264, and 384 kbps AAC stereo.
+20 Mbps is 2.5 times YouTube's 1080p rate, and HEVC at 80 is about as
+generous for 4K (HEVC needs roughly a third fewer bits than H.264). That
+headroom is for the speed-priority hardware encoder and YouTube's
+re-encode, and it's what Mike's Filmora presets used ("Mike High" was
+1080p H.264 at 20 Mbps, the 2026 4K preset HEVC at 80). What changed:
+the high frame rate step and the area scaling come from YouTube's table,
+and audio went from 256 to 320 kbps, the most Apple's AAC encoder takes at
+48 kHz stereo (it refuses 384). The bug these rules fixed: a 1080x1920
+project exported at the 4K preset's 80 Mbps (752 MB for 76 s), and
+YouTube 1080p laid it out again as 1920x1080.
 
 ## Proxies
 

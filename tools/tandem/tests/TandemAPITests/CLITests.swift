@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import TandemAPI
 import TandemAssets
@@ -425,6 +426,50 @@ final class NewProjectCLITests: XCTestCase {
         XCTAssertEqual(project.settings.height, 1920)
         let bad = try CLITests().tandem("new", "Odd.tandem", "--size", "big", in: folder.url)
         XCTAssertEqual(bad.status, 2)
+    }
+
+    /// A project made portrait is its own short: the short preset and the
+    /// default both render its 1080x1920 canvas at the 1080p rate, and say
+    /// what they used. (It used to fail with "No output format".)
+    func testPortraitProjectExports() async throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        let cli = CLITests()
+        let folder = TempFolder()
+        try FileManager.default.createDirectory(at: folder.file("source"), withIntermediateDirectories: true)
+        try ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x2040c0:s=1080x1920:d=2:r=30",
+                        "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                        "-c:a", "aac", "-shortest", folder.file("source/take1-camera.mp4").path])
+        let created = try cli.tandem("new", "Short.tandem", "--portrait", in: folder.url)
+        XCTAssertEqual(created.status, 0, created.stderr)
+        let project = try ProjectFile.load(from: folder.file("Short.tandem")).project
+        let media = try XCTUnwrap(project.media.first { $0.path == "source/take1-camera.mp4" })
+        let placed = try cli.tandem("apply", "-", in: folder.url, stdin: #"{"placeMedia": {"mediaIDs": ["\#(media.id)"], "at": 0}}"#)
+        XCTAssertEqual(placed.status, 0, placed.stderr)
+
+        // Into exports/, as the snapshot beside each export is a .tandem too.
+        let short = try cli.tandem("export", "--preset", "short", "-o", "exports/short.mp4", in: folder.url)
+        XCTAssertEqual(short.status, 0, short.stderr)
+        XCTAssertTrue(short.stdout.contains("(Short 9:16: 1080x1920 H.264 at 20 Mbps, 00:02.000 long)"), short.stdout)
+        let standard = try cli.tandem("export", "-o", "exports/default.mp4", "--json", in: folder.url)
+        XCTAssertEqual(standard.status, 0, standard.stderr)
+        let outcome = try ServiceJSON.decoder().decode(ExportOutcome.self, from: Data(standard.stdout.utf8))
+        XCTAssertEqual(outcome.preset, "YouTube 1080p")
+        XCTAssertEqual([outcome.width, outcome.height], [1080, 1920])
+        XCTAssertEqual(outcome.videoBitrate, 20_000_000)
+        for name in ["exports/short.mp4", "exports/default.mp4"] {
+            let asset = AVURLAsset(url: folder.file(name))
+            let size = try await asset.loadTracks(withMediaType: .video)[0].load(.naturalSize)
+            XCTAssertEqual(size, CGSize(width: 1080, height: 1920), name)
+        }
+        // Laying a short over a project that's already one is refused.
+        let layout = try cli.tandem("short", in: folder.url)
+        XCTAssertEqual(layout.status, 1)
+        XCTAssertTrue(layout.stderr.contains("already 9:16"), layout.stderr)
+
+        let help = try cli.tandem("help", "export", in: folder.url)
+        XCTAssertTrue(help.stdout.contains("1080x1920 for a 9:16 one"), help.stdout)
+        XCTAssertTrue(help.stdout.contains("`tandem new --portrait`"), help.stdout)
     }
 }
 

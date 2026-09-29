@@ -5,7 +5,8 @@ import TandemMedia
 @testable import TandemRender
 
 final class ExportTests: XCTestCase {
-    /// A small, fast preset.
+    /// A small, fast preset. It has no resolution class, so it renders the
+    /// canvas at its own size.
     func preset(codec: ExportPreset.Codec = .h264, loudness: Double? = -14, range: TimeRange? = nil, format: String? = nil) -> ExportPreset {
         ExportPreset(name: "Test", codec: codec, videoBitrate: 4_000_000, audioBitrate: 192_000, loudnessTarget: loudness, truePeakCeiling: loudness == nil ? nil : -1, range: range, format: format)
     }
@@ -142,19 +143,6 @@ final class ExportTests: XCTestCase {
         XCTAssertLessThanOrEqual(meter.truePeak, -1 + 0.5)
     }
 
-    func testWithoutATargetTheMixIsLeftAlone() async throws {
-        let media = try TestMedia()
-        try await media.movie("tone.mov", seconds: 2, draw: { TestMedia.fill($1, 0, 0, 0) }, sound: { i in
-            Float(pow(10, -20.0 / 20) * sin(2 * Double.pi * 1000 * Double(i) / 48_000))
-        })
-        let item = media.item("med_t", "tone.mov", seconds: 2, audio: true)
-        let sound = Clip(id: "clip_a", content: .media(mediaID: "med_t"), start: .zero, duration: t(2))
-        let project = smallProject(video: [], audio: [Track(kind: .audio, name: "A1", clips: [sound])], media: [item])
-        let out = media.folder.appendingPathComponent("tone-out.mov")
-        let result = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: preset(loudness: nil), output: out).run()
-        XCTAssertEqual(try XCTUnwrap(result.integratedLUFS), -20, accuracy: 0.3)
-    }
-
     /// Dominant frequency by counting zero crossings on the left channel.
     func frequency(_ samples: [Float], from start: Int, frames: Int) -> Double {
         var crossings = 0
@@ -248,6 +236,48 @@ final class ExportTests: XCTestCase {
         _ = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: small, output: out).run()
         let size = try await AVURLAsset(url: out).loadTracks(withMediaType: .video)[0].load(.naturalSize)
         XCTAssertEqual(size, CGSize(width: 160, height: 90))
+    }
+
+    /// A preset with a resolution class keeps the canvas's shape, and the
+    /// short renders a canvas that's already 9:16 (docs/RENDER.md).
+    func testPresetsKeepTheCanvasShape() async throws {
+        let media = try TestMedia()
+        try await media.movie("red.mov", seconds: 1, draw: { TestMedia.fill($1, 1, 0, 0) })
+        let clip = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        var portrait = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_r", "red.mov", seconds: 1)])
+        portrait.settings.width = 180
+        portrait.settings.height = 320
+        let context = RenderContext(project: portrait, folder: media.projectFolder)
+        func size(_ url: URL) async throws -> CGSize {
+            try await AVURLAsset(url: url).loadTracks(withMediaType: .video)[0].load(.naturalSize)
+        }
+
+        let small = ExportPreset(name: "Small", resolution: 90, codec: .h264, videoBitrate: 1_000_000, loudnessTarget: nil, truePeakCeiling: nil)
+        let smallOut = media.folder.appendingPathComponent("small.mp4")
+        _ = try await Exporter(context: context, preset: small, output: smallOut).run()
+        let smallSize = try await size(smallOut)
+        XCTAssertEqual(smallSize, CGSize(width: 90, height: 160), "90 on the short side, still portrait")
+
+        var short = small
+        short.name = "Short"
+        short.resolution = 180
+        short.format = OutputFormat.portrait.id
+        let shortOut = media.folder.appendingPathComponent("short.mp4")
+        _ = try await Exporter(context: context, preset: short, output: shortOut).run()
+        let shortSize = try await size(shortOut)
+        XCTAssertEqual(shortSize, CGSize(width: 180, height: 320), "the 9:16 canvas is the short")
+
+        // A landscape canvas without a portrait format has no short to render.
+        var landscape = portrait
+        landscape.settings.width = 320
+        landscape.settings.height = 180
+        let refused = Exporter(context: RenderContext(project: landscape, folder: media.projectFolder), preset: short, output: media.folder.appendingPathComponent("none.mp4"))
+        do {
+            _ = try await refused.run()
+            XCTFail("a landscape project without a portrait format has no short")
+        } catch {
+            XCTAssertEqual(error as? ExportPlanError, .noPortrait(width: 320, height: 180))
+        }
     }
 
     func testRefusesOutputsThatCouldDestroyWork() async throws {

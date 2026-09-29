@@ -230,6 +230,13 @@ Audio rules:
 - Export measures the mix and applies gain to hit the master loudness target
   (-14 LUFS) under the true-peak ceiling (-1 dBTP).
 
+Export presets set the quality, not the shape. `ExportPreset.plan(for:)`
+turns a preset into a frame (the canvas or an alternate format), a size
+and a bitrate, and the CLI, the API, the exporter and the Export dialog
+all go through it. A preset's resolution is the frame's short side and the
+frame keeps the canvas's shape; with no preset named, the canvas picks
+one. RENDER.md has the rules.
+
 Colour: sources are treated as BT.709 SDR, honouring each file's video range;
 exports are tagged TV-range BT.709.
 

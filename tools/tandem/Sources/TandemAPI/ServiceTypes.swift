@@ -1,6 +1,7 @@
 import Foundation
 import TandemCore
 import TandemMedia
+import TandemRender
 
 // Requests and results for every service operation. The same types travel
 // over HTTP (as the JSON body and response), MCP (as tool arguments) and the
@@ -666,7 +667,8 @@ public struct ClipRequest: ServiceCall {
 
 public struct ExportRequest: ServiceCall {
     public static let operation = ServiceOperation.export
-    /// A preset name (`youtube4k`, `youtube1080`, `review`, `short`).
+    /// A preset name (`youtube4k`, `youtube1080`, `review`, `short`). Nil
+    /// picks the one that fits the canvas (`ExportPreset.standard(for:)`).
     public var preset: String?
     public var output: String?
     public var from: Time?
@@ -699,12 +701,23 @@ public struct ExportRequest: ServiceCall {
 public struct ExportOutcome: Codable, Sendable {
     public var path: String
     public var preset: String
+    /// The frame size, codec and bitrates it rendered with. An older app
+    /// answering the CLI leaves them out.
+    public var width: Int?
+    public var height: Int?
+    public var codec: ExportPreset.Codec?
+    public var videoBitrate: Int?
+    public var audioBitrate: Int?
+    /// The alternate format rendered, like `portrait`; nil for the canvas.
+    public var format: String?
     public var duration: Time
+    /// Measured on the mix before AAC encoding.
     public var integratedLUFS: Double?
     public var truePeakDBTP: Double?
     /// Seconds the render took.
     public var elapsed: Double
-    /// What the render shows or plays differently from the project.
+    /// What the render shows or plays differently from the project, and
+    /// anything about the preset worth knowing, like an upscale.
     public var warnings: [String]
 
     public init(path: String, preset: String, duration: Time, integratedLUFS: Double?, truePeakDBTP: Double?, elapsed: Double, warnings: [String] = []) {
@@ -721,6 +734,12 @@ public struct ExportOutcome: Codable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         path = try c.decode(String.self, forKey: .path)
         preset = try c.decode(String.self, forKey: .preset)
+        width = try c.decodeIfPresent(Int.self, forKey: .width)
+        height = try c.decodeIfPresent(Int.self, forKey: .height)
+        codec = try c.decodeIfPresent(ExportPreset.Codec.self, forKey: .codec)
+        videoBitrate = try c.decodeIfPresent(Int.self, forKey: .videoBitrate)
+        audioBitrate = try c.decodeIfPresent(Int.self, forKey: .audioBitrate)
+        format = try c.decodeIfPresent(String.self, forKey: .format)
         duration = try c.decode(Time.self, forKey: .duration)
         integratedLUFS = try c.decodeIfPresent(Double.self, forKey: .integratedLUFS)
         truePeakDBTP = try c.decodeIfPresent(Double.self, forKey: .truePeakDBTP)

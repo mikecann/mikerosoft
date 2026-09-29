@@ -1,6 +1,7 @@
 import Foundation
 import TandemCore
 import TandemMedia
+import TandemRender
 
 // Plain-text forms of every result, shared by the CLI's default output and
 // MCP tool results. They lead with the answer, keep IDs visible (agents need
@@ -278,7 +279,12 @@ extension ImageResult: ReadableResult {
 
 extension ExportOutcome: ReadableResult {
     public var readableText: String {
-        var text = "Wrote \(path) (\(preset), \(duration) long) in \(String(format: "%.1f", elapsed))s."
+        var used = preset
+        if let width, let height, let codec, let videoBitrate {
+            used += ": \(width)x\(height) \(codec.displayName) at \(ExportPlan.megabits(videoBitrate))"
+            if let format { used += ", \(format) format" }
+        }
+        var text = "Wrote \(path) (\(used), \(duration) long) in \(String(format: "%.1f", elapsed))s."
         if let lufs = integratedLUFS, let peak = truePeakDBTP {
             text += String(format: " Loudness %.1f LUFS, true peak %.1f dBTP.", lufs, peak)
         }
