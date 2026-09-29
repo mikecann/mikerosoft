@@ -89,7 +89,7 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
     }
 
     /// The toggle icons' rectangles for a lane, right-aligned.
-    private func toggleRects(_ lane: TimelineLane) -> [(Toggle, CGRect)] {
+    private func toggleRects(_ lane: TimelineLane, offset: CGFloat) -> [(Toggle, CGRect)] {
         let size: CGFloat = 14
         let y = lane.y - offset + (lane.height - size) / 2
         return [
@@ -102,7 +102,10 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
         let started = CACurrentMediaTime()
         defer { DrawTiming.record("headers", CACurrentMediaTime() - started) }
         guard let container, let context = NSGraphicsContext.current?.cgContext else { return }
+        // The container's copy of the model, never the model itself: see
+        // `TimelineDrawState`.
         let project = container.displayedProject
+        let offset = container.drawState.verticalOffset
         context.setFillColor(Theme.window.cg)
         context.fill(dirtyRect.intersection(bounds))
         for lane in container.layoutCache.lanes {
@@ -131,7 +134,7 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
             if showSubtitle, let subtitle {
                 draw(subtitle, at: CGPoint(x: 14, y: nameY + 16), font: Theme.Fonts.ui(10), color: Theme.textFaint, maxX: nameMaxX)
             }
-            for (toggle, box) in toggleRects(lane) where lane.height >= 18 {
+            for (toggle, box) in toggleRects(lane, offset: offset) where lane.height >= 18 {
                 let active: Bool
                 switch toggle {
                 case .lock: active = track.locked
@@ -245,11 +248,11 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
         }
         guard let model, let lane = lane(at: event), let trackID = lane.trackID, let track = model.project.track(trackID) else { return }
         let point = convert(event.locationInWindow, from: nil)
-        if event.clickCount == 2, !toggleRects(lane).contains(where: { $0.1.insetBy(dx: -3, dy: -3).contains(point) }) {
+        if event.clickCount == 2, !toggleRects(lane, offset: offset).contains(where: { $0.1.insetBy(dx: -3, dy: -3).contains(point) }) {
             beginRename(trackID)
             return
         }
-        for (toggle, box) in toggleRects(lane) where box.insetBy(dx: -3, dy: -3).contains(point) {
+        for (toggle, box) in toggleRects(lane, offset: offset) where box.insetBy(dx: -3, dy: -3).contains(point) {
             switch toggle {
             case .lock:
                 update(track, ["locked": .bool(!track.locked)], label: track.locked ? "Unlock track" : "Lock track")

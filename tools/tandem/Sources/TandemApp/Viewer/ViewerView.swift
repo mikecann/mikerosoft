@@ -164,7 +164,7 @@ final class ViewerView: NSView, CaptureAware {
             default:
                 fill(visible, Theme.brollClip, context)
             }
-            let name = ClipRenderer(project: project, scale: model.timeline.scale, artwork: nil, visible: 0...0).name(of: clip)
+            let name = ClipRenderer.name(of: clip, in: project)
             label(name, in: visible, colour: Theme.textSecondary, context: context)
         }
         context.restoreGState()

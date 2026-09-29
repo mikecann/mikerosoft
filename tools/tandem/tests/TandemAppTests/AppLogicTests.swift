@@ -148,12 +148,11 @@ final class MediaCatalogTests: XCTestCase {
     func testClipsFromTheLibraryShowTheAssetsName() {
         var project = Project.standard(name: "Names")
         project.media = [MediaItem(id: "med_r", path: "assets/sticker/rocket-x3iqg3mw.mov", kind: .video, role: .sticker, duration: t(1), hasVideo: true)]
-        let renderer = ClipRenderer(project: project, scale: TimelineScale(pixelsPerSecond: 10), artwork: nil, visible: 0...0)
         // placeMedia names a clip after its file.
         var clip = Clip(name: "rocket-x3iqg3mw", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
-        XCTAssertEqual(renderer.name(of: clip), "rocket")
+        XCTAssertEqual(ClipRenderer.name(of: clip, in: project), "rocket")
         clip.name = "Launch"
-        XCTAssertEqual(renderer.name(of: clip), "Launch", "a name someone chose stays")
+        XCTAssertEqual(ClipRenderer.name(of: clip, in: project), "Launch", "a name someone chose stays")
     }
 
     func testTimeOfDayFromRecordItNames() {

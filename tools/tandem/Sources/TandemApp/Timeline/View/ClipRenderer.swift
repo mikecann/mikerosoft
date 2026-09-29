@@ -20,8 +20,11 @@ struct ClipRenderer {
     let project: Project
     let scale: TimelineScale
     let artwork: MediaArtwork?
-    /// The lanes' visible horizontal span, so off-screen detail is skipped.
+    /// The horizontal span being drawn, so detail outside it is skipped.
     let visible: ClosedRange<CGFloat>
+    /// Where labels stop when their clip starts further left: the lanes'
+    /// left edge, whichever part of them is being drawn.
+    let pinX: CGFloat
 
     // MARK: - Styles
 
@@ -193,7 +196,9 @@ struct ClipRenderer {
             context.fill(CGRect(x: rect.minX + 2, y: midY - 0.5, width: max(0, rect.width - 4), height: 1))
             return
         }
-        let start = max(rect.minX, visible.lowerBound)
+        // Columns sit on whole points from the clip's start, so a part
+        // drawn on its own lines up with what's around it.
+        let start = rect.minX + max(0, (visible.lowerBound - rect.minX).rounded(.down))
         let end = min(rect.maxX, visible.upperBound)
         guard start < end else { return }
         let half = rect.height / 2 - 3
@@ -231,7 +236,8 @@ struct ClipRenderer {
         let fadeOut = min(scale.width(of: audio.fadeOut), rect.width / 2)
         let path = CGMutablePath()
         if let keys = clip.keyframes["audio.gainDB"], !keys.isEmpty {
-            let start = max(rect.minX, visible.lowerBound - 3)
+            // Every 3 points from the clip's start, wherever drawing starts.
+            let start = rect.minX + max(0, ((visible.lowerBound - 3 - rect.minX) / 3).rounded(.down) * 3)
             let end = min(rect.maxX, visible.upperBound + 3)
             guard start < end else { return }
             var x = start
@@ -336,6 +342,12 @@ struct ClipRenderer {
     }
 
     func name(of clip: Clip) -> String {
+        Self.name(of: clip, in: project)
+    }
+
+    /// A clip's name as the timeline shows it: its text, its own name, or
+    /// its file's.
+    static func name(of clip: Clip, in project: Project) -> String {
         switch clip.content {
         case .text(let text):
             return text.text.split(separator: "\n").first.map(String.init) ?? "Text"
@@ -360,7 +372,7 @@ struct ClipRenderer {
     }
 
     private func drawLabel(_ clip: Clip, lane: TimelineLane, rect: CGRect, style: Theme.ClipStyle, in context: CGContext) {
-        let left = max(rect.minX, visible.lowerBound)
+        let left = max(rect.minX, pinX)
         let room = rect.maxX - left
         guard room > 14 else { return }
         switch lane.style {
