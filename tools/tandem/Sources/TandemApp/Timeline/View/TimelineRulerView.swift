@@ -18,7 +18,8 @@ final class TimelineRulerView: TimelineChildView {
         // The container's copy of the model, never the model itself: see
         // `TimelineDrawState`.
         guard let state = container?.drawState, let context = NSGraphicsContext.current?.cgContext else { return }
-        let scale = state.scale
+        // Scrolled to the whole point the lanes are painted at.
+        guard let scale = container?.drawScale else { return }
         let rate = state.frameRate
         context.setFillColor(Theme.window.cg)
         context.fill(bounds)

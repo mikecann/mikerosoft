@@ -12,6 +12,14 @@ extension NSPasteboard.PasteboardType {
 
 /// The lanes: clips, transitions, the transcript and every edit gesture.
 ///
+/// The content is painted into tiles `tileWidth` points of time wide that
+/// move as the timeline scrolls, so a scroll paints only what comes into
+/// view and a strip along the left edge, where the labels of clips that
+/// start off screen stay in view. An edit, a selection or a drag's preview
+/// repaints only the clips it changes; while zooming or dragging a track's
+/// height, one full-size canvas paints instead of every tile. Everything
+/// paints through `LanesPainter`.
+///
 /// Drags are planned by `DragPlanner` and previewed by drawing the project
 /// as it would be after the edit; nothing is committed until mouse up, when
 /// the planned batch goes to the model in one piece.
@@ -20,7 +28,11 @@ final class TimelineLanesView: TimelineChildView {
     private var model: EditorModel? { container?.model }
 
     /// The project as it would be after the drag or drop in progress.
-    private(set) var previewProject: Project?
+    private(set) var previewProject: Project? {
+        didSet { previewedCache = nil }
+    }
+    /// The clips the preview moved or made, worked out once per preview.
+    private var previewedCache: Set<String>?
     private var session: DragSession?
     private var pressPoint: CGPoint = .zero
     private var pressSeconds: Double = 0
@@ -61,11 +73,68 @@ final class TimelineLanesView: TimelineChildView {
     /// The run of phrases under the playhead, drawn brighter.
     private var highlightedGroup: Int?
 
+    /// Width of a tile, in points: whole, and a multiple of the locked
+    /// tracks' 8 point hatching.
+    static let tileWidth: CGFloat = 512
+    /// Tiles by index: tile `i` shows content x from `i * tileWidth`.
+    private var tiles: [Int: LanesPaintView] = [:]
+    private lazy var strip = LanesPaintView(role: .strip, lanes: self)
+    private lazy var canvas = LanesPaintView(role: .canvas, lanes: self)
+    /// The zoom, height and layout the tiles were painted for; when any
+    /// changes they all paint again.
+    private var tilesPaintedFor: (pixelsPerSecond: Double, height: CGFloat, layout: TimelineLayout)?
+    /// True while the zoom or the lanes' heights are changing, until they
+    /// rest for `reshapeRest`.
+    private var isReshaping = false
+    private var reshapeRestTimer: Timer?
+    /// How long the zoom and heights stay still before the tiles come back.
+    static let reshapeRest: TimeInterval = 0.25
+    /// While zooming, or dragging a track's height, the canvas shows
+    /// everything: every tile would paint again each step, and one big
+    /// painting costs less than six.
+    private var usesCanvas: Bool { isReshaping }
+    /// Something changed while the canvas was up, so the tiles paint again
+    /// when they come back.
+    private var tilesStale = false
+    /// The project, drag outlines and drop target the lanes were last
+    /// painted for, so an edit or a preview's next move repaints only what
+    /// differs.
+    private var shownContent: PreviewState?
+    /// A drag's snap line and label: layers over the lanes that move
+    /// without repainting them.
+    private let snapView = SnapLineView()
+    private let labelView = DragLabelView()
+    /// What a library or Finder drag carries, read once per drag, and the
+    /// times it can snap to.
+    private var dropPayload: LibraryDrag?
+    private var dropTargets: SnapTargets?
+    /// Where a library drag was last worked out for and what that came
+    /// to: moving within the same frame and lane changes nothing.
+    private var lastDrop: (key: DropKey, operation: NSDragOperation, snapLine: Time?)?
+
+    private struct DropKey: Equatable {
+        var payload: LibraryDrag
+        var time: Time
+        var laneID: String?
+        var insert: Bool
+        var clipID: String?
+    }
+    /// Paint views that showed a thumbnail still decoding, to paint again
+    /// when it's ready.
+    private var awaitingArtwork: Set<ObjectIdentifier> = []
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         registerForDraggedTypes([.tandemMedia, .string, .fileURL])
+        layer?.backgroundColor = Theme.window.cg
+        // Tiles go in under the canvas as they're needed.
+        canvas.isHidden = true
+        addSubview(canvas)
+        addSubview(strip)
         addSubview(outlineView)
         addSubview(marqueeView)
+        addSubview(snapView)
+        addSubview(labelView)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -95,173 +164,287 @@ final class TimelineLanesView: TimelineChildView {
         let groups = transcriptGroups(phrases)
         let current = TranscriptPhrase.group(at: time, in: groups, phrases: phrases)
         guard current != highlightedGroup else { return }
-        let scale = container.drawState.scale
-        let y = lane.y - container.drawState.verticalOffset
+        let scale = container.drawScale
+        let y = lane.y - container.contentOrigin.y
         for index in [highlightedGroup, current].compactMap({ $0 }) where index < groups.count {
             // From where its text can start to where the next run starts.
             let start = max(0, scale.x(phrases[groups[index].lowerBound].start))
             let end = index + 1 < groups.count ? scale.x(phrases[groups[index + 1].lowerBound].start) : bounds.width
-            setNeedsDisplay(CGRect(x: start - 2, y: y, width: max(0, end - start) + 4, height: lane.height))
+            redraw(CGRect(x: start - 2, y: y, width: max(0, end - start) + 4, height: lane.height))
         }
         highlightedGroup = current
     }
 
-    // MARK: - Drawing
+    // MARK: - Painting
 
-    override func draw(_ dirtyRect: NSRect) {
+    /// Paints part of one of the paint views, in its own coordinates.
+    func paint(_ view: LanesPaintView, _ dirty: CGRect) {
         let started = CACurrentMediaTime()
         defer {
             DrawTiming.record("lanes", CACurrentMediaTime() - started)
-            DrawTiming.record("lanes area", Double(dirtyRect.intersection(bounds).area / max(bounds.area, 1)), unit: .fraction)
+            DrawTiming.record("lanes area", Double(dirty.intersection(view.bounds).area / max(bounds.area, 1)), unit: .fraction)
         }
-        // Everything comes from the container's copy of the model, never
-        // the model itself: see `TimelineDrawState`.
         guard let container, let context = NSGraphicsContext.current?.cgContext else { return }
-        let snapshot = container.drawState
-        let project = container.displayedProject
-        let layout = container.layoutCache
-        let scale = snapshot.scale
-        let offset = snapshot.verticalOffset
-        context.setFillColor(Theme.window.cg)
-        context.fill(dirtyRect.intersection(bounds))
+        let origin = contentOrigin(of: view)
+        let painter = painter(for: view.role)
+        let waits = container.artwork.waits
+        context.saveGState()
+        context.translateBy(x: -origin.x, y: -origin.y)
+        painter.paint(dirty.offsetBy(dx: origin.x, dy: origin.y), area: view.bounds.offsetBy(dx: origin.x, dy: origin.y), in: context)
+        context.restoreGState()
+        if container.artwork.waits != waits { awaitingArtwork.insert(ObjectIdentifier(view)) }
+    }
 
-        // In to out.
-        if let inPoint = snapshot.inPoint ?? (snapshot.outPoint != nil ? .zero : nil) {
-            let end = snapshot.outPoint ?? project.duration
-            let x0 = scale.x(inPoint)
-            let x1 = scale.x(max(end, inPoint))
-            if x1 > x0 {
-                context.setFillColor(Theme.inOutFill.cg)
-                context.fill(CGRect(x: x0, y: 0, width: x1 - x0, height: bounds.height))
-            }
-        }
-
-        // Labels pin to the left edge of the lanes, whatever part is drawn.
-        let renderer = ClipRenderer(project: project, scale: scale, artwork: container.artwork, visible: dirtyRect.minX...dirtyRect.maxX, pinX: bounds.minX)
-        let selected = snapshot.selection
-        let linkedGroups = Set(selected.compactMap { project.clip($0)?.linkGroup })
-        let changed = previewChangedClipIDs(project, committed: snapshot.project)
-
-        for lane in layout.lanes {
-            let rect = CGRect(x: 0, y: lane.y - offset, width: bounds.width, height: lane.height)
-            guard rect.intersects(dirtyRect) else { continue }
-            if lane.isTranscript {
-                drawTranscript(lane: lane, project: project, rect: rect, renderer: renderer, in: context)
-                continue
-            }
-            guard let trackID = lane.trackID, let track = project.track(trackID) else { continue }
-            if drop?.laneID == trackID {
-                context.setFillColor(Theme.dropTarget.cg)
-                context.fill(rect)
-            }
-            let shifted = TimelineLane(trackID: lane.trackID, kind: lane.kind, style: lane.style, y: lane.y - offset, height: lane.height)
-            for clip in track.clips {
-                let x0 = scale.x(clip.start)
-                let x1 = scale.x(clip.end)
-                guard x1 >= dirtyRect.minX - 2, x0 <= dirtyRect.maxX + 2 else { continue }
-                let clipRect = CGRect(x: x0, y: shifted.y, width: max(1, x1 - x0), height: shifted.height)
-                var state = ClipDrawState()
-                state.selected = selected.contains(clip.id)
-                state.linked = !state.selected && clip.linkGroup.map(linkedGroups.contains) == true
-                state.previewed = changed.contains(clip.id) && !state.selected
-                if let keyframe = snapshot.selectedKeyframe, keyframe.clipID == clip.id {
-                    state.selectedKeyframe = keyframeDrag?.clip.id == clip.id ? keyframeDrag?.time : keyframe.time
-                }
-                renderer.draw(clip, lane: shifted, rect: clipRect, state: state, in: context)
-            }
-            for transition in track.transitions {
-                renderer.drawTransition(transition, on: track, lane: shifted, selected: snapshot.selectedTransitionID == transition.id, in: context)
-            }
-            if track.locked {
-                drawLockedHatch(rect, in: context)
-            } else if track.hidden || (track.kind == .audio && track.muted) {
-                context.setFillColor(Theme.window.opacity(0.45).cg)
-                context.fill(rect)
-            }
-        }
-
-        if let snapLine {
-            let x = scale.x(snapLine).rounded() + 0.5
-            context.setStrokeColor(Theme.amber.opacity(0.9).cg)
-            context.setLineWidth(1)
-            context.setLineDash(phase: 0, lengths: [4, 3])
-            context.move(to: CGPoint(x: x, y: 0))
-            context.addLine(to: CGPoint(x: x, y: bounds.height))
-            context.strokePath()
-            context.setLineDash(phase: 0, lengths: [])
-        }
-
-        if let dragLabel {
-            let font = Theme.Fonts.digits(10.5, .semibold)
-            let size = (dragLabel.text as NSString).size(withAttributes: [.font: font])
-            let box = CGRect(x: min(dragLabel.point.x + 12, bounds.width - size.width - 14), y: max(2, dragLabel.point.y - offset - 22), width: size.width + 10, height: 16)
-            context.addPath(CGPath(roundedRect: box, cornerWidth: 4, cornerHeight: 4, transform: nil))
-            context.setFillColor(Theme.raised.cg)
-            context.fillPath()
-            renderer.drawText(dragLabel.text, at: CGPoint(x: box.minX + 5, y: box.minY + 1.5), maxX: box.maxX, font: font, color: Theme.text)
+    /// The content point at a paint view's top left.
+    private func contentOrigin(of view: LanesPaintView) -> CGPoint {
+        switch view.role {
+        case .tile(let index): return CGPoint(x: CGFloat(index) * Self.tileWidth, y: 0)
+        case .strip, .canvas: return container?.contentOrigin ?? .zero
         }
     }
 
-    /// Clips that exist or moved in the preview, for highlighting a drop or drag.
+    private func painter(for role: LanesPaintView.Role) -> LanesPainter {
+        guard let container else { fatalError("lanes painted outside a timeline") }
+        let project = container.displayedProject
+        let phrases = container.drawState.showTranscript ? transcriptPhrases(project, artwork: container.artwork) : []
+        let origin = container.contentOrigin
+        // Tiles draw labels where they fall; the strip and canvas pin them
+        // to the lanes' left edge.
+        var pinned = true
+        if case .tile = role { pinned = false }
+        return LanesPainter(
+            project: project, state: container.drawState, layout: container.layoutCache, artwork: container.artwork,
+            pinX: pinned ? origin.x : nil, viewMaxX: pinned ? origin.x + bounds.width : nil,
+            phrases: phrases, groups: transcriptGroups(phrases), highlightedGroup: highlightedGroup,
+            previewed: previewChangedClipIDs(project, committed: container.drawState.project),
+            dropLaneID: drop?.laneID, keyframeDrag: keyframeDrag.map { ($0.clip.id, $0.time) }
+        )
+    }
+
+    // MARK: - Tiles
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        canvas.frame = bounds
+        updateTiles()
+    }
+
+    /// Puts the tiles where the timeline is scrolled to, making tiles that
+    /// came into view and painting them, and sizes the left-edge strip.
+    func updateTiles() {
+        guard let container, !usesCanvas, bounds.width > 0 else { return }
+        let origin = container.contentOrigin
+        let layout = container.layoutCache
+        let pixelsPerSecond = container.drawState.scale.pixelsPerSecond
+        let height = max(layout.contentHeight, origin.y + bounds.height)
+        let repaint = tilesPaintedFor.map { $0.pixelsPerSecond != pixelsPerSecond || $0.height != height || $0.layout != layout } ?? true
+        tilesPaintedFor = (pixelsPerSecond, height, layout)
+        // Painted afresh, the tiles show the project as it is now.
+        if repaint { shownContent = currentContent() }
+        let width = Self.tileWidth
+        let first = Int((origin.x / width).rounded(.down))
+        let last = max(first, Int(((origin.x + bounds.width - 1) / width).rounded(.down)))
+        // A tile either side stays, hidden, for small scrolls back; tiles
+        // further away become the new ones.
+        let kept = (first - 1)...(last + 1)
+        var spare: [LanesPaintView] = []
+        for (index, tile) in tiles where !kept.contains(index) {
+            tiles[index] = nil
+            spare.append(tile)
+        }
+        for index in first...last where tiles[index] == nil {
+            let tile = spare.popLast() ?? {
+                let made = LanesPaintView(role: .tile(index: index), lanes: self)
+                addSubview(made, positioned: .below, relativeTo: canvas)
+                return made
+            }()
+            tile.role = .tile(index: index)
+            tiles[index] = tile
+            tile.needsDisplay = true
+        }
+        for tile in spare { tile.removeFromSuperview() }
+        for (index, tile) in tiles {
+            let frame = CGRect(x: CGFloat(index) * width - origin.x, y: -origin.y, width: width, height: height)
+            if tile.frame != frame { tile.frame = frame }
+            // Hidden tiles don't paint until they show.
+            tile.isHidden = !(first...last).contains(index)
+            if repaint { tile.needsDisplay = true }
+        }
+        updateStrip(repaint: true)
+    }
+
+    /// The strip along the left edge covers what's pinned there, sized to
+    /// its reach. It paints afresh when the timeline moves under it
+    /// (`repaint`) or it changes size; otherwise only where it's redrawn.
+    private func updateStrip(repaint: Bool) {
+        guard let container, !usesCanvas else { return }
+        let origin = container.contentOrigin
+        let reach = painter(for: .strip).pinnedReach()
+        let width = min(bounds.width, max(0, (reach - origin.x).rounded(.up) + 2))
+        strip.isHidden = width <= 2
+        let frame = CGRect(x: 0, y: 0, width: width, height: bounds.height)
+        let resized = strip.frame != frame
+        if resized { strip.frame = frame }
+        if !strip.isHidden && (repaint || resized) { strip.needsDisplay = true }
+    }
+
+    /// Everything paints again: new thumbnails, a new layout.
+    func redrawAll() {
+        shownContent = currentContent()
+        if usesCanvas {
+            canvas.needsDisplay = true
+            tilesStale = true
+            return
+        }
+        tilesPaintedFor = nil
+        updateTiles()
+    }
+
+    /// The timeline scrolled, sideways or up and down: the tiles move with
+    /// it and the strip paints again.
+    func lanesMoved() {
+        if usesCanvas {
+            canvas.needsDisplay = true
+        } else {
+            updateTiles()
+        }
+    }
+
+    /// Part of the lanes paints again, in the lanes' coordinates.
+    func redraw(_ rect: CGRect) {
+        if usesCanvas {
+            canvas.setNeedsDisplay(rect)
+            tilesStale = true
+            return
+        }
+        for tile in tiles.values where !tile.isHidden && tile.frame.intersects(rect) {
+            tile.setNeedsDisplay(rect.offsetBy(dx: -tile.frame.minX, dy: -tile.frame.minY))
+        }
+        if !strip.isHidden, strip.frame.intersects(rect) { strip.setNeedsDisplay(rect) }
+    }
+
+    /// The project shown changed (an edit, or a drag's preview): what
+    /// changed paints again, or everything when tracks came or went.
+    func contentChanged() {
+        guard let container else { return }
+        let content = currentContent()
+        guard let shown = shownContent, !Self.changesEverything(from: shown.project, to: content.project, state: container.drawState),
+              let rects = TimelineDamage.previewRects(
+                from: shown, to: content, layout: container.layoutCache, scale: container.drawScale,
+                offsetY: container.contentOrigin.y, width: bounds.width
+              ) else {
+            redrawAll()
+            return
+        }
+        shownContent = content
+        for rect in rects { redraw(rect) }
+        // A label near the left edge can have grown or gone.
+        if !rects.isEmpty { updateStrip(repaint: false) }
+    }
+
+    /// Changes that reach every clip: media (names and pictures), frame
+    /// rate, and the length when the in to out range runs to the end.
+    private static func changesEverything(from old: Project, to new: Project, state: TimelineDrawState) -> Bool {
+        if old.media != new.media || old.settings != new.settings { return true }
+        let rangeRunsToEnd = (state.inPoint != nil || state.outPoint != nil) && state.outPoint == nil
+        return rangeRunsToEnd && old.duration != new.duration
+    }
+
+    /// Thumbnails landed: the views that showed them still decoding paint
+    /// again.
+    func artworkDecoded() {
+        let waiting = awaitingArtwork
+        awaitingArtwork = []
+        for view in [canvas, strip] + Array(tiles.values) where waiting.contains(ObjectIdentifier(view)) {
+            view.needsDisplay = true
+        }
+    }
+
+    /// A drag or drop's preview changed: the snap line and label move, and
+    /// the clips the preview changed since its last move paint again.
+    func previewDidChange() {
+        guard let container else { return }
+        if let snapLine {
+            snapView.show(atX: container.drawScale.x(snapLine).rounded(), height: bounds.height)
+        } else {
+            snapView.isHidden = true
+        }
+        if let dragLabel {
+            labelView.show(dragLabel.text, near: CGPoint(x: dragLabel.point.x, y: dragLabel.point.y - container.contentOrigin.y), in: bounds)
+        } else {
+            labelView.isHidden = true
+        }
+        contentChanged()
+    }
+
+    /// What the lanes show: the project (or a drag's preview of it), the
+    /// clips a preview outlines, a drop's target track, a dragged keyframe.
+    private func currentContent() -> PreviewState {
+        let project = container?.displayedProject ?? Project(name: "")
+        return PreviewState(
+            project: project, previewed: previewChangedClipIDs(project, committed: container?.drawState.project ?? project),
+            dropLaneID: drop?.laneID, keyframeClipID: keyframeDrag?.clip.id, keyframeTime: keyframeDrag?.time
+        )
+    }
+
+    /// The zoom or the lanes' heights changed: the canvas paints each step,
+    /// and the tiles come back once they rest.
+    func reshaped() {
+        shownContent = currentContent()
+        isReshaping = true
+        reshapeRestTimer?.invalidate()
+        let timer = Timer(timeInterval: Self.reshapeRest, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reshapeRested() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        reshapeRestTimer = timer
+        canvas.isHidden = false
+        strip.isHidden = true
+        for tile in tiles.values { tile.isHidden = true }
+        canvas.needsDisplay = true
+    }
+
+    /// Back to tiles, painted for the new zoom and heights.
+    private func reshapeRested() {
+        isReshaping = false
+        canvas.isHidden = true
+        // Its 30 MB of pixels aren't needed until the next zoom.
+        canvas.layer?.contents = nil
+        tilesStale = false
+        tilesPaintedFor = nil
+        updateTiles()
+    }
+
+    /// Clips that exist or moved in the preview, for highlighting a drop or
+    /// drag. Worked out once per preview: it looks at every clip.
     private func previewChangedClipIDs(_ project: Project, committed: Project) -> Set<String> {
         guard previewProject != nil else { return [] }
-        var before: [String: Clip] = [:]
-        for clip in committed.allTracks.flatMap(\.clips) { before[clip.id] = clip }
+        if let previewedCache { return previewedCache }
+        var before: [String: (clip: Clip, trackID: String)] = [:]
+        for track in committed.allTracks {
+            for clip in track.clips { before[clip.id] = (clip, track.id) }
+        }
+        let committedTracks = Dictionary(uniqueKeysWithValues: committed.allTracks.map { ($0.id, $0) })
         var changed = Set<String>()
         for track in project.allTracks {
+            // A track the preview didn't touch shares its clips with the
+            // project, and compares at once.
+            if committedTracks[track.id]?.clips == track.clips { continue }
             for clip in track.clips {
                 guard let old = before[clip.id] else {
                     if drop != nil { changed.insert(clip.id) }
                     continue
                 }
-                if old.start != clip.start || old.duration != clip.duration || old.sourceStart != clip.sourceStart || committed.track(containingClip: clip.id)?.id != track.id {
+                if old.clip.start != clip.start || old.clip.duration != clip.duration || old.clip.sourceStart != clip.sourceStart || old.trackID != track.id {
                     changed.insert(clip.id)
                 }
             }
         }
+        previewedCache = changed
         return changed
     }
 
-    private func drawLockedHatch(_ rect: CGRect, in context: CGContext) {
-        context.saveGState()
-        context.clip(to: rect)
-        context.setStrokeColor(Theme.textFaint.opacity(0.18).cg)
-        context.setLineWidth(1)
-        var x = rect.minX - rect.height
-        while x < rect.maxX {
-            context.move(to: CGPoint(x: x, y: rect.maxY))
-            context.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
-            x += 8
-        }
-        context.strokePath()
-        context.restoreGState()
-    }
-
     // MARK: - Transcript lane
-
-    private func drawTranscript(lane: TimelineLane, project: Project, rect: CGRect, renderer: ClipRenderer, in context: CGContext) {
-        guard let container else { return }
-        let phrases = transcriptPhrases(project, artwork: container.artwork)
-        let font = Theme.Fonts.ui(10.5)
-        let y = rect.minY + (rect.height - 14) / 2
-        if phrases.isEmpty {
-            let hasTake = project.allTracks.flatMap(\.clips).contains { clip in
-                clip.mediaID.flatMap { project.media($0) }.map { $0.role == .camera && $0.hasAudio } ?? false
-            }
-            let text = hasTake ? "The transcript shows here once the take is transcribed." : "Place a take to see what's said here."
-            renderer.drawText(text, at: CGPoint(x: 6, y: y), maxX: bounds.width - 6, font: font, color: Theme.textFainter)
-            return
-        }
-        let scale = container.drawState.scale
-        let groups = transcriptGroups(phrases)
-        for (index, group) in groups.enumerated() {
-            let first = phrases[group.lowerBound]
-            let x0 = scale.x(first.start)
-            let next = index + 1 < groups.count ? scale.x(phrases[groups[index + 1].lowerBound].start) : bounds.width + 400
-            guard next >= 0, x0 <= bounds.width else { continue }
-            renderer.drawText(first.text, at: CGPoint(x: max(x0, 0) + 2, y: y), maxX: min(next - 6, bounds.width), font: font, color: index == highlightedGroup ? Theme.text : Theme.textFaint)
-        }
-    }
 
     /// The runs of phrases the transcript lane shows at the current zoom.
     private func transcriptGroups(_ phrases: [TranscriptPhrase]) -> [Range<Int>] {
@@ -279,7 +462,22 @@ final class TimelineLanesView: TimelineChildView {
     /// into phrases at pauses.
     private func transcriptPhrases(_ project: Project, artwork: MediaArtwork) -> [TranscriptPhrase] {
         guard let container else { return [] }
-        let revision = previewProject == nil ? container.drawState.revision : -1
+        // A preview that leaves the take's sound alone (most drags) shows
+        // the same words as the project.
+        let committed = container.drawState.project
+        if previewProject != nil, Self.speech(of: project) == Self.speech(of: committed) {
+            return transcriptPhrases(committed, artwork: artwork, revision: container.drawState.revision)
+        }
+        return transcriptPhrases(project, artwork: artwork, revision: previewProject == nil ? container.drawState.revision : -1)
+    }
+
+    /// The tracks transcripts come from: the take's sound.
+    private static func speech(of project: Project) -> [Track] {
+        project.audioTracks.filter { $0.rippleMode == .cut && !$0.muted }
+    }
+
+    private func transcriptPhrases(_ project: Project, artwork: MediaArtwork, revision: Int) -> [TranscriptPhrase] {
+        guard let container else { return [] }
         // A transcript that lands changes the phrases without an edit.
         let artworkRevision = container.drawState.artworkRevision
         if let cache = phraseCache, cache.revision == revision, cache.artwork == artworkRevision, revision >= 0 { return cache.phrases }
@@ -568,9 +766,10 @@ final class TimelineLanesView: TimelineChildView {
             // when it picks up or drops a clip, or the timeline scrolls.
             if changed || outlinedAt?.scale != scale || outlinedAt?.offset != offset {
                 if outlineView.frame != bounds { outlineView.frame = bounds }
+                // Placed as the clips are painted, on whole points.
                 outlineView.show(Marquee.outlines(
                     of: box.selection.subtracting(model.selection), project: model.project, layout: container.layoutCache,
-                    scale: scale, verticalOffset: offset, visibleX: -8...(bounds.width + 8)
+                    scale: container.drawScale, verticalOffset: container.contentOrigin.y, visibleX: -8...(bounds.width + 8)
                 ))
                 outlinedAt = (scale, offset)
             }
@@ -840,7 +1039,19 @@ final class TimelineLanesView: TimelineChildView {
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         draggedFiles = nil
+        dropPayload = libraryDrag(from: sender)
+        dropTargets = nil
+        lastDrop = nil
         return updateDrop(sender)
+    }
+
+    /// The times a drag in progress can snap to, found once per drag: the
+    /// project doesn't change while it's over the lanes.
+    private func dragSnapTargets(_ model: EditorModel) -> SnapTargets {
+        if let dropTargets { return dropTargets }
+        let targets = SnapTargets.collect(in: model.project, playhead: model.playback.time, inPoint: model.inPoint, outPoint: model.outPoint)
+        dropTargets = targets
+        return targets
     }
 
     /// File URLs on the pasteboard, when the drag came from Finder.
@@ -912,18 +1123,24 @@ final class TimelineLanesView: TimelineChildView {
     private func updateDrop(_ info: NSDraggingInfo) -> NSDragOperation {
         guard let model, let container else { return [] }
         let local = convert(info.draggingLocation, from: nil)
-        if libraryDrag(from: info) == nil {
+        guard let dragged = dropPayload else {
             // Files from Finder: they join the project when dropped.
             if draggedFiles == nil { draggedFiles = FileImport.mediaFiles(in: fileURLs(from: info)) }
             guard let files = draggedFiles, !files.isEmpty else { return [] }
             let point = CGPoint(x: local.x, y: local.y + offset)
             var time = model.timeline.scale.time(atX: point.x, rate: model.frameRate)
             snapLine = nil
-            if model.snapping {
-                let targets = SnapTargets.collect(in: model.project, playhead: model.playback.time, inPoint: model.inPoint, outPoint: model.outPoint)
-                if let snapped = targets.nearest(to: time, within: model.timeline.scale.duration(forPixels: Theme.Metrics.snapDistance)) { time = snapped }
+            if model.snapping, let snapped = dragSnapTargets(model).nearest(to: time, within: model.timeline.scale.duration(forPixels: Theme.Metrics.snapDistance)) {
+                time = snapped
             }
             let lane = container.layoutCache.lane(atY: point.y)
+            if let fileDrop, fileDrop.time == time, fileDrop.trackID == lane?.trackID, let dragLabel {
+                // Still the same frame and track: the label follows the pointer.
+                self.snapLine = time
+                self.dragLabel = (dragLabel.text, point)
+                container.previewChanged()
+                return .copy
+            }
             fileDrop = (files, time, lane?.trackID)
             drop = nil
             previewProject = nil
@@ -933,18 +1150,34 @@ final class TimelineLanesView: TimelineChildView {
             container.previewChanged()
             return .copy
         }
-        guard let dragged = libraryDrag(from: info) else { return [] }
         let point = CGPoint(x: local.x, y: local.y + offset)
         var time = model.timeline.scale.time(atX: point.x, rate: model.frameRate)
         snapLine = nil
-        if model.snapping {
-            let targets = SnapTargets.collect(in: model.project, playhead: model.playback.time, inPoint: model.inPoint, outPoint: model.outPoint)
-            if let snapped = targets.nearest(to: time, within: model.timeline.scale.duration(forPixels: Theme.Metrics.snapDistance)) {
-                time = snapped
-                snapLine = snapped
-            }
+        if model.snapping, let snapped = dragSnapTargets(model).nearest(to: time, within: model.timeline.scale.duration(forPixels: Theme.Metrics.snapDistance)) {
+            time = snapped
+            snapLine = snapped
         }
         let lane = container.layoutCache.lane(atY: point.y)
+        let key = DropKey(
+            payload: dragged, time: time, laneID: lane?.trackID, insert: NSEvent.modifierFlags.contains(.command),
+            clipID: tester(for: model.project)?.hit(point).clipID
+        )
+        if let lastDrop, lastDrop.key == key {
+            // The same frame, track and clip: the same edit. Only the label
+            // follows the pointer.
+            snapLine = lastDrop.snapLine
+            dragLabel = dragLabel.map { ($0.text, point) }
+            container.previewChanged()
+            return lastDrop.operation
+        }
+        let operation = workOutDrop(dragged, at: time, lane: lane, point: point, model: model)
+        lastDrop = (key, operation, snapLine)
+        container.previewChanged()
+        return operation
+    }
+
+    /// The edit a library drag would make at `time` on `lane`, previewed.
+    private func workOutDrop(_ dragged: LibraryDrag, at time: Time, lane: TimelineLane?, point: CGPoint, model: EditorModel) -> NSDragOperation {
         let at = Timecode.string(time, rate: model.frameRate)
         let batch: EditBatch?
         var label: String
@@ -973,7 +1206,6 @@ final class TimelineLanesView: TimelineChildView {
                 } else {
                     dragLabel = (AssetApplying.dropHint(for: asset), point)
                 }
-                container.previewChanged()
                 return assetApply == nil ? [] : .copy
             }
             // Placed once it's downloaded; the line shows where.
@@ -983,7 +1215,6 @@ final class TimelineLanesView: TimelineChildView {
             previewProject = nil
             snapLine = time
             dragLabel = ((NSEvent.modifierFlags.contains(.command) ? "Insert \(name) at " : "Add \(name) at ") + at, point)
-            container.previewChanged()
             return .copy
         case .transition(let type):
             batch = LibraryDrops.transition(type, at: time, trackID: lane?.trackID, in: model.project)
@@ -1004,18 +1235,19 @@ final class TimelineLanesView: TimelineChildView {
             drop = nil
             previewProject = nil
             dragLabel = (label, point)
-            container.previewChanged()
             return []
         }
         drop = (batch, lane?.trackID)
         previewProject = EditPreview.apply(batch, to: model.project)
         dragLabel = (label, point)
-        container.previewChanged()
         return previewProject == nil ? [] : .copy
     }
 
     private func clearDrop() {
         let drewPreview = previewProject != nil || snapLine != nil || dragLabel != nil || drop != nil
+        dropPayload = nil
+        dropTargets = nil
+        lastDrop = nil
         drop = nil
         assetDrop = nil
         assetApply = nil

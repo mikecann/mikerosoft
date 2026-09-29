@@ -20,24 +20,42 @@ final class TimelineDamageTests: XCTestCase {
         TimelineLayout.make(project: f.project, showTranscript: true)
     }
 
-    func testScrollingRedrawsTheRulerAndLanesButNotTheHeaders() throws {
+    /// A scroll moves the lanes' tiles rather than repainting them.
+    func testScrollingMovesTheLanesAndRedrawsTheRulerButNotTheHeaders() throws {
         let f = try AppFixture()
         let damage = TimelineDamage.between(state(f), state(f, scroll: 4), layout: layout(f), layoutChanged: false)
-        XCTAssertEqual(damage, TimelineDamage(ruler: true, headers: false, allLanes: true))
+        XCTAssertEqual(damage, TimelineDamage(ruler: true, headers: false, lanesMoved: true))
     }
 
-    func testScrollingDownRedrawsTheHeadersAndLanesButNotTheRuler() throws {
+    func testScrollingDownMovesTheLanesAndRedrawsTheHeadersButNotTheRuler() throws {
         let f = try AppFixture()
         var down = state(f)
         down.verticalOffset = 30
-        XCTAssertEqual(TimelineDamage.between(state(f), down, layout: layout(f), layoutChanged: false), TimelineDamage(ruler: false, headers: true, allLanes: true))
+        XCTAssertEqual(TimelineDamage.between(state(f), down, layout: layout(f), layoutChanged: false), TimelineDamage(ruler: false, headers: true, lanesMoved: true))
     }
 
-    func testAnEditRedrawsEverything() throws {
+    func testZoomingRepaintsTheLanesAndRuler() throws {
+        let f = try AppFixture()
+        XCTAssertEqual(
+            TimelineDamage.between(state(f), state(f, pps: 12), layout: layout(f), layoutChanged: false),
+            TimelineDamage(ruler: true, headers: false, allLanes: true, lanesReshaped: true)
+        )
+    }
+
+    /// An edit redraws the ruler (markers) and headers (names), and leaves
+    /// the lanes to repaint the clips it changed.
+    func testAnEditLeavesTheLanesToFindWhatChanged() throws {
         let f = try AppFixture()
         var edited = state(f)
         edited.revision = 2
-        XCTAssertEqual(TimelineDamage.between(state(f), edited, layout: layout(f), layoutChanged: false), TimelineDamage(ruler: true, headers: true, allLanes: true))
+        XCTAssertEqual(TimelineDamage.between(state(f), edited, layout: layout(f), layoutChanged: false), TimelineDamage(ruler: true, headers: true, lanesEdited: true))
+    }
+
+    /// Lanes that change height (a track's edge dragged) repaint on the
+    /// canvas, like a zoom.
+    func testNewLanesRepaintEverything() throws {
+        let f = try AppFixture()
+        XCTAssertEqual(TimelineDamage.between(state(f), state(f), layout: layout(f), layoutChanged: true), TimelineDamage(headers: true, allLanes: true, lanesReshaped: true))
     }
 
     /// Clicking the screen clip selects it; the camera picture and sound
@@ -208,12 +226,205 @@ final class TimelineRedrawTests: XCTestCase {
         XCTAssertLessThan(area, 0.25, "the 5 s shot and its sound, not all of the lanes")
     }
 
-    func testScrollingLeavesTheHeadersAlone() throws {
+    /// Scrolling moves the lanes' tiles: the strip along the left edge
+    /// (where the transcript lane's note stays in view) paints again, and
+    /// so does what scrolls into view. It used to repaint all the lanes and
+    /// the headers.
+    func testScrollingPaintsOnlyTheLeftEdgeAndWhatComesIntoView() throws {
         try showTimeline()
         model.timeline.scale.scrollSeconds = 12
         settle()
         XCTAssertEqual(draws("headers"), 0)
         XCTAssertEqual(draws("ruler"), 1)
+        XCTAssertGreaterThan(draws("lanes"), 0, "the strip")
+        XCTAssertLessThan(paintedArea(), 0.5)
+    }
+
+    /// Moving a clip repaints where it was and where it went.
+    func testAnEditRepaintsTheClipsItChanged() throws {
+        try showTimeline()
+        let shot = model.project.track(named: "B-roll")!.clips[0]
+        model.apply(EditBatch(label: "Move", commands: [.moveClips(clipIDs: [shot.id], delta: t(20), includeLinked: false)]))
+        settle()
         XCTAssertGreaterThan(draws("lanes"), 0)
+        XCTAssertLessThan(paintedArea(), 0.2, "two 5 s shots, not the lanes")
+    }
+
+    /// Dragging a clip previews it on the tiles, repainting only what each
+    /// move changes; the snap line and label are layers of their own.
+    func testDraggingAClipRepaintsOnlyWhatMoves() throws {
+        try showTimeline()
+        let lanes = try XCTUnwrap(timeline?.lanes)
+        let lane = try XCTUnwrap(timeline?.layoutCache.lane(forTrack: model.project.track(named: "B-roll")!.id))
+        // The shot runs 20 to 25 s: 200 to 250 points.
+        let press = CGPoint(x: 225, y: lane.midY)
+        mouse(.leftMouseDown, at: press, in: lanes)
+        settle()
+        DrawTiming.reset()
+        for step in 1...10 {
+            mouse(.leftMouseDragged, at: CGPoint(x: press.x + CGFloat(step) * 8, y: press.y), in: lanes)
+            settle()
+        }
+        XCTAssertEqual(draws("headers"), 0)
+        XCTAssertEqual(draws("ruler"), 0)
+        XCTAssertGreaterThan(draws("lanes"), 0)
+        XCTAssertLessThan(paintedArea() / Double(draws("lanes")), 0.1, "each paint a few clips' worth")
+        mouse(.leftMouseUp, at: CGPoint(x: press.x + 80, y: press.y), in: lanes)
+        settle()
+        XCTAssertEqual(model.project.track(named: "B-roll")?.clips[0].start, t(28))
+    }
+
+    /// Zooming paints one full-size canvas a step, not every tile; the
+    /// tiles come back when the zoom rests.
+    func testZoomingPaintsTheCanvasThenTheTiles() throws {
+        try showTimeline()
+        model.timeline.scale.pixelsPerSecond = 12
+        settle()
+        XCTAssertEqual(draws("lanes"), 1, "the canvas")
+        XCTAssertEqual(paintedArea(), 1, accuracy: 0.01)
+        DrawTiming.reset()
+        RunLoop.main.run(until: Date().addingTimeInterval(TimelineLanesView.reshapeRest + 0.05))
+        settle()
+        XCTAssertGreaterThanOrEqual(draws("lanes"), 3, "the tiles in view")
+    }
+
+    private var timeline: TimelineContainerView? { window?.contentView as? TimelineContainerView }
+
+    /// The share of the lanes painted since the timings were reset.
+    private func paintedArea() -> Double {
+        DrawTiming.samples("lanes area").reduce(0, +)
+    }
+
+    /// Sends a mouse event to `view` at `point` in its coordinates.
+    private func mouse(_ type: NSEvent.EventType, at point: CGPoint, in view: NSView) {
+        guard let event = NSEvent.mouseEvent(
+            with: type, location: view.convert(point, to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ) else { return }
+        switch type {
+        case .leftMouseDown: view.mouseDown(with: event)
+        case .leftMouseDragged: view.mouseDragged(with: event)
+        default: view.mouseUp(with: event)
+        }
+    }
+}
+
+/// What a drag or drop's preview, or an edit, repaints in the lanes.
+@MainActor
+final class PreviewDamageTests: XCTestCase {
+    private let scale = TimelineScale(pixelsPerSecond: 10)
+
+    private func rects(_ from: Project, _ to: Project, previewed: (Set<String>, Set<String>) = ([], []), drop: (String?, String?) = (nil, nil)) -> [CGRect]? {
+        TimelineDamage.previewRects(
+            from: PreviewState(project: from, previewed: previewed.0, dropLaneID: drop.0),
+            to: PreviewState(project: to, previewed: previewed.1, dropLaneID: drop.1),
+            layout: TimelineLayout.make(project: from, showTranscript: true), scale: scale, offsetY: 0, width: 1_000
+        )
+    }
+
+    /// Moving the B-roll shot from 20 s to 40 s repaints where it was and
+    /// where it went, and nothing else.
+    func testAMovedClipRepaintsWhereItWasAndWhereItIs() throws {
+        let f = try AppFixture()
+        let before = f.project
+        let shot = f.clip("B-roll")
+        try f.coordinator.apply(EditBatch(label: "Move", commands: [.moveClips(clipIDs: [shot.id], delta: t(20), includeLinked: false)]))
+        let found = try XCTUnwrap(rects(before, f.project))
+        XCTAssertEqual(found.count, 2)
+        XCTAssertEqual(Set(found.map { ($0.minX + TimelineDamage.keyframeReach).rounded() }), [200, 400])
+        XCTAssertTrue(found.allSatisfy { $0.width < 70 }, "a 5 s shot is 50 points")
+    }
+
+    func testNothingRepaintsWhenNothingChanged() throws {
+        let f = try AppFixture()
+        XCTAssertEqual(rects(f.project, f.project), [])
+    }
+
+    func testOutliningAClipRepaintsIt() throws {
+        let f = try AppFixture()
+        let shot = f.clip("B-roll").id
+        let found = try XCTUnwrap(rects(f.project, f.project, previewed: ([], [shot])))
+        XCTAssertEqual(found.count, 1)
+    }
+
+    func testTheDropTargetsLaneRepaintsWhenItMoves() throws {
+        let f = try AppFixture()
+        let broll = f.track("B-roll").id
+        let music = f.track("Music").id
+        let found = try XCTUnwrap(rects(f.project, f.project, drop: (broll, music)))
+        XCTAssertEqual(found.count, 2)
+        XCTAssertTrue(found.allSatisfy { $0.width == 1_000 }, "whole lanes")
+    }
+
+    /// Muting a track dims all of it, and changes which words the
+    /// transcript shows.
+    func testMutingATrackRepaintsItAndTheTranscript() throws {
+        let f = try AppFixture()
+        let before = f.project
+        var after = before
+        let index = after.audioTracks.firstIndex { $0.name == "Voice" }!
+        after.audioTracks[index].muted = true
+        let found = try XCTUnwrap(rects(before, after))
+        XCTAssertEqual(found.count, 2, "the track and the transcript")
+    }
+
+    func testANewTrackRepaintsEverything() throws {
+        let f = try AppFixture()
+        var after = f.project
+        after.audioTracks.append(Track(kind: .audio, name: "SFX 2", rippleMode: .follow))
+        XCTAssertNil(rects(f.project, after))
+    }
+}
+
+/// The strip along the lanes' left edge is as wide as what's pinned there.
+@MainActor
+final class PinnedReachTests: XCTestCase {
+    private func painter(_ f: AppFixture, pinX: CGFloat) -> LanesPainter {
+        LanesPainter(
+            project: f.project, state: TimelineDrawState(
+                project: f.project, revision: 1, scale: TimelineScale(pixelsPerSecond: 10), verticalOffset: 0, trackHeights: [:],
+                showTranscript: false, selection: [], selectedTransitionID: nil, selectedKeyframe: nil, inPoint: nil, outPoint: nil,
+                renamingTrackID: nil, artworkRevision: 0
+            ),
+            layout: TimelineLayout.make(project: f.project, showTranscript: false), artwork: nil, pinX: pinX, viewMaxX: pinX + 1_000
+        )
+    }
+
+    /// Scrolled to 22 s, the take (0 to 60 s) and the B-roll shot (20 to
+    /// 25 s) start off the left edge: their name badges stay at the edge,
+    /// and the strip covers the longest.
+    func testLabelsPinnedAtTheEdgeWidenTheStrip() throws {
+        let f = try AppFixture()
+        let reach = painter(f, pinX: 220).pinnedReach()
+        XCTAssertGreaterThan(reach, 220 + 40, "a name badge past the edge")
+        XCTAssertLessThan(reach, 220 + 200)
+        // Pinned labels move with the edge.
+        XCTAssertEqual(painter(f, pinX: 230).pinnedReach(), reach + 10, accuracy: 0.01)
+    }
+
+    func testNothingPinnedLeavesNoStrip() throws {
+        let f = try AppFixture()
+        // At 70 s the take and the music (0 to 60 s) are behind the edge.
+        XCTAssertEqual(painter(f, pinX: 700).pinnedReach(), 700)
+    }
+}
+
+@MainActor
+final class FramePacerTests: XCTestCase {
+    /// Changes arriving together run once; more within a frame wait for the
+    /// next one.
+    func testRunsAtMostOncePerFrame() {
+        var runs: [CFTimeInterval] = []
+        let pacer = FramePacer(view: NSView()) { runs.append(CACurrentMediaTime()) }
+        pacer.request()
+        pacer.request()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+        XCTAssertEqual(runs.count, 1, "two requests in one turn run once")
+        pacer.request()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.004))
+        XCTAssertEqual(runs.count, 1, "the next waits for a frame to pass")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(runs.count, 2)
+        XCTAssertGreaterThanOrEqual(runs[1] - runs[0], 1.0 / 60 * 0.9)
     }
 }

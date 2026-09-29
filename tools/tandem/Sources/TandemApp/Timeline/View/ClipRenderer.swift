@@ -25,6 +25,9 @@ struct ClipRenderer {
     /// Where labels stop when their clip starts further left: the lanes'
     /// left edge, whichever part of them is being drawn.
     let pinX: CGFloat
+    /// When set, labels aren't drawn; how far right they'd reach is noted
+    /// here instead (see `labelReach`).
+    var reach: LabelReach?
 
     // MARK: - Styles
 
@@ -61,9 +64,21 @@ struct ClipRenderer {
 
     // MARK: - Clips
 
+    /// The rectangle a clip draws in: one point of gap between touching
+    /// clips, so cuts read clearly, on whole points.
+    nonisolated static func drawnRect(_ fullRect: CGRect) -> CGRect {
+        let inset = fullRect.insetBy(dx: 1, dy: 0)
+        guard !inset.isNull else { return inset }
+        // Frame times often land exactly on whole points; rounding error
+        // either side of one mustn't move an edge a point, or different
+        // paintings of the same clip disagree.
+        func settled(_ x: CGFloat) -> CGFloat { (x * 1_000_000).rounded() / 1_000_000 }
+        let minX = settled(inset.minX)
+        return CGRect(x: minX, y: inset.minY, width: settled(inset.maxX) - minX, height: inset.height).integral
+    }
+
     func draw(_ clip: Clip, lane: TimelineLane, rect fullRect: CGRect, state: ClipDrawState, in context: CGContext) {
-        // One point of gap between touching clips, so cuts read clearly.
-        let rect = fullRect.insetBy(dx: 1, dy: 0).integral.insetBy(dx: 0, dy: 0)
+        let rect = Self.drawnRect(fullRect)
         guard rect.width >= 1, rect.maxX >= visible.lowerBound - 2, rect.minX <= visible.upperBound + 2 else { return }
         let style = style(for: clip, lane: lane)
         // Slivers on a zoomed-out timeline: a plain bar is all that shows,
@@ -371,7 +386,19 @@ struct ClipRenderer {
         }
     }
 
-    private func drawLabel(_ clip: Clip, lane: TimelineLane, rect: CGRect, style: Theme.ClipStyle, in context: CGContext) {
+    /// How far right a clip's label reaches (its right edge, or the edge
+    /// of its text when truncated), or nil when it has none showing.
+    func labelReach(of clip: Clip, lane: TimelineLane, rect fullRect: CGRect) -> CGFloat? {
+        var measuring = self
+        let reach = LabelReach()
+        measuring.reach = reach
+        measuring.drawLabel(clip, lane: lane, rect: Self.drawnRect(fullRect), style: style(for: clip, lane: lane), in: nil)
+        return reach.maxX.isFinite ? reach.maxX : nil
+    }
+
+    /// Draws a clip's name and badges, or with `reach` set, only measures
+    /// them (with no context).
+    private func drawLabel(_ clip: Clip, lane: TimelineLane, rect: CGRect, style: Theme.ClipStyle, in context: CGContext?) {
         let left = max(rect.minX, pinX)
         let room = rect.maxX - left
         guard room > 14 else { return }
@@ -430,13 +457,18 @@ struct ClipRenderer {
 
     /// Draws a dark rounded badge and returns its right edge.
     @discardableResult
-    func drawBadge(_ text: String, at origin: CGPoint, color: Swatch, in clipRect: CGRect, context: CGContext) -> CGFloat {
+    func drawBadge(_ text: String, at origin: CGPoint, color: Swatch, in clipRect: CGRect, context: CGContext?) -> CGFloat {
         let font = Theme.Fonts.ui(9.5, .semibold)
         guard clipRect.maxX - origin.x > 30 else { return origin.x }
         let size = CGSize(width: TextMetrics.width(of: text, font: font), height: 12)
         // A badge that doesn't fit whole ("Pi") is noise; leave it out.
         guard size.width + 10 <= clipRect.maxX - origin.x - 3 else { return origin.x }
         let badge = CGRect(x: origin.x, y: origin.y, width: size.width + 10, height: 14)
+        if let reach {
+            reach.note(badge.maxX)
+            return badge.maxX
+        }
+        guard let context else { return badge.maxX }
         context.addPath(CGPath(roundedRect: badge, cornerWidth: 3, cornerHeight: 3, transform: nil))
         context.setFillColor(Theme.badge.cg)
         context.fillPath()
@@ -450,6 +482,10 @@ struct ClipRenderer {
         // short text that fits ("Full") always draws.
         guard width > 6 else { return }
         if width < 40, TextMetrics.width(of: text, font: font) > width { return }
+        if let reach {
+            reach.note(point.x + min(TextMetrics.width(of: text, font: font), width))
+            return
+        }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color.ns, .paragraphStyle: paragraph]
@@ -463,7 +499,12 @@ struct ClipRenderer {
         (text as NSString).draw(with: CGRect(x: point.x, y: point.y, width: width, height: font.pointSize + 5), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
     }
 
-    private func drawBars(at origin: CGPoint, color: Swatch, in context: CGContext) {
+    private func drawBars(at origin: CGPoint, color: Swatch, in context: CGContext?) {
+        if let reach {
+            reach.note(origin.x + 12)
+            return
+        }
+        guard let context else { return }
         context.setFillColor(color.cg)
         for (x, y, h) in [(0.0, 5.0, 5.0), (4.5, 2.0, 8.0), (9.0, 0.0, 10.0)] {
             context.fill(CGRect(x: origin.x + x, y: origin.y + y, width: 3, height: h))
@@ -516,6 +557,15 @@ struct ClipRenderer {
         context.addPath(path)
         context.setFillColor(Theme.onAmber.cg)
         context.fillPath()
+    }
+}
+
+/// How far right measured labels reach.
+final class LabelReach {
+    private(set) var maxX = -CGFloat.infinity
+
+    func note(_ x: CGFloat) {
+        maxX = max(maxX, x)
     }
 }
 

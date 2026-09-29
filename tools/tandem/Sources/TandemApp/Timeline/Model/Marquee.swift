@@ -80,7 +80,7 @@ extension Marquee {
                 let x1 = scale.x(clip.end)
                 guard x1 >= visibleX.lowerBound, x0 <= visibleX.upperBound else { continue }
                 let full = CGRect(x: x0, y: lane.y - verticalOffset, width: max(1, x1 - x0), height: lane.height)
-                let rect = full.insetBy(dx: 1, dy: 0).integral
+                let rect = ClipRenderer.drawnRect(full)
                 guard rect.width >= 1 else { continue }
                 let radius = min(Theme.Metrics.clipCornerRadius, rect.width / 2, rect.height / 2)
                 outlines.append(Outline(rect: rect.insetBy(dx: 1, dy: 1), radius: max(radius - 1, 0)))

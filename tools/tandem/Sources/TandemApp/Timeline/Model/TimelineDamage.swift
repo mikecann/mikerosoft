@@ -46,26 +46,51 @@ struct TimelineDamage: Equatable {
     var ruler = false
     var headers = false
     var allLanes = false
+    /// The lanes scrolled, sideways or up and down, without changing: their
+    /// tiles move rather than paint.
+    var lanesMoved = false
+    /// The zoom or the lanes' heights changed: everything in them moved
+    /// and changed size, and usually goes on changing (a zoom, a track's
+    /// edge dragged).
+    var lanesReshaped = false
+    /// An edit: the lanes repaint the clips it changed (see `previewRects`).
+    var lanesEdited = false
     /// Parts of the lanes, in their view coordinates.
     var laneRects: [CGRect] = []
 
-    var isEmpty: Bool { !ruler && !headers && !allLanes && laneRects.isEmpty }
+    var isEmpty: Bool { !ruler && !headers && !allLanes && !lanesMoved && !lanesReshaped && !lanesEdited && laneRects.isEmpty }
 
     /// What changed from `old` to `new`. `layoutChanged` says whether the
     /// lanes moved (heights, tracks added, the transcript lane shown).
     static func between(_ old: TimelineDrawState, _ new: TimelineDrawState, layout: TimelineLayout, layoutChanged: Bool) -> TimelineDamage {
         var damage = TimelineDamage()
         if old.revision != new.revision {
-            // An edit: names, clips and markers can all change.
-            return TimelineDamage(ruler: true, headers: true, allLanes: true)
+            // An edit: markers, track names and clips can all change.
+            damage.ruler = true
+            damage.headers = true
+            damage.lanesEdited = true
         }
-        if old.scale != new.scale || old.inPoint != new.inPoint || old.outPoint != new.outPoint {
+        if old.scale.pixelsPerSecond != new.scale.pixelsPerSecond {
+            damage.ruler = true
+            damage.allLanes = true
+            damage.lanesReshaped = true
+        }
+        if old.inPoint != new.inPoint || old.outPoint != new.outPoint {
             damage.ruler = true
             damage.allLanes = true
         }
-        if layoutChanged || old.verticalOffset != new.verticalOffset {
+        if old.scale.scrollSeconds != new.scale.scrollSeconds {
+            damage.ruler = true
+            damage.lanesMoved = true
+        }
+        if layoutChanged {
             damage.headers = true
             damage.allLanes = true
+            damage.lanesReshaped = true
+        }
+        if old.verticalOffset != new.verticalOffset {
+            damage.headers = true
+            damage.lanesMoved = true
         }
         if old.renamingTrackID != new.renamingTrackID { damage.headers = true }
         if old.artworkRevision != new.artworkRevision { damage.allLanes = true }
@@ -124,4 +149,93 @@ struct TimelineDamage: Equatable {
     /// How far past a clip's ends its drawing can reach: half a selected
     /// keyframe diamond, and a little to spare.
     static let keyframeReach: CGFloat = KeyframeGeometry.size
+}
+
+/// What a drag or drop's preview shows in the lanes, so the next move
+/// repaints only what it changes.
+struct PreviewState {
+    /// The project as it would be after the drag or drop.
+    var project: Project
+    /// Clips the preview moved or made, outlined.
+    var previewed: Set<String>
+    /// The track a drop would land on, tinted.
+    var dropLaneID: String?
+    /// A keyframe being dragged and where to.
+    var keyframeClipID: String?
+    var keyframeTime: Time?
+}
+
+extension TimelineDamage {
+    /// The parts of the lanes, in view coordinates, that look different
+    /// from one preview to the next: clips that moved, changed, came or
+    /// went (both where they were and where they are), transitions likewise,
+    /// the tinted lane, and the transcript when the take's sound changed.
+    /// Nil when the tracks themselves changed, which moves every lane.
+    static func previewRects(from old: PreviewState, to new: PreviewState, layout: TimelineLayout, scale: TimelineScale, offsetY: CGFloat, width: CGFloat) -> [CGRect]? {
+        let oldTracks = Dictionary(uniqueKeysWithValues: old.project.allTracks.map { ($0.id, $0) })
+        let newTracks = Dictionary(uniqueKeysWithValues: new.project.allTracks.map { ($0.id, $0) })
+        guard Set(oldTracks.keys) == Set(newTracks.keys) else { return nil }
+        var rects: [CGRect] = []
+        func clipRect(_ clip: Clip, in lane: TimelineLane) -> CGRect {
+            let x0 = scale.x(clip.start)
+            let x1 = scale.x(clip.end)
+            return CGRect(x: x0, y: lane.y - offsetY, width: max(1, x1 - x0), height: lane.height).insetBy(dx: -keyframeReach, dy: -1)
+        }
+        func keyframe(_ state: PreviewState, _ id: String) -> Time? {
+            state.keyframeClipID == id ? state.keyframeTime : nil
+        }
+        var soundChanged = false
+        // Clips outlined in one preview and not the other, and the clips of
+        // a dragged keyframe.
+        var highlighted = old.previewed.symmetricDifference(new.previewed)
+        if old.keyframeTime != new.keyframeTime || old.keyframeClipID != new.keyframeClipID {
+            highlighted.formUnion([old.keyframeClipID, new.keyframeClipID].compactMap { $0 })
+        }
+        for lane in layout.lanes {
+            guard let id = lane.trackID, let before = oldTracks[id], let after = newTracks[id] else { continue }
+            if (old.dropLaneID == id) != (new.dropLaneID == id) {
+                rects.append(CGRect(x: 0, y: lane.y - offsetY, width: width, height: lane.height))
+            }
+            if before == after {
+                // The same clips (which compares at once when the previews
+                // share them): only outlines can have changed.
+                if !highlighted.isEmpty {
+                    for clip in after.clips where highlighted.contains(clip.id) { rects.append(clipRect(clip, in: lane)) }
+                }
+                continue
+            }
+            if before.name != after.name || before.kind != after.kind || before.hidden != after.hidden || before.muted != after.muted || before.locked != after.locked {
+                // The track's style, dimming or hatching: all of it.
+                rects.append(CGRect(x: 0, y: lane.y - offsetY, width: width, height: lane.height))
+                if before.muted != after.muted, after.kind == .audio { soundChanged = true }
+                continue
+            }
+            if (before.clips != after.clips && after.kind == .audio && after.rippleMode == .cut) || before.rippleMode != after.rippleMode { soundChanged = true }
+            var beforeClips: [String: Clip] = [:]
+            for clip in before.clips { beforeClips[clip.id] = clip }
+            var afterClips: [String: Clip] = [:]
+            for clip in after.clips { afterClips[clip.id] = clip }
+            for clipID in Set(beforeClips.keys).union(afterClips.keys) {
+                let was = beforeClips[clipID]
+                let isNow = afterClips[clipID]
+                guard was != isNow || old.previewed.contains(clipID) != new.previewed.contains(clipID)
+                    || keyframe(old, clipID) != keyframe(new, clipID) else { continue }
+                if let was { rects.append(clipRect(was, in: lane)) }
+                if let isNow { rects.append(clipRect(isNow, in: lane)) }
+            }
+            if before.transitions != after.transitions {
+                let shifted = TimelineLane(trackID: lane.trackID, kind: lane.kind, style: lane.style, y: lane.y - offsetY, height: lane.height)
+                let unchanged = Set(before.transitions.filter { after.transitions.contains($0) }.map(\.id))
+                for (track, transition) in before.transitions.map({ (before, $0) }) + after.transitions.map({ (after, $0) }) where !unchanged.contains(transition.id) {
+                    if let band = TransitionGeometry.bandRect(transition, on: track, lane: shifted, scale: scale) {
+                        rects.append(band.union(TransitionGeometry.chipRect(transition, on: track, lane: shifted, scale: scale) ?? band).insetBy(dx: -2, dy: -1))
+                    }
+                }
+            }
+        }
+        if soundChanged, let transcript = layout.lanes.first(where: \.isTranscript) {
+            rects.append(CGRect(x: 0, y: transcript.y - offsetY, width: width, height: transcript.height))
+        }
+        return rects
+    }
 }

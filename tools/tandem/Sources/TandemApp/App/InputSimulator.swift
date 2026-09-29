@@ -15,9 +15,13 @@ extension NSHostingView: NSHostingViewMarker {}
 ///     open -g "tandem://simulate?menu=600,700&out=/tmp/menu.txt"
 ///     open -g "tandem://simulate?drop=tandem-effect:vignette&at=600,700"
 ///     open -g "tandem://simulate?scroll=900,1100,-12,0&steps=90&interval=16"
+///     open -g "tandem://simulate?dragover=tandem-title:label&at=600,700&to=900,700&steps=60&interval=16"
 ///
 /// A drop hands a library payload (see `LibraryDrag`) to the drop target
-/// under the point, as if it had been dragged there from a library tab.
+/// under the point, as if it had been dragged there from a library tab. A
+/// drag over moves one from `at` to `to` in steps, showing its preview
+/// along the way, and leaves without dropping (or with `stay=1`, stays
+/// there, for a screenshot of the preview).
 /// A drag with an `interval` (milliseconds) sends its steps that far apart
 /// so the app draws between them, as it does for a real mouse; without
 /// one they all go at once. A scroll sends `steps` wheel events of the
@@ -38,6 +42,9 @@ enum InputSimulator {
             case choose(String)
             case scroll(dx: CGFloat, dy: CGFloat, steps: Int)
             case drop(payload: String)
+            /// A library payload dragged over the view from `at` to `to`
+            /// and away again, without dropping.
+            case dragOver(payload: String, to: CGPoint, steps: Int, stay: Bool)
             /// Files dropped as if from Finder.
             case dropFiles([String])
             /// Moves the pointer to the point and leaves it there, for
@@ -124,6 +131,14 @@ enum InputSimulator {
         let at = numbers(query["at"])
         if let payload = query["drop"], at.count == 2, LibraryDrag.parse(payload) != nil {
             return Gesture(kind: .drop(payload: payload), at: CGPoint(x: at[0], y: at[1]), modifiers: flags)
+        }
+        let to = numbers(query["to"])
+        if let payload = query["dragover"], at.count == 2, to.count == 2, LibraryDrag.parse(payload) != nil {
+            let steps = max(1, Int(query["steps"] ?? "") ?? 12)
+            return Gesture(
+                kind: .dragOver(payload: payload, to: CGPoint(x: to[0], y: to[1]), steps: steps, stay: query["stay"] == "1"), at: CGPoint(x: at[0], y: at[1]),
+                modifiers: flags, interval: interval
+            )
         }
         if let files = query["files"], at.count == 2 {
             let paths = files.split(separator: ",").map { NSString(string: String($0)).expandingTildeInPath }.filter { $0.hasPrefix("/") }
@@ -251,6 +266,29 @@ enum InputSimulator {
             }
         case .type:
             break
+        case .dragOver(let payload, let to, let steps, let stay):
+            var view: NSView? = target
+            while let candidate = view, candidate.registeredDraggedTypes.isEmpty { view = candidate.superview }
+            guard let destination = view else { return }
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.mikerosoft.tandem.simulated-drop"))
+            pasteboard.clearContents()
+            pasteboard.setString(payload, forType: .string)
+            let end = windowPoint(to)
+            var actions: [() -> Void] = [{ _ = destination.draggingEntered(SimulatedDrop(window: window, location: start, pasteboard: pasteboard)) }]
+            for step in 1...steps {
+                let fraction = CGFloat(step) / CGFloat(steps)
+                let point = NSPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction)
+                actions.append { _ = destination.draggingUpdated(SimulatedDrop(window: window, location: point, pasteboard: pasteboard)) }
+            }
+            if !stay {
+                actions.append { destination.draggingExited(SimulatedDrop(window: window, location: end, pasteboard: pasteboard)) }
+            }
+            if let interval = gesture.interval {
+                finished = false
+                PacedReplay(actions: actions, done: done).start(every: interval)
+            } else {
+                for action in actions { action() }
+            }
         case .drop, .dropFiles:
             // The nearest view up the chain that takes drops.
             var view: NSView? = target

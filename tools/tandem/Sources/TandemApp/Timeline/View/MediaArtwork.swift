@@ -25,6 +25,9 @@ final class MediaArtwork {
     private var misses: [String: Date] = [:]
     /// Called (at most every 50 ms) when decoded thumbnails are ready.
     var onDecoded: (() -> Void)?
+    /// Counts thumbnails asked for before they were decoded, so a painter
+    /// can tell it drew a placeholder that `onDecoded` will replace.
+    private(set) var waits = 0
     /// Big enough for the tallest track on a Retina screen.
     static let thumbnailPixels = 240
 
@@ -61,6 +64,12 @@ final class MediaArtwork {
     /// The thumbnail nearest `mediaTime`, or nil while it's still being
     /// decoded (or doesn't exist).
     func thumbnail(for item: MediaItem, at mediaTime: Time) -> CGImage? {
+        decodedThumbnail(for: item, at: mediaTime)?.image
+    }
+
+    /// The path of the thumbnail nearest `mediaTime` and its decoded image,
+    /// or nil for the image while it's decoding.
+    private func decodedThumbnail(for item: MediaItem, at mediaTime: Time) -> (path: String, image: CGImage?)? {
         guard let (strip, folder) = thumbnailStrip(for: item) else { return nil }
         let key = "thumbs:\(item.id):\(item.fingerprint ?? "")"
         let paths = stripPaths[key] ?? {
@@ -72,9 +81,10 @@ final class MediaArtwork {
         }()
         let index = min(max(Int((mediaTime.seconds / max(strip.interval, 0.001)).rounded(.down)), 0), paths.count - 1)
         let path = paths[index]
-        if let image = images.object(forKey: path as NSString) { return image }
+        if let image = images.object(forKey: path as NSString) { return (path, image) }
+        waits += 1
         decode(path)
-        return nil
+        return (path, nil)
     }
 
     private func decode(_ path: String) {

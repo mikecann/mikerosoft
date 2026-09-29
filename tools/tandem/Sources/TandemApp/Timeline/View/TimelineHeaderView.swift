@@ -105,7 +105,7 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
         // The container's copy of the model, never the model itself: see
         // `TimelineDrawState`.
         let project = container.displayedProject
-        let offset = container.drawState.verticalOffset
+        let offset = container.contentOrigin.y
         context.setFillColor(Theme.window.cg)
         context.fill(dirtyRect.intersection(bounds))
         for lane in container.layoutCache.lanes {
