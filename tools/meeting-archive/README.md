@@ -31,12 +31,11 @@ setup script is intentionally separate from the Windows-only `install.ps1`.
 Quit Meeting Archive from its menu before updating or rebuilding it, so an
 active recording can finish cleanly. The setup script does not launch the app.
 
-For an existing login item, disable startup before replacing the bundle. Open
-the updated app normally, then use its Settings to disable and re-enable the
-login item. During the September 17 update, command-line registration reported
-success but macOS rejected the background launch; re-registering from the
-running app restored it. Verify the managed process actually starts after the
-foreground app quits. The Settings label alone is not a startup health check.
+When a login item already exists, the setup script re-registers it through
+LaunchServices and restarts the background agent. A replaced bundle is otherwise
+refused by launchd (`EX_CONFIG`) until it is re-registered, and registering from
+a shell does not count. The build signs with your Apple Development identity
+when one is available, so the signature stays stable across rebuilds.
 
 ## First launch and privacy
 
@@ -64,8 +63,13 @@ alone is not evidence of backup coverage. Cleanup is allowed only after the
 worker validates every declared media stream, rechecks the manifest, and saves
 its durable processing job.
 
+Until that toggle is on, every recording stays in the local spool after Bruce
+has verified it. That is the intended safe default, but it adds up: eight
+calls took about 1 GB.
+
 Transfers and Notion publication are retryable and recorded in durable local
-state. A Notion outage does not repeat transcription or playback generation.
+state. Retries back off while Bruce is unreachable and are released as soon as
+the Mac wakes or the network returns. A Notion outage does not repeat transcription or playback generation.
 Existing files under the older `RecordedMeetings` location are left alone and
 are not imported automatically yet.
 
@@ -75,6 +79,34 @@ is complete and the managed worker passed startup, clean shutdown, and automatic
 restart. A solo recording completed processing and publication after a disk
 priority correction and retry. A fresh call without corrective intervention
 and an actual reboot remain untested.
+
+## Recording and naming
+
+Recording follows the meeting app's camera. Turning video off for up to 20
+seconds keeps the same recording; the session ends once the camera stays off
+for 20 seconds or the meeting window closes. Nothing is polled through
+Accessibility while no camera is in use.
+
+When a recording ends, a small floating panel asks for a title. It takes
+typing without pulling focus from the call, stays above a full-screen meeting,
+and saves on its own after 90 seconds. Typing adds time. Return saves, Esc
+saves with the current title, and Discard asks before deleting anything.
+Calendar suggestions only appear once calendars are selected in Settings.
+
+An archived meeting can be renamed from the library with **Rename…**. Bruce
+stores the new title next to the archive and republishes Notion; nothing is
+re-uploaded or re-transcribed.
+
+If the meeting window stops producing frames (hidden, dragged, or static), the
+recorder repeats the last frame so the video stays as long as the audio. A
+microphone that drops out mid-call is restarted rather than ending the whole
+recording.
+
+The app logs capture, detection and transfer events to the unified log:
+
+```sh
+log show --predicate 'subsystem == "com.mikerosoft.meeting-archive"' --last 1d
+```
 
 ## Review and current limits
 

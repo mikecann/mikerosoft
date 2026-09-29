@@ -285,7 +285,7 @@ results are Codable so the CLI and MCP can return them as JSON.
 | Description credits | `credits(for: project, in: folder).text()`, plus `warnings`; `licenceHistory(id)` for disputes |
 | Import folders | `addImportFolder(url, licence: FolderLicence.presets["envato"])`, `rescanImportFolders()`, `watchImportFolders` |
 | Shared library | `sharedLibrary`, `createSharedLibrary()`, `rescanSharedLibrary()`, `watchSharedLibrary`, `refreshChangedSharedFiles(report)`, `moveSharedLibrary(to:)`, `registerSharedFonts()`; `SharedLibrary.locate()` for other processes |
-| Fonts | `registerFonts()` at launch, `AssetLibrary.registerFonts(in: project)` on open |
+| Fonts | `registerFonts()` at launch; a project's own `assets/font/` is registered by whatever renders it (`ProjectFonts` in TandemRender) |
 | Housekeeping | `prune()`, `evictUnpinnedFiles()`, `rebuildCatalogFromDisk()` |
 
 An import folder's licence note is `tandem-licence.json` in the folder

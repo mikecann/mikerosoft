@@ -187,6 +187,19 @@ struct LanesPainter {
         return reach
     }
 
+    /// Whether a transcript phrase's text runs past `edge` (content x),
+    /// where the lanes' right edge would cut it off mid-word.
+    func transcriptRunsPast(_ edge: CGFloat) -> Bool {
+        guard !phrases.isEmpty else { return false }
+        let scale = scale
+        guard let index = groups.lastIndex(where: { scale.x(phrases[$0.lowerBound].start) < edge }) else { return false }
+        let first = phrases[groups[index].lowerBound]
+        let x0 = scale.x(first.start)
+        let next = index + 1 < groups.count ? scale.x(phrases[groups[index + 1].lowerBound].start) : .infinity
+        let end = min(x0 + 2 + TextMetrics.width(of: first.text, font: Self.transcriptFont), next - 6)
+        return end > edge
+    }
+
     private func transcriptReach(pinX: CGFloat) -> CGFloat {
         let font = Self.transcriptFont
         if phrases.isEmpty {

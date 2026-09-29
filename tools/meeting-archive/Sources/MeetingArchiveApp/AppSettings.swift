@@ -6,6 +6,9 @@ final class AppSettings: ObservableObject {
     @Published var selectedCalendarIDs: Set<String> { didSet { defaults.set(Array(selectedCalendarIDs), forKey: "calendarIDs") } }
     @Published var archiveHost: String { didSet { defaults.set(archiveHost, forKey: "archiveHost") } }
     @Published var archiveRoot: String { didSet { defaults.set(archiveRoot, forKey: "archiveRoot") } }
+    /// Bruce's playback viewer behind Tailscale Serve. It streams video with
+    /// range requests and shows the transcript, so nothing is copied locally.
+    @Published var viewerURL: String { didSet { defaults.set(viewerURL, forKey: "viewerURL") } }
     // Enable only after checking that this directory is included in Bruce's
     // existing backup. A network transfer is not evidence of backup coverage.
     @Published var backupCoverageVerified: Bool { didSet { defaults.set(backupCoverageVerified, forKey: "backupCoverageVerified") } }
@@ -15,6 +18,7 @@ final class AppSettings: ObservableObject {
         selectedCalendarIDs = Set(defaults.stringArray(forKey: "calendarIDs") ?? [])
         archiveHost = defaults.string(forKey: "archiveHost") ?? "bruce"
         archiveRoot = defaults.string(forKey: "archiveRoot") ?? "/Volumes/CannMedia/MeetingArchive"
+        viewerURL = defaults.string(forKey: "viewerURL") ?? "https://bruce.tail9ef766.ts.net:10443"
         backupCoverageVerified = defaults.bool(forKey: "backupCoverageVerified")
     }
 }

@@ -128,7 +128,7 @@ private struct TitlePreview: View {
     let preset: TitlePreset
 
     var body: some View {
-        let style = preset.style
+        let style = TitlePresets.presetStyle(preset.id)
         let lines = TitleSamples.text(for: preset.id).components(separatedBy: "\n")
         let size = max(9, min(22, CGFloat(style.size) * 0.13))
         VStack(spacing: 1) {
@@ -153,7 +153,7 @@ private struct TitlePreview: View {
     }
 
     private func text(_ line: String, first: Bool) -> Text {
-        let shown = preset.style.uppercase ? line.uppercased() : line
+        let shown = TitlePresets.presetStyle(preset.id).uppercase ? line.uppercased() : line
         // Word captions light up the word being said.
         guard let highlight = preset.highlightColor else { return Text(shown) }
         let words = shown.split(separator: " ").map(String.init)

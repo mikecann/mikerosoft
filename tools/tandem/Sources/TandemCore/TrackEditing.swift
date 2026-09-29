@@ -58,12 +58,15 @@ extension Clip {
             audio.fadeIn = .zero
             right.audio = audio
         }
+        // No animation at the cut. Clearing the field isn't enough for a
+        // title with a preset, which would bring the preset's back, so
+        // those say "none".
         if case .text(var text) = left.content {
-            text.animationOut = nil
+            text.animationOut = text.preset == nil ? nil : "none"
             left.content = .text(text)
         }
         if case .text(var text) = right.content {
-            text.animationIn = nil
+            text.animationIn = text.preset == nil ? nil : "none"
             right.content = .text(text)
         }
         return (left, right)

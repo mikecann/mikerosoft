@@ -66,6 +66,52 @@ final class FileImportTests: XCTestCase {
         XCTAssertEqual(again?.action, .inPlace)
     }
 
+    func testALivePhotosMotionClipGoesBesideItsStill() throws {
+        // Photos exports each Live Photo as a still and a movie. The movie
+        // follows its still into graphics/, rather than going to broll/ as
+        // a video of its own, so the folder's scan pairs them too.
+        let export = outside.appendingPathComponent("Export", isDirectory: true)
+        let clip = try file(export.appendingPathComponent("IMG_0130.mov"))
+        let still = try file(export.appendingPathComponent("IMG_0130.HEIC"))
+        let video = try file(export.appendingPathComponent("IMG_0140.MOV"))
+        let plan = FileImport.plan([clip, still, video], folder: folder, motionClips: [clip: still]) { _ in true }
+        XCTAssertEqual(plan.map(\.destination), ["graphics/IMG_0130.mov", "graphics/IMG_0130.HEIC", "broll/IMG_0140.MOV"])
+        XCTAssertEqual(plan.map(\.livePhotoOf), [still, nil, nil])
+        XCTAssertEqual(plan.map(\.action), [.copy, .copy, .copy])
+
+        // A still whose name is taken takes its clip's name with it.
+        try file(project.appendingPathComponent("graphics/IMG_0130.HEIC"), "another photo")
+        let numbered = FileImport.plan([still, clip], folder: folder, motionClips: [clip: still]) { _ in true }
+        XCTAssertEqual(numbered.map(\.destination), ["graphics/IMG_0130 2.HEIC", "graphics/IMG_0130 2.mov"])
+
+        // From another disk both are linked; already in the folder, both stay.
+        let linked = FileImport.plan([still, clip], folder: folder, motionClips: [clip: still]) { _ in false }
+        XCTAssertEqual(linked.map(\.destination), ["linked-media/IMG_0130.HEIC", "linked-media/IMG_0130.mov"])
+        XCTAssertEqual(linked.map(\.action), [.link, .link])
+        let insideStill = try file(project.appendingPathComponent("photos/IMG_0131.HEIC"))
+        let insideClip = try file(project.appendingPathComponent("photos/IMG_0131.mov"))
+        let inPlace = FileImport.plan([insideStill, insideClip], folder: folder, motionClips: [insideClip: insideStill]) { _ in true }
+        XCTAssertEqual(inPlace.map(\.destination), ["photos/IMG_0131.HEIC", "photos/IMG_0131.mov"])
+        XCTAssertEqual(inPlace.map(\.action), [.inPlace, .inPlace])
+    }
+
+    func testTheStillKeepsItsMotionClipAndTheClipIsntCounted() throws {
+        let still = URL(fileURLWithPath: "/Export/IMG_0130.HEIC")
+        let plan = [
+            FileImportPlan(source: still, destination: "graphics/IMG_0130.HEIC", action: .copy),
+            FileImportPlan(source: URL(fileURLWithPath: "/Export/IMG_0130.mov"), destination: "graphics/IMG_0130.mov", action: .copy, livePhotoOf: still),
+            FileImportPlan(source: URL(fileURLWithPath: "/Export/IMG_0140.MOV"), destination: "broll/IMG_0140.MOV", action: .copy)
+        ]
+        let items = [
+            MediaItem(id: "med_still", path: "graphics/IMG_0130.HEIC", kind: .image, role: .graphic, width: 4032, height: 3024),
+            MediaItem(id: "med_video", path: "broll/IMG_0140.MOV", kind: .video, role: .broll, duration: t(7), hasVideo: true)
+        ]
+        let joined = FileImport.withMotionClips(items, plan: plan)
+        XCTAssertEqual(joined.map(\.livePhotoVideo), ["graphics/IMG_0130.mov", nil])
+        // What a drag says it will add leaves the clips out, by name.
+        XCTAssertEqual(FileImport.countedFiles(plan.map(\.source)).map(\.lastPathComponent), ["IMG_0130.HEIC", "IMG_0140.MOV"])
+    }
+
     func testPerformingCopiesAndLinks() throws {
         let video = try file(outside.appendingPathComponent("drone.mov"), "frames")
         let far = try file(outside.appendingPathComponent("far.mov"), "far frames")
@@ -118,6 +164,44 @@ final class FileImportTests: XCTestCase {
         XCTAssertEqual(justAdd.label, "Add 2 files to the media")
         XCTAssertFalse(justAdd.commands.contains { if case .placeMedia = $0 { return true } else { return false } })
         XCTAssertNil(FileImport.batch([items[1]], into: project, at: nil, trackID: nil), "nothing new to add")
+    }
+
+    /// Files from Finder dropped above the tracks get a new video track,
+    /// like library media. A file with no picture can't go there, so it's
+    /// placed as usual.
+    func testFilesDroppedAboveTheTracksGoOnANewVideoTrack() throws {
+        let project = Project.standard(name: "Import")
+        let items = [
+            MediaItem(id: "med_drone", path: "broll/drone.mov", kind: .video, role: .broll, duration: t(4), hasVideo: true),
+            MediaItem(id: "med_whoosh", path: "audio/whoosh.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true),
+            MediaItem(id: "med_png", path: "graphics/diagram.png", kind: .image, role: .graphic, hasVideo: true)
+        ]
+        let batch = try XCTUnwrap(FileImport.batch(items, into: project, at: t(10), trackID: nil, newTrack: (.video, "trk_new")))
+        XCTAssertEqual(batch.label, "Add 3 files on a new video track")
+        let coordinator = ProjectCoordinator(project: project)
+        _ = try coordinator.apply(batch)
+        assertValid(coordinator.project)
+        let result = coordinator.project
+        XCTAssertEqual(result.videoTracks.count, project.videoTracks.count + 1)
+        XCTAssertEqual(result.videoTracks.last?.id, "trk_new", "on top of the video tracks")
+        let onNew = result.track("trk_new")?.clips ?? []
+        XCTAssertEqual(onNew.map(\.mediaID), ["med_drone", "med_png"])
+        XCTAssertEqual(onNew.map(\.start), [t(10), t(15)], "one after another, the sound's second still counted")
+        XCTAssertTrue(result.audioTracks.flatMap(\.clips).contains { $0.mediaID == "med_whoosh" }, "the sound is placed as usual")
+    }
+
+    func testSoundDroppedBelowTheTracksGoesOnANewAudioTrack() throws {
+        let project = Project.standard(name: "Import")
+        let items = [MediaItem(id: "med_whoosh", path: "audio/whoosh.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)]
+        let batch = try XCTUnwrap(FileImport.batch(items, into: project, at: t(3), trackID: nil, newTrack: (.audio, "trk_sound")))
+        let coordinator = ProjectCoordinator(project: project)
+        _ = try coordinator.apply(batch)
+        XCTAssertEqual(coordinator.project.audioTracks.last?.id, "trk_sound", "below the other audio tracks")
+        XCTAssertEqual(coordinator.project.track("trk_sound")?.clips.map(\.mediaID), ["med_whoosh"])
+        // Nothing fits a new track: no empty track is made.
+        let still = [MediaItem(id: "med_png", path: "graphics/diagram.png", kind: .image, role: .graphic, hasVideo: true)]
+        let placed = try XCTUnwrap(FileImport.batch(still, into: project, at: t(3), trackID: nil, newTrack: (.audio, "trk_sound")))
+        XCTAssertFalse(placed.commands.contains { if case .addTrack = $0 { return true } else { return false } })
     }
 
     func testADropIsWorkedOutAgainstTheProjectWhenItLands() throws {

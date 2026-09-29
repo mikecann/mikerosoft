@@ -20,6 +20,9 @@ struct FileImportPlan: Equatable, Sendable {
     /// Relative to the project folder.
     var destination: String
     var action: Action
+    /// For a Live Photo's motion clip, the still it goes with. It lands
+    /// beside the still and is recorded on it, not added as media.
+    var livePhotoOf: URL? = nil
 }
 
 /// Files and folders dropped from Finder onto the timeline or the media
@@ -68,36 +71,92 @@ enum FileImport {
     /// Where each file goes. Files already in the folder stay put; others
     /// are copied in, or linked when `sameVolume` says they're on another
     /// disk. A name that's taken by a different file gets a number.
-    static func plan(_ files: [URL], folder: ProjectFolder, sameVolume: (URL) -> Bool) -> [FileImportPlan] {
+    ///
+    /// `motionClips` are Live Photo movies with their stills
+    /// (`LivePhotos.motionClips(among:)`). Each goes beside its still with
+    /// the still's name, so a scan of the folder pairs them the same way.
+    static func plan(_ files: [URL], folder: ProjectFolder, motionClips: [URL: URL] = [:], sameVolume: (URL) -> Bool) -> [FileImportPlan] {
+        let files = files.map(\.standardizedFileURL)
+        var stills: [URL: URL] = [:]
+        for (clip, still) in motionClips where files.contains(still.standardizedFileURL) {
+            stills[clip.standardizedFileURL] = still.standardizedFileURL
+        }
         var taken = Set<String>()
-        return files.map { file in
-            let file = file.standardizedFileURL
+        var planned: [URL: FileImportPlan] = [:]
+        // Everything but the motion clips first, so each clip can follow
+        // its still wherever that went.
+        for file in files where stills[file] == nil && planned[file] == nil {
             let relative = folder.path(for: file)
             if !relative.hasPrefix("/"), !MediaScanner.isSkippedPath(relative) {
-                return FileImportPlan(source: file, destination: relative, action: .inPlace)
+                planned[file] = FileImportPlan(source: file, destination: relative, action: .inPlace)
+                continue
             }
             let action: FileImportPlan.Action = sameVolume(file) ? .copy : .link
             let directory = action == .link ? "linked-media" : subfolder(for: file)
-            let base = file.deletingPathExtension().lastPathComponent
-            let ext = file.pathExtension
-            var number = 1
-            while true {
-                let name = number == 1 ? file.lastPathComponent : "\(base) \(number).\(ext)"
-                let destination = "\(directory)/\(name)"
-                let target = folder.url(forPath: destination)
-                if !taken.contains(destination) {
-                    if !FileManager.default.fileExists(atPath: target.path) {
-                        taken.insert(destination)
-                        return FileImportPlan(source: file, destination: destination, action: action)
-                    }
-                    if sameFile(file, target) {
-                        taken.insert(destination)
-                        return FileImportPlan(source: file, destination: destination, action: .inPlace)
-                    }
-                }
-                number += 1
-            }
+            planned[file] = place(file, in: directory, base: file.deletingPathExtension().lastPathComponent, action: action, folder: folder, taken: &taken)
         }
+        for file in files where planned[file] == nil {
+            guard let still = stills[file].flatMap({ planned[$0] }) else { continue }
+            let relative = folder.path(for: file)
+            if still.action == .inPlace, !relative.hasPrefix("/"), !MediaScanner.isSkippedPath(relative) {
+                planned[file] = FileImportPlan(source: file, destination: relative, action: .inPlace, livePhotoOf: still.source)
+                continue
+            }
+            let action: FileImportPlan.Action = still.action == .inPlace ? (sameVolume(file) ? .copy : .link) : still.action
+            let name = (still.destination as NSString).lastPathComponent
+            var clip = place(file, in: (still.destination as NSString).deletingLastPathComponent, base: (name as NSString).deletingPathExtension, action: action, folder: folder, taken: &taken)
+            clip.livePhotoOf = still.source
+            planned[file] = clip
+        }
+        var seen = Set<URL>()
+        return files.filter { seen.insert($0).inserted }.compactMap { planned[$0] }
+    }
+
+    /// A free name for `file` in `directory`: `base` with the file's
+    /// extension, numbered when a different file has it. The same file
+    /// brought in before is used where it is.
+    private static func place(_ file: URL, in directory: String, base: String, action: FileImportPlan.Action, folder: ProjectFolder, taken: inout Set<String>) -> FileImportPlan {
+        let ext = file.pathExtension
+        var number = 1
+        while true {
+            let name = number == 1 ? (ext.isEmpty ? base : "\(base).\(ext)") : "\(base) \(number)\(ext.isEmpty ? "" : ".\(ext)")"
+            let destination = directory.isEmpty ? name : "\(directory)/\(name)"
+            let target = folder.url(forPath: destination)
+            if !taken.contains(destination) {
+                if !FileManager.default.fileExists(atPath: target.path) {
+                    taken.insert(destination)
+                    return FileImportPlan(source: file, destination: destination, action: action)
+                }
+                if sameFile(file, target) {
+                    taken.insert(destination)
+                    return FileImportPlan(source: file, destination: destination, action: .inPlace)
+                }
+            }
+            number += 1
+        }
+    }
+
+    /// Records each Live Photo's motion clip, brought in beside its still,
+    /// on the still's media item.
+    static func withMotionClips(_ items: [MediaItem], plan: [FileImportPlan]) -> [MediaItem] {
+        var clips: [String: String] = [:]
+        for entry in plan {
+            guard let source = entry.livePhotoOf, let still = plan.first(where: { $0.source == source && $0.livePhotoOf == nil }) else { continue }
+            clips[still.destination] = entry.destination
+        }
+        return items.map { item in
+            var item = item
+            if let clip = clips[item.path] { item.livePhotoVideo = clip }
+            return item
+        }
+    }
+
+    /// The files a drop adds as media: Live Photo motion clips, by name,
+    /// go with their stills. For saying what a drop will do before anything
+    /// has been read.
+    static func countedFiles(_ files: [URL]) -> [URL] {
+        let clips = LivePhotos.likelyMotionClips(among: files)
+        return files.filter { !clips.contains($0) }
     }
 
     /// True when two files are the same file, or hold the same bytes.
@@ -141,9 +200,11 @@ enum FileImport {
     /// The edit for probed files: new media added (a file the project
     /// already has keeps its media, matched by ID or by where it is in the
     /// folder), and with `at`, each placed after the one before, stills for
-    /// 5 s. Dropping one file on a track uses that track. Nil when there's
+    /// 5 s. Dropping one file on a track uses that track. With `newTrack`
+    /// (a drop above or below the tracks) the files that fit go on a track
+    /// made for them, and the rest are placed as usual. Nil when there's
     /// nothing to do.
-    static func batch(_ items: [MediaItem], into project: Project, folder: ProjectFolder? = nil, at time: Time?, trackID: String?) -> EditBatch? {
+    static func batch(_ items: [MediaItem], into project: Project, folder: ProjectFolder? = nil, at time: Time?, trackID: String?, newTrack: (kind: TrackKind, id: String)? = nil) -> EditBatch? {
         var project = project
         var commands: [EditCommand] = []
         var ids: [String] = []
@@ -167,13 +228,30 @@ enum FileImport {
             return EditBatch(label: commands.count == 1 ? "Add \(name(of: ids[0], in: project)) to the media" : "Add \(commands.count) files to the media", commands: commands)
         }
         var start = max(.zero, time)
+        var madeTrack = false
         for id in ids {
             guard let placed = TimelineEdits.placeMedia(project, mediaIDs: [id], at: start, trackID: ids.count == 1 ? trackID : nil, insert: false) else { continue }
-            commands += placed.commands
+            if let newTrack, let item = project.media(id), fits(item, on: newTrack.kind) {
+                if !madeTrack { commands.append(.addTrack(kind: newTrack.kind, id: newTrack.id)) }
+                madeTrack = true
+                commands.append(.placeMedia(
+                    mediaIDs: [id], at: start, mode: .overwrite,
+                    videoTrackID: newTrack.kind == .video ? newTrack.id : nil, audioTrackID: newTrack.kind == .audio ? newTrack.id : nil
+                ))
+            } else {
+                commands += placed.commands
+            }
             start = start + (project.media(id)?.duration ?? Time(seconds: 5))
         }
         guard !commands.isEmpty else { return nil }
-        return EditBatch(label: ids.count == 1 ? "Add \(name(of: ids[0], in: project))" : "Add \(ids.count) files", commands: commands)
+        let label = ids.count == 1 ? "Add \(name(of: ids[0], in: project))" : "Add \(ids.count) files"
+        guard madeTrack, let newTrack else { return EditBatch(label: label, commands: commands) }
+        return EditBatch(label: label + (newTrack.kind == .video ? " on a new video track" : " on a new audio track"), commands: commands)
+    }
+
+    /// Picture goes on a video track and sound on an audio track.
+    private static func fits(_ item: MediaItem, on kind: TrackKind) -> Bool {
+        kind == .video ? item.hasVideo || item.kind == .image : item.hasAudio
     }
 
     /// Commits probed files to the project as it is at that moment, not
@@ -183,12 +261,14 @@ enum FileImport {
     /// worked out against, and is worked out again if another commit lands
     /// first. `beforeApply` is for tests to land one. Nil when there's
     /// nothing left to do.
-    static func commit(_ items: [MediaItem], to coordinator: ProjectCoordinator, folder: ProjectFolder, at time: Time?, trackID: String?, attempts: Int = 20, beforeApply: (() -> Void)? = nil) throws -> (batch: EditBatch, result: ProjectCoordinator.CommitResult)? {
+    static func commit(_ items: [MediaItem], to coordinator: ProjectCoordinator, folder: ProjectFolder, at time: Time?, trackID: String?, newTrack: TrackKind? = nil, attempts: Int = 20, beforeApply: (() -> Void)? = nil) throws -> (batch: EditBatch, result: ProjectCoordinator.CommitResult)? {
         var attempt = 0
+        // One ID for every attempt, so a retry doesn't make another track.
+        let made = newTrack.map { (kind: $0, id: IDs.make("trk")) }
         while true {
             attempt += 1
             let (current, revision) = coordinator.snapshot()
-            guard var batch = batch(items, into: current, folder: folder, at: time, trackID: trackID) else { return nil }
+            guard var batch = batch(items, into: current, folder: folder, at: time, trackID: trackID, newTrack: made) else { return nil }
             batch.expectedRevision = revision
             beforeApply?()
             do {

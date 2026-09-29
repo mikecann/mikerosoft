@@ -100,6 +100,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Word-by-word captions from the transcripts (`tandem captions`, MCP `captions`) [integration]
 - [x] Colour tab like other editors': whole take or this clip, then Light, Colour, colour wheels (the new `colorWheels` effect), a Lightroom-style colour mixer, vignette, sharpen and LUT; sliders with gradient tracks, reset, scrubbing and typing [app, render]
 - [x] Portrait short from the same edit: `setFormatLayout`, `tandem short`, portrait frames and the short export preset [integration]
+- [x] Export presets set quality, not shape: a resolution class on the frame's short side, the default preset follows the canvas, `--preset short` renders a 9:16 canvas, and the Export dialog shows each preset's size (`ExportPreset.plan(for:)`) [render, api, app]
 - [ ] Segment render cache for fast re-exports
 - [ ] Remotion graphics clips with props, rendered in the background
 - [ ] Own playback engine (VTDecompressionSession, frame cache, audio clock) if AVPlayer scrubbing isn't fast enough

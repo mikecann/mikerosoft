@@ -336,14 +336,17 @@ final class RealMediaTests: XCTestCase {
 
     func testTranscriptOfAMinute() async throws {
         guard #available(macOS 26, *) else { throw XCTSkip("needs macOS 26") }
-        let (transcript, seconds) = try await time {
+        let (raw, seconds) = try await time {
             try await SpeechTranscription.transcribe(source: Self.camera, localeID: "en-US", context: context(.transcript), timeRange: Self.minute)
         }
-        let raw = try await SpeechTranscription.transcribe(source: Self.camera, localeID: "en-US", context: context(.transcript), timeRange: Self.minute, snapWords: false)
-        report(String(format: "transcript camera 60 s: %d words in %.2f s = %.0fx realtime", transcript.words.count, seconds, 60 / seconds))
-        report("  text: \(transcript.text.prefix(200))...")
-        XCTAssertGreaterThan(transcript.words.count, 120)
-        XCTAssertGreaterThanOrEqual(transcript.words.first!.start.seconds, 1009.9, "media time, not clip time")
+        report(String(format: "transcript camera 60 s: %d words in %.2f s = %.0fx realtime", raw.words.count, seconds, 60 / seconds))
+        report("  text: \(raw.text.prefix(200))...")
+        XCTAssertGreaterThan(raw.words.count, 120)
+        XCTAssertGreaterThanOrEqual(raw.words.first!.start.seconds, 1009.9, "media time, not clip time")
+        // The waveform of the same minute, as the cache would have it.
+        let reader = try await AudioReader(url: Self.camera, timeRange: Self.minute)
+        let peaks = try WaveformJob.measure(reader, rate: 100, rangeStart: Self.minute.start.seconds, context: context(.waveform))
+        let transcript = raw.aligned(to: Waveform(samplesPerSecond: 100, peaks: peaks), origin: Self.minute.start.seconds)
 
         // Agreement with Whisper medium.en on the same minute (the spike's
         // reference), before and after pulling word edges in to the voice.
@@ -355,7 +358,7 @@ final class RealMediaTests: XCTestCase {
             guard let text = entry["text"] as? String, let start = entry["start"] as? Double, let end = entry["end"] as? Double else { return nil }
             return TranscriptWord(text: text, start: Time(seconds: start + 1010), end: Time(seconds: end + 1010))
         }
-        for (label, words) in [("raw", raw.words), ("snapped", transcript.words)] {
+        for (label, words) in [("raw", raw.words), ("aligned", transcript.words)] {
             let pairs = align(words, reference)
             let starts = pairs.map { abs($0.0.start.seconds - $0.1.start.seconds) }.sorted()
             let ends = pairs.map { abs($0.0.end.seconds - $0.1.end.seconds) }.sorted()
@@ -363,6 +366,7 @@ final class RealMediaTests: XCTestCase {
             report(String(format: "  %@ vs whisper medium.en: %d words matched, start diff median %.0f ms p90 %.0f ms, end diff median %.0f ms p90 %.0f ms; %d pauses over 0.3 s totalling %.2f s",
                           label, pairs.count, starts[starts.count / 2] * 1000, starts[starts.count * 9 / 10] * 1000, ends[ends.count / 2] * 1000, ends[ends.count * 9 / 10] * 1000,
                           pauses.count, pauses.reduce(0) { $0 + $1.duration.seconds }))
+            report("    pauses: " + pauses.map { String(format: "%.2f-%.2f", $0.start.seconds - 1010, $0.end.seconds - 1010) }.joined(separator: " "))
         }
         let whisperPauses = Transcript(language: "en-US", engine: "", words: reference).pauses(longerThan: Time(seconds: 0.3))
         report(String(format: "  whisper medium.en: %d pauses over 0.3 s totalling %.2f s", whisperPauses.count, whisperPauses.reduce(0) { $0 + $1.duration.seconds }))

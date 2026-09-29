@@ -341,9 +341,7 @@ enum SpeakerReviewCommandBuilder {
     ) -> ArchiveProcessRequest {
         ArchiveProcessRequest(
             executable: configuration.sshExecutable,
-            arguments: [
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=5",
+            arguments: configuration.sshOptions + [
                 "--", configuration.host,
                 RemoteShellCommand.make(arguments),
             ],
@@ -654,12 +652,18 @@ final class SpeakerReviewModel: ObservableObject {
     private func localPlaybackURL() async throws -> URL {
         if let playbackURL { return playbackURL }
         if let playbackFetchTask { return try await playbackFetchTask.value }
-        playbackStatus = "Fetching the archived playback…"
-        isFetchingPlayback = true
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("meeting-archive-speaker-review", isDirectory: true)
+        // Cached across reviews: the full playback file used to be fetched
+        // into a fresh temporary copy every time a review opened.
+        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Meeting Archive/playback", isDirectory: true)
             .appendingPathComponent(meetingID.uuidString.lowercased(), isDirectory: true)
         let destination = directory.appendingPathComponent("meeting.mp4")
+        if let size = try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 {
+            playbackURL = destination
+            return destination
+        }
+        playbackStatus = "Fetching the archived playback…"
+        isFetchingPlayback = true
         let task = Task { [client, configuration, meetingID] in
             try await client.fetchPlayback(
                 meetingID: meetingID,

@@ -194,11 +194,11 @@ final class FilmoraImporterTests: XCTestCase {
         XCTAssertEqual(text.style.color, RGBA(r: 1, g: 0, b: 0))
         XCTAssertEqual(text.style.strokeColor, RGBA(r: 0, g: 0, b: 0))
         XCTAssertEqual(text.style.strokeWidth, 3)
-        XCTAssertTrue(text.style.shadow)
+        XCTAssertEqual(text.style.shadow, true)
         XCTAssertEqual(text.style.alignment, "left")
         XCTAssertEqual(text.animationIn, "typewriter")
         XCTAssertEqual(text.animationDuration, t(0.5))
-        XCTAssertGreaterThan(text.style.size, 20)
+        XCTAssertGreaterThan(try XCTUnwrap(text.style.size), 20)
         XCTAssertEqual(title.video?.transform.position, Point(x: 0.5, y: 0.86))
         XCTAssertTrue(title.tags.contains("filmora-template:Basic 1"))
     }

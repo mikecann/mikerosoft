@@ -50,8 +50,17 @@ final class HeadlessHistory: @unchecked Sendable {
     }
 
     private func load() -> State? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? ServiceJSON.decoder().decode(State.self, from: data)
+        guard let data = try? Data(contentsOf: url), var state = try? ServiceJSON.decoder().decode(State.self, from: data) else { return nil }
+        // Snapshots an older Tandem kept read the way it wrote them, as the
+        // project file does.
+        func upgraded(_ entry: Entry) -> Entry {
+            var entry = entry
+            entry.project = (try? ProjectFile.migrate(entry.project)) ?? entry.project
+            return entry
+        }
+        state.undo = state.undo.map(upgraded)
+        state.redo = state.redo.map(upgraded)
+        return state
     }
 
     private func save(_ state: State) {

@@ -148,7 +148,6 @@ def validate_media_files(destination: Path, manifest: VerifiedManifest) -> dict[
         raise MediaValidationError("Media validation timeouts must be positive.")
 
     results: list[dict[str, Any]] = []
-    coverage = 0.0
     for item in manifest.files:
         expected_type = _EXPECTED_STREAM.get(item.kind)
         if expected_type is None:
@@ -157,7 +156,6 @@ def validate_media_files(destination: Path, manifest: VerifiedManifest) -> dict[
         probe = _probe(path, ffprobe, probe_timeout)
         duration, start = _stream_duration(probe, expected_type, item.path)
         _decode(path, expected_type, ffmpeg, decode_timeout)
-        coverage = max(coverage, start + duration)
         results.append(
             {
                 "path": item.path,
@@ -165,6 +163,7 @@ def validate_media_files(destination: Path, manifest: VerifiedManifest) -> dict[
                 "stream_type": expected_type,
                 "duration_seconds": round(duration, 6),
                 "start_time_seconds": round(start, 6),
+                "coverage_end_seconds": round(start + duration, 6),
                 "full_decode": True,
             },
         )
@@ -173,18 +172,41 @@ def validate_media_files(destination: Path, manifest: VerifiedManifest) -> dict[
 
     claimed_duration = float(manifest.metadata["duration_seconds"])
     tolerance = min(15.0, max(3.0, claimed_duration * 0.005))
+    coverage = max(result["coverage_end_seconds"] for result in results)
+    # "passed" means every hash-verified track fully decodes, which is what
+    # makes Mac cleanup safe. A short track is a capture fault, not a transfer
+    # fault: the Mac holds the same bytes, so refusing would only retry forever.
+    # Report shortfalls per track instead so a truncated video stays visible
+    # even when another track covers the whole meeting.
+    warnings: list[dict[str, Any]] = []
+    for result in results:
+        truncated = claimed_duration > 0 and result["coverage_end_seconds"] + tolerance < claimed_duration
+        result["truncated"] = truncated
+        if truncated:
+            warnings.append(
+                {
+                    "code": f"{result['stream_type']}_truncated",
+                    "path": result["path"],
+                    "kind": result["kind"],
+                    "covered_seconds": result["coverage_end_seconds"],
+                    "claimed_seconds": claimed_duration,
+                },
+            )
     if claimed_duration > 0 and coverage + tolerance < claimed_duration:
-        raise MediaValidationError(
-            "Finalized media covers only "
-            f"{coverage:.3f}s of the claimed {claimed_duration:.3f}s meeting duration "
-            f"(tolerance {tolerance:.3f}s).",
+        warnings.append(
+            {
+                "code": "media_shorter_than_claimed_duration",
+                "covered_seconds": round(coverage, 6),
+                "claimed_seconds": claimed_duration,
+            },
         )
     return {
         "status": "passed",
-        "validator_version": 1,
+        "validator_version": 2,
         "full_decode": True,
         "claimed_duration_seconds": claimed_duration,
         "coverage_duration_seconds": round(coverage, 6),
         "coverage_tolerance_seconds": round(tolerance, 6),
         "files": results,
+        "warnings": warnings,
     }

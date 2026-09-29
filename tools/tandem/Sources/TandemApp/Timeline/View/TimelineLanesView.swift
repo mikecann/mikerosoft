@@ -58,7 +58,7 @@ final class TimelineLanesView: TimelineChildView {
     private var assetApply: (asset: Asset, clipID: String)?
     /// Media files dragged in from Finder, found once per drag, and where
     /// they'd go.
-    private var fileDrop: (files: [URL], time: Time, trackID: String?)?
+    private var fileDrop: (files: [URL], time: Time, trackID: String?, newTrack: TrackKind?)?
     private var draggedFiles: [URL]?
     /// A keyframe being dragged: its clip as it was, the diamond, the rect
     /// the clip had (for reading levels off the volume line), and the edit
@@ -79,6 +79,13 @@ final class TimelineLanesView: TimelineChildView {
     /// Tiles by index: tile `i` shows content x from `i * tileWidth`.
     private var tiles: [Int: LanesPaintView] = [:]
     private lazy var strip = LanesPaintView(role: .strip, lanes: self)
+    /// Where a transcript phrase runs past the right edge, a fade and an
+    /// ellipsis: tiles draw phrases whole, so the edge cut them mid-word.
+    private lazy var transcriptEdge: TranscriptEdgeView = {
+        let view = TranscriptEdgeView()
+        addSubview(view)
+        return view
+    }()
     private lazy var canvas = LanesPaintView(role: .canvas, lanes: self)
     /// The zoom, height and layout the tiles were painted for; when any
     /// changes they all paint again.
@@ -280,13 +287,28 @@ final class TimelineLanesView: TimelineChildView {
     private func updateStrip(repaint: Bool) {
         guard let container, !usesCanvas else { return }
         let origin = container.contentOrigin
-        let reach = painter(for: .strip).pinnedReach()
+        let painter = painter(for: .strip)
+        let reach = painter.pinnedReach()
+        updateTranscriptEdge(painter, origin: origin)
         let width = min(bounds.width, max(0, (reach - origin.x).rounded(.up) + 2))
         strip.isHidden = width <= 2
         let frame = CGRect(x: 0, y: 0, width: width, height: bounds.height)
         let resized = strip.frame != frame
         if resized { strip.frame = frame }
         if !strip.isHidden && (repaint || resized) { strip.needsDisplay = true }
+    }
+
+    private func updateTranscriptEdge(_ painter: LanesPainter, origin: CGPoint) {
+        guard let container, container.drawState.showTranscript,
+              let lane = container.layoutCache.lanes.first(where: \.isTranscript),
+              painter.transcriptRunsPast(origin.x + bounds.width) else {
+            if !transcriptEdge.isHidden { transcriptEdge.isHidden = true }
+            return
+        }
+        let width: CGFloat = 30
+        let frame = CGRect(x: bounds.width - width, y: lane.y - origin.y, width: width, height: lane.height)
+        if transcriptEdge.frame != frame { transcriptEdge.frame = frame }
+        transcriptEdge.isHidden = false
     }
 
     /// Everything paints again: new thumbnails, a new layout.
@@ -482,26 +504,8 @@ final class TimelineLanesView: TimelineChildView {
         // A transcript that lands changes the phrases without an edit.
         let artworkRevision = container.drawState.artworkRevision
         if let cache = phraseCache, cache.revision == revision, cache.artwork == artworkRevision, revision >= 0 { return cache.phrases }
-        var words: [(text: String, start: Time, end: Time)] = []
-        // Where a track above already had words, so the same speech heard
-        // on two tracks (camera and screen microphones) isn't listed twice.
-        var covered: [TimeRange] = []
-        // Transcripts live on the take's sound, on the tracks the take cuts.
-        for track in project.audioTracks where track.rippleMode == .cut && !track.muted {
-            var spoken: [TimeRange] = []
-            for clip in track.clips where clip.enabled {
-                guard let item = clip.mediaID.flatMap({ project.media($0) }), let transcript = artwork.transcript(for: item) else { continue }
-                spoken.append(clip.range)
-                for word in transcript.words where word.end > clip.sourceStart && word.start < clip.sourceEnd {
-                    let start = clip.start + Time(seconds: max(0, (word.start - clip.sourceStart).seconds) / clip.speed)
-                    let end = clip.start + Time(seconds: max(0, (word.end - clip.sourceStart).seconds) / clip.speed)
-                    if covered.contains(where: { $0.start <= start && start < $0.end }) { continue }
-                    words.append((word.text, start, min(end, clip.end)))
-                }
-            }
-            covered += spoken
-        }
-        let phrases = TranscriptPhrase.group(words.sorted { $0.start < $1.start })
+        let words = TranscriptPhrase.words(in: project) { artwork.transcript(for: $0) }
+        let phrases = TranscriptPhrase.group(words)
         phraseCache = (revision, artworkRevision, phrases)
         groupCache = nil
         return phrases
@@ -1110,7 +1114,7 @@ final class TimelineLanesView: TimelineChildView {
         }
         if let files = fileDrop {
             clearDrop()
-            model.importFiles(files.files, at: files.time, trackID: files.trackID)
+            model.importFiles(files.files, at: files.time, trackID: files.trackID, newTrack: files.newTrack)
             window?.makeKeyAndOrderFront(nil)
             return true
         }
@@ -1167,19 +1171,28 @@ final class TimelineLanesView: TimelineChildView {
                 time = snapped
             }
             let lane = container.layoutCache.lane(atY: point.y)
-            if let fileDrop, fileDrop.time == time, fileDrop.trackID == lane?.trackID, let dragLabel {
+            // Above or below the tracks, as for library media, the files
+            // get a track of their own.
+            let newTrack: TrackKind?
+            switch DropTarget.at(y: point.y, in: container.layoutCache) {
+            case .newVideoTrackOnTop: newTrack = .video
+            case .newAudioTrackAtBottom: newTrack = .audio
+            case .track: newTrack = nil
+            }
+            if let fileDrop, fileDrop.time == time, fileDrop.trackID == lane?.trackID, fileDrop.newTrack == newTrack, let dragLabel {
                 // Still the same frame and track: the label follows the pointer.
                 self.snapLine = time
                 self.dragLabel = (dragLabel.text, point)
                 container.previewChanged()
                 return .copy
             }
-            fileDrop = (files, time, lane?.trackID)
+            fileDrop = (files, time, lane?.trackID, newTrack)
             drop = nil
             previewProject = nil
             snapLine = time
-            let what = files.count == 1 ? files[0].lastPathComponent : "\(files.count) files"
-            dragLabel = ("Add \(what) at \(Timecode.string(time, rate: model.frameRate))", point)
+            let counted = FileImport.countedFiles(files)
+            let what = counted.count == 1 ? counted[0].lastPathComponent : "\(counted.count) files"
+            dragLabel = ((newTrack != nil ? "New track · " : "") + "Add \(what) at \(Timecode.string(time, rate: model.frameRate))", point)
             container.previewChanged()
             return .copy
         }
@@ -1310,6 +1323,34 @@ struct TranscriptPhrase: Equatable {
     var start: Time
     var end: Time
 
+    /// The take's words on the timeline, in order: from the unmuted tracks
+    /// the take cuts, each word placed by the rule captions and pauses use
+    /// (`Transcript.placements(on:)`), so a word a cut runs through shows
+    /// once and a word cut out doesn't show.
+    static func words(in project: Project, transcript: (MediaItem) -> Transcript?) -> [(text: String, start: Time, end: Time)] {
+        var words: [(text: String, start: Time, end: Time)] = []
+        // Where a track above already had words, so the same speech heard
+        // on two tracks (camera and screen microphones) isn't listed twice.
+        var covered: [TimeRange] = []
+        for track in project.audioTracks where track.rippleMode == .cut && !track.muted {
+            var spoken: [TimeRange] = []
+            var byMedia: [String: [Clip]] = [:]
+            for clip in track.clips where clip.enabled {
+                if let mediaID = clip.mediaID { byMedia[mediaID, default: []].append(clip) }
+            }
+            for (mediaID, clips) in byMedia {
+                guard let item = project.media(mediaID), let transcript = transcript(item) else { continue }
+                spoken += clips.map(\.range)
+                for placed in transcript.placements(on: clips) {
+                    if covered.contains(where: { $0.start <= placed.start && placed.start < $0.end }) { continue }
+                    words.append((transcript.words[placed.index].text, placed.start, placed.end))
+                }
+            }
+            covered += spoken
+        }
+        return words.sorted { ($0.start, $0.end) < ($1.start, $1.end) }
+    }
+
     /// Groups words into phrases, breaking at pauses and long runs.
     static func group(_ words: [(text: String, start: Time, end: Time)], pause: Time = Time(seconds: 0.35), maxWords: Int = 9) -> [TranscriptPhrase] {
         var phrases: [TranscriptPhrase] = []
@@ -1374,5 +1415,35 @@ enum MediaDrag {
     static func ids(from text: String) -> [String] {
         guard text.hasPrefix(prefix) else { return [] }
         return text.dropFirst(prefix.count).split(separator: ",").map(String.init).filter { !$0.isEmpty }
+    }
+}
+
+/// The end of a transcript phrase at the lanes' right edge: the text fades
+/// into an ellipsis, as it did before the lanes drew in tiles.
+final class TranscriptEdgeView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let ground = Theme.window
+        let colours = [ground.opacity(0).cg, ground.cg] as CFArray
+        if let fade = CGGradient(colorsSpace: nil, colors: colours, locations: [0, 1]) {
+            context.drawLinearGradient(fade, start: CGPoint(x: 0, y: 0), end: CGPoint(x: bounds.width - 12, y: 0), options: [.drawsAfterEndLocation])
+        }
+        let font = Theme.Fonts.ui(10.5)
+        let dots = "…" as NSString
+        let size = dots.size(withAttributes: [.font: font])
+        dots.draw(at: CGPoint(x: bounds.width - size.width - 4, y: (bounds.height - size.height) / 2), withAttributes: [.font: font, .foregroundColor: Theme.textFaint.ns])
     }
 }

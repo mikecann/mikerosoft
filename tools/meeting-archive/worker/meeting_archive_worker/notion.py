@@ -8,9 +8,11 @@ properties and blocks are left alone.
 
 from __future__ import annotations
 
+import http.client
 import json
 import hashlib
 import os
+import random
 import tempfile
 import time
 from datetime import datetime
@@ -21,12 +23,15 @@ from urllib.error import HTTPError
 from urllib.parse import parse_qsl, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
+from .titles import effective_title
+
 
 NOTION_VERSION = "2026-03-11"
 NOTION_ENDPOINT = "https://api.notion.com/v1"
 MAX_RICH_TEXT = 2_000
 MAX_BLOCKS = 100
 MAX_RETRIES = 3
+MAX_RETRY_DELAY = 30.0
 RECEIPT_NAME = "notion-receipt.json"
 
 
@@ -200,6 +205,36 @@ def _block(block_type: str, parts: list[tuple[str, str | None]]) -> dict[str, An
     return {"object": "block", "type": block_type, block_type: {"rich_text": rich}}
 
 
+def _comparable_block(block: dict[str, Any]) -> tuple[Any, ...]:
+    """Reduce a block to what this publisher writes: type, text and links.
+
+    Notion's GET responses decorate each rich-text item with annotations,
+    plain_text, href and a block color that requests never send. Comparing
+    raw shapes made every owned block look changed on every republish.
+    """
+    block_type = block.get("type")
+    content = block.get(block_type) if isinstance(block_type, str) else None
+    rich_text = content.get("rich_text") if isinstance(content, dict) else None
+    if not isinstance(rich_text, list):
+        return (block_type, None)
+    items = []
+    for item in rich_text:
+        text = item.get("text") if isinstance(item, dict) else None
+        if not isinstance(text, dict):
+            return (block_type, None)
+        link = text.get("link")
+        url = link.get("url") if isinstance(link, dict) else None
+        items.append((str(text.get("content", "")), url))
+    # Adjacent runs with the same link render identically, however Notion splits them.
+    merged: list[tuple[str, str | None]] = []
+    for content_text, url in items:
+        if merged and merged[-1][1] == url:
+            merged[-1] = (merged[-1][0] + content_text, url)
+        else:
+            merged.append((content_text, url))
+    return (block_type, tuple(merged))
+
+
 def _timestamp(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise NotionError("metadata.json started_at is required for Notion publication.")
@@ -274,28 +309,50 @@ class NotionPublisher:
             "Notion-Version": NOTION_VERSION,
             "Content-Type": "application/json",
         }
+        # Only requests that are safe to repeat retry after a 5xx or a lost
+        # connection. Creating a page or appending blocks may have committed
+        # before the failure; those fall through to marker-based recovery.
+        idempotent = (
+            method in ("GET", "DELETE")
+            or (method == "POST" and path.endswith("/query"))
+            or (method == "PATCH" and not path.split("?", 1)[0].endswith("/children"))
+        )
         for attempt in range(self.max_retries + 1):
+            final = attempt >= self.max_retries
             request = Request(NOTION_ENDPOINT + query_path, data=payload, headers=headers, method=method)
             try:
                 response = self.transport(request)
                 status, response_headers, raw = _response_parts(response)
             except HTTPError as error:
                 status, response_headers, raw = error.code, error.headers, error.read()
-            except Exception:
-                raise
+            except (OSError, http.client.HTTPException):
+                # URLError, timeouts and resets. Unsafe requests are left to
+                # the caller's recovery path rather than repeated blindly.
+                if final or not idempotent:
+                    raise
+                self.sleep(self._backoff(attempt))
+                continue
             parsed = _decode(raw)
-            if status == 429 and attempt < self.max_retries:
+            # 429 and 409 mean Notion did not apply the request.
+            retryable = status in (429, 409) or (status >= 500 and idempotent)
+            if retryable and not final:
                 retry_after = _header(response_headers, "Retry-After")
                 try:
-                    delay = max(0.0, float(retry_after)) if retry_after is not None else 1.0 * (2**attempt)
+                    delay = max(0.0, float(retry_after)) if retry_after is not None else self._backoff(attempt)
                 except ValueError:
-                    delay = 1.0 * (2**attempt)
-                self.sleep(min(delay, 30.0))
+                    delay = self._backoff(attempt)
+                self.sleep(min(delay, MAX_RETRY_DELAY))
                 continue
             if status < 200 or status >= 300:
                 raise _HTTPError(status, parsed, response_headers)
             return parsed
         raise NotionError("Notion request retry budget was exhausted.")
+
+    @staticmethod
+    def _backoff(attempt: int) -> float:
+        # Jitter keeps a restarted service from retrying in lockstep.
+        ceiling = min(MAX_RETRY_DELAY, 1.0 * (2**attempt))
+        return random.uniform(ceiling / 2, ceiling)
 
     def _query_pages(self, meeting_id: str) -> list[dict[str, Any]]:
         cursor: str | None = None
@@ -449,8 +506,7 @@ class NotionPublisher:
                 continue
             block_id = current["id"]
             found[key] = block_id
-            block_type = candidate.get("type")
-            if current.get("type") != block_type or current.get(block_type) != candidate.get(block_type):
+            if _comparable_block(current) != _comparable_block(candidate):
                 self._update_owned_block(block_id, candidate)
 
         # A transcript correction can remove turns. Receipt IDs make this safe:
@@ -495,6 +551,11 @@ class NotionPublisher:
     def publish(self, archive_directory: Path | str) -> dict[str, Any]:
         archive = Path(archive_directory)
         metadata, transcript, _ = _archive_data(archive)
+        # A rename lives in title.json beside the immutable metadata. Folding
+        # it in here also changes the content fingerprint, so it republishes.
+        title = effective_title(archive, metadata)
+        if title is not None:
+            metadata = dict(metadata, title=title)
         meeting_id = str(metadata["meeting_id"])
         marker = f"{self.playback_base_url}/meeting/{meeting_id}"
         receipt_path = archive / RECEIPT_NAME

@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import Combine
 import MeetingArchiveCore
+import Network
 import UserNotifications
 
 struct CaptureJournal: Codable {
@@ -25,6 +26,9 @@ final class ArchiveController: ObservableObject {
     @Published var pending: MeetingRecord?
     @Published var titleDraft = ""
     @Published var calendarChoices: [CalendarSuggestion] = []
+    /// Typing in the naming prompt pushes this back, so the prompt never saves
+    /// and closes while the user is mid-word.
+    @Published private(set) var promptDeadline: Date?
     @Published private(set) var followUpMeetingID: UUID?
     let settings = AppSettings()
     let calendar = CalendarService()
@@ -33,6 +37,11 @@ final class ArchiveController: ObservableObject {
     private var detector = MeetingSignalProvider()
     private var timer: Task<Void, Never>?
     private var recorder: NativeRecording?
+    /// The window the live stream is filtered to; the detector may move a
+    /// meeting to another window mid-call.
+    private var recordingWindowID: CGWindowID?
+    private var retargeting = false
+    private var failedRetargetWindowID: CGWindowID?
     private var journal: CaptureJournal?
     private var captureLifecycle = CaptureLifecycleCoordinator()
     private var sourcesReady = false
@@ -42,11 +51,14 @@ final class ArchiveController: ObservableObject {
     private var lastWorkerStatusPoll = Date.distantPast
     private var cleanedMeetingIDs = Set<UUID>()
     private var lockFD: Int32 = -1
-    private var pendingWindow: NSWindow?
+    private var pendingWindow: NSPanel?
     private var followUpWindow: NamingWindow?
     private var attentionTracker = SpeakerAttentionTracker()
     private var refreshingWorkerStatuses = false
     private var workerRefreshRequested = false
+    private var workerStatusFailures = 0
+    private var pathMonitor: NWPathMonitor?
+    private var lastPathSatisfied: Bool?
     private var hasPolledMeetingState = false
     private var meetingInteractionBlocksAttention = true
     private let transfer = ArchiveTransfer()
@@ -66,6 +78,7 @@ final class ArchiveController: ObservableObject {
             machine = CaptureStateMachine(restoringPersistedState: try database.loadRecorderState())
             detector = MeetingSignalProvider(restoring: machine.state.currentSession?.descriptor)
             try database.saveRecorderState(machine.state)
+            try? database.checkpoint()
         } catch {
             store = nil
             machine = CaptureStateMachine()
@@ -85,6 +98,7 @@ final class ArchiveController: ObservableObject {
             meetingInteractionBlocksAttention = false
             return
         }
+        adoptDefaultCalendarsIfNeeded()
         timer = Task { [weak self] in
             await self?.recoverInterruptedCaptures()
             await self?.refreshWorkerStatuses()
@@ -93,6 +107,20 @@ final class ArchiveController: ObservableObject {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.connectivityRestored() }
+        }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            Task { @MainActor in
+                guard let self else { return }
+                defer { self.lastPathSatisfied = satisfied }
+                if satisfied, self.lastPathSatisfied == false { self.connectivityRestored() }
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "meeting-archive.network"))
+        pathMonitor = monitor
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.recorder != nil else { return }
@@ -100,6 +128,28 @@ final class ArchiveController: ObservableObject {
                 if let entry = self.journal { self.dispatch(.captureInterrupted(sessionID: entry.session.id, at: Date())) }
             }
         }
+    }
+
+    /// Retries were scheduled with exponential backoff while Bruce was out of
+    /// reach. Once the network or the Mac comes back, try again straight away.
+    private func connectivityRestored() {
+        do {
+            if try store?.makeRetryableJobsAvailable(now: Date()) ?? 0 > 0 { refresh() }
+        } catch { fail(error.localizedDescription) }
+        lastQueuePoll = .distantPast
+        workerStatusFailures = 0
+        lastWorkerStatusPoll = .distantPast
+    }
+
+    /// Picks the signed-in account calendars once, so title suggestions work
+    /// without a trip to Settings. Later changes in Settings are respected.
+    private func adoptDefaultCalendarsIfNeeded() {
+        guard settings.selectedCalendarIDs.isEmpty else { return }
+        calendar.reload()
+        let ids = calendar.defaultCalendarIDs()
+        guard !ids.isEmpty else { return }
+        settings.selectedCalendarIDs = ids
+        Log.controller.notice("Selected \(ids.count, privacy: .public) account calendars for title suggestions")
     }
 
     func refresh() {
@@ -131,6 +181,9 @@ final class ArchiveController: ObservableObject {
                         && job.acknowledgement != nil
                 }
             }
+            // Routine polls skip meetings whose Bruce state can no longer
+            // change on its own; a forced refresh still covers everything.
+            .filter { force || !WorkerStatusPolling.isSettled(self.workerStatuses[$0.id], revision: $0.metadataRevision) }
             .map(\.id)
         // Opening an older recording must still fetch its review, even when
         // the routine recent-history batch is full.
@@ -138,11 +191,7 @@ final class ArchiveController: ObservableObject {
             archivedIDs.removeAll { $0 == focused }
             archivedIDs.insert(focused, at: 0)
         }
-        guard !archivedIDs.isEmpty else {
-            workerStatuses = [:]
-            workerStatusFailure = nil
-            return
-        }
+        guard !archivedIDs.isEmpty else { return }
         do {
             let fetched = try await workerStatusClient.fetch(
                 meetingIDs: Array(archivedIDs.prefix(100)),
@@ -151,10 +200,38 @@ final class ArchiveController: ObservableObject {
             )
             workerStatuses.merge(fetched) { _, fresh in fresh }
             workerStatusFailure = nil
+            workerStatusFailures = 0
             presentReadySpeakerReview()
         } catch {
             workerStatusFailure = error.localizedDescription
+            workerStatusFailures += 1
         }
+    }
+
+    /// Only archived meetings are renamed this way. Before the upload finishes
+    /// the title is still taken from the local record at upload time.
+    func canRename(_ record: MeetingRecord) -> Bool {
+        jobs.contains { $0.meetingID == record.id && $0.status == .succeeded && $0.acknowledgement != nil }
+    }
+
+    func rename(_ meetingID: UUID, to rawTitle: String) async -> Bool {
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, var record = meetings.first(where: { $0.id == meetingID }) else { return false }
+        do {
+            let saved = try await workerStatusClient.rename(meetingID: meetingID, title: title, configuration: transferConfiguration)
+            record = record.renamingArchived(saved, at: Date())
+            try store?.updateMeeting(record)
+            refresh()
+            followUpWindow?.title = saved
+            return true
+        } catch {
+            fail("Could not rename the meeting on Bruce. \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func searchTranscripts(_ query: String) async throws -> [WorkerSearchResult] {
+        try await workerStatusClient.search(query: query, configuration: transferConfiguration)
     }
 
     func retryWorker(_ meetingID: UUID) {
@@ -182,6 +259,7 @@ final class ArchiveController: ObservableObject {
         )
         recorder?.checkHealth()
         recorder?.setVideoAllowed(snapshot.videoSafe)
+        followMeetingWindow(snapshot)
         if let session = snapshot.session {
             if snapshot.cameraActive == false { dispatch(.cameraOff(sessionID: session.id, at: Date()), windowID: snapshot.windowID) }
             else if snapshot.cameraActive == true, snapshot.videoSafe { dispatch(.cameraOn(session, at: Date()), windowID: snapshot.windowID) }
@@ -200,24 +278,46 @@ final class ArchiveController: ObservableObject {
             }
         } else if !snapshot.videoSafe, isRecording { status = "Recording audio • meeting video unavailable" }
         for meeting in meetings {
-            if case .pending(let deadline) = meeting.acceptance, Date() >= deadline {
-                resolve(meeting.id, resolution: .accept(trigger: .deadline))
+            if case .pending(let stored) = meeting.acceptance {
+                let deadline = meeting.id == pending?.id ? max(stored, promptDeadline ?? stored) : stored
+                if Date() >= deadline { resolve(meeting.id, resolution: .accept(trigger: .deadline)) }
             }
         }
         if !uploading, Date().timeIntervalSince(lastQueuePoll) >= 15 {
             lastQueuePoll = Date()
             Task { await uploadNext() }
         }
-        if Date().timeIntervalSince(lastWorkerStatusPoll) >= (processingMeetings.isEmpty ? 60 : 15) {
+        let statusInterval = WorkerStatusPolling.interval(hasBusyMeetings: !processingMeetings.isEmpty, consecutiveFailures: workerStatusFailures)
+        if Date().timeIntervalSince(lastWorkerStatusPoll) >= statusInterval {
             lastWorkerStatusPoll = Date()
             Task { await refreshWorkerStatuses() }
         }
         presentReadySpeakerReview()
     }
 
+    private func followMeetingWindow(_ snapshot: MeetingSignalSnapshot) {
+        guard let recording = recorder, let windowID = snapshot.windowID, let current = recordingWindowID,
+              windowID != current, windowID != failedRetargetWindowID, !retargeting,
+              snapshot.session?.id == journal?.session.id else { return }
+        retargeting = true
+        Task {
+            defer { retargeting = false }
+            do {
+                try await recording.retarget(windowID: windowID)
+                if recorder === recording { recordingWindowID = windowID }
+            } catch {
+                failedRetargetWindowID = windowID
+                Log.capture.error("Could not follow the meeting window: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     private func dispatch(_ event: CaptureEvent, windowID: CGWindowID? = nil) {
         cancelExactStartupIfNeeded(for: event)
         let effects = machine.handle(event)
+        if !effects.isEmpty {
+            Log.controller.notice("\(String(describing: event), privacy: .public) -> \(String(describing: effects), privacy: .public)")
+        }
         do { try store?.saveRecorderState(machine.state) } catch { fail(error.localizedDescription); return }
         isPaused = machine.state.isPaused
         for effect in effects {
@@ -301,6 +401,13 @@ final class ArchiveController: ObservableObject {
                     self.announceCaptureStart(entry)
                 }
             }
+            recording.onStreamEnded = { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.journal?.id == entry.id else { return }
+                    Log.controller.notice("Meeting window closed; finishing the recording")
+                    self.dispatch(.cameraOff(sessionID: entry.session.id, at: Date()))
+                }
+            }
             recording.onFailure = { [weak self] message in
                 Task { @MainActor in
                     guard let self, self.journal?.id == entry.id else { return }
@@ -308,6 +415,7 @@ final class ArchiveController: ObservableObject {
                     self.dispatch(.captureInterrupted(sessionID: entry.session.id, at: Date()))
                 }
             }
+            recordingWindowID = request.windowID
             let outcome = try await recording.start(windowID: request.windowID, directory: directory)
             if outcome == .cancelled {
                 guard recorder === recording, journal?.id == entry.id else { return }
@@ -392,14 +500,16 @@ final class ArchiveController: ObservableObject {
               entry.id == request.meetingID else { return }
         let ended = Date()
         let directory = AppPaths.meeting(entry.id)
+        let stopped = await recording.stop()
         do {
-            let tracks = try await recording.stop()
-            try ModelCodec.encoder.encode(tracks).write(to: directory.appendingPathComponent("tracks.json"), options: .atomic)
+            try ModelCodec.encoder.encode(stopped.tracks).write(to: directory.appendingPathComponent("tracks.json"), options: .atomic)
         } catch { fail(error.localizedDescription) }
+        if let error = stopped.error { fail(error.localizedDescription) }
         recorder = nil
         journal = nil
+        recordingWindowID = nil
         isRecording = false
-        var meeting = makeRecord(entry, ended: ended)
+        var meeting = makeRecord(entry, ended: ended, microphoneChannels: stopped.microphoneChannels ?? 1)
         if request.discardAfterFinalization {
             meeting = meeting.resolvingAcceptance(.discard, at: Date())
             do {
@@ -409,6 +519,7 @@ final class ArchiveController: ObservableObject {
             status = "Skipped this meeting"
         } else {
             do {
+                adoptDefaultCalendarsIfNeeded()
                 let events = calendar.suggestions(start: entry.startedAt, end: ended, selectedCalendarIDs: settings.selectedCalendarIDs)
                 if let match = CalendarRanking.best(events, start: entry.startedAt, end: ended) { meeting.title = match.title }
                 try ModelCodec.encoder.encode(events).write(to: directory.appendingPathComponent("calendar.json"), options: .atomic)
@@ -458,8 +569,8 @@ final class ArchiveController: ObservableObject {
         }
     }
 
-    private func makeRecord(_ entry: CaptureJournal, ended: Date) -> MeetingRecord {
-        MeetingRecord(id: entry.id, title: "Meeting \(entry.startedAt.formatted(date: .abbreviated, time: .shortened))", sourceApplication: entry.session.sourceApplication, startedAt: entry.startedAt, endedAt: ended, timezoneIdentifier: TimeZone.current.identifier, video: .init(surfaceID: entry.session.surface.id, codec: "hevc", width: 1920, height: 1080), microphone: .init(deviceUID: entry.microphoneUID, displayName: entry.microphoneName, sampleRate: 48000, channels: 1), incomingAudio: .init(sourceApplicationBundleIdentifier: entry.session.sourceApplication.bundleIdentifier, sampleRate: 48000, channels: 2), finalizedAt: Date())
+    private func makeRecord(_ entry: CaptureJournal, ended: Date, microphoneChannels: Int = 1) -> MeetingRecord {
+        MeetingRecord(id: entry.id, title: "Meeting \(entry.startedAt.formatted(date: .abbreviated, time: .shortened))", sourceApplication: entry.session.sourceApplication, startedAt: entry.startedAt, endedAt: ended, timezoneIdentifier: TimeZone.current.identifier, video: .init(surfaceID: entry.session.surface.id, codec: "hevc", width: 1920, height: 1080), microphone: .init(deviceUID: entry.microphoneUID, displayName: entry.microphoneName, sampleRate: 48000, channels: microphoneChannels), incomingAudio: .init(sourceApplicationBundleIdentifier: entry.session.sourceApplication.bundleIdentifier, sampleRate: 48000, channels: 2), finalizedAt: Date())
     }
 
     func resolve(_ id: UUID, resolution: AcceptanceResolution) {
@@ -467,7 +578,9 @@ final class ArchiveController: ObservableObject {
             guard var record = try store?.fetchMeeting(id: id), record.acceptance.isPending else { return }
             let showProgress: Bool
             if pending?.id == id, case .accept(let trigger) = resolution {
-                showProgress = trigger == .keepButton || trigger == .deadline
+                // An ignored prompt means the user is busy; do not answer that
+                // with a larger window. Progress stays in the menu bar.
+                showProgress = trigger == .keepButton
             } else { showProgress = false }
             if pending?.id == id, !titleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, titleDraft != record.title {
                 record = record.updatingTitle(titleDraft.trimmingCharacters(in: .whitespacesAndNewlines), at: Date())
@@ -476,9 +589,9 @@ final class ArchiveController: ObservableObject {
             let job = ArchiveJob(meetingID: id, manifestRevision: record.metadataRevision, createdAt: Date())
             _ = try store?.resolveAcceptanceAndEnqueue(id: id, resolution: resolution, at: Date(), job: job)
             if case .discard = resolution { try FileManager.default.removeItem(at: AppPaths.meeting(id)) }
-            if pending?.id == id { pending = nil; pendingWindow?.close(); pendingWindow = nil }
+            if pending?.id == id { pending = nil; promptDeadline = nil; pendingWindow?.close(); pendingWindow = nil }
             refresh()
-            if showProgress { showFollowUp(id) }
+            if showProgress { showFollowUp(id, activate: false) }
             if case .accept = resolution { Task { await uploadNext() } }
         } catch { fail(error.localizedDescription) }
     }
@@ -524,7 +637,9 @@ final class ArchiveController: ObservableObject {
 
     var speakersNeedingNames: Int { speakerAttentionCandidates.reduce(0) { $0 + $1.remainingCount } }
 
-    func showFollowUp(_ id: UUID, refreshStatus: Bool = true) {
+    /// `activate` is for explicit clicks. Automatic presentation orders the
+    /// window in without taking keyboard focus from whatever the user is doing.
+    func showFollowUp(_ id: UUID, refreshStatus: Bool = true, activate: Bool = true) {
         guard let record = meetings.first(where: { $0.id == id }) else { return }
         if followUpMeetingID != id {
             closeFollowUp()
@@ -543,8 +658,12 @@ final class ArchiveController: ObservableObject {
         if let candidate = speakerAttentionCandidates.first(where: { $0.meetingID == id }) {
             markSpeakerAttentionPresented(candidate)
         }
-        followUpWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if activate {
+            followUpWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            followUpWindow?.orderFrontRegardless()
+        }
         if refreshStatus, jobs.contains(where: { $0.meetingID == id && $0.status == .succeeded && $0.acknowledgement != nil }) {
             Task { await refreshWorkerStatuses(force: true) }
         }
@@ -560,8 +679,7 @@ final class ArchiveController: ObservableObject {
         let blocked = !hasPolledMeetingState || meetingInteractionBlocksAttention || isRecording || recorder != nil || pending != nil
         let candidates = speakerAttentionCandidates.filter { followUpMeetingID == nil || $0.meetingID == followUpMeetingID }
         guard let candidate = attentionTracker.nextPresentation(from: candidates, interactionBlocked: blocked) else { return }
-        showFollowUp(candidate.meetingID)
-        NSApp.requestUserAttention(.informationalRequest)
+        showFollowUp(candidate.meetingID, activate: false)
     }
 
     private func markSpeakerAttentionPresented(_ candidate: SpeakerAttentionCandidate) {
@@ -575,14 +693,26 @@ final class ArchiveController: ObservableObject {
         if let old = pending { resolve(old.id, resolution: .accept(trigger: .promptClosed)) }
         pending = record
         titleDraft = record.title
-        let panel = NamingWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 210), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        if case .pending(let deadline) = record.acceptance { promptDeadline = deadline }
+        // A non-activating floating panel can take typing without pulling
+        // focus away from the call, and stays above Zoom (including full
+        // screen) instead of vanishing behind it on the next click.
+        let panel = NamingPanel(contentRect: NSRect(x: 0, y: 0, width: 480, height: 230), styleMask: [.titled, .closable, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "Recording finished"
         panel.isReleasedWhenClosed = false
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.hidesOnDeactivate = false
         panel.contentView = NSHostingView(rootView: NamingView(controller: self))
         panel.onClose = { [weak self] in self?.resolve(record.id, resolution: .accept(trigger: .promptClosed)) }
         panel.center()
-        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
         pendingWindow = panel
+    }
+
+    func titleDraftEdited() {
+        guard pending != nil else { return }
+        promptDeadline = max(promptDeadline ?? .distantPast, Date().addingTimeInterval(120))
     }
 
     private func recoverInterruptedCaptures() async {
@@ -647,7 +777,9 @@ final class ArchiveController: ObservableObject {
             let manifest = try await Task.detached(priority: .utility) { try SpoolBundle.prepare(record: record, directory: source) }.value
             let acknowledgement = try await transfer.upload(sourceDirectory: source, manifest: manifest, configuration: transferConfiguration)
             try store?.acknowledgeJob(id: job.id, acknowledgement: acknowledgement)
+            try? store?.checkpoint()
         } catch {
+            Log.transfer.error("Upload failed: \(error.localizedDescription, privacy: .public)")
             if let claimed {
                 let delay = min(3600.0, 30.0 * pow(2, Double(min(claimed.attemptCount, 7))))
                 try? store?.scheduleRetry(jobID: claimed.id, availableAt: Date().addingTimeInterval(delay), error: error.localizedDescription)
@@ -677,8 +809,16 @@ final class ArchiveController: ObservableObject {
         }
     }
 
-    func openPlayback(_ id: UUID) {
-        retrieve(id, relativePath: "playback/meeting.mp4", localName: "meeting.mp4")
+    /// Opens the meeting in Bruce's viewer: streamed video plus a transcript
+    /// with seek buttons. Downloading the transcript stays available as a
+    /// fallback when the viewer is unreachable.
+    func openInViewer(_ id: UUID) {
+        let base = settings.viewerURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        guard let url = URL(string: "\(base)/meeting/\(id.uuidString.lowercased())") else {
+            fail("The viewer address in Settings is not a valid URL.")
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     func openTranscript(_ id: UUID) {
@@ -707,7 +847,13 @@ final class ArchiveController: ObservableObject {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
+    func clearFailure() {
+        failure = nil
+        if !isRecording, recorder == nil { status = isPaused ? "Paused" : "Ready" }
+    }
+
     func fail(_ message: String) {
+        Log.controller.error("\(message, privacy: .public)")
         failure = message
         status = "Needs attention"
     }
@@ -719,6 +865,8 @@ final class ArchiveController: ObservableObject {
             await finish(request)
         }
         if let pending { resolve(pending.id, resolution: .accept(trigger: .promptClosed)) }
+        pathMonitor?.cancel()
+        try? store?.checkpoint()
         NSApp.terminate(nil)
     }
 }
@@ -729,4 +877,13 @@ import SwiftUI
 final class NamingWindow: NSWindow {
     var onClose: (() -> Void)?
     override func close() { let action = onClose; onClose = nil; action?(); super.close() }
+}
+
+@MainActor
+final class NamingPanel: NSPanel {
+    var onClose: (() -> Void)?
+    override var canBecomeKey: Bool { true }
+    override func close() { let action = onClose; onClose = nil; action?(); super.close() }
+    // Esc saves with whatever title is in the field, same as closing.
+    override func cancelOperation(_ sender: Any?) { close() }
 }

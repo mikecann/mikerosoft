@@ -8,7 +8,8 @@ import TandemCore
 public enum AnalysisKind: String, Codable, Sendable, CaseIterable {
     /// Filmstrip thumbnails for the timeline and browser.
     case thumbnails
-    /// Peak envelope for drawing audio.
+    /// Peak envelope for drawing audio, and for pulling transcript words
+    /// in to the voice (`TranscriptAlignment`).
     case waveform
     /// EBU R128 loudness of the whole file.
     case loudness

@@ -30,7 +30,7 @@ change the code and the tests with it.
 | Target | Owns | May import |
 | --- | --- | --- |
 | `TandemCore` | Model, time, commands, editing, validation, undo, journal, effect registry | Foundation |
-| `TandemMedia` | Folder scanning, probing, take pairing, analysis jobs and cache | Core, AVFoundation, Vision, Speech, VideoToolbox, Accelerate |
+| `TandemMedia` | Folder scanning, probing, take pairing, analysis jobs and cache | Core, AVFoundation, Vision, Speech, SoundAnalysis, VideoToolbox, Accelerate |
 | `TandemRender` | Composition building, compositor, text, transitions, audio mix, frame grabs, export | Core, Media, AVFoundation, Core Image, Metal |
 | `TandemAPI` | `ProjectSession`, the service (status, timeline, apply, frame, clip, export...), local HTTP server, MCP tool definitions | Core, Media, Render |
 | `TandemApp` | The macOS app (SwiftUI shell, AppKit timeline and viewer) | everything |
@@ -117,7 +117,21 @@ in the library.
   it); its picture comes from the `converted` analysis. An older build that
   drops it only makes the next scan look again, so it didn't need a schema
   version.
+- `MediaItem.livePhotoVideo` is a Live Photo still's motion clip, the movie
+  beside it, which isn't media of its own. An older build drops it on save
+  and its next scan adds the movie as a video, as scans did before, so it
+  didn't need a schema version either.
 - Keyframe times are relative to the clip start and move with the clip.
+- A text clip's `style` fields are all optional. One that's set wins over
+  the clip's preset even when it's the default value (`"uppercase": false`
+  on a label); one that isn't comes from the preset, then
+  `TextStyle.defaults` (`TitlePresets.style(for:)` resolves it). Only set
+  fields are written, and an empty style not at all, so a caption is its
+  preset and its words. `animationDuration` works the same way.
+  Schema 1 wrote every field and read a default value as "not set", so
+  loading a schema 1 file (or a journal entry or headless undo snapshot
+  written by that build) drops the fields equal to the old defaults
+  (`LegacyTextStyles`) and it looks the same; only values set since win.
 - Adding a field that matters means bumping `Project.currentSchemaVersion`
   (with a `ProjectFile.migrate` step if old files need it). Lenient decoding
   lets an older build open a newer file, and it would silently drop the new
@@ -202,7 +216,10 @@ centre lands on the canvas centre.
 takes by base name (`<base>-camera.mov` with `<base>-screen.mov`), setting a
 shared `takeID` and each file's `takeOffset`. When record-it writes a
 `<base>.take.json` with each file's start host time, pairing uses that;
-otherwise it uses file creation times.
+otherwise it uses file creation times. A Live Photo's still and movie are
+one item, the still. A new video nothing names is the camera take when it's
+a recording (a camera's make and model in its metadata, or in `source/`)
+with speech and a face in it. MEDIA.md has both.
 
 `MediaAnalysis` runs background jobs through one scheduler with priorities
 (`interactive`, `timeline`, `background`) and an encoder lock, so proxy builds
@@ -222,13 +239,26 @@ edits, so placing a take or pressing 2 for the PiP queues its work. Results are 
 | Kind | Result | Notes |
 | --- | --- | --- |
 | thumbnails | JPEG strip | for the timeline and browser |
-| waveform | peak envelope | drawn on audio clips |
+| waveform | peak envelope | drawn on audio clips; transcripts are aligned to it |
 | loudness | integrated LUFS, true peak, LRA | per file; dialogue is levelled per take, not per cut |
 | proxy | 1080p HEVC, a keyframe every 15 frames; HEVC with alpha for video with alpha | used for motion; paused frames decode the original |
-| transcript | words with media times | SpeechAnalyzer first; Whisper medium.en as the careful pass |
+| transcript | words with media times | SpeechAnalyzer first; Whisper medium.en as the careful pass; the engine's times are kept and trimmed to the voice when read |
 | matte | greyscale HEVC person matte | Vision person segmentation, blended with the instance mask to keep a handheld mic |
 | isolatedVoice | audio file | AUSoundIsolation, shifted back by its 3,665-sample latency |
 | converted | HEVC copy, alpha kept | only for video macOS can't decode (QuickTime Animation, PNG in a MOV); made with ffmpeg; the picture, thumbnails, proxy and matte come from it |
+
+### Words on the timeline
+
+Transcript word times are pulled in to the voice when a transcript is read
+(`TranscriptAlignment`, from the file's waveform), because SpeechAnalyzer's
+run end to end and swallow the pauses. Everything that puts words on the
+timeline (captions, pauses, tighten, search, `transcript`, `timeline
+--words`, the app's transcript lane and its Tighten pauses) places them
+with one rule, `Transcript.placements(on:)`: among the clips of one track
+that play the file, a word shows once, on the clip that plays most of it
+(measured in media time, so speed doesn't change it), and not at all when
+less than half of it is left, because it was cut. A clip that plays the
+same stretch again shows its words again.
 
 ## Rendering
 
@@ -254,10 +284,39 @@ Audio rules:
 - `voiceIsolation` mixes the cached isolated voice with the original.
 - Every hard cut on an audio track gets a 3 ms micro-fade so nothing clicks.
 - Export measures the mix and applies gain to hit the master loudness target
-  (-14 LUFS) under the true-peak ceiling (-1 dBTP).
+  (-14 LUFS) under the true-peak ceiling (-1 dBTP), limiting 0.5 dB under
+  it so the AAC file stays under too.
+
+Export presets set the quality, not the shape. `ExportPreset.plan(for:)`
+turns a preset into a frame (the canvas or an alternate format), a size
+and a bitrate, and the CLI, the API, the exporter and the Export dialog
+all go through it. A preset's resolution is the frame's short side and the
+frame keeps the canvas's shape; with no preset named, the canvas picks
+one. RENDER.md has the rules.
 
 Colour: sources are treated as BT.709 SDR, honouring each file's video range;
 exports are tagged TV-range BT.709.
+
+Text and fonts:
+
+- Core Text fonts are registered per process. Every composition build
+  first registers the files in the project's `assets/font/` that this
+  process hasn't seen (`ProjectFonts.registerNew`), and so do `status`,
+  `validate` and a media refresh; a new registration drops cached title
+  drawings, and the app's viewer builds again when any font arrives. So a
+  font `tandem assets use` copies in while the app has the project open
+  reaches the app's renders without a restart (the command also asks the
+  app for its status, which registers it at once).
+- A title whose font can't be drawn falls back to SF Pro with a warning
+  naming the font and the `tandem assets use` that installs it, in the
+  build's warnings (viewer, `frame`, `clip`, `export`) and in `captions`,
+  `status` and `validate`.
+- A built-in preset whose font doesn't come with macOS names its asset
+  (`TitlePreset.fontAsset`, the caption preset's `fontsource:tilt-warp`).
+  The first time a title needs it (captions applied, a render, the app
+  showing the project), `PresetFonts` installs it from the asset library
+  into `assets/font/`, once at a time and not again for two minutes after
+  a failure.
 
 ## API
 
@@ -307,16 +366,17 @@ data, not files, so there's nothing to collect for them.
 
 Where files go: `media/<the folder it was in>/<name>` (a take's files and
 sidecar stay together, and `music/` or `sfx/` still say what's inside),
-`assets/lut/<name>` and `assets/font/<name>`, which the app registers when it
-opens a project. A file keeps the name the project used, even when that was
-a link to a file called something else. Shared library files keep their
-place in the library under `media/Tandem Library/` (`media/Tandem Library/
-Stickers/Star.mov`, `media/Tandem Library/Segments/Intro/sting.wav`), and
-the converted copy of one goes where its original would, named after it
-(`media/Tandem Library/Stickers/Spin.mov` for `Stickers/Spin.webm`), found
-through the `meta.json` beside the copy. `ArchiveOptions.sharedLibrary` and
-`assetsRoot` say where those are; the service finds them the way the rest of
-Tandem does (`SharedLibrary.locate`).
+`assets/lut/<name>` and `assets/font/<name>`. Whatever renders the project
+(the app, `tandem serve`, a CLI command) registers new files in
+`assets/font/` before it draws (see Rendering). A file keeps the name the
+project used, even when that was a link to a file called something else.
+Shared library files keep their place in the library under `media/Tandem
+Library/` (`media/Tandem Library/Stickers/Star.mov`, `media/Tandem
+Library/Segments/Intro/sting.wav`), and the converted copy of one goes where
+its original would, named after it (`media/Tandem Library/Stickers/Spin.mov`
+for `Stickers/Spin.webm`), found through the `meta.json` beside the copy.
+`ArchiveOptions.sharedLibrary` and `assetsRoot` say where those are; the
+service finds them the way the rest of Tandem does (`SharedLibrary.locate`).
 
 Two modes:
 

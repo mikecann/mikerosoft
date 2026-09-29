@@ -10,6 +10,17 @@ import TandemCore
 final class TextRenderer: @unchecked Sendable {
     static let shared = TextRenderer()
 
+    private init() {
+        // A font registered anywhere in this process (a project's own, one
+        // the asset library downloaded) may be one a cached title fell back
+        // from, so the cache starts again.
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name(kCTFontManagerRegisteredFontsChangedNotification as String), object: nil, queue: nil
+        ) { [weak self] _ in
+            self?.forgetDrawings()
+        }
+    }
+
     /// Everything that changes the drawn pixels. Sizes are output pixels.
     struct Request: Hashable {
         var text: String
@@ -52,6 +63,12 @@ final class TextRenderer: @unchecked Sendable {
         cache.totalCostLimit = 384 * 1024 * 1024
         return cache
     }()
+
+    /// Drops every cached drawing, for when the fonts they were drawn with
+    /// may have changed.
+    func forgetDrawings() {
+        cache.removeAllObjects()
+    }
 
     /// The text as an image with its origin at 0, 0, or nil for empty text.
     func image(_ request: Request) -> CIImage? {
@@ -216,30 +233,40 @@ final class TextRenderer: @unchecked Sendable {
 
     private static let systemNames: Set<String> = ["", "system", "system-ui", "-apple-system", "sf pro", "sf pro display", "sf pro text", "san francisco"]
 
+    /// True for the names that mean the system font (SF Pro).
+    static func isSystemName(_ name: String) -> Bool {
+        systemNames.contains(name.lowercased())
+    }
+
     /// The named family at the nearest weight, or the system font (SF Pro)
     /// when the family isn't installed.
     static func makeFont(_ name: String, size: Double, weight: Double) -> CTFont {
-        let trait = weightTrait(weight)
-        let traits = [kCTFontWeightTrait: trait] as CFDictionary
-        if !systemNames.contains(name.lowercased()) {
-            let descriptor = CTFontDescriptorCreateWithAttributes([
-                kCTFontFamilyNameAttribute: name,
-                kCTFontTraitsAttribute: traits
-            ] as CFDictionary)
-            let font = CTFontCreateWithFontDescriptor(descriptor, CGFloat(size), nil)
-            if (CTFontCopyFamilyName(font) as String).caseInsensitiveCompare(name) == .orderedSame {
-                return font
-            }
-            // Maybe it's a PostScript or full name, such as "Kanit-Bold".
-            let named = CTFontCreateWithName(name as CFString, CGFloat(size), nil)
-            let names = [CTFontCopyPostScriptName(named), CTFontCopyFullName(named)].map { $0 as String }
-            if names.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
-                return named
-            }
-        }
+        if !isSystemName(name), let font = installedFont(name, size: size, weight: weight) { return font }
+        let traits = [kCTFontWeightTrait: weightTrait(weight)] as CFDictionary
         let system = CTFontCreateUIFontForLanguage(.system, CGFloat(size), nil) ?? CTFontCreateWithName("Helvetica" as CFString, CGFloat(size), nil)
         let descriptor = CTFontDescriptorCreateCopyWithAttributes(CTFontCopyFontDescriptor(system), [kCTFontTraitsAttribute: traits] as CFDictionary)
         return CTFontCreateWithFontDescriptor(descriptor, CGFloat(size), nil)
+    }
+
+    /// The named font at the nearest weight, looked up as a family and then
+    /// as a PostScript or full name ("Kanit-Bold"). Nil when this process
+    /// can't draw it: it isn't installed or registered.
+    static func installedFont(_ name: String, size: Double, weight: Double) -> CTFont? {
+        let traits = [kCTFontWeightTrait: weightTrait(weight)] as CFDictionary
+        let descriptor = CTFontDescriptorCreateWithAttributes([
+            kCTFontFamilyNameAttribute: name,
+            kCTFontTraitsAttribute: traits
+        ] as CFDictionary)
+        let font = CTFontCreateWithFontDescriptor(descriptor, CGFloat(size), nil)
+        if (CTFontCopyFamilyName(font) as String).caseInsensitiveCompare(name) == .orderedSame {
+            return font
+        }
+        let named = CTFontCreateWithName(name as CFString, CGFloat(size), nil)
+        let names = [CTFontCopyPostScriptName(named), CTFontCopyFullName(named)].map { $0 as String }
+        if names.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
+            return named
+        }
+        return nil
     }
 }
 

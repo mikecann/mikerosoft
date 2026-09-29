@@ -124,11 +124,16 @@ public enum ProjectFile {
         return stamp.range(of: #"^\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}$"#, options: .regularExpression) != nil
     }
 
-    /// Upgrades older schema versions. Version 1 is the first.
+    /// Upgrades older schema versions. Version 1 is the first. The result
+    /// is marked current, so it's saved as current and never upgraded twice
+    /// (an upgrade would drop the explicit values made since).
     public static func migrate(_ project: Project) throws -> Project {
         guard project.schemaVersion <= Project.currentSchemaVersion else {
             throw EditError.invalid("This project was saved by a newer Tandem (schema \(project.schemaVersion)).")
         }
+        var project = project
+        if project.schemaVersion < 2 { LegacyTextStyles.upgrade(&project) }
+        project.schemaVersion = Project.currentSchemaVersion
         return project
     }
 }
@@ -148,6 +153,9 @@ public final class ProjectJournal: @unchecked Sendable {
         public var seed: UInt64?
         public var snapshot: Project?
         public var reason: String?
+        /// The project schema the batch was written for. Nil for entries
+        /// from before schema 2, whose titles are read the old way.
+        public var schemaVersion: Int?
     }
 
     /// Where the journal is now. It follows its folder if the video folder
@@ -169,11 +177,11 @@ public final class ProjectJournal: @unchecked Sendable {
     }
 
     public func append(batch: EditBatch, revision: Int, seed: UInt64) {
-        write(Entry(revision: revision, date: Date(), batch: batch, seed: seed, snapshot: nil, reason: nil))
+        write(Entry(revision: revision, date: Date(), batch: batch, seed: seed, snapshot: nil, reason: nil, schemaVersion: Project.currentSchemaVersion))
     }
 
     public func appendSnapshot(project: Project, revision: Int, reason: String) {
-        write(Entry(revision: revision, date: Date(), batch: nil, seed: nil, snapshot: project, reason: reason))
+        write(Entry(revision: revision, date: Date(), batch: nil, seed: nil, snapshot: project, reason: reason, schemaVersion: Project.currentSchemaVersion))
     }
 
     /// Entries newer than `revision`, oldest first. Each line is read on
@@ -257,7 +265,8 @@ public final class ProjectJournal: @unchecked Sendable {
         var currentRevision = revision
         for entry in pending {
             if let snapshot = entry.snapshot {
-                current = snapshot
+                // A snapshot carries its own schema version.
+                current = (try? ProjectFile.migrate(snapshot)) ?? snapshot
             } else if let batch = entry.batch {
                 var context = EditContext(seed: entry.seed ?? 0)
                 var working = current
@@ -265,6 +274,10 @@ public final class ProjectJournal: @unchecked Sendable {
                     for command in batch.commands {
                         try Editing.apply(command, to: &working, context: &context)
                     }
+                    // An older Tandem wrote full styles where it meant
+                    // "the preset's". Every edit before this one was that
+                    // older Tandem's too, so the whole project reads its way.
+                    if (entry.schemaVersion ?? 1) < 2 { LegacyTextStyles.upgrade(&working) }
                     current = working
                 } catch {
                     // A batch that no longer applies is skipped rather than

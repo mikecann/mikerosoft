@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import stat
+import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,40 +52,136 @@ class ArchiveStore:
         *,
         validate_media: bool = False,
         media_validator: Callable[[Path, VerifiedManifest], dict[str, Any]] = validate_media_files,
+        incoming_root: Path | str | None = None,
     ):
         self.archive_root = Path(archive_root).absolute()
         self.queue = JobQueue(database_path)
         self.validate_media = validate_media
         self.media_validator = media_validator
+        # Staged bundles under incoming_root/<meeting>/r<revision> are removed
+        # once their archive copy is durable. None keeps every staged copy.
+        self.incoming_root = Path(os.path.abspath(incoming_root)) if incoming_root is not None else None
 
     def accept(
         self,
         incoming_directory: Path | str,
         expected_manifest_sha256: str | None = None,
     ) -> dict[str, Any]:
-        verified = verify_incoming(incoming_directory)
+        incoming = Path(incoming_directory)
+        if not os.path.lexists(incoming) and expected_manifest_sha256 is not None:
+            # A retry after an ambiguous success may find its staging already
+            # removed. The committed receipt still answers it.
+            acknowledgement = self._accepted_without_staging(incoming, expected_manifest_sha256)
+            if acknowledgement is not None:
+                return acknowledgement
+        verified = verify_incoming(incoming)
+        acknowledgement = self._accept_verified(verified, expected_manifest_sha256)
+        # Only reached once the archive copy is verified and the job and
+        # receipt are committed, so the staged copy is now redundant.
+        self._remove_staging(incoming, verified)
+        return acknowledgement
+
+    def _staging_identity(self, incoming: Path) -> tuple[str, int] | None:
+        if self.incoming_root is None:
+            return None
+        # Lexical check only: a symlinked component is refused at removal time.
+        parts = Path(os.path.abspath(incoming)).parts
+        root_parts = self.incoming_root.parts
+        if parts[: len(root_parts)] != root_parts:
+            return None
+        relative = parts[len(root_parts):]
+        if len(relative) != 2 or not relative[1].startswith("r") or not relative[1][1:].isdigit():
+            return None
+        try:
+            meeting_id = str(uuid.UUID(relative[0]))
+        except ValueError:
+            return None
+        if meeting_id != relative[0]:
+            return None
+        return meeting_id, int(relative[1][1:])
+
+    def _accepted_without_staging(self, incoming: Path, expected_manifest_sha256: str) -> dict[str, Any] | None:
+        identity = self._staging_identity(incoming)
+        if identity is None:
+            return None
+        meeting_id, revision = identity
+        existing_ack = self.queue.acceptance(meeting_id)
+        if (
+            existing_ack is None
+            or existing_ack["manifest_revision"] != revision
+            or existing_ack["manifest_sha256"] != expected_manifest_sha256
+        ):
+            return None
+        # The archive copy stands in for the staged bundle it was verified against.
+        verified = verify_incoming(self._archive_path(existing_ack))
+        return self._existing_acceptance(existing_ack, verified, archive_verified=True)
+
+    def _archive_path(self, acknowledgement: dict[str, Any]) -> Path:
+        path = Path(acknowledgement["archive_path"])
+        return path if path.is_absolute() else self.archive_root / path
+
+    def _remove_staging(self, incoming: Path, verified: VerifiedManifest) -> None:
+        identity = self._staging_identity(incoming)
+        if identity != (verified.meeting_id, verified.revision) or self.incoming_root is None:
+            return
+        meeting_directory = self.incoming_root / verified.meeting_id
+        staging = meeting_directory / f"r{verified.revision}"
+        try:
+            for path in (self.incoming_root, meeting_directory, staging):
+                entry_stat = path.lstat()
+                if stat.S_ISLNK(entry_stat.st_mode) or not stat.S_ISDIR(entry_stat.st_mode):
+                    # Never follow a link out of the incoming root.
+                    return
+            shutil.rmtree(staging)
+            try:
+                meeting_directory.rmdir()
+            except OSError:
+                pass  # Another revision is still staged here.
+        except OSError as error:
+            # The receipt is already committed; a leftover copy only costs space.
+            print(
+                f"meeting-archive: accepted, but could not remove staged copy {staging}: {error}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    def _existing_acceptance(
+        self,
+        existing_ack: dict[str, Any],
+        verified: VerifiedManifest,
+        *,
+        archive_verified: bool = False,
+    ) -> dict[str, Any]:
+        if (
+            existing_ack["manifest_revision"] != verified.revision
+            or existing_ack["manifest_sha256"] != verified.manifest_sha256
+        ):
+            raise ArchiveConflict(
+                f"Meeting {verified.meeting_id} was already accepted with a different manifest.",
+            )
+        if not archive_verified:
+            self._verify_existing(Path(existing_ack["archive_path"]), verified)
+        if self.validate_media and existing_ack.get("media_validation", {}).get("status") != "passed":
+            media_validation = self.media_validator(Path(existing_ack["archive_path"]), verified)
+            self._verify_existing(Path(existing_ack["archive_path"]), verified)
+            return self.queue.attach_media_validation(
+                verified.meeting_id,
+                verified.revision,
+                verified.manifest_sha256,
+                media_validation,
+            )
+        return existing_ack
+
+    def _accept_verified(
+        self,
+        verified: VerifiedManifest,
+        expected_manifest_sha256: str | None,
+    ) -> dict[str, Any]:
         if expected_manifest_sha256 is not None and verified.manifest_sha256 != expected_manifest_sha256:
             raise ArchiveConflict("The supplied manifest SHA-256 does not match manifest.json bytes.")
         existing_ack = self.queue.acceptance(verified.meeting_id)
         if existing_ack:
-            if (
-                existing_ack["manifest_revision"] != verified.revision
-                or existing_ack["manifest_sha256"] != verified.manifest_sha256
-            ):
-                raise ArchiveConflict(
-                    f"Meeting {verified.meeting_id} was already accepted with a different manifest.",
-                )
-            self._verify_existing(Path(existing_ack["archive_path"]), verified)
-            if self.validate_media and existing_ack.get("media_validation", {}).get("status") != "passed":
-                media_validation = self.media_validator(Path(existing_ack["archive_path"]), verified)
-                self._verify_existing(Path(existing_ack["archive_path"]), verified)
-                return self.queue.attach_media_validation(
-                    verified.meeting_id,
-                    verified.revision,
-                    verified.manifest_sha256,
-                    media_validation,
-                )
-            return existing_ack
+            return self._existing_acceptance(existing_ack, verified)
 
         self._prepare_root()
         relative_archive = Path(

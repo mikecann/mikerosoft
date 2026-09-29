@@ -5,15 +5,27 @@ import TandemRender
 
 /// The export sheet: presets on the left, what they'll do on the right, and
 /// the output file. It drops from the top bar over a dimmed window, as in
-/// the design.
+/// the design. Presets resolve through `ExportPreset.plan(for:)`, as they
+/// do for the CLI: each keeps the timeline's shape, and the sheet opens on
+/// the one that fits the timeline.
 struct ExportSheetOverlay: View {
     let model: EditorModel
-    @State private var presetIndex = 0
+    /// Nil until Mike picks one: the preset that fits the timeline.
+    @State private var presetIndex: Int?
     @State private var useRange = false
     @State private var output: URL?
 
-    private var presets: [ExportPreset] { ExportPreset.all }
-    private var preset: ExportPreset { presets[min(presetIndex, presets.count - 1)] }
+    static let presets = ExportPreset.all
+
+    init(model: EditorModel, initialPreset: Int? = nil) {
+        self.model = model
+        _presetIndex = State(initialValue: initialPreset)
+    }
+
+    private var presets: [ExportPreset] { Self.presets }
+    private var selectedIndex: Int { min(presetIndex ?? Self.defaultIndex(settings: model.project.settings), presets.count - 1) }
+    private var preset: ExportPreset { presets[selectedIndex] }
+    private var plan: Result<ExportPlan, ExportPlanError> { Self.plan(preset, settings: model.project.settings) }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -69,7 +81,7 @@ struct ExportSheetOverlay: View {
     private var presetList: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(presets.enumerated()), id: \.offset) { index, preset in
-                let selected = index == presetIndex
+                let selected = index == selectedIndex
                 Button {
                     presetIndex = index
                     output = defaultOutput()
@@ -96,13 +108,28 @@ struct ExportSheetOverlay: View {
     }
 
     private var settings: some View {
-        let size = Self.size(of: preset, settings: model.project.settings)
-        return VStack(alignment: .leading, spacing: 0) {
-            SheetRow(label: "Video") {
-                Text(verbatim: "\(preset.codec == .hevc ? "HEVC" : "H.264") on the hardware encoder, \(preset.videoBitrate / 1_000_000) Mbps")
-            }
-            SheetRow(label: "Size") {
-                Text(verbatim: "\(size.width) × \(size.height), \(Self.fps(model.project.settings.frameRate)) fps, same as the timeline")
+        VStack(alignment: .leading, spacing: 0) {
+            switch plan {
+            case .success(let plan):
+                SheetRow(label: "Video") {
+                    Text(verbatim: "\(plan.codec.displayName) on the hardware encoder, \(ExportPlan.megabits(plan.videoBitrate))")
+                }
+                SheetRow(label: "Size") {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(verbatim: Self.sizeText(plan, settings: model.project.settings))
+                        if let note = Self.upscaleNote(plan, settings: model.project.settings) {
+                            Text(verbatim: note)
+                                .font(.ui(11.5))
+                                .foregroundStyle(Theme.amber.color)
+                        }
+                    }
+                }
+            case .failure(let problem):
+                SheetRow(label: "Short") {
+                    Text(verbatim: Self.problem(problem))
+                        .foregroundStyle(Theme.amber.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             SheetRow(label: "Loudness") {
                 VStack(alignment: .leading, spacing: 3) {
@@ -177,9 +204,11 @@ struct ExportSheetOverlay: View {
                     .padding(.horizontal, 18)
                     .frame(height: 32)
                     .background(RoundedRectangle(cornerRadius: 8).fill(Theme.amber.color))
+                    .opacity(canExport ? 1 : 0.4)
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.defaultAction)
+            .disabled(!canExport)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -193,11 +222,18 @@ struct ExportSheetOverlay: View {
         model.showExportSheet = false
     }
 
+    private var canExport: Bool {
+        if case .success = plan { return true }
+        return false
+    }
+
     private func export() {
-        var chosen = preset
+        // The plan carries the frame, size and bitrate the sheet showed.
+        guard case .success(let plan) = plan else { return }
+        var chosen = plan.preset
         if useRange, let range = model.inOutRange { chosen.range = range }
         let url = output ?? defaultOutput()
-        let context = RenderContext(project: model.project, folder: model.folder, analysis: model.session.analysis, useProxies: false, format: chosen.format)
+        let context = RenderContext(project: model.project, folder: model.folder, analysis: model.session.analysis, useProxies: false, format: plan.format)
         model.exports.enqueue(preset: chosen, output: url, context: context)
         model.show(.info, "Exporting \(url.lastPathComponent).")
         close()
@@ -206,7 +242,9 @@ struct ExportSheetOverlay: View {
     private func defaultOutput() -> URL {
         let folder = model.folder.exportsFolder
         let existing = Set((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
-        let name = VersionNaming.exportName(projectFile: model.fileName, preset: preset == ExportPreset.youtube4K ? "" : preset.name, existing: existing)
+        // The preset that fits the timeline is the plain export.
+        let fits = selectedIndex == Self.defaultIndex(settings: model.project.settings)
+        let name = VersionNaming.exportName(projectFile: model.fileName, preset: fits ? "" : preset.name, existing: existing)
         return folder.appendingPathComponent(name)
     }
 
@@ -241,12 +279,21 @@ struct ExportSheetOverlay: View {
 
     // MARK: - Descriptions
 
-    static func size(of preset: ExportPreset, settings: ProjectSettings) -> (width: Int, height: Int) {
-        if let format = preset.format, let alternate = settings.alternateFormats.first(where: { $0.id == format }) {
-            return (alternate.width, alternate.height)
+    /// The preset that fits the timeline (`ExportPreset.standard(for:)`).
+    static func defaultIndex(settings: ProjectSettings) -> Int {
+        let standard = ExportPreset.standard(for: settings)
+        return presets.firstIndex { $0.name == standard.name } ?? 0
+    }
+
+    /// What the preset makes of the project, or why it can't export it.
+    static func plan(_ preset: ExportPreset, settings: ProjectSettings) -> Result<ExportPlan, ExportPlanError> {
+        do {
+            return .success(try preset.plan(for: settings))
+        } catch let error as ExportPlanError {
+            return .failure(error)
+        } catch {
+            return .failure(.noFormat(id: preset.format ?? OutputFrames.main, known: settings.alternateFormats.map(\.id)))
         }
-        if preset.format == OutputFormat.portrait.id { return (OutputFormat.portrait.width, OutputFormat.portrait.height) }
-        return (preset.width ?? settings.width, preset.height ?? settings.height)
     }
 
     static func fps(_ rate: FrameRate) -> String {
@@ -254,10 +301,50 @@ struct ExportSheetOverlay: View {
         return value == value.rounded() ? "\(Int(value))" : String(format: "%.2f", value)
     }
 
+    /// The line under each preset's name.
     static func detail(_ preset: ExportPreset, settings: ProjectSettings) -> String {
-        let size = size(of: preset, settings: settings)
-        let codec = preset.codec == .hevc ? "HEVC" : "H.264"
-        return "\(codec) · \(size.width)×\(size.height) · \(fps(settings.frameRate))p"
+        switch plan(preset, settings: settings) {
+        case .success(let plan):
+            return "\(plan.codec.displayName) · \(plan.width)×\(plan.height) · \(fps(settings.frameRate))p"
+        case .failure(.noPortrait):
+            return "No 9:16 layout yet"
+        case .failure:
+            return "No such layout"
+        }
+    }
+
+    /// The Size row: the frame, and how it compares with the timeline.
+    static func sizeText(_ plan: ExportPlan, settings: ProjectSettings) -> String {
+        let size = "\(plan.width) × \(plan.height), \(fps(settings.frameRate)) fps"
+        let frame = "\(plan.frameWidth) × \(plan.frameHeight)"
+        if let id = plan.format, plan.width == plan.frameWidth, plan.height == plan.frameHeight {
+            let name = settings.alternateFormats.first { $0.id == id }?.name ?? id
+            return "\(size), the timeline's \(name) layout"
+        }
+        if plan.isUpscaled { return "\(size), upscaled from the \(frame) timeline" }
+        if plan.width < plan.frameWidth || plan.height < plan.frameHeight { return "\(size), scaled down from the \(frame) timeline" }
+        return "\(size), same as the timeline"
+    }
+
+    /// Under an upscale: it adds nothing, and the preset that keeps the size.
+    static func upscaleNote(_ plan: ExportPlan, settings: ProjectSettings) -> String? {
+        guard plan.isUpscaled else { return nil }
+        var note = "No sharper than the timeline."
+        let standard = ExportPreset.standard(for: settings, format: plan.format)
+        if standard.name != plan.preset.name, let fits = try? standard.plan(for: settings, format: plan.format), !fits.isUpscaled {
+            note += " \(standard.name) exports it at \(fits.width) × \(fits.height)."
+        }
+        return note
+    }
+
+    /// Why the preset can't export this project, in the sheet's words.
+    static func problem(_ error: ExportPlanError) -> String {
+        switch error {
+        case .noPortrait:
+            return "This project has no 9:16 layout for the short yet. An agent can lay one out with `tandem short --apply`, with the screen on top and the camera below."
+        case .noFormat:
+            return error.description
+        }
     }
 }
 

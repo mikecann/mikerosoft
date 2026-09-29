@@ -9,16 +9,26 @@ import AppKit
 /// to fit), not the one it was on. So a restart to install a build put
 /// the editor back at the default size on the wrong screen.
 enum WindowPlacement {
+    /// The last frame any project window had, for projects without their own.
     static let key = "projectWindowFrame"
+    /// Each project's own frame, by the project file's path, so two
+    /// projects open side by side each come back where they were.
+    static let projectsKey = "projectWindowFrames"
     /// How much of a title bar has to be on a screen to grab it.
     static let grabWidth: CGFloat = 120
 
-    static func save(_ frame: NSRect, to store: UserDefaults = AppDefaults.store) {
-        store.set(NSStringFromRect(frame.integral), forKey: key)
+    static func save(_ frame: NSRect, for project: URL? = nil, to store: UserDefaults = AppDefaults.store) {
+        let text = NSStringFromRect(frame.integral)
+        store.set(text, forKey: key)
+        guard let project else { return }
+        var frames = store.dictionary(forKey: projectsKey) as? [String: String] ?? [:]
+        frames[project.standardizedFileURL.path] = text
+        store.set(frames, forKey: projectsKey)
     }
 
-    static func saved(in store: UserDefaults = AppDefaults.store) -> NSRect? {
-        guard let text = store.string(forKey: key) else { return nil }
+    static func saved(for project: URL? = nil, in store: UserDefaults = AppDefaults.store) -> NSRect? {
+        let own = project.flatMap { (store.dictionary(forKey: projectsKey) as? [String: String])?[$0.standardizedFileURL.path] }
+        guard let text = own ?? store.string(forKey: key) else { return nil }
         let frame = NSRectFromString(text)
         return frame.width >= 100 && frame.height >= 100 ? frame : nil
     }
@@ -34,8 +44,8 @@ enum WindowPlacement {
 
     /// The saved frame if it's still on a screen, stepped down and right
     /// past any window already sitting there.
-    static func restored(screens: [NSRect], occupied: [NSRect], store: UserDefaults = AppDefaults.store) -> NSRect? {
-        guard var frame = saved(in: store), isOnScreen(frame, screens: screens) else { return nil }
+    static func restored(screens: [NSRect], occupied: [NSRect], for project: URL? = nil, store: UserDefaults = AppDefaults.store) -> NSRect? {
+        guard var frame = saved(for: project, in: store), isOnScreen(frame, screens: screens) else { return nil }
         while occupied.contains(where: { $0.origin == frame.origin }) {
             frame = frame.offsetBy(dx: 24, dy: -24)
         }

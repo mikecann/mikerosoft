@@ -171,6 +171,23 @@ public enum TimelineDump {
             let heads = Dictionary(track.transitions.filter { $0.fromClipID == nil }.compactMap { t in t.toClipID.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
             let tails = Dictionary(track.transitions.compactMap { t in t.fromClipID.map { ($0, t) } }, uniquingKeysWith: { a, _ in a })
             var previousEnd: Time? = range ? nil : .zero
+            // The words each clip plays, placed among all of the track's
+            // clips at once, so a word a cut runs through shows on one side.
+            var spoken: [String: [TranscriptTools.SpokenWord]] = [:]
+            var transcribed = Set<String>()
+            if let transcripts = options.transcripts, speechTrackIDs.contains(track.id) {
+                var byMedia: [String: [Clip]] = [:]
+                for clip in track.clips where TranscriptTools.isHeard(clip) || clips.contains(where: { $0.id == clip.id }) {
+                    if let mediaID = clip.mediaID { byMedia[mediaID, default: []].append(clip) }
+                }
+                for (mediaID, group) in byMedia {
+                    guard let item = project.media(mediaID), item.hasAudio, let transcript = transcripts(item) else { continue }
+                    transcribed.insert(mediaID)
+                    for word in TranscriptTools.words(transcript, playedBy: group, mediaID: mediaID) {
+                        spoken[word.clipID, default: []].append(word)
+                    }
+                }
+            }
             for (clip, own) in zip(clips, settings) {
                 if track.rippleMode == .cut, let previousEnd, clip.start > previousEnd {
                     out.append("    gap \(previousEnd)-\(clip.start) (\(TimeText.duration(clip.start - previousEnd)))")
@@ -194,11 +211,11 @@ public enum TimelineDump {
                     let target = transition.toClipID.map { " into \($0)" } ?? " out"
                     out.append("    ~ \(transition.type.rawValue)\(direction(transition)) \(TimeText.duration(transition.duration))\(target)  \(transition.id)")
                 }
-                if let transcripts = options.transcripts, speechTrackIDs.contains(track.id),
+                if options.transcripts != nil, speechTrackIDs.contains(track.id),
                    let mediaID = clip.mediaID, let item = project.media(mediaID), item.hasAudio {
-                    if let transcript = transcripts(item) {
+                    if transcribed.contains(mediaID) {
                         // With a range, only the words inside it, marked where they're cut short.
-                        let all = TranscriptTools.words(transcript, playedBy: clip)
+                        let all = spoken[clip.id] ?? []
                         let shown = all.filter { overlaps($0.start, $0.end) }
                         var words = shown.map(\.text).joined(separator: " ")
                         if !words.isEmpty {
@@ -347,6 +364,9 @@ public enum TimelineDump {
         if case .text(let text) = clip.content {
             if let animation = text.animationIn { parts.append("in \(animation)") }
             if let animation = text.animationOut { parts.append("out \(animation)") }
+            // What the clip sets over its preset, as the JSON names it, so
+            // an agent can see (and patch) exactly what wins.
+            if !text.style.isEmpty { parts.append("style " + styleFields(text.style)) }
         }
         if !clip.keyframes.isEmpty {
             let names = clip.keyframes.keys.sorted().map { key -> String in
@@ -376,6 +396,23 @@ public enum TimelineDump {
     static func num(_ value: Double) -> String {
         let rounded = (value * 1000).rounded() / 1000
         return CommandText.number(rounded)
+    }
+
+    /// `font=TiltWarp-Regular size=84 shadow=false`: only the fields set.
+    static func styleFields(_ style: TextStyle) -> String {
+        var fields: [String] = []
+        if let font = style.font { fields.append("font=\(font)") }
+        if let size = style.size { fields.append("size=\(num(size))") }
+        if let weight = style.weight { fields.append("weight=\(num(weight))") }
+        if let color = style.color { fields.append("color=\(hex(color))") }
+        if let color = style.strokeColor { fields.append("strokeColor=\(hex(color))") }
+        if let width = style.strokeWidth { fields.append("strokeWidth=\(num(width))") }
+        if let color = style.backgroundColor { fields.append("backgroundColor=\(color.a <= 0 ? "none" : hex(color))") }
+        if let alignment = style.alignment { fields.append("alignment=\(alignment)") }
+        if let uppercase = style.uppercase { fields.append("uppercase=\(uppercase)") }
+        if let shadow = style.shadow { fields.append("shadow=\(shadow)") }
+        if let spacing = style.lineSpacing { fields.append("lineSpacing=\(num(spacing))") }
+        return fields.joined(separator: " ")
     }
 
     static func hex(_ color: RGBA) -> String {

@@ -49,6 +49,6 @@ exec /usr/bin/nice -n 10 "${PYTHON}" -m meeting_archive_worker.viewer \
     --archive-root "${ARCHIVE_ROOT}" \
     --db "${DATABASE}" \
     --host "${LISTEN_HOST}" \
-    --port 8765 \
+    --port 8791 \
     --allowed-login "${ALLOWED_LOGIN}" \
     --max-threads 4

@@ -43,7 +43,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // (a new version) and has that one's frame.
         shouldCascadeWindows = false
         let others = NSApplication.shared.windows.filter { $0 is EditorWindow && $0 !== window && $0.isVisible }.map(\.frame)
-        if frame == nil, let placed = WindowPlacement.restored(screens: NSScreen.screens.map(\.visibleFrame), occupied: others) {
+        if frame == nil, let placed = WindowPlacement.restored(screens: NSScreen.screens.map(\.visibleFrame), occupied: others, for: model.fileURL) {
             window.setFrame(placed, display: false)
         }
         window.delegate = self
@@ -61,9 +61,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
         window.layoutTrafficLights()
         // Fonts the project carries in assets/font, so its titles look the
-        // same here as on the Mac that made them.
-        let folder = model.folder
-        Task.detached(priority: .utility) { await AssetLibrary.registerFonts(in: folder) }
+        // same here as on the Mac that made them, and the fonts its presets
+        // need that aren't here yet.
+        model.checkFonts()
         // A project opened without an icon gets one once it has settled.
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.window?.isVisible == true else { return }
@@ -212,12 +212,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// full screen or minimised window.
     private func saveFrame() {
         guard let window, !window.styleMask.contains(.fullScreen), !window.isMiniaturized else { return }
-        WindowPlacement.save(window.frame)
+        WindowPlacement.save(window.frame, for: model.fileURL)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
         (window as? EditorWindow)?.layoutTrafficLights()
         model.rescanMedia()
+        // A font dropped into assets/font while Tandem was in the background.
+        model.checkFonts()
         RelinkPrompt.windowBecameKey(self)
     }
 

@@ -33,7 +33,10 @@ final class SchemaTests: XCTestCase {
         let clip = Clip(
             id: "clip_full", name: "Full", content: .text(TextContent(
                 text: "Hi", preset: "callout",
-                style: TextStyle(strokeColor: .black, strokeWidth: 2, backgroundColor: .white, uppercase: true, shadow: true, lineSpacing: 0.2),
+                style: TextStyle(
+                    font: "Tilt Warp", size: 72, weight: 400, color: .white, strokeColor: .black, strokeWidth: 2,
+                    backgroundColor: .white, alignment: "left", uppercase: true, shadow: true, lineSpacing: 0.2
+                ),
                 animationIn: "popIn", animationOut: "fadeOut", animationDuration: t(0.5),
                 words: [TimedWord(text: "Hi", start: t(0), end: t(0.4))]
             )),
@@ -56,7 +59,7 @@ final class SchemaTests: XCTestCase {
         let media = MediaItem(
             id: "med_full", path: "a.mov", kind: .video, role: .camera, takeID: "take", takeOffset: t(0.5), duration: t(10),
             frameRate: .fps30, width: 1920, height: 1080, hasVideo: true, hasAudio: true, hasAlpha: true, variableFrameRate: true,
-            undecodableCodec: "rle ", fingerprint: "abc", look: [effect]
+            undecodableCodec: "rle ", fingerprint: "abc", look: [effect], livePhotoVideo: "photos/a.mov"
         )
         let template = Template(id: "card", name: "Card", duration: t(3), fields: [TemplateField(key: "title", label: "Title", defaultValue: "X")], clips: [
             TemplateClip(track: "SFX", trackKind: .audio, offset: t(0.2), clip: clip, mediaPath: "sfx/whoosh.wav")
