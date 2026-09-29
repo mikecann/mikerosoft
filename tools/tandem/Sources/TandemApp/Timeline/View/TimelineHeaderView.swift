@@ -112,13 +112,12 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
             let rect = CGRect(x: 0, y: lane.y - offset, width: bounds.width, height: lane.height)
             guard rect.intersects(dirtyRect) else { continue }
             guard let trackID = lane.trackID, let track = project.track(trackID) else {
-                draw("Transcript", at: CGPoint(x: 14, y: rect.midY - 7), font: Theme.Fonts.ui(10.5), color: Theme.textFaint)
+                drawKindIcon(Self.transcriptSymbol, color: Theme.textFaint, midY: rect.midY)
+                draw("Transcript", at: CGPoint(x: Self.nameX, y: rect.midY - 7), font: Theme.Fonts.ui(10.5), color: Theme.textFaint)
                 continue
             }
-            let subtitle = Self.subtitle(for: track, in: project)
             let nameFont = Theme.Fonts.ui(11, .semibold)
-            let showSubtitle = subtitle != nil && lane.height >= 34
-            let nameY = showSubtitle ? rect.midY - 14 : rect.midY - 7
+            let nameY = rect.midY - 7
             let dimmed = track.hidden || (track.kind == .audio && track.muted)
             let hovering = hoverTrackID == trackID
             // Names use the full width unless the toggles are showing.
@@ -128,11 +127,11 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
                 context.setFillColor(Theme.rowSelected.cg)
                 context.fill(rect)
             }
-            if renamingTrackID != trackID {
-                draw(track.name, at: CGPoint(x: 14, y: nameY), font: nameFont, color: dimmed ? Theme.textFaint : Theme.textStrong, maxX: nameMaxX)
+            if lane.height >= 14 {
+                drawKindIcon(Self.symbol(for: track.kind), color: dimmed ? Theme.textFainter : Theme.textFaint, midY: rect.midY)
             }
-            if showSubtitle, let subtitle {
-                draw(subtitle, at: CGPoint(x: 14, y: nameY + 16), font: Theme.Fonts.ui(10), color: Theme.textFaint, maxX: nameMaxX)
+            if renamingTrackID != trackID {
+                draw(track.name, at: CGPoint(x: Self.nameX, y: nameY), font: nameFont, color: dimmed ? Theme.textFaint : Theme.textStrong, maxX: nameMaxX)
             }
             for (toggle, box) in toggleRects(lane, offset: offset) where lane.height >= 18 {
                 let active: Bool
@@ -160,24 +159,32 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
         return others[others.count - 1].maxY + Theme.Metrics.trackGap / 2
     }
 
-    /// What the design shows under a track name: "cutout · look",
-    /// "zoom", "isolated · −14 LUFS".
-    static func subtitle(for track: Track, in project: Project) -> String? {
-        var parts: [String] = []
-        switch track.kind {
-        case .video:
-            if track.clips.contains(where: { $0.video?.cutout?.enabled == true }) { parts.append("cutout") }
-            let mediaIDs = Set(track.clips.compactMap(\.mediaID))
-            if project.media.contains(where: { mediaIDs.contains($0.id) && !$0.look.isEmpty }) { parts.append("look") }
-            if track.clips.contains(where: { ($0.video?.transform.scale ?? 1) > 1.001 || $0.keyframes["video.transform.scale"] != nil }) { parts.append("zoom") }
-        case .audio:
-            if track.clips.contains(where: { ($0.audio?.voiceIsolation ?? 0) > 0 }) { parts.append("isolated") }
-            if let target = track.clips.compactMap({ $0.audio?.normalizeTo }).first {
-                parts.append(String(format: "%.0f LUFS", target).replacingOccurrences(of: "-", with: "−"))
-            }
+    /// Where names start, after the icon that says what kind of track
+    /// it is.
+    static let nameX: CGFloat = 30
+    static let transcriptSymbol = "captions.bubble"
+
+    /// Picture tracks and sound tracks look alike otherwise.
+    static func symbol(for kind: TrackKind) -> String {
+        kind == .video ? "film" : "waveform"
+    }
+
+    private var symbols: [String: NSImage] = [:]
+
+    private func drawKindIcon(_ name: String, color: Swatch, midY: CGFloat) {
+        let key = "\(name)|\(color.ns)"
+        let image: NSImage
+        if let cached = symbols[key] {
+            image = cached
+        } else {
+            let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .medium).applying(.init(paletteColors: [color.ns]))
+            guard let made = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config) else { return }
+            symbols[key] = made
+            image = made
         }
-        if track.locked { parts.append("locked") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        let size = image.size
+        let box = CGRect(x: 12 + (12 - size.width) / 2, y: midY - size.height / 2, width: size.width, height: size.height)
+        image.draw(in: box, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 
     private func draw(_ text: String, at point: CGPoint, font: NSFont, color: Swatch, maxX: CGFloat? = nil) {
@@ -360,12 +367,10 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
             model.timeline.verticalOffset = max(0, lane.maxY - bounds.height + 8)
             container.clampVerticalOffset()
         }
-        // Over the name: centred in the lane, or its upper line when the
-        // lane is tall enough for a subtitle.
+        // Over the name, centred in the lane.
         let height: CGFloat = 18
-        let hasSubtitle = Self.subtitle(for: track, in: model.project) != nil && lane.height >= 34
-        let nameMid = lane.y - offset + lane.height / 2 - (hasSubtitle ? 7 : 0)
-        let field = NSTextField(frame: CGRect(x: 10, y: nameMid - height / 2, width: bounds.width - 16, height: height))
+        let nameMid = lane.y - offset + lane.height / 2
+        let field = NSTextField(frame: CGRect(x: Self.nameX - 4, y: nameMid - height / 2, width: bounds.width - Self.nameX - 2, height: height))
         field.stringValue = track.name
         field.font = Theme.Fonts.ui(11, .semibold)
         field.textColor = Theme.text.ns

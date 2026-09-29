@@ -79,14 +79,9 @@ struct AssetBrowser: View {
     private var sectionTabs: some View {
         HStack(spacing: 16) {
             ForEach(sections) { item in
-                Button {
+                SubTab(title: item.title, icon: Icons.assetSection(item), selected: item == section) {
                     section = item
-                } label: {
-                    Text(item.title)
-                        .font(.ui(13, item == section ? .bold : .regular))
-                        .foregroundStyle(item == section ? Theme.text.color : Theme.textFaint.color)
                 }
-                .buttonStyle(.plain)
             }
             Spacer(minLength: 4)
             if section.isAudio {
@@ -259,7 +254,9 @@ private struct SourceChips: View {
     var body: some View {
         FlowLayout(spacing: 6) {
             ChipView(title: "All sources", selected: selected == nil) { selected = nil }
-            ForEach(providers, id: \.id) { provider in
+            // Sources that can't be used yet (no key, not set up) stay out
+            // of the way; Settings is where they're turned on.
+            ForEach(providers.filter { $0.status.isUsable || $0.id == selected }, id: \.id) { provider in
                 ChipView(title: AssetBrowsing.sourceName(provider.displayName), selected: selected == provider.id) {
                     selected = selected == provider.id ? nil : provider.id
                 }
@@ -440,21 +437,19 @@ private struct AssetList: View {
     }
 }
 
-/// What a tile or row shows under its name: where it's from and its licence.
+/// Under a tile or row's name, only when its licence is unknown: that's
+/// worth fixing before it goes in a video. Every other licence is in the
+/// tooltip, and credits are gathered in the Credits panel.
 private struct LicenceLine: View {
     let asset: Asset
 
     var body: some View {
-        Text(AssetBrowsing.licenceLabel(asset.licenceClass))
-            .font(.ui(10.5))
-            .foregroundStyle(colour)
-            .lineLimit(1)
-    }
-
-    private var colour: Color {
-        // Only a missing licence is worth colour; credits are gathered in
-        // the Credits panel.
-        asset.licenceClass == .unknown ? Theme.red.color.opacity(0.85) : Theme.textFaint.color
+        if asset.licenceClass == .unknown {
+            Text(AssetBrowsing.licenceLabel(asset.licenceClass))
+                .font(.ui(10.5))
+                .foregroundStyle(Theme.red.color.opacity(0.85))
+                .lineLimit(1)
+        }
     }
 }
 

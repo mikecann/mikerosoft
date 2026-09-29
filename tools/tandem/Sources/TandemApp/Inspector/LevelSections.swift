@@ -35,38 +35,35 @@ struct LevelSection: View {
                               model.apply(InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain"))
                           }
                       })
-            switchRow("Muted", value: audio.muted ? "Yes" : "No", isOn: audio.muted,
+            switchRow("Muted", value: nil, isOn: audio.muted,
                       help: audio.muted ? "Muted: this \(noun) plays nothing. Click to hear it again." : "Silences this \(noun) without removing it.") {
                 model.apply(InspectorEdits.audio(ids, ["muted": .bool(!audio.muted)], label: audio.muted ? "Unmute \(noun)" : "Mute \(noun)"))
             }
-            switchRow("Normalise", value: audio.normalizeTo.map { "to \(AudioLevelText.lufs($0))" } ?? "Off", isOn: audio.normalizeTo != nil,
-                      help: AudioLevelText.normaliseHelp(normalizeTo: audio.normalizeTo, speechLevel: settings.speechLoudness)) {
+            // The measurements behind it are in the tooltip, not the panel.
+            let measured = AudioLevelText.measured(lufs: loudness?.integratedLUFS, peak: loudness?.truePeakDBTP, normalizeTo: audio.normalizeTo)
+            let plays = audio.normalizeTo != nil || gain != 0 ? AudioLevels.playbackLoudness(shown, measuredLUFS: loudness?.integratedLUFS) : nil
+            let details = [
+                AudioLevelText.normaliseHelp(normalizeTo: audio.normalizeTo, speechLevel: settings.speechLoudness),
+                measured.map { "Measured: \($0)." },
+                plays.map { "Plays at about \(AudioLevelText.lufs($0, decimals: 1))." },
+                AudioLevelText.combineNote(settings)
+            ].compactMap { $0 }.joined(separator: "\n")
+            switchRow("Normalise", value: audio.normalizeTo.map { AudioLevelText.lufs($0) }, isOn: audio.normalizeTo != nil, help: details) {
                 let value: JSONValue = audio.normalizeTo == nil ? .number(settings.speechLoudness) : .null
                 model.apply(InspectorEdits.audio(ids, ["normalizeTo": value], label: audio.normalizeTo == nil ? "Normalise \(noun)" : "Stop normalising \(noun)"))
             }
-            if let measured = AudioLevelText.measured(lufs: loudness?.integratedLUFS, peak: loudness?.truePeakDBTP, normalizeTo: audio.normalizeTo) {
-                InfoRow(label: "Measured", value: measured)
-                    .help("The file's integrated loudness (EBU R128), measured in the background, and the gain normalising adds to reach its level (at most ±30 dB). A take is levelled as a whole, so every cut of it gets the same gain.")
-            }
-            if audio.normalizeTo != nil || gain != 0, let plays = AudioLevels.playbackLoudness(shown, measuredLUFS: loudness?.integratedLUFS) {
-                InfoRow(label: "Plays at", value: "about \(AudioLevelText.lufs(plays, decimals: 1))")
-                    .help("Measured loudness, plus normalising, plus gain: how loud this \(noun) plays in the viewer. Export then turns the whole mix up or down to \(AudioLevelText.lufs(settings.loudnessTarget)).")
-            }
-            Text(AudioLevelText.combineNote(settings))
-                .font(.ui(11))
-                .foregroundStyle(Theme.textFaint.color)
-                .fixedSize(horizontal: false, vertical: true)
-                .help("Normalise and Gain make one level per clip, and the viewer, review clips and export all play it the same.")
         }
     }
 
-    private func switchRow(_ label: String, value: String, isOn: Bool, help: String, action: @escaping () -> Void) -> some View {
+    /// A label and a switch, with a value between them only when it says
+    /// more than the switch does.
+    private func switchRow(_ label: String, value: String?, isOn: Bool, help: String, action: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
             Text(label)
                 .font(.ui(12))
                 .foregroundStyle(Theme.textMuted.color)
                 .frame(width: 86, alignment: .leading)
-            Text(value)
+            Text(value ?? "")
                 .font(.ui(12))
                 .foregroundStyle(Theme.text.color)
             Spacer()
@@ -101,17 +98,18 @@ struct SpeechLevelSection: View {
                               commands: [.updateSettings(patch: .object(["speechLoudness": .number(rounded)]))]
                           ))
                       })
-            Text(AudioLevelText.speechStatus(speech: speech.count, unlevelled: unlevelled, level: level))
-                .font(.ui(11.5))
-                .foregroundStyle(Theme.textMuted.color)
-                .fixedSize(horizontal: false, vertical: true)
-                .help("Speech clips are the camera's sound, voice files, and anything on a take track like Voice.")
-            OutlineButton(title: "Normalise speech clips") {
-                model.apply(EditBatch(label: "Normalise speech clips", commands: [.normalizeSpeech]))
+            // Only when there's something to do: all levelled is the norm.
+            if unlevelled > 0 {
+                Text(AudioLevelText.speechStatus(speech: speech.count, unlevelled: unlevelled, level: level))
+                    .font(.ui(11.5))
+                    .foregroundStyle(Theme.textMuted.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help("Speech clips are the camera's sound, voice files, and anything on a take track like Voice.")
+                OutlineButton(title: "Normalise speech clips") {
+                    model.apply(EditBatch(label: "Normalise speech clips", commands: [.normalizeSpeech]))
+                }
+                .help("Sets every speech clip to \(AudioLevelText.lufs(level)) with no gain, as one undo step. Music and sound effects keep their gains.")
             }
-            .disabled(unlevelled == 0)
-            .opacity(unlevelled == 0 ? 0.45 : 1)
-            .help("Sets every speech clip to \(AudioLevelText.lufs(level)) with no gain, as one undo step. Music and sound effects keep their gains.")
         }
     }
 }

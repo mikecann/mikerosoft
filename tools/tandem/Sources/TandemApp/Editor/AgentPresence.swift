@@ -67,10 +67,11 @@ enum AgentChipState: Equatable {
         }
     }
 
-    /// The muted part after the name.
+    /// The muted part after the name. Nothing while no agent is around:
+    /// the grey dot says so.
     var detail: String {
         switch self {
-        case .idle(let serving): return serving ? "not connected" : "API off"
+        case .idle(let serving): return serving ? "" : "API off"
         case .editing(_, let section): return section.map { "is editing \($0)" } ?? "is editing"
         case .connected: return "connected"
         case .edited(_, let date): return "edited \(date.formatted(date: .omitted, time: .shortened))"

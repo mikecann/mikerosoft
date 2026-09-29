@@ -122,7 +122,8 @@ private struct InspectorTabButton: View {
     }
 }
 
-/// "Camera · Take 2" and "V2 · 05:21 to 05:44 · linked to screen".
+/// The clip's name, "Take 2" or "Take 2 and 3 more". Where it is and
+/// what it's linked to are in the Info tab.
 struct ClipHeader: View {
     let model: EditorModel
     let clip: Clip
@@ -133,10 +134,6 @@ struct ClipHeader: View {
                 .font(.ui(13, .bold))
                 .foregroundStyle(Theme.text.color)
                 .lineLimit(1)
-            Text(subtitle)
-                .font(.ui(11.5))
-                .foregroundStyle(Theme.textMuted.color)
-                .lineLimit(2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -145,27 +142,10 @@ struct ClipHeader: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1) }
     }
 
-    private var trackName: String { model.project.track(containingClip: clip.id)?.name ?? "" }
-
     private var title: String {
         let name = ClipRenderer.name(of: clip, in: model.project)
         let count = model.selection.count
-        let suffix = count > 1 ? " and \(count - 1) more" : ""
-        return "\(trackName) · \(name)\(suffix)"
-    }
-
-    private var subtitle: String {
-        var parts: [String] = []
-        if let location = model.project.location(ofClip: clip.id) {
-            parts.append("\(location.track.kind == .video ? "V" : "A")\(location.track.index + 1)")
-        }
-        parts.append("\(Timecode.string(clip.start, rate: model.frameRate)) to \(Timecode.string(clip.end, rate: model.frameRate))")
-        let partners = model.project.linkedClipIDs(of: clip.id).filter { $0 != clip.id }
-        if !partners.isEmpty {
-            let names = Set(partners.compactMap { model.project.track(containingClip: $0)?.name.lowercased() })
-            parts.append("linked to " + names.sorted().joined(separator: " and "))
-        }
-        return parts.joined(separator: " · ")
+        return count > 1 ? "\(name) and \(count - 1) more" : name
     }
 }
 
@@ -181,7 +161,7 @@ private struct NothingSelected: View {
                     .foregroundStyle(Theme.text.color)
                 HStack(spacing: 6) {
                     PanelIcon(name: Icons.selectAClip, color: Theme.amber.color)
-                    Text("Select a clip on the timeline to edit its video, colour, audio and info.")
+                    Text("Select a clip to edit it.")
                         .font(.ui(11.5))
                         .foregroundStyle(Theme.textMuted.color)
                         .fixedSize(horizontal: false, vertical: true)
@@ -336,9 +316,6 @@ struct VideoInspector: View {
                     .foregroundStyle(Theme.textMuted.color)
                     .frame(width: 86, alignment: .leading)
                 let keeps = (cutout?.mode ?? .personAndProps) == .personAndProps
-                Text(keeps ? "On" : "Off")
-                    .font(.ui(12))
-                    .foregroundStyle(Theme.text.color)
                 Spacer()
                 GraphiteSwitch(isOn: keeps) {
                     model.apply(InspectorEdits.video(clip.id, ["cutout": .object(["mode": .string(keeps ? CutoutMode.person.rawValue : CutoutMode.personAndProps.rawValue)])], label: keeps ? "Cutout without props" : "Cutout keeps the mic"))
@@ -517,9 +494,6 @@ struct AudioInspector: View {
                 SliderRow(label: "Amount", value: audio.voiceIsolation * 100, range: 0...100, format: { "\(Int($0.rounded()))%" },
                           defaultValue: 0, help: "How much of the isolated voice (room noise and music taken out) replaces the original sound. 0% is the original.",
                           onCommit: { value in model.apply(InspectorEdits.audio(ids, ["voiceIsolation": .number(value / 100)], label: "Voice isolation")) })
-                Text("Mixes in the isolated voice once the media module has made it.")
-                    .font(.ui(11))
-                    .foregroundStyle(Theme.textFaint.color)
             }
             EffectStack(model: model, clip: first, domain: .audio, excludeCategories: [])
         } else {

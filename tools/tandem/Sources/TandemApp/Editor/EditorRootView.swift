@@ -170,18 +170,13 @@ struct TopBar: View {
             HStack(spacing: 14) {
                 // The window's own traffic lights sit here.
                 Color.clear.frame(width: 52, height: 12)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.project.name)
-                        .font(.ui(13, .bold))
-                        .foregroundStyle(Theme.text.color)
-                        .lineLimit(1)
-                    Text("\(model.folderName) / \(model.fileName) · \(model.saveProblem != nil ? "not saved" : model.isDirty ? "edited" : "saved")")
-                        .font(.ui(10.5))
-                        .foregroundStyle(Theme.textFaint.color)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .frame(maxWidth: 260, alignment: .leading)
+                // Just the video's name: it autosaves, and the status bar
+                // says when a save fails.
+                Text(model.project.name)
+                    .font(.ui(13, .bold))
+                    .foregroundStyle(Theme.text.color)
+                    .lineLimit(1)
+                    .frame(maxWidth: 260, alignment: .leading)
                 // The title drags the window like the rest of the bar.
                 .allowsHitTesting(false)
                 Spacer(minLength: 12)
@@ -331,9 +326,11 @@ private struct AgentChip: View {
                     Text(state.name)
                         .font(.ui(12, .semibold))
                         .foregroundStyle(Theme.text.color)
-                    Text(state.detail)
-                        .font(.ui(12))
-                        .foregroundStyle(Theme.textMuted.color)
+                    if !state.detail.isEmpty {
+                        Text(state.detail)
+                            .font(.ui(12))
+                            .foregroundStyle(Theme.textMuted.color)
+                    }
                 }
                 .padding(.horizontal, 11)
                 .frame(height: 28)
@@ -410,10 +407,6 @@ struct StatusBar: View {
                         .lineLimit(1)
                 }
             }
-            Text(formatSummary)
-                .font(.ui(11))
-                .foregroundStyle(Theme.textSecondary.color)
-                .lineLimit(1)
         }
         .padding(.horizontal, 14)
         .frame(height: Theme.Metrics.statusBarHeight)
@@ -446,27 +439,6 @@ struct StatusBar: View {
         let more = max(0, running.count - 2) + model.jobs.filter { $0.state == .queued }.count
         if more > 0 { lines.append("\(more) more analysis \(more == 1 ? "job" : "jobs")") }
         return lines
-    }
-
-    private var formatSummary: String {
-        let settings = model.project.settings
-        let size: String
-        switch (settings.width, settings.height) {
-        case (3840, 2160): size = "4K"
-        case (1920, 1080): size = "1080p"
-        case (1080, 1920): size = "9:16"
-        case (let w, let h): size = "\(w)×\(h)"
-        }
-        let fps = settings.frameRate.framesPerSecond
-        let rate = fps == fps.rounded() ? "\(Int(fps))p" : String(format: "%.2fp", fps)
-        let loudness: String
-        if let measured = model.exports.jobs.last(where: { if case .done = $0.state { return true } else { return false } }),
-           case .done(let result) = measured.state, let lufs = result.integratedLUFS {
-            loudness = String(format: "%.1f LUFS", lufs).replacingOccurrences(of: "-", with: "−")
-        } else {
-            loudness = String(format: "Target %.0f LUFS", settings.loudnessTarget).replacingOccurrences(of: "-", with: "−")
-        }
-        return "\(loudness) · \(size) \(rate)"
     }
 }
 
