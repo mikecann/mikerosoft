@@ -110,6 +110,9 @@ enum Theme {
         static let statusBarHeight: CGFloat = 26
         static let trackHeaderWidth: CGFloat = 112
         static let trackGap: CGFloat = 3
+        /// Points either side of the line between two track headers that
+        /// grab it to change the track's height.
+        static let trackResizeGrab: CGFloat = 5
         static let tracksTopPadding: CGFloat = 3
         static let clipCornerRadius: CGFloat = 4
         static let playheadHeadWidth: CGFloat = 11

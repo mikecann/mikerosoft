@@ -431,7 +431,7 @@ private struct AssetList: View {
             }
         } else {
             let tileHeight = (82 / section.tileAspect).rounded()
-            LazyVGrid(columns: TileGrid.columns(3, width: 82), alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: TileGrid.columns(width: 82), alignment: .leading, spacing: 12) {
                 ForEach(assets) { asset in
                     AssetTile(model: model, asset: asset, height: tileHeight)
                 }

@@ -3,48 +3,62 @@ import TandemCore
 import TandemMedia
 
 /// The Graphite window: top bar, then media panel, viewer and inspector,
-/// then the timeline and status bar. The split between the workspace and
-/// the timeline can be dragged.
+/// then the timeline and status bar. The dividers between the panels drag
+/// (see `PanelSizes`), and a double-click puts one back.
 struct EditorRootView: View {
     let model: EditorModel
     let actions: EditorActions
-    /// Set once the split is dragged; until then it follows the window.
-    @State private var workspaceHeight: CGFloat?
-    @State private var dragStartHeight: CGFloat?
+    @State private var sizes = PanelSizes.load()
+    /// The size the panel had when the divider being dragged was pressed.
+    @State private var dragStart: CGFloat?
 
     var body: some View {
         GeometryReader { geometry in
+            let width = geometry.size.width
             let available = geometry.size.height - Theme.Metrics.topBarHeight - Theme.Metrics.statusBarHeight
-            let workspace = clampedWorkspace(workspaceHeight ?? defaultWorkspace(available: available), available: available)
+            let workspace = clampedWorkspace(sizes.workspaceHeight ?? defaultWorkspace(available: available), available: available)
+            let panels = sizes.fitted(windowWidth: width)
             VStack(spacing: 0) {
                 TopBar(model: model, actions: actions)
                 HStack(spacing: 0) {
                     // Leading, so nothing that asks for more room than the
                     // panel has can push the whole panel sideways.
                     LibraryPanel(model: model, actions: actions)
-                        .frame(width: Theme.Metrics.mediaPanelWidth, alignment: .topLeading)
+                        .frame(width: panels.library, alignment: .topLeading)
                         .clipped()
-                    Rectangle().fill(Theme.border.color).frame(width: 1)
+                    PanelDivider(axis: .vertical, help: "Drag to resize the media panel. Double-click for its standard width.") { travel in
+                        sizes.libraryWidth = sizes.library(dragged: startDrag(panels.library) + travel, windowWidth: width)
+                    } onEnd: {
+                        endDrag()
+                    } onReset: {
+                        sizes.libraryWidth = PanelSizes.standard.libraryWidth
+                        sizes.save()
+                    }
                     ViewerPanel(model: model, actions: actions)
                         .frame(maxWidth: .infinity)
                         // Space over the asset browser previews here.
                         .overlay { AssetPreviewLayer(model: model) }
-                    Rectangle().fill(Theme.border.color).frame(width: 1)
+                    PanelDivider(axis: .vertical, help: "Drag to resize the inspector. Double-click for its standard width.") { travel in
+                        sizes.inspectorWidth = sizes.inspector(dragged: startDrag(panels.inspector) - travel, windowWidth: width)
+                    } onEnd: {
+                        endDrag()
+                    } onReset: {
+                        sizes.inspectorWidth = PanelSizes.standard.inspectorWidth
+                        sizes.save()
+                    }
                     InspectorPanel(model: model, actions: actions)
-                        .frame(width: Theme.Metrics.inspectorWidth - 1)
+                        .frame(width: panels.inspector - 1)
                 }
                 .frame(height: workspace)
                 .clipped()
-                SplitHandle()
-                    .gesture(
-                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                            .onChanged { value in
-                                let start = dragStartHeight ?? workspace
-                                if dragStartHeight == nil { dragStartHeight = workspace }
-                                workspaceHeight = clampedWorkspace(start + value.translation.height, available: available)
-                            }
-                            .onEnded { _ in dragStartHeight = nil }
-                    )
+                PanelDivider(axis: .horizontal, help: "Drag to share the height between the viewer and the timeline. Double-click to fit every track.") { travel in
+                    sizes.workspaceHeight = clampedWorkspace(startDrag(workspace) + travel, available: available)
+                } onEnd: {
+                    endDrag()
+                } onReset: {
+                    sizes.workspaceHeight = nil
+                    sizes.save()
+                }
                 TimelinePanel(model: model, actions: actions)
                     .frame(maxHeight: .infinity)
                 StatusBar(model: model)
@@ -72,19 +86,74 @@ struct EditorRootView: View {
         let upper = max(Theme.Metrics.minimumWorkspaceHeight, available - Theme.Metrics.minimumTimelineHeight)
         return min(max(value, Theme.Metrics.minimumWorkspaceHeight), upper)
     }
+
+    /// The panel's size when the drag started, noting it on the first move.
+    private func startDrag(_ size: CGFloat) -> CGFloat {
+        if let dragStart { return dragStart }
+        dragStart = size
+        return size
+    }
+
+    private func endDrag() {
+        dragStart = nil
+        sizes.save()
+    }
 }
 
-/// The 1 pt line between the workspace and the timeline, with a taller
-/// invisible grab area.
-private struct SplitHandle: View {
+/// A divider between panels that drags. The line is 1 pt, but it can be
+/// grabbed anywhere in a band `grab` points across, over the edges of the
+/// panels either side, and it lights up amber while the pointer is on it.
+/// The first version grabbed only 4 points and never changed the pointer
+/// off the line itself, so it was hard to find.
+private struct PanelDivider: View {
+    enum Axis { case vertical, horizontal }
+    /// `.vertical` runs top to bottom and drags sideways.
+    let axis: Axis
+    let help: String
+    /// How far the pointer has moved along the drag since it started.
+    let onDrag: (CGFloat) -> Void
+    let onEnd: () -> Void
+    let onReset: () -> Void
+    @State private var hovering = false
+    @State private var dragging = false
+
+    static let grab: CGFloat = 11
+
     var body: some View {
+        let vertical = axis == .vertical
         Rectangle()
             .fill(Theme.border.color)
-            .frame(height: 1)
-            .overlay(Color.clear.frame(height: 7).contentShape(Rectangle()))
-            .onHover { inside in
-                (inside ? NSCursor.resizeUpDown : NSCursor.arrow).set()
+            .frame(width: vertical ? 1 : nil, height: vertical ? nil : 1)
+            .overlay {
+                ZStack {
+                    Rectangle()
+                        .fill(Theme.amber.color.opacity(hovering || dragging ? 0.85 : 0))
+                        .frame(width: vertical ? 3 : nil, height: vertical ? nil : 3)
+                        .allowsHitTesting(false)
+                    Color.clear
+                        .frame(width: vertical ? Self.grab : nil, height: vertical ? nil : Self.grab)
+                        .contentShape(Rectangle())
+                        .pointerStyle(vertical ? .columnResize : .rowResize)
+                        .onHover { hovering = $0 }
+                        .onTapGesture(count: 2, perform: onReset)
+                        .gesture(
+                            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                                .onChanged { value in
+                                    dragging = true
+                                    onDrag(vertical ? value.translation.width : value.translation.height)
+                                }
+                                .onEnded { _ in
+                                    dragging = false
+                                    onEnd()
+                                }
+                        )
+                        .help(help)
+                }
+                .animation(.easeOut(duration: 0.12), value: hovering || dragging)
             }
+            // Above the panels either side, so the band over their edges
+            // gets the pointer rather than them.
+            .zIndex(1)
     }
 }
 

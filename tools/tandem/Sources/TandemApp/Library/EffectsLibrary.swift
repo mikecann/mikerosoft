@@ -57,7 +57,7 @@ struct EffectsLibrary: View {
             .padding(.bottom, 10)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    LazyVGrid(columns: TileGrid.columns(3, width: 82), alignment: .leading, spacing: 12) {
+                    LazyVGrid(columns: TileGrid.columns(width: 82), alignment: .leading, spacing: 12) {
                         if showTransitions {
                             ForEach(transitions, id: \.self) { type in
                                 LibraryTile(title: type.displayName, selected: selected == type.rawValue, width: 82, height: 48, drag: .transition(type)) {

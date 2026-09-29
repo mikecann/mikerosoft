@@ -56,7 +56,7 @@ struct TitleLibrary: View {
             .padding(.top, 14)
             .padding(.bottom, 10)
             ScrollView {
-                LazyVGrid(columns: TileGrid.columns(2, width: 130), alignment: .leading, spacing: 12) {
+                LazyVGrid(columns: TileGrid.columns(width: 130), alignment: .leading, spacing: 12) {
                     if showTemplates {
                         ForEach(BuiltInTemplates.all) { template in
                             LibraryTile(title: template.name, selected: selected == template.id, width: 130, height: 73, drag: .template(template.id)) {
@@ -245,11 +245,11 @@ struct LibraryTile<Preview: View>: View {
     }
 }
 
-/// Columns for the libraries' tile grids: fixed tiles 10 points apart,
-/// with no spacing after the last column so the grid is exactly as wide
-/// as its tiles.
+/// Columns for the libraries' tile grids: tiles `width` points wide, 10
+/// apart, as many as the panel has room for. It's three 82 point tiles at
+/// the media panel's standard width, more or fewer as it's dragged.
 enum TileGrid {
-    static func columns(_ count: Int, width: CGFloat) -> [GridItem] {
-        (0..<count).map { GridItem(.fixed(width), spacing: $0 == count - 1 ? 0 : 10, alignment: .top) }
+    static func columns(width: CGFloat) -> [GridItem] {
+        [GridItem(.adaptive(minimum: width, maximum: width), spacing: 10, alignment: .top)]
     }
 }

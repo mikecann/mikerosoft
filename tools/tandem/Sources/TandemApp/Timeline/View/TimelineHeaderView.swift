@@ -41,7 +41,7 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
         guard let container else { return nil }
         let y = convert(event.locationInWindow, from: nil).y + offset
         return container.layoutCache.lanes.first { lane in
-            lane.trackID != nil && abs(lane.maxY + Theme.Metrics.trackGap / 2 - y) <= 3
+            lane.trackID != nil && abs(lane.maxY + Theme.Metrics.trackGap / 2 - y) <= Theme.Metrics.trackResizeGrab
         }
     }
 
