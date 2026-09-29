@@ -9,7 +9,7 @@ struct ViewerPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ViewerRepresentable(model: model, zoom: viewerZoom)
+            ViewerRepresentable(model: model, zoom: $viewerZoom)
             TransportBar(model: model, actions: actions, zoom: $viewerZoom)
         }
         .background(Theme.viewer.color)
@@ -18,17 +18,22 @@ struct ViewerPanel: View {
 
 struct ViewerRepresentable: NSViewRepresentable {
     let model: EditorModel
-    let zoom: CGFloat
+    /// The transport bar's zoom menu and the viewer's pinch and wheel both
+    /// change it.
+    @Binding var zoom: CGFloat
 
     func makeNSView(context: Context) -> ViewerView {
-        ViewerView(model: model)
+        let view = ViewerView(model: model)
+        let binding = $zoom
+        view.onZoomChange = { value in
+            DispatchQueue.main.async { if binding.wrappedValue != value { binding.wrappedValue = value } }
+        }
+        return view
     }
 
     func updateNSView(_ view: ViewerView, context: Context) {
-        if view.zoom != zoom {
-            view.zoom = zoom
-            if zoom == 1 { view.pan = .zero }
-        }
+        guard abs(view.zoom - zoom) > 0.0001 else { return }
+        if zoom == 1 { view.zoomToFit() } else { view.setZoom(zoom) }
     }
 }
 
@@ -87,6 +92,8 @@ struct TransportBar: View {
                     playback.useProxies.toggle()
                 }
                 Menu {
+                    Button("25%") { zoom = 0.25 }
+                    Button("50%") { zoom = 0.5 }
                     Button("Fit") { zoom = 1 }
                     Button("150%") { zoom = 1.5 }
                     Button("200%") { zoom = 2 }
@@ -102,7 +109,7 @@ struct TransportBar: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("Viewer zoom: fit the frame, or look closer")
+                .help("Viewer zoom, relative to fitting the frame. Pinch, or scroll with ⌘ or ⌥, to zoom about the pointer; scroll to move around; double-click the picture to fit.")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }

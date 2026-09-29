@@ -55,6 +55,15 @@ final class PlaybackController {
     @ObservationIgnored var stillSize = CGSize(width: 1920, height: 1080)
     /// How long the last composition took to build, for `describe`.
     @ObservationIgnored private(set) var lastBuildSeconds: Double = 0
+    /// Clip properties being dragged in the viewer or inspector, which the
+    /// player draws on every frame until the edit lands (`previewVideo`).
+    @ObservationIgnored let liveOverrides = LiveVideoOverrides()
+    /// True from the end of a drag until the composition with the edit in
+    /// it is on screen, so the picture doesn't jump back meanwhile.
+    @ObservationIgnored private var overridesEnding = false
+    @ObservationIgnored private var overrideClear: DispatchWorkItem?
+    @ObservationIgnored private var redrawing = false
+    @ObservationIgnored private var redrawAgain = false
 
     @ObservationIgnored private let players: [AVPlayer]
     @ObservationIgnored private var outputs: [AVPlayerItemVideoOutput?] = [nil, nil]
@@ -168,6 +177,7 @@ final class PlaybackController {
         guard var context = makeContext?() else { return }
         context.useProxies = useProxies
         if useProxies { context.sizeOverride = Self.previewSize(for: context.renderSize) }
+        context.liveOverrides = liveOverrides
         buildGeneration += 1
         let generation = buildGeneration
         let started = ProcessInfo.processInfo.systemUptime
@@ -263,6 +273,12 @@ final class PlaybackController {
 
     private func show(slot: Int) {
         readyObservation = nil
+        // The new cut has the dragged edit in it, so the preview can go.
+        if overridesEnding {
+            overridesEnding = false
+            overrideClear?.cancel()
+            liveOverrides.set([:])
+        }
         DrawTiming.record("new cut on screen", ProcessInfo.processInfo.systemUptime - loadStarted)
         let old = front
         let wasShowing = hasComposition
@@ -381,6 +397,72 @@ final class PlaybackController {
         CATransaction.commit()
         stillTime = nil
         stillImage = nil
+    }
+
+    // MARK: - Drag previews
+
+    /// Draws `previews` (clip ID to properties) in place of the clips' own
+    /// while something is dragged. Paused, the frame at the playhead is
+    /// drawn again straight away; playing, the next frames pick them up.
+    /// An empty dictionary ends the preview, but the overrides stay until
+    /// the composition with the committed edit is on screen, so the picture
+    /// doesn't flick back to where it started.
+    func previewVideo(_ previews: [String: VideoProperties]) {
+        overrideClear?.cancel()
+        if previews.isEmpty {
+            guard !liveOverrides.isEmpty else { return }
+            overridesEnding = true
+            // A drag that changed nothing rebuilds nothing, so let go soon.
+            let work = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated { self?.endOverrides() }
+            }
+            overrideClear = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+            return
+        }
+        overridesEnding = false
+        liveOverrides.set(previews)
+        guard hasComposition, rate == 0 else { return }
+        // The still over the player shows the clip where it was.
+        stillWork?.cancel()
+        hideStill()
+        redrawFrame()
+    }
+
+    private func endOverrides() {
+        overrideClear = nil
+        guard overridesEnding else { return }
+        overridesEnding = false
+        liveOverrides.set([:])
+        guard hasComposition, rate == 0 else { return }
+        redrawFrame()
+        scheduleStill()
+    }
+
+    /// Draws the paused frame again, for previews, at most once a screen
+    /// refresh with only the latest waiting, so a fast drag doesn't queue
+    /// up frames. A seek to the time it's already at draws nothing new;
+    /// setting the item's video composition again is AVFoundation's way to
+    /// have a paused player composite its frame afresh.
+    private func redrawFrame() {
+        guard !redrawing else {
+            redrawAgain = true
+            return
+        }
+        redrawing = true
+        if let item = players[front].currentItem, let composition = item.videoComposition?.mutableCopy() as? AVVideoComposition {
+            item.videoComposition = composition
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.redrawing = false
+                if self.redrawAgain {
+                    self.redrawAgain = false
+                    self.redrawFrame()
+                }
+            }
+        }
     }
 
     // MARK: - Transport

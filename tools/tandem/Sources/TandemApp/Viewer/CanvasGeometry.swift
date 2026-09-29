@@ -20,6 +20,16 @@ enum CanvasGeometry {
         return CGRect(x: (bounds.midX - size.width / 2 + pan.x).rounded(), y: (bounds.midY - size.height / 2 + pan.y).rounded(), width: size.width, height: size.height)
     }
 
+    /// The pan that keeps `point` over the same spot of the picture while
+    /// the zoom goes from `from` to `to`, for zooming about the pointer.
+    static func pan(keeping point: CGPoint, in bounds: CGRect, width: Int, height: Int, from: CGFloat, to: CGFloat, pan: CGPoint) -> CGPoint {
+        let before = canvasRect(in: bounds, width: width, height: height, zoom: from, pan: pan)
+        guard before.width > 0, before.height > 0 else { return pan }
+        let spot = CGPoint(x: (point.x - before.minX) / before.width, y: (point.y - before.minY) / before.height)
+        let after = canvasRect(in: bounds, width: width, height: height, zoom: to)
+        return CGPoint(x: point.x - spot.x * after.width - after.minX, y: point.y - spot.y * after.height - after.minY)
+    }
+
     /// The source size for a clip: the media's pixels, or the canvas for
     /// text, solids and anything unprobed.
     static func sourceSize(of clip: Clip, in project: Project) -> CGSize {

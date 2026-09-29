@@ -318,3 +318,29 @@ final class CompositorTests: XCTestCase {
         XCTAssertGreaterThan(p[0] - p[2], 12)
     }
 }
+
+final class LiveOverrideTests: XCTestCase {
+    /// Dragging a picture in picture in the viewer moves the picture itself
+    /// on the next frame, before the edit is committed.
+    func testOverridesMoveTheLayerUntilCleared() {
+        let pip = VideoProperties(transform: Transform(position: Point(x: 0.75, y: 0.75), scale: 0.4))
+        let v1 = Track(kind: .video, name: "V1", clips: [Clip(id: "clip_b", content: .media(mediaID: "med_blue"), start: .zero, duration: Time(seconds: 4), video: pip)])
+        var h = CompositorHarness(smallProject(video: [v1], media: [blueMedia]))
+        h.pictures["med_blue"] = solid(0, 0, 1)
+        let overrides = LiveVideoOverrides()
+        h.overrides = overrides
+        let blue = [0, 0, 255], black = [0, 0, 0]
+        // 320x180 canvas: the PiP centre sits at (240, 135).
+        assertColor(h.render(at: Time(seconds: 1))[240, 135], blue)
+        assertColor(h.render(at: Time(seconds: 1))[80, 45], black)
+
+        var dragged = pip
+        dragged.transform.position = Point(x: 0.25, y: 0.25)
+        overrides.set(["clip_b": dragged])
+        assertColor(h.render(at: Time(seconds: 1))[80, 45], blue, "the dragged position")
+        assertColor(h.render(at: Time(seconds: 1))[240, 135], black, "not where it was")
+
+        overrides.set([:])
+        assertColor(h.render(at: Time(seconds: 1))[240, 135], blue, "back to the clip's own")
+    }
+}

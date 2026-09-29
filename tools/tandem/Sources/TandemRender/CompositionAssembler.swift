@@ -283,7 +283,7 @@ enum CompositionAssembler {
         let scene = RenderScene(
             canvas: canvas, frameDuration: frameDuration, format: context.format,
             clips: sceneClips, registry: context.effects, folder: context.folder,
-            recovery: .shared
+            recovery: .shared, overrides: context.liveOverrides
         )
         let trackIDs = videoTracks.map(\.trackID)
         let videoComposition = AVMutableVideoComposition()
