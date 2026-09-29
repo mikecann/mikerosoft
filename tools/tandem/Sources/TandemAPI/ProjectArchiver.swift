@@ -13,9 +13,10 @@ import TandemMedia
 /// be installed on this Mac. Archiving finds all of them in the open
 /// project and in the other project files beside it (versions):
 ///
-/// - media files and LUTs whose files are outside the folder (following
-///   links, so a link to a file elsewhere counts as outside) are copied to
-///   `media/<the folder they were in>/<name>` and `assets/lut/<name>`;
+/// - media files (with a Live Photo's movie) and LUTs whose files are
+///   outside the folder (following links, so a link to a file elsewhere
+///   counts as outside) are copied to `media/<the folder they were
+///   in>/<name>` and `assets/lut/<name>`;
 /// - a record-it take's `<base>.take.json` goes beside its take;
 /// - fonts titles use that don't come with macOS are copied into
 ///   `assets/font/`, which the app registers when it opens a project;
@@ -424,6 +425,10 @@ public final class ProjectArchiver: @unchecked Sendable {
         var found: [Reference] = []
         for item in project.media {
             found.append(Reference(kind: .media, stored: item.path, owner: item.id, clips: clipCounts[item.id] ?? 0))
+            // A Live Photo's movie goes with its still.
+            if let movie = item.livePhotoVideo, !movie.isEmpty {
+                found.append(Reference(kind: .media, stored: movie, owner: "\(item.id) motion clip", clips: clipCounts[item.id] ?? 0))
+            }
             for effect in item.look {
                 if let path = lutPath(effect) { found.append(Reference(kind: .lut, stored: path, owner: "\(item.id) look", clips: clipCounts[item.id] ?? 0)) }
             }
@@ -875,6 +880,11 @@ public final class ProjectArchiver: @unchecked Sendable {
                 patch["path"] = .string(path)
                 newPaths.insert(path)
                 moved.insert(item.id)
+                count += 1
+            }
+            if let movie = item.livePhotoVideo, let path = map[movie], path != movie {
+                patch["livePhotoVideo"] = .string(path)
+                newPaths.insert(path)
                 count += 1
             }
             var look = item.look

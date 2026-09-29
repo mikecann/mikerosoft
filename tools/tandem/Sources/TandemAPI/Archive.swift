@@ -48,8 +48,8 @@ public struct ArchivedFile: Codable, Equatable, Sendable {
     public var bytes: Int64
     public var sha256: String?
     public var outcome: Outcome
-    /// What uses it: media IDs, `clipID effectID` for a clip's LUT, a font
-    /// family.
+    /// What uses it: media IDs (`<id> motion clip` for a Live Photo's
+    /// movie), `clipID effectID` for a clip's LUT, a font family.
     public var usedBy: [String]
 }
 

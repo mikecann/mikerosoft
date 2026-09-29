@@ -122,6 +122,9 @@ extension AssetUseResult: ReadableResult {
         if mediaID == nil {
             if !fonts.isEmpty {
                 lines.append("Installed the font \(asset.name) (\(fonts.joined(separator: ", "))). Use it in a title's style: {\"font\": \"\(fonts[0])\"}.")
+                if referencedInPlace == true {
+                    lines.append("It stays in the shared library (\(files.joined(separator: ", "))), where every Tandem render finds it; archiving copies it into the project's assets/font/.")
+                }
                 if let owner = fontsReached {
                     lines.append(owner == "app" ? "The Tandem app has it now too." : "tandem serve has it now too.")
                 }

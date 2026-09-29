@@ -5,6 +5,7 @@ import Observation
 import TandemAPI
 import TandemAssets
 import TandemCore
+import TandemRender
 
 /// The per-user asset library, shared by every window: opened once off
 /// the main thread (with the starter set added on first run), and the
@@ -111,6 +112,9 @@ final class AssetLibraryHost {
     func open() {
         guard !opened else { return }
         opened = true
+        // Titles draw in the shared library's fonts from the first render
+        // (each one registers what's new there), not only once this opens.
+        if !Self.isTesting { ProjectFonts.libraryFolders = [SharedLibrary.locate().url(.fonts)] }
         Task.detached(priority: .userInitiated) {
             do {
                 let library = try AssetService.standard().library
@@ -213,6 +217,7 @@ final class AssetLibraryHost {
             do {
                 let scan = try await library.moveSharedLibrary(to: folder)
                 self.sharedRoot = library.sharedLibrary.root
+                ProjectFonts.libraryFolders = [library.sharedLibrary.url(.fonts)]
                 self.watchSharedLibrary()
                 self.reloadSegments()
                 self.revision += 1

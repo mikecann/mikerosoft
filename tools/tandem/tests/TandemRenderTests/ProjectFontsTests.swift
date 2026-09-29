@@ -31,6 +31,29 @@ final class ProjectFontsTests: XCTestCase {
         XCTAssertEqual(ProjectFonts.registerNew(in: media.projectFolder), [], "each file once")
     }
 
+    func testTheSharedLibrarysFontsComeWithEveryProjects() throws {
+        let media = try TestMedia()
+        let family = FontFixtures.uniqueFamily()
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-library-fonts-\(UUID().uuidString)", isDirectory: true)
+        // The library's Fonts folder, reached through a link as a library
+        // kept on another disk would be.
+        let fonts = temp.appendingPathComponent("disk/Fonts", isDirectory: true)
+        let link = temp.appendingPathComponent("Fonts", isDirectory: true)
+        let before = ProjectFonts.libraryFolders
+        ProjectFonts.libraryFolders = [link]
+        defer {
+            ProjectFonts.libraryFolders = before
+            try? FileManager.default.removeItem(at: temp)
+        }
+        XCTAssertEqual(ProjectFonts.registerNew(in: media.projectFolder), [], "no library folder yet")
+        try FontFixtures.renamed(try fontFile(), family: family, to: fonts.appendingPathComponent("\(family)/face.ttf"))
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: fonts)
+        XCTAssertEqual(ProjectFonts.registerNew(in: media.projectFolder).map(\.lastPathComponent), ["face.ttf"], "subfolders too")
+        XCTAssertTrue(ProjectFonts.isAvailable(family))
+        XCTAssertEqual(ProjectFonts.missing(for: TextContent(text: "hi", style: TextStyle(font: family)), clipID: "clip_t"), nil)
+        XCTAssertEqual(ProjectFonts.registerNew(in: media.projectFolder), [], "each file once")
+    }
+
     func testMissingFontsAreListedWithTheFix() throws {
         let project = smallProject(video: [Track(kind: .video, name: "Text", clips: [
             title("clip_a", "one", font: "Nope Sans Test"),

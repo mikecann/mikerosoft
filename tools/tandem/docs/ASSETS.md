@@ -117,9 +117,11 @@ survive the library moving; a row whose file is somewhere else now is
 described again. Licences: the nearest `tandem-licence.json` at or above a
 file covers it (one in the library's top folder for Mike's own things,
 another in `Sound effects/Envato/` for a subscription); without one a file
-is Unknown licence, and the credits say so. The app registers the fonts in
-`Fonts/` when it starts, so titles can use them without installing them for
-the whole Mac.
+is Unknown licence, and the credits say so. Fonts in `Fonts/` are
+registered by whatever renders a project (the app, `tandem serve`, a CLI
+export) along with the project's own `assets/font/`, so titles can use them
+without installing them for the whole Mac; archiving copies the ones a
+project uses into it.
 
 **Reference, don't copy.** Using a shared asset (double-click, drag,
 `tandem assets use shared:...`) adds the library's file to the project where
@@ -146,9 +148,9 @@ are used from the library too.
 **Segments.** A segment is a reusable bit of timeline (Mike's intro, outro,
 like and subscribe, comment below): a `Template` of clips with their
 offsets, the transitions between them and optional fields, plus copies of
-every file those clips play and their LUTs, beside `segment.json` in
-`Segments/<name>/`, so it keeps working whatever happens to the project it
-came from. Save one with Timeline > Save
+every file those clips play (with a Live Photo's movie) and their LUTs,
+beside `segment.json` in `Segments/<name>/`, so it keeps working whatever
+happens to the project it came from. Save one with Timeline > Save
 selection as segment… (or right-click a clip), `tandem segments save` or
 `segments_save`; they're in the Text tab under Segments. Saving again
 under the same name replaces it but keeps every file only the old version
@@ -285,7 +287,7 @@ results are Codable so the CLI and MCP can return them as JSON.
 | Description credits | `credits(for: project, in: folder).text()`, plus `warnings`; `licenceHistory(id)` for disputes |
 | Import folders | `addImportFolder(url, licence: FolderLicence.presets["envato"])`, `rescanImportFolders()`, `watchImportFolders` |
 | Shared library | `sharedLibrary`, `createSharedLibrary()`, `rescanSharedLibrary()`, `watchSharedLibrary`, `refreshChangedSharedFiles(report)`, `moveSharedLibrary(to:)`, `registerSharedFonts()`; `SharedLibrary.locate()` for other processes |
-| Fonts | `registerFonts()` at launch; a project's own `assets/font/` is registered by whatever renders it (`ProjectFonts` in TandemRender) |
+| Fonts | `registerFonts()` at launch; a project's own `assets/font/` and the shared library's `Fonts/` (`ProjectFonts.libraryFolders`) are registered by whatever renders it (`ProjectFonts` in TandemRender) |
 | Housekeeping | `prune()`, `evictUnpinnedFiles()`, `rebuildCatalogFromDisk()` |
 
 An import folder's licence note is `tandem-licence.json` in the folder

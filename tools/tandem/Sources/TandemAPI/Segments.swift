@@ -87,6 +87,8 @@ public struct StoredSegment: Equatable, Sendable {
                 let path = absolute(relative)
                 if var item = items[relative] ?? clip.media {
                     item.path = path
+                    // A Live Photo's movie, if the folder still has it.
+                    item.livePhotoVideo = item.livePhotoVideo.map(absolute).flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
                     item.look = SegmentPaths.luts(in: item.look, resolve: absolute)
                     clip.media = item
                 }
@@ -453,6 +455,11 @@ public enum SegmentMaker {
                     }
                     var copy = item
                     copy.path = try files.add(url)
+                    // A Live Photo's movie comes along, when it's there.
+                    if let movie = item.livePhotoVideo {
+                        let movieURL = folder.url(forPath: movie)
+                        copy.livePhotoVideo = FileCopier.fileInfo(movieURL) == nil ? nil : try files.add(movieURL)
+                    }
                     // A fresh ID wherever it goes: the source's may be an
                     // asset's (med_<code>), which `assets use` of that asset
                     // would then take for its own.

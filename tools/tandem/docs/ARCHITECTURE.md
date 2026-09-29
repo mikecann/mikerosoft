@@ -120,7 +120,8 @@ in the library.
 - `MediaItem.livePhotoVideo` is a Live Photo still's motion clip, the movie
   beside it, which isn't media of its own. An older build drops it on save
   and its next scan adds the movie as a video, as scans did before, so it
-  didn't need a schema version either.
+  didn't need a schema version either. It's a file the project uses like
+  `path`: archiving copies it, relink and segments carry it.
 - Keyframe times are relative to the clip start and move with the clip.
 - A text clip's `style` fields are all optional. One that's set wins over
   the clip's preset even when it's the default value (`"uppercase": false`
@@ -307,6 +308,13 @@ Text and fonts:
   font `tandem assets use` copies in while the app has the project open
   reaches the app's renders without a restart (the command also asks the
   app for its status, which registers it at once).
+- The shared library's `Fonts/` (subfolders too) is registered the same
+  way, after the project's own: the app and the CLI set
+  `ProjectFonts.libraryFolders` when they start (TandemRender doesn't know
+  where the library is), so a title in a shared font draws in the app,
+  `tandem serve` and a CLI export alike, and a font dropped into the
+  library reaches the next build. Archiving copies the ones a project uses
+  into its `assets/font/`.
 - A title whose font can't be drawn falls back to SF Pro with a warning
   naming the font and the `tandem assets use` that installs it, in the
   build's warnings (viewer, `frame`, `clip`, `export`) and in `captions`,
@@ -354,6 +362,9 @@ What counts as outside:
   file (however the library is reached: through a link to it, a library
   that is itself a link, or a library file that links to another file), the
   asset library's converted copy of one, and a segment's media;
+- a Live Photo's movie (`livePhotoVideo`), which goes where its still does
+  and is rewritten with it, so a scan of the archive still knows it's the
+  still's movie rather than a video of its own;
 - the file a `lut` effect reads (`path`), on a clip or in a media look;
 - a font a title uses (its own or its preset's) that doesn't come with macOS
   and isn't in `assets/font/`, found through Core Text, then in the shared
@@ -440,8 +451,9 @@ folder, and files that are in this Mac's shared library (a project from
 another Mac that used stickers or sounds from its library), are relinked
 straight away, and Mike is asked for a folder to search for the rest.
 `MediaRelinker` takes a file with the same name and, when the item has a
-fingerprint, the same content; `tandem relink --search <folder>` does the
-same for agents. The shared library is searched last, only for what the
+fingerprint, the same content, and a Live Photo's movie from beside the
+still it found; `tandem relink --search <folder>` does the same for
+agents. The shared library is searched last, only for what the
 project folder and the folders given didn't settle, so a file found twice
 by name elsewhere stays undecided rather than being picked from the library,
 and since nobody chose it, a file there is only taken when its content

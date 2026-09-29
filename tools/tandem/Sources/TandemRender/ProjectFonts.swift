@@ -53,19 +53,48 @@ public enum ProjectFonts {
     }
 
     private static let registry = FontRegistry()
+    private static let libraries = LibraryFontFolders()
 
-    /// Registers the font files in `assets/font/` that this process hasn't
-    /// registered yet, or that changed since. Cheap when nothing is new: a
-    /// folder listing. Returns the files it registered.
+    /// Font folders every project can use besides its own: the shared
+    /// library's `Fonts/`. TandemRender doesn't know where that is, so the
+    /// app and the CLI set it when they start. Each `registerNew(in:)`
+    /// takes in what's new there too, subfolders included, so a font
+    /// dropped into the library reaches the next render; archiving copies
+    /// the ones a project uses into its `assets/font/`.
+    public static var libraryFolders: [URL] {
+        get { libraries.folders }
+        set { libraries.folders = newValue }
+    }
+
+    /// Registers the font files in `assets/font/` (then the library
+    /// folders') that this process hasn't registered yet, or that changed
+    /// since. Cheap when nothing is new: a folder listing. Returns the
+    /// files it registered.
     @discardableResult
     public static func registerNew(in project: ProjectFolder) -> [URL] {
-        registerNew(inFolder: folder(of: project))
+        registerNew(inFolder: folder(of: project)) + libraryFolders.flatMap { registerNew(inTree: $0) }
     }
 
     /// The same for any folder of fonts.
     @discardableResult
     public static func registerNew(inFolder folder: URL) -> [URL] {
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? []
+        return register(files)
+    }
+
+    /// The same for a folder and the folders in it. The folder itself may
+    /// be a link (a library kept on another disk).
+    @discardableResult
+    public static func registerNew(inTree folder: URL) -> [URL] {
+        var files: [URL] = []
+        let walk = FileManager.default.enumerator(at: folder.resolvingSymlinksInPath(), includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey], options: [.skipsHiddenFiles, .skipsPackageDescendants])
+        while let url = walk?.nextObject() as? URL {
+            files.append(url)
+        }
+        return register(files)
+    }
+
+    private static func register(_ files: [URL]) -> [URL] {
         let added = registry.register(files.filter { extensions.contains($0.pathExtension.lowercased()) })
         // Titles drawn before the font arrived were drawn in the fallback.
         if !added.isEmpty { TextRenderer.shared.forgetDrawings() }
@@ -134,6 +163,17 @@ public enum ProjectFonts {
         }
         let words = family.lowercased().split { !$0.isLetter && !$0.isNumber }
         return "fontsource:" + words.joined(separator: "-")
+    }
+}
+
+/// `ProjectFonts.libraryFolders`, safe from any thread.
+final class LibraryFontFolders: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [URL] = []
+
+    var folders: [URL] {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }
 

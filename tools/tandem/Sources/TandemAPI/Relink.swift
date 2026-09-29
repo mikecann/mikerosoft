@@ -14,6 +14,15 @@ public enum MediaRelinker {
         public var from: String
         /// The path it gets: relative when the file is in the project folder.
         public var to: String
+        /// For a Live Photo: its movie, found beside the still.
+        public var livePhotoVideo: String?
+
+        public init(mediaID: String, from: String, to: String, livePhotoVideo: String? = nil) {
+            self.mediaID = mediaID
+            self.from = from
+            self.to = to
+            self.livePhotoVideo = livePhotoVideo
+        }
     }
 
     /// Media whose files aren't there.
@@ -50,7 +59,13 @@ public enum MediaRelinker {
                 ambiguous.append(item.path)
             }
             if let chosen {
-                found.append(Match(mediaID: item.id, from: item.path, to: storedPath(for: chosen, in: folder)))
+                // A Live Photo's movie travels with its still.
+                var movie: String?
+                if let clip = item.livePhotoVideo {
+                    let beside = chosen.deletingLastPathComponent().appendingPathComponent((clip as NSString).lastPathComponent)
+                    if FileCopier.fileInfo(beside) != nil { movie = storedPath(for: beside, in: folder) }
+                }
+                found.append(Match(mediaID: item.id, from: item.path, to: storedPath(for: chosen, in: folder), livePhotoVideo: movie))
             }
         }
         return (found, ambiguous)
@@ -101,9 +116,14 @@ public enum MediaRelinker {
         }
     }
 
-    /// The edit that points each match's media at its file.
+    /// The edit that points each match's media at its file (and a Live
+    /// Photo at its movie).
     public static func commands(for matches: [Match]) -> [EditCommand] {
-        matches.map { .updateMedia(mediaID: $0.mediaID, patch: .object(["path": .string($0.to)])) }
+        matches.map { match in
+            var patch: [String: JSONValue] = ["path": .string(match.to)]
+            if let movie = match.livePhotoVideo { patch["livePhotoVideo"] = .string(movie) }
+            return .updateMedia(mediaID: match.mediaID, patch: .object(patch))
+        }
     }
 }
 

@@ -106,7 +106,8 @@ media item and keeps the movie's path in `livePhotoVideo`; the movie isn't
 media of its own. `tandem media` shows it as `Live Photo, motion clip
 IMG_0130.mov`. Folder refreshes, the app's folder watcher and files dropped
 on the app all pair them the same way. A movie a project already had as
-media stays as it is.
+media stays as it is. Archiving, relink and segments take the movie along
+with its still.
 
 ### When the app is open
 
@@ -415,9 +416,11 @@ changed files are read), so a file dropped in is found straight away.
   Music at -31 dB with a 2 s fade out, stickers, icons and logos on
   Graphics, stock video on B-roll. The edit goes through the app when the app
   has the project open, as one undo step under your name. Fonts are
-  installed instead of placed, into the project's `assets/font/`; use their
-  name in a title's style. When the app has the project open it has the
-  font straight away too (the output says so), with no restart. A
+  installed instead of placed, into the project's `assets/font/` (a shared
+  library font stays in the library, where every render finds it, until
+  the project is archived); use their name in a title's style. When the
+  app has the project open it has the font straight away too (the output
+  says so), with no restart. A
   `fontsource:<name>` ID works without searching first, so the fix a
   missing-font warning gives can be run as it is.
 - `tandem assets fetch <id>` downloads and normalises without using it.
@@ -1383,9 +1386,10 @@ them), as are `node_modules` folders; transcripts and the converted copies
 of stickers macOS can't decode always go. Files outside
 the folder land in `media/<the folder they were in>/`, shared library files
 in `media/Tandem Library/<where they were in it>` (a segment's in
-`media/Tandem Library/Segments/<name>/`), LUTs in `assets/lut/` and fonts
-in `assets/font/` (the shared library's `Fonts/` is looked in too). Other
-`.tandem` files in the folder (versions) get the same treatment.
+`media/Tandem Library/Segments/<name>/`), a Live Photo's movie beside its
+still, LUTs in `assets/lut/` and fonts in `assets/font/` (the shared
+library's `Fonts/` is looked in too). Other `.tandem` files in the folder
+(versions) get the same treatment.
 
 Every copy is an APFS clone when it can be (instant, no extra space) and is
 checked against the original by SHA-256 when it isn't. A different file with
@@ -1418,7 +1422,8 @@ what the project knew (its fingerprint). A file with no fingerprint is taken
 when it's the only one with that name. Then it looks in this Mac's shared
 library for whatever's still missing, so a project that used stickers and
 sounds from the library on another Mac finds them here; there, only a file
-whose content matches is taken. It's one undo step.
+whose content matches is taken. A Live Photo's movie comes back with its
+still when it's beside it. It's one undo step.
 
 ### Work alongside Mike
 

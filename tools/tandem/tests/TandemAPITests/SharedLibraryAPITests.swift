@@ -684,3 +684,15 @@ final class DiscardLog: @unchecked Sendable {
 
     var urls: [URL] { lock.withLock { stored } }
 }
+
+final class SharedFontTextTests: XCTestCase {
+    func testASharedFontSaysItStaysInTheLibrary() {
+        let result = AssetUseResult(
+            asset: Asset(provider: "shared", providerID: "Fonts/TiltWarp.ttf", kind: .font, name: "Tilt Warp"),
+            mediaID: nil, files: ["/Users/mike/Movies/Tandem Library/Fonts/TiltWarp.ttf"], referencedInPlace: true,
+            role: .other, trackName: nil, gainDB: nil, at: nil, applied: nil, fonts: ["TiltWarp-Regular"], licence: nil
+        )
+        XCTAssertTrue(result.readableText.hasPrefix("Installed the font Tilt Warp"), result.readableText)
+        XCTAssertTrue(result.readableText.contains("It stays in the shared library (/Users/mike/Movies/Tandem Library/Fonts/TiltWarp.ttf)"), result.readableText)
+    }
+}

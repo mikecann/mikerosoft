@@ -152,6 +152,9 @@ isn't media of its own.
   it is.
 - Once paired, a scan skips the movie without probing it. A still whose
   movie has gone forgets it; a movie that lands after its still joins it.
+- The movie is one of the project's files: `tandem archive` copies it in
+  beside its still and points `livePhotoVideo` at the copy, relink takes
+  the movie beside the still it finds, and a saved segment copies it too.
 - Dropped on the app, a movie goes beside its still (`graphics/`, or
   `linked-media/` from another disk), with the still's name if that had to
   be numbered, and is recorded on it.

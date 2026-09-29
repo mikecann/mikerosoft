@@ -1,6 +1,8 @@
 import Foundation
 import TandemAPI
+import TandemAssets
 import TandemCore
+import TandemRender
 
 /// The `tandem` command. Each subcommand builds a service request, sends
 /// it through `ProjectClient` (to the app when it has the project open,
@@ -34,6 +36,9 @@ struct CLI {
             print(Help.overview)
             return parsed.has("help") ? 0 : 2
         }
+        // Titles can use the shared library's fonts wherever this process
+        // draws them (an export, a frame, tandem serve).
+        ProjectFonts.libraryFolders = [SharedLibrary.locate(environment: environment).url(.fonts)]
         if name == "help" {
             if let topic = parsed.positionals.first {
                 guard let command = Help.command(topic) else { return usage("There's no `\(topic)` command.", command: nil) }
