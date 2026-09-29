@@ -978,6 +978,9 @@ final class TimelineLanesView: TimelineChildView {
             }
         }
         menu.addItem(.separator())
+        menu.add("Save selection as segment…", icon: Icons.segment) {
+            NSApp.sendAction(#selector(ProjectWindowController.saveSelectionAsSegment(_:)), to: nil, from: nil)
+        }
         menu.add("Mark in and out around clip", command: .markClip) {
             model.inPoint = clip.start
             model.outPoint = clip.end

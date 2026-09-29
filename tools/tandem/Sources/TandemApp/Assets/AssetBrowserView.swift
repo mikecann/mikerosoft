@@ -397,12 +397,12 @@ private struct EmptyAssets: View {
         case .inProject: return "This project doesn't use any of these yet."
         case .all:
             switch section {
-            case .music: return "No music in the library yet. Add a folder of tracks you've licensed (Epidemic, Artlist, Envato), or generate a cue with ElevenLabs."
-            case .sfx: return "No sound effects yet. Add a folder of effects you've licensed, search online, or generate one with ElevenLabs."
-            case .broll: return "No B-roll yet. Pexels and Pixabay need a free API key in the Keychain, or add a folder of clips."
-            case .stickers, .icons: return "Nothing here yet. Search online to find more."
-            case .looks: return "No looks yet. Add a folder of .cube LUTs you've downloaded, with the licence they came under."
-            case .fonts: return "No fonts downloaded yet. Type a name and press Return to search Google Fonts."
+            case .music: return "No music in the library yet. Drop tracks into Music in your shared library (Tandem > Settings), add a folder of tracks you've licensed (Epidemic, Artlist, Envato), or generate a cue with ElevenLabs."
+            case .sfx: return "No sound effects yet. Drop them into Sound effects in your shared library, add a folder of effects you've licensed, search online, or generate one with ElevenLabs."
+            case .broll: return "No B-roll yet. Drop graphics into Graphics in your shared library; Pexels and Pixabay need a free API key in the Keychain, or add a folder of clips."
+            case .stickers, .icons: return "Nothing here yet. Drop stickers into Stickers in your shared library, or search online to find more."
+            case .looks: return "No looks yet. Drop .cube LUTs into Looks in your shared library, or add a folder of LUTs you've downloaded, with the licence they came under."
+            case .fonts: return "No fonts downloaded yet. Type a name and press Return to search Google Fonts, or drop fonts into Fonts in your shared library."
             }
         }
     }
@@ -496,6 +496,9 @@ private struct AssetActions: ViewModifier {
                 if let page = asset.pageURL {
                     Button("Open its page", systemImage: "safari") { NSWorkspace.shared.open(page) }
                 }
+                if SharedChip.shows(asset), let file = asset.files.original {
+                    Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)]) }
+                }
             }
             .help(tooltip)
     }
@@ -507,7 +510,11 @@ private struct AssetActions: ViewModifier {
         if let credit = asset.creditLine { lines.append("Credit: \(credit)") }
         let details = AssetBrowsing.details(asset)
         if !details.isEmpty { lines.append(details) }
-        lines.append(asset.state >= .original ? "Downloaded" : "Downloads when you use it")
+        if SharedChip.shows(asset) {
+            lines.append("In your shared library: projects use it where it is, and archiving copies it in")
+        } else {
+            lines.append(asset.state >= .original ? "Downloaded" : "Downloads when you use it")
+        }
         switch asset.kind {
         case .lut: lines.append("Double-click to grade the selected clips, or drag onto a clip")
         case .font: lines.append("Double-click to set the selected titles in it, or drag onto a title")
@@ -555,6 +562,9 @@ private struct AssetTile: View {
                 }
             }
             .frame(width: 82, height: height)
+            .overlay(alignment: .bottomLeading) {
+                if SharedChip.shows(asset) { SharedChip().padding(4) }
+            }
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(hovering ? Theme.textFaint.color : .clear, lineWidth: 1))
             .onContinuousHover { phase in
                 switch phase {
@@ -641,6 +651,7 @@ struct AssetAudioRow: View {
                     .foregroundStyle(Theme.text.color)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if SharedChip.shows(asset) { SharedChip() }
                 Spacer(minLength: 4)
                 if let busy = host.busy[asset.id] {
                     Text(busy).font(.ui(10.5)).foregroundStyle(Theme.amber.color)
@@ -717,6 +728,7 @@ private struct AssetFontRow: View {
                     .truncationMode(.tail)
             }
             Spacer(minLength: 4)
+            if SharedChip.shows(asset) { SharedChip() }
             if let busy = host.busy[asset.id] {
                 Text(busy).font(.ui(10.5)).foregroundStyle(Theme.amber.color)
             }
@@ -800,5 +812,25 @@ private struct BusyOverlay: View {
                 Text(text).font(.ui(10)).foregroundStyle(Theme.textSecondary.color)
             }
         }
+    }
+}
+
+/// The chip on a shared library asset: it's Mike's own file, used where
+/// it is rather than copied into the project.
+struct SharedChip: View {
+    static func shows(_ asset: Asset) -> Bool {
+        asset.provider == SharedLibraryProvider.providerID
+    }
+
+    var body: some View {
+        Text("Shared library")
+            .font(.ui(9, .semibold))
+            .foregroundStyle(Theme.textStrong.color)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(Theme.badge.color))
+            .overlay(Capsule().stroke(Theme.controlBorder.color, lineWidth: 1))
     }
 }

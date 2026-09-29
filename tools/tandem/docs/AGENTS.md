@@ -62,6 +62,9 @@ tandem assets search "<text>" [--kind sfx] [--provider id] [--online] [--limit n
 tandem assets use <id> [--at T] [--duration T]   copy into the project, add, place
 tandem assets fetch <id>    tandem assets credits [--optional]
 tandem assets generate sfx|music "<prompt>" [--duration s]    tandem assets install-starter
+tandem segments list                             saved segments in the shared library
+tandem segments save "<name>" --clips <id,id> | --from T --to T [--field <clip>=<label>]... [--replace]
+tandem segments insert "<name>" --at T [--value key=text]... [--mode overwrite]
 ```
 
 `tandem help <command>` explains each one.
@@ -123,7 +126,9 @@ The tools mirror the operations: `status`, `timeline`, `media`,
 `transcript`, `search`, `pauses`, `tighten`, `apply`, `undo`, `redo`,
 `history`, `validate`, `frame`, `screenshot`, `clip`, `export`, `archive`,
 `relink`, `loudness`, `watch` and `effects`, plus the asset library's `assets_search`,
-`assets_use`, `assets_credits`, `assets_generate` and `assets_providers`.
+`assets_use`, `assets_credits`, `assets_generate` and `assets_providers`,
+and the saved segments' `segments_list`, `segments_save` and
+`segments_insert`.
 Tool results are readable text; pass `json: true` for the raw JSON. `frame` and `screenshot` return the picture as an image.
 The `apply` tool's input schema describes every edit command. The server
 speaks both MCP revisions in use: the `initialize` handshake (2025-11-25 and
@@ -331,6 +336,19 @@ browser. Every asset records its licence, and every use in a project is
 recorded, which is what the description credits are built from.
 `docs/ASSETS.md` explains the sources and licences.
 
+Mike's own reusable things live in his **shared library**, the folder
+`~/Movies/Tandem Library` (Stickers, Graphics, Sound effects, Music, Looks,
+Fonts, Segments). Its files are the `shared` source, with IDs that are
+their path in the folder: `shared:Stickers/Star.mov`, `shared:Sound
+effects/Whoosh.wav`. Unlike every other source, a shared asset isn't copied
+into the project when it's used: the project refers to the library's file
+where it is (absolute path), so a sticker Mike improves in the library
+improves every video that uses it. Archiving the project copies those files
+in (see [Archive a finished video](#archive-a-finished-video)).
+`tandem assets search --provider shared` lists them. The app watches the
+folder, and the CLI and MCP look at it again before they search (only
+changed files are read), so a file dropped in is found straight away.
+
 - `tandem assets providers` (MCP `assets_providers`) lists the sources and
   whether each works now, with what to fix: a missing key, or an ElevenLabs
   key without the `sound_generation` permission (music still works then).
@@ -343,8 +361,9 @@ recorded, which is what the description credits are built from.
   logo, lut, title and transition. Asset IDs look like `noto:1f680`,
   `svgl:convex` or `import:sfx-3fa2c1/Whoosh_03.wav`.
 - `tandem assets use <id>` (`assets_use`) downloads and normalises the asset
-  if needed, copies it into the project's `assets/<kind>/` folder, records
-  the use and adds it to the project's media. With `--at 1:23` it's also
+  if needed, copies it into the project's `assets/<kind>/` folder (a
+  `shared:` asset is used where it is instead, and the result says
+  `referencedInPlace`), records the use and adds it to the project's media. With `--at 1:23` it's also
   placed on the track for its kind: sound effects on SFX at -15 dB, music on
   Music at -31 dB with a 2 s fade out, stickers, icons and logos on
   Graphics, stock video on B-roll. The edit goes through the app when the app
@@ -365,6 +384,9 @@ recorded, which is what the description credits are built from.
 
 `$TANDEM_ASSETS_ROOT` moves the library, and `TANDEM_ASSETS_OFFLINE=1`
 keeps it off the network and out of the Keychain (for tests, or a flight).
+`$TANDEM_LIBRARY` moves the shared library for one command; with
+`$TANDEM_ASSETS_ROOT` set and no `$TANDEM_LIBRARY`, the shared library is
+`Tandem Library` inside that root, so tests never touch the real one.
 
 ## Edit command reference
 
@@ -540,13 +562,23 @@ split, follow tracks move).
 
 #### insertTemplate
 
-Expands a template (a section card, Like and Subscribe, Comment Below) into
-linked clips at a time, filling `{{field}}` placeholders from `values`.
-Templates come from packs as JSON. Media a template uses must already be in
-the project, matched by path.
+Expands a template (a section card, Like and Subscribe, Comment Below, a
+saved segment) into linked clips at a time, filling `{{field}}`
+placeholders from `values`. Templates come from packs as JSON. Media a
+template uses is matched by path (`mediaPath`); a clip that carries its
+media item under `media` adds it when the project has nothing at that path
+yet, and reuses what's there otherwise. Saved segments carry theirs, which
+is how `tandem segments insert` works; without one, the file must already
+be in the project.
 
 ```json
 {"insertTemplate": {"template": {"id": "sectionCard", "name": "Section card", "duration": 3, "fields": [{"key": "title", "label": "Title"}], "clips": [{"track": "Text", "clip": {"content": {"text": {"text": "{{title}}", "preset": "sectionHeader"}}, "duration": 3}}]}, "at": 60, "values": {"title": "CURSOR DOCS"}}}
+```
+
+A clip that carries its file:
+
+```json
+{"insertTemplate": {"template": {"id": "segment:Sting", "name": "Sting", "duration": 1.2, "clips": [{"track": "SFX", "trackKind": "audio", "clip": {"duration": 1.2, "audio": {"gainDB": -15}}, "mediaPath": "/Users/m5-mike/Movies/Tandem Library/Segments/Sting/sting.wav", "media": {"path": "sting.wav", "kind": "audio", "role": "sfx", "duration": 1.2, "hasAudio": true}}]}, "at": 42, "mode": "overwrite"}}
 ```
 
 ### Cutting and trimming
@@ -1134,12 +1166,63 @@ removing media the cut no longer uses. Sort out everything under "Before
 publishing" first. `--optional` adds courtesy credits nobody requires
 (Pexels creators).
 
+### Reuse an intro, an outro or a call to action (segments)
+
+A segment is a bit of timeline saved to reuse: a group of clips with their
+offsets, settings, effects and keyframes, saved into the shared library's
+`Segments/<name>/` with copies of the files they play. Mike saves them from
+the timeline (Timeline > Save selection as segment…); agents do the same
+from clip IDs or a range:
+
+```bash
+tandem timeline --from 0:00 --to 0:08          # find the intro's clips
+tandem segments save "Intro" --clips clip_card,clip_title,clip_whoosh --field clip_title=Title
+tandem segments save "Outro" --from 10:02 --to 10:15    # every clip wholly inside
+tandem segments list
+```
+
+`--clips` takes exactly those clips (a linked partner isn't added, so name
+the camera's sound too if it should come). `--field clip=Label` makes a
+title's words a field: they're asked for on insert, and the words it has now
+are the default. A `{{key}}` already in a title is a field too. Saving under
+a name that's taken fails unless `--replace` (the old one goes to the
+Trash). Transitions between the clips aren't kept yet, and saving says so.
+
+Then put one on the timeline, as one undo step:
+
+```bash
+tandem segments insert "Intro" --at 0 --value title="DECISION MODELS"
+tandem segments insert "Like and subscribe" --at 4:12 --mode overwrite
+```
+
+Each clip goes on the track with the same name and kind (made if the
+project hasn't one), at the same offset, linked to the rest. The segment's
+files are added to the project's media where they are in the library (no
+copy), and inserting again reuses them; archiving the project copies them
+in. `--mode` is `place` (the default: fails where a track is taken),
+`overwrite` or `insert` (pushes later clips right). In MCP:
+`segments_insert {"name": "Intro", "at": 0, "values": {"title": "..."}}`.
+
+On disk a segment is plain JSON beside its files:
+
+```
+Tandem Library/Segments/Intro/
+  segment.json      {"version": 1, "name": "Intro", "template": {...}, "media": [...], "savedFrom": "Decision Models", "notes": []}
+  card.mov          the files its clips play, named as they were
+  whoosh.wav
+  warm.cube         and the looks they use
+```
+
+`template` is an `insertTemplate` template whose `mediaPath`s and LUT paths
+are relative to the folder; `media` holds the media items for those files.
+
 ### Archive a finished video
 
 When a video's done it moves to Bruce, Mike's other Mac, which keeps the
 archive. A project there has to open with nothing missing, but projects use
-files from outside their folder: an import's absolute paths, a sound from
-another video's folder, a LUT, a font installed only on this Mac. Look first:
+files from outside their folder: stickers, sounds, looks and segments from
+the shared library, an import's absolute paths, a sound from another
+video's folder, a LUT, a font installed only on this Mac. Look first:
 
 ```bash
 tandem archive --dry-run
@@ -1175,9 +1258,11 @@ path relative, so it opens anywhere. Proxies, mattes, thumbnails and
 isolated voice are left out (Tandem makes them again; `--with-cache` keeps
 them), as are `node_modules` folders; transcripts and the converted copies
 of stickers macOS can't decode always go. Files outside
-the folder land in `media/<the folder they were in>/`, LUTs in `assets/lut/`
-and fonts in `assets/font/`. Other `.tandem` files in the folder (versions)
-get the same treatment.
+the folder land in `media/<the folder they were in>/`, shared library files
+in `media/Tandem Library/<where they were in it>` (a segment's in
+`media/Tandem Library/Segments/<name>/`), LUTs in `assets/lut/` and fonts
+in `assets/font/` (the shared library's `Fonts/` is looked in too). Other
+`.tandem` files in the folder (versions) get the same treatment.
 
 Every copy is an APFS clone when it can be (instant, no extra space) and is
 checked against the original by SHA-256 when it isn't. A different file with
@@ -1207,7 +1292,9 @@ tandem relink --search "/Volumes/CannMedia/decision-models"
 It looks in the project folder and each `--search` folder (subfolders too)
 for a file with the same name, and takes it only when its content matches
 what the project knew (its fingerprint). A file with no fingerprint is taken
-when it's the only one with that name. It's one undo step.
+when it's the only one with that name. Then it looks in this Mac's shared
+library for whatever's still missing, so a project that used stickers and
+sounds from the library on another Mac finds them here. It's one undo step.
 
 ### Work alongside Mike
 
@@ -1251,8 +1338,9 @@ Output paths given to the API are absolute or relative to the project
 folder; the CLI makes them absolute from where you run it.
 
 The asset library isn't a project operation, so it has no HTTP endpoint;
-the CLI and MCP open the library themselves, and only `use` and `credits`
-reach the project (through the app's API when it's open).
+the CLI and MCP open the library themselves, and only `use`, `credits` and
+the segment `save` and `insert` reach the project (through the app's API
+when it's open).
 
 | Asset operation | CLI | MCP tool |
 | --- | --- | --- |
@@ -1263,6 +1351,9 @@ reach the project (through the app's API when it's open).
 | credits | `tandem assets credits [--optional]` | `assets_credits` |
 | generate | `tandem assets generate sfx or music "<prompt>"` | `assets_generate` |
 | install-starter | `tandem assets install-starter` | |
+| list segments | `tandem segments list` | `segments_list` |
+| save a segment | `tandem segments save "<name>" --clips <ids>` or `--from --to` | `segments_save` |
+| insert a segment | `tandem segments insert "<name>" --at <time>` | `segments_insert` |
 
 ## Troubleshooting
 
@@ -1294,3 +1385,12 @@ reach the project (through the app's API when it's open).
 - **"The copy of ... didn't match the original"**: a copy failed its
   checksum and was thrown away, and nothing in the project changed. Run it
   again; if it keeps failing, the destination disk is suspect.
+- **"There's already a segment called ..."**: pick another name, or pass
+  `--replace` (`replace: true`) to save over it; the old one goes to the
+  Trash.
+- **"... is missing ... from .../Segments/..., so it wasn't inserted"**: a
+  file was deleted from the segment's folder. Put it back, or save the
+  segment again from a project that has it.
+- **"There's no shared library at ... yet"**: the app makes
+  `~/Movies/Tandem Library` the first time it opens after installing, and
+  `tandem segments save` makes it too.

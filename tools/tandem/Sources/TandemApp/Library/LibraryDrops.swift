@@ -83,8 +83,9 @@ enum TitleSamples {
 enum BuiltInTemplates {
     static let all: [Template] = [sectionCard, likeAndSubscribe, commentBelow]
 
+    /// A built-in template, or a saved segment (`segment:<folder>`).
     static func template(_ id: String) -> Template? {
-        all.first { $0.id == id }
+        all.first { $0.id == id } ?? SegmentShelf.shared.template(id)
     }
 
     /// A dark card behind a two-line section header.

@@ -14,6 +14,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     var onClose: ((ProjectWindowController) -> Void)?
     /// File > Archive project…, while its sheet is up.
     private var archiveSheet: ArchiveSheetController?
+    /// Timeline > Save selection as segment…, while its sheet is up.
+    private var segmentSheet: SaveSegmentSheetController?
 
     init(model: EditorModel, keymap: Keymap, frame: NSRect? = nil) {
         self.model = model
@@ -103,6 +105,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(revealProject(_:)) { return true }
         if item.action == #selector(archiveProject(_:)) { return archiveSheet == nil }
+        if item.action == #selector(saveSelectionAsSegment(_:)) { return segmentSheet == nil && !model.selection.isEmpty }
         guard let command = MainMenu.command(of: item) else { return true }
         switch command {
         case .undo:
@@ -138,6 +141,30 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         let sheet = ArchiveSheetController(model: sheetModel, parent: window)
         sheet.onDismiss = { [weak self] in self?.archiveSheet = nil }
         archiveSheet = sheet
+        sheet.present()
+    }
+
+    /// Opens the sheet that saves the selected clips as a segment in the
+    /// shared library (see `SaveSegmentSheet.swift`).
+    @objc func saveSelectionAsSegment(_ sender: Any?) {
+        guard segmentSheet == nil, let window, window.attachedSheet == nil else { return }
+        let ids = TimelineEdits.ordered(model.selection, in: model.project)
+        guard !ids.isEmpty else {
+            model.show(.info, "Select the clips to save as a segment first.")
+            return
+        }
+        let host = AssetLibraryHost.shared
+        let library = host.library?.sharedLibrary ?? SharedLibrary.locate()
+        let sheetModel = SaveSegmentModel(project: model.project, folder: model.folder, clipIDs: ids, library: library)
+        sheetModel.onSaved = { [weak self] stored in
+            host.reloadSegments()
+            var message = "Saved \(stored.name) to the shared library's Segments. It's in the Text tab under Segments."
+            if let note = stored.segment.notes.first { message += " \(note)" }
+            self?.model.show(.info, message)
+        }
+        let sheet = SaveSegmentSheetController(model: sheetModel, parent: window)
+        sheet.onDismiss = { [weak self] in self?.segmentSheet = nil }
+        segmentSheet = sheet
         sheet.present()
     }
 

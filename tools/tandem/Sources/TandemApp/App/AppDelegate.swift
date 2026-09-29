@@ -241,6 +241,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         return command == .newProject || command == .openProject
     }
 
+    /// Tandem > Settings…: where the shared library is.
+    @objc func showSettings(_ sender: Any?) {
+        SettingsWindowController.show()
+    }
+
     @objc func showKeymapFile(_ sender: Any?) {
         let url = KeymapStore.userKeymapURL
         if !FileManager.default.fileExists(atPath: url.path) {

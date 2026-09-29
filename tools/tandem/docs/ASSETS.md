@@ -37,6 +37,7 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 
 | Source | Kind | Access | Licence | V1 |
 | --- | --- | --- | --- | --- |
+| Shared library | anything, plus saved segments | Mike's own folder, `~/Movies/Tandem Library`, watched; used where it is | the nearest `tandem-licence.json` above a file | yes |
 | Import folders | anything | watched folders, one per library, with a licence note | per folder | yes |
 | ElevenLabs sound effects | SFX, generated | `POST /v1/sound-generation`, key in Keychain service `elevenlabs` (needs the `sound_generation` permission turned on) | commercial on paid plans | yes |
 | ElevenLabs music | music, generated | `POST /v1/music` | commercial on paid plans | yes |
@@ -68,34 +69,117 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 ~/Library/Caches/Tandem/AssetPreviews/     size-capped, least recently used goes first
 ```
 
-Originals are pinned while favourited or used in a project. Using an asset in
-a project copies it into the project's `assets/` folder so projects stay
-self-contained. A different file already there under the same name (a copy
-Mike reworked, or an older version the timeline still plays) is never
-replaced: the new copy goes beside it.
+Originals are pinned while favourited or used in a project. Using a
+downloaded, generated or import folder asset in a project copies it into the
+project's `assets/` folder so projects stay self-contained. A different file
+already there under the same name (a copy Mike reworked, or an older version
+the timeline still plays) is never replaced: the new copy goes beside it.
+Shared library assets are the exception: they're used where they are (see
+below).
+
+## The shared library
+
+One visible folder on this Mac for everything Mike reuses across videos:
+`~/Movies/Tandem Library` (Backblaze backs it up with the rest of the Mac).
+Tandem > Settings… moves it; the choice is `sharedLibrary` in the asset
+library's `settings.json`, and `$TANDEM_LIBRARY` moves it for one process.
+An asset library anywhere other than the standard place (tests,
+`$TANDEM_ASSETS_ROOT`) keeps its shared library inside itself, `<root>/Tandem
+Library`, so nothing but the app touches the real one. The app makes the
+folder the first time it opens after installing; opening the library
+(the CLI, MCP, tests) never does.
+
+```
+~/Movies/Tandem Library/
+  README.txt                what the folder is for
+  Stickers/                 animated stickers: HEVC with alpha, WebM, GIF, WebP, Lottie
+  Graphics/                 logos, lower thirds, overlays, stills (PNG, JPEG, SVG, MOV)
+  Sound effects/
+  Music/
+  Looks/                    colour looks as .cube LUTs
+  Fonts/                    TTF, OTF, TTC for titles
+  Segments/<name>/          saved segments: segment.json and the media they play
+```
+
+Each folder has a README. Tandem never writes over one Mike edited.
+
+**How it's indexed.** `SharedLibraryProvider` (source `shared`, the "Shared
+library" chip) indexes the folder with the import folder machinery and
+watches it with FSEvents, so a file dropped in shows up in its tab within a
+second or so, searchable, with its thumbnail (made as its tile comes into
+view) or waveform. A file's folder says what it is: anything in Music is
+music however short, sounds in Sound effects are SFX, pictures in Stickers
+are stickers, pictures in Graphics are overlays (logos when the name says
+so; SVGs by their name), LUTs in Looks and fonts in Fonts. Subfolder names
+become search words. `Segments/` and the READMEs aren't indexed. Asset IDs
+are the path inside the library (`shared:Stickers/Party/Dance.gif`), so they
+survive the library moving; a row whose file is somewhere else now is
+described again. Licences: the nearest `tandem-licence.json` at or above a
+file covers it (one in the library's top folder for Mike's own things,
+another in `Sound effects/Envato/` for a subscription); without one a file
+is Unknown licence, and the credits say so. The app registers the fonts in
+`Fonts/` when it starts, so titles can use them without installing them for
+the whole Mac.
+
+**Reference, don't copy.** Using a shared asset (double-click, drag,
+`tandem assets use shared:...`) adds the library's file to the project where
+it is, by its absolute path, and records the use for the credits. Nothing is
+copied into `assets/`, so improving a sticker or re-exporting an intro in
+the library improves every project that uses it the next time it plays or
+renders. Files a project can't play as they are (WebM, Lottie, SVG, TIFF,
+FLAC, Ogg, animated GIF, WebP and PNG, QuickTime Animation) play from the
+library's converted copy in `~/Library/Application Support/Tandem/Assets/
+shared/<file>/`, which the watcher makes again when the file changes and a
+project uses it (`refreshChangedSharedFiles`). Audio is measured for
+loudness and a waveform but never copied to a 48 kHz WAV; LUTs and fonts
+are used from the library too.
+
+| Where the asset comes from | Using it in a project |
+| --- | --- |
+| Shared library (`shared:`) | referenced where it is; archiving copies it in |
+| Import folder (`import:`) | copied into `assets/<kind>/` |
+| Downloaded or generated (Noto, Iconify, SVGL, Fontsource, Pexels, Pixabay, ElevenLabs) | copied into `assets/<kind>/` |
+
+**Segments.** A segment is a reusable bit of timeline (Mike's intro, outro,
+like and subscribe, comment below): a `Template` of clips with their offsets
+and optional fields, plus copies of every file those clips play and their
+LUTs, beside `segment.json` in `Segments/<name>/`, so it keeps working
+whatever happens to the project it came from. Save one with Timeline > Save
+selection as segment… (or right-click a clip), `tandem segments save` or
+`segments_save`; they're in the Text tab under Segments. Inserting one is a
+single `insertTemplate` whose media clips carry their media items, pointing
+at the files in the segment's folder, so a project that lacks them gets them
+added and one that has them reuses them. See AGENTS.md for the commands.
 
 ## Shared files and archived projects
 
-The library is the shared, global folder: stickers, sounds, music, LUTs,
-fonts, icons and logos live there once for every project, and Mike's own
-collections join it as import folders (`addImportFolder`). Effects, title
-styles and transitions are data built into Tandem (packs later), so a
-project never needs their files.
+Effects, title styles and transitions are data built into Tandem (packs
+later), so a project never needs their files. A project can still end up
+using files from outside its folder: the shared library's files and the
+converted copies of them, a segment's media, an import's absolute paths, a
+sound from another video's folder, a LUT picked from Downloads, a font a
+title names that's only installed on this Mac. Archiving (File > Archive
+project…, `tandem archive`, see ARCHITECTURE.md) copies all of those into
+the project folder and points the project at the copies, so the folder opens
+on another Mac (Bruce) with nothing missing:
 
-A project can still end up using files from outside its folder: an import's
-absolute paths, a sound from another video's folder, a LUT picked from
-Downloads, a library file a project referred to directly, a font a title
-names that's only installed on this Mac. Archiving (File > Archive project…,
-`tandem archive`, see ARCHITECTURE.md) copies all of those into the project
-folder, media into `media/<the folder it was in>/`, LUTs into
-`assets/lut/`, fonts into `assets/font/`, and points the project at the
-copies, so the folder opens on another Mac (Bruce) with nothing missing.
+- shared library files into `media/Tandem Library/<where they were in it>`
+  (`media/Tandem Library/Stickers/Star.mov`, `media/Tandem Library/Segments/
+  Intro/sting.wav`), and the converted copy of one beside where its original
+  would go, named after it (`media/Tandem Library/Stickers/Spin.mov` for
+  `Stickers/Spin.webm`);
+- other media into `media/<the folder it was in>/`;
+- LUTs into `assets/lut/` and fonts into `assets/font/`.
+
 With `--to <folder>` it writes a standalone copy of the whole folder there
 instead. Fonts are looked for with Core Text first (fonts in
-`/System/Library` come with every Mac and aren't copied), then among the
-library's downloaded fonts, which the CLI doesn't register. `archive.json`
-records where each file came from, so the licence trail (the catalogue's
-usage and licence tables) can still be followed from an archived copy.
+`/System/Library` come with every Mac and aren't copied), then in the shared
+library's `Fonts/` and among the library's downloaded fonts, which the CLI
+doesn't register. `archive.json` records where each file came from, so the
+licence trail (the catalogue's usage and licence tables) can still be
+followed from an archived copy. A project opened on another Mac without
+being archived finds its shared files again by relinking: `tandem relink`
+and the app look in that Mac's shared library after the project folder.
 
 ## Normalising on import (tested on this Mac)
 
@@ -135,7 +219,14 @@ usage and licence tables) can still be followed from an archived copy.
 
 - Left rail: Music, SFX, Stickers, Overlays and B-roll, Titles, Transitions,
   Effects, LUTs, Fonts, Icons and logos. Each has Favourites, Recently used,
-  Downloaded and In this project. Source chips across the top.
+  Downloaded and In this project. Source chips across the top, with Shared
+  library first; shared assets carry a "Shared library" chip of their own.
+- The Text tab's Segments lists the shared library's saved segments as
+  sketches of their tracks. Segments sit with the Text tab's templates, not
+  the Graphics tab, because they are templates: a group of clips that go in
+  together, linked, often with words that change, and the built-in Like and
+  Subscribe and Comment Below templates they generalise are already there.
+  The Graphics tab is for single files placed one at a time.
 - Filters: duration, BPM, mood, has alpha, and licence (no credit, credit
   needed, subscription, AI).
 - Tiles: hover-scrub for video and Lottie, audio plays from the hovered point
@@ -183,6 +274,7 @@ results are Codable so the CLI and MCP can return them as JSON.
 | Use in a project | `use(id, in:projectID:)` gives an `AssetPlacement`; `editCommands(at:in:)` adds and places it |
 | Description credits | `credits(for: project, in: folder).text()`, plus `warnings`; `licenceHistory(id)` for disputes |
 | Import folders | `addImportFolder(url, licence: FolderLicence.presets["envato"])`, `rescanImportFolders()`, `watchImportFolders` |
+| Shared library | `sharedLibrary`, `createSharedLibrary()`, `rescanSharedLibrary()`, `watchSharedLibrary`, `refreshChangedSharedFiles(report)`, `moveSharedLibrary(to:)`, `registerSharedFonts()`; `SharedLibrary.locate()` for other processes |
 | Fonts | `registerFonts()` at launch, `AssetLibrary.registerFonts(in: project)` on open |
 | Housekeeping | `prune()`, `evictUnpinnedFiles()`, `rebuildCatalogFromDisk()` |
 

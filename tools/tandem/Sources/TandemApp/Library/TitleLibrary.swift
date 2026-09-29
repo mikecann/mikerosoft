@@ -4,9 +4,10 @@ import TandemCore
 import TandemRender
 
 /// The Text tab: title styles from the render module's presets,
-/// templates (a section card, calls to action) and fonts from the asset
-/// library. Double-click to add at the playhead, or drag to the timeline;
-/// a font goes on the selected titles, or the title it's dropped on.
+/// templates (a section card, calls to action), saved segments from the
+/// shared library and fonts from the asset library. Double-click to add at
+/// the playhead, or drag to the timeline; a font goes on the selected
+/// titles, or the title it's dropped on.
 struct TitleLibrary: View {
     let model: EditorModel
     @State private var showTemplates = false
@@ -15,6 +16,8 @@ struct TitleLibrary: View {
     var body: some View {
         if AssetLibraryHost.shared.fontsShown {
             AssetBrowser(model: model, sections: [.fonts], section: .constant(.fonts), tabs: AnyView(tabs(count: nil)))
+        } else if AssetLibraryHost.shared.segmentsShown {
+            SegmentLibrary(model: model, tabs: AnyView(tabs(count: AssetLibraryHost.shared.segments.count)))
         } else {
             builtIn
         }
@@ -23,15 +26,24 @@ struct TitleLibrary: View {
     private func tabs(count: Int?) -> some View {
         let host = AssetLibraryHost.shared
         return HStack(spacing: 16) {
-            SubTab(title: "Titles", selected: !host.fontsShown && !showTemplates) {
+            SubTab(title: "Titles", selected: !host.fontsShown && !host.segmentsShown && !showTemplates) {
                 host.fontsShown = false
+                host.segmentsShown = false
                 showTemplates = false
             }
-            SubTab(title: "Templates", selected: !host.fontsShown && showTemplates) {
+            SubTab(title: "Templates", selected: !host.fontsShown && !host.segmentsShown && showTemplates) {
                 host.fontsShown = false
+                host.segmentsShown = false
                 showTemplates = true
             }
-            SubTab(title: "Fonts", selected: host.fontsShown) { host.fontsShown = true }
+            SubTab(title: "Segments", selected: host.segmentsShown) {
+                host.fontsShown = false
+                host.segmentsShown = true
+            }
+            SubTab(title: "Fonts", selected: host.fontsShown) {
+                host.segmentsShown = false
+                host.fontsShown = true
+            }
             Spacer(minLength: 4)
             if let count {
                 Text(verbatim: String(count))

@@ -35,7 +35,7 @@ change the code and the tests with it.
 | `TandemAPI` | `ProjectSession`, the service (status, timeline, apply, frame, clip, export...), local HTTP server, MCP tool definitions | Core, Media, Render |
 | `TandemApp` | The macOS app (SwiftUI shell, AppKit timeline and viewer) | everything |
 | `TandemCLI` | The `tandem` command, including `tandem mcp` and `tandem export` | Core, Media, Render, API |
-| `TandemAssets` | Asset library: catalogue, providers, normalising on import, copying into projects, credits (see ASSETS.md) | Core, Media, AVFoundation, ImageIO, Core Text, Lottie |
+| `TandemAssets` | Asset library: catalogue, providers, normalising on import, copying into projects, credits, the shared library folder (see ASSETS.md) | Core, Media, AVFoundation, ImageIO, Core Text, Lottie |
 
 Only `TandemApp` imports AppKit or SwiftUI. One exception: the asset
 library's SVG rasteriser uses `NSImage`, the only SVG renderer macOS has,
@@ -55,6 +55,7 @@ until the project is archived (see Archiving).
   broll/ music/ sfx/ graphics/
   assets/                  library assets in use (assets/<kind>/), and LUTs and fonts
   media/                   files an archive brought in from outside the folder
+    Tandem Library/        ...from the shared library, where they were in it
   archive.json             where those came from, once the project is archived
   exports/                 renders, each with a .tandem snapshot beside it
   .tandem/
@@ -67,6 +68,30 @@ until the project is archived (see Archiving).
 
 Versions are separate files (`Video v2.tandem`), made with Save As. There are
 no forks or branches inside a project.
+
+## Shared library
+
+Things every video reuses live once, in one visible folder on this Mac:
+`~/Movies/Tandem Library` (Settings moves it; `SharedLibrary` in
+TandemAssets knows where it is), with `Stickers`, `Graphics`, `Sound
+effects`, `Music`, `Looks`, `Fonts` and `Segments` folders. It's the asset
+library's `shared` source, watched live (ASSETS.md has how files are
+indexed). The rule that matters here: **a project refers to a shared file
+where it is**, by its absolute path, instead of copying it into the project
+folder, so changing the file in the library changes it in every project that
+uses it. Files a project can't play as they are play from the asset
+library's converted copy, which is made again when the file changes.
+Everything else from the asset library (downloads, generated sounds, import
+folders) is copied into `assets/` as before. Archiving is what makes a
+project that uses the shared library standalone.
+
+A segment (`Segments/<name>/segment.json`, see AGENTS.md) is a `Template`
+plus copies of the files its clips play, so it stands on its own in the
+library. A `TemplateClip` can carry the `MediaItem` its file needs
+(`media`); `insertTemplate` adds it when the project has nothing at that
+path yet and reuses what's there otherwise. Inserting a segment is one
+`insertTemplate` whose files are the segment's own, where they are in the
+library.
 
 ## Model conventions
 
@@ -246,7 +271,9 @@ itself.
 Operations: `status`, `media`, `transcript`, `search`, `timeline`, `apply`,
 `undo`, `redo`, `frame`, `screenshot`, `clip`, `export`, `loudness`,
 `validate`, `watch`, `archive`, `relink`. `tandem mcp` exposes the same
-operations as MCP tools over stdio. Every edit an agent makes shows up in the
+operations as MCP tools over stdio, plus the asset library's and the
+segments' (`segments_list`, `segments_save`, `segments_insert`), which work
+on Mike's per-user library and reach the project through the same client. Every edit an agent makes shows up in the
 app's activity feed and undo menu under the agent's name.
 
 ## Archiving
@@ -263,11 +290,14 @@ the open project and every other `.tandem` file in the folder (versions).
 What counts as outside:
 
 - a media file whose real path (links followed) isn't in the folder, which
-  includes a link in the folder to a file somewhere else;
+  includes a link in the folder to a file somewhere else, a shared library
+  file (however the library is reached: through a link to it, a library
+  that is itself a link, or a library file that links to another file), the
+  asset library's converted copy of one, and a segment's media;
 - the file a `lut` effect reads (`path`), on a clip or in a media look;
 - a font a title uses (its own or its preset's) that doesn't come with macOS
-  and isn't in `assets/font/`, found through Core Text and then in the asset
-  library's downloaded fonts;
+  and isn't in `assets/font/`, found through Core Text, then in the shared
+  library's `Fonts/`, then in the asset library's downloaded fonts;
 - a record-it take's `<base>.take.json`, which goes with its take.
 
 A reference to a file inside the folder written as an absolute path (or
@@ -278,7 +308,14 @@ Where files go: `media/<the folder it was in>/<name>` (a take's files and
 sidecar stay together, and `music/` or `sfx/` still say what's inside),
 `assets/lut/<name>` and `assets/font/<name>`, which the app registers when it
 opens a project. A file keeps the name the project used, even when that was
-a link to a file called something else.
+a link to a file called something else. Shared library files keep their
+place in the library under `media/Tandem Library/` (`media/Tandem Library/
+Stickers/Star.mov`, `media/Tandem Library/Segments/Intro/sting.wav`), and
+the converted copy of one goes where its original would, named after it
+(`media/Tandem Library/Stickers/Spin.mov` for `Stickers/Spin.webm`), found
+through the `meta.json` beside the copy. `ArchiveOptions.sharedLibrary` and
+`assetsRoot` say where those are; the service finds them the way the rest of
+Tandem does (`SharedLibrary.locate`).
 
 Two modes:
 
@@ -338,10 +375,14 @@ Tandem's is never written over. Missing files are listed there and in the
 result, and left pointing where they did; everything else is archived.
 
 When a project opens in the app with media missing, files moved within its
-folder are relinked straight away and Mike is asked for a folder to search
-for the rest. `MediaRelinker` takes a file with the same name and, when the
-item has a fingerprint, the same content; `tandem relink --search <folder>`
-does the same for agents.
+folder, and files that are in this Mac's shared library (a project from
+another Mac that used stickers or sounds from its library), are relinked
+straight away, and Mike is asked for a folder to search for the rest.
+`MediaRelinker` takes a file with the same name and, when the item has a
+fingerprint, the same content; `tandem relink --search <folder>` does the
+same for agents. The shared library is searched last, only for what the
+project folder and the folders given didn't settle, so a file found twice
+by name elsewhere stays undecided rather than being picked from the library.
 
 ## Packs
 
@@ -373,7 +414,13 @@ the generic controls after them.
 - API: session, lock, recovery, and the CLI end to end in headless mode.
 - Archive: on temporary folders, both modes, copies checked byte for byte,
   runs stopped part way and run again, the copy opened with the original
-  gone.
+  gone; a project using a temporary shared library (files, a converted copy,
+  a look, a font, a segment's media, and links into and out of it) comes out
+  standalone with the library gone.
+- Shared library and segments: indexing by folder and nearest licence note,
+  the watcher, use in place, a changed sticker converted again, the library
+  moving, relinking from it, and segments saved with their media and
+  inserted into another project, all on temporary folders.
 - Real footage: the decision-models project rebuilt from its EDL.
 
 Run everything with `swift test --package-path tools/tandem`.

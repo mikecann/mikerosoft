@@ -331,8 +331,8 @@ final class SegmentTests: XCTestCase {
         }
         let segment = saved.segment
         XCTAssertEqual(segment.template.duration, t(3))
-        XCTAssertEqual(segment.template.clips.map(\.offset), [t(0), t(0), t(0.5), t(1)])
-        XCTAssertEqual(Set(segment.template.clips.map(\.track)), ["Graphics", "Text", "SFX", "B-roll"])
+        XCTAssertEqual(segment.template.clips.map(\.track), ["Text", "Graphics", "B-roll", "SFX"], "top to bottom as the app shows them")
+        XCTAssertEqual(segment.template.clips.map(\.offset), [t(0.5), t(0), t(1), t(0)])
         XCTAssertEqual(Set(segment.media.map(\.path)), ["card.mov", "whoosh.wav", "Star.mov"])
         XCTAssertEqual(segment.template.clips.first { $0.track == "Graphics" }?.clip.video?.effects.first?.params["path"], .string("warm.cube"))
         XCTAssertEqual(segment.template.fields, [TemplateField(key: "title", label: "Title", defaultValue: "Welcome back")])
@@ -536,6 +536,31 @@ final class SegmentCLITests: XCTestCase {
         XCTAssertTrue(noAt.stderr.contains("needs --at"), noAt.stderr)
         let help = try cli.tandem("help", "segments", in: intro.f.video)
         XCTAssertTrue(help.stdout.hasPrefix("Usage: tandem segments list | save"), help.stdout)
+    }
+
+    /// A sound dropped into the shared library is found, and used where it
+    /// is, with the app closed.
+    func testSharedAssetsFromTheCommandLine() throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        let cli = CLITests()
+        let f = try SharedFixture()
+        let pop = f.library("Sound effects/Pop.wav")
+        try AssetFixtures.wav(at: pop)
+        try ProjectFile.save(Project.standard(name: "Video"), revision: 1, to: f.projectURL)
+        let env = ["TANDEM_LIBRARY": f.shared.root.path, "TANDEM_ASSETS_ROOT": f.assetsRoot.path, "TANDEM_ASSETS_OFFLINE": "1"]
+
+        let search = try cli.tandem("assets", "search", "pop", "--provider", "shared", "--json", in: f.video, env: env)
+        XCTAssertEqual(search.status, 0, search.stderr)
+        let found = try ServiceJSON.decoder().decode(AssetSearchResult.self, from: Data(search.stdout.utf8))
+        XCTAssertEqual(found.local.map(\.id), ["shared:Sound effects/Pop.wav"])
+        XCTAssertEqual(found.local.first?.kind, .sfx)
+
+        let use = try cli.tandem("assets", "use", "shared:Sound effects/Pop.wav", "--at", "1", in: f.video, env: env)
+        XCTAssertEqual(use.status, 0, use.stderr)
+        XCTAssertTrue(use.stdout.contains("It's the shared library's file, not a copy"), use.stdout)
+        let project = try ProjectFile.load(from: f.projectURL).project
+        XCTAssertEqual(project.media.first?.path, pop.standardizedFileURL.path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.video.appendingPathComponent("assets").path), "nothing copied")
     }
 
     typealias Intro = SegmentTests.Intro

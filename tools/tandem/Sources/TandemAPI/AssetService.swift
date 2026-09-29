@@ -76,6 +76,12 @@ public final class AssetService: @unchecked Sendable {
             maxDuration: request.maxDuration,
             limit: limit
         )
+        // Files dropped into the shared library while the app was closed
+        // (or before it looked) are found too: a rescan only reads files
+        // that changed.
+        if request.providers.isEmpty || request.providers.contains(SharedLibraryProvider.providerID) {
+            _ = try? await library.rescanSharedLibrary()
+        }
         var online: [AssetLibrary.ProviderResults]?
         if request.online {
             // Ask first, so what the providers found is in the catalogue and
@@ -101,6 +107,10 @@ public final class AssetService: @unchecked Sendable {
 
     /// Fetches an asset, explaining an unknown ID.
     func fetched(_ id: String) async throws -> Asset {
+        // A shared file dropped in since the last scan.
+        if id.hasPrefix(SharedLibraryProvider.providerID + ":"), (try? library.asset(id)) == nil {
+            _ = try? await library.rescanSharedLibrary()
+        }
         do {
             return try await library.fetch(id)
         } catch let error as AssetError {

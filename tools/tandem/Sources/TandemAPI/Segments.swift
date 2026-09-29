@@ -307,14 +307,17 @@ public enum SegmentMaker {
         let ids = clipIDs.filter { seen.insert($0).inserted }
         guard !ids.isEmpty else { throw ServiceError(.badRequest, "Choose the clips to save: select them on the timeline (or pass clip IDs, or a time range).") }
 
-        // Clips in timeline order, each with its track.
+        // Clips track by track as the app shows them (video tracks top
+        // down, then audio), each track's in time order.
         var picked: [(track: Track, clip: Clip)] = []
         for id in ids {
             guard let location = project.location(ofClip: id) else { throw ServiceError(.notFound, "There's no clip \(id) in the project.") }
             picked.append((project[location.track], project[location.track].clips[location.index]))
         }
-        let trackOrder = Dictionary(uniqueKeysWithValues: project.allTracks.enumerated().map { ($0.element.id, $0.offset) })
-        picked.sort { ($0.clip.start, trackOrder[$0.track.id] ?? 0) < ($1.clip.start, trackOrder[$1.track.id] ?? 0) }
+        var trackOrder: [String: Int] = [:]
+        for (index, track) in project.videoTracks.reversed().enumerated() { trackOrder[track.id] = index }
+        for (index, track) in project.audioTracks.enumerated() { trackOrder[track.id] = project.videoTracks.count + index }
+        picked.sort { (trackOrder[$0.track.id] ?? 0, $0.clip.start) < (trackOrder[$1.track.id] ?? 0, $1.clip.start) }
         let start = picked.map(\.clip.start).min() ?? .zero
         let end = picked.map(\.clip.end).max() ?? .zero
 
