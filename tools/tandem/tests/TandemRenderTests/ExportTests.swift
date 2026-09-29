@@ -5,7 +5,8 @@ import TandemMedia
 @testable import TandemRender
 
 final class ExportTests: XCTestCase {
-    /// A small, fast preset.
+    /// A small, fast preset. It has no resolution class, so it renders the
+    /// canvas at its own size.
     func preset(codec: ExportPreset.Codec = .h264, loudness: Double? = -14, range: TimeRange? = nil, format: String? = nil) -> ExportPreset {
         ExportPreset(name: "Test", codec: codec, videoBitrate: 4_000_000, audioBitrate: 192_000, loudnessTarget: loudness, truePeakCeiling: loudness == nil ? nil : -1, range: range, format: format)
     }
@@ -138,21 +139,47 @@ final class ExportTests: XCTestCase {
         var meter = LoudnessMeter(sampleRate: 48_000, channels: 2)
         meter.process(interleaved: try await decodeAudio(out))
         XCTAssertEqual(meter.integrated, -14, accuracy: 0.5)
-        // AAC adds a little overshoot; the limiter's margin keeps it close.
-        XCTAssertLessThanOrEqual(meter.truePeak, -1 + 0.5)
+        XCTAssertLessThanOrEqual(meter.truePeak, -1)
     }
 
-    func testWithoutATargetTheMixIsLeftAlone() async throws {
+    /// AAC overshoots the limited mix by a tenth of a dB or more, which put
+    /// finished files over -1 dBTP when measured with ffmpeg. The limiter
+    /// aims under the ceiling by enough that the file itself stays under.
+    func testTheAACFileStaysUnderTheCeiling() async throws {
         let media = try TestMedia()
-        try await media.movie("tone.mov", seconds: 2, draw: { TestMedia.fill($1, 0, 0, 0) }, sound: { i in
-            Float(pow(10, -20.0 / 20) * sin(2 * Double.pi * 1000 * Double(i) / 48_000))
-        })
-        let item = media.item("med_t", "tone.mov", seconds: 2, audio: true)
-        let sound = Clip(id: "clip_a", content: .media(mediaID: "med_t"), start: .zero, duration: t(2))
+        var seed: UInt64 = 7
+        func noise() -> Double {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let u = max(Double(seed >> 11) / Double(1 << 53), 1e-12)
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return sqrt(-2 * log(u)) * cos(2 * .pi * Double(seed >> 11) / Double(1 << 53))
+        }
+        // Bright snare-like hits ten times a second over a tone: every hit
+        // reaches the limiter, and AAC at the presets' 320 kbps put this
+        // file at -0.73 dBTP before the margin.
+        var previous = 0.0
+        let samples = (0..<(6 * 48_000)).map { i -> Float in
+            let beat = i % 4_800
+            let white = noise()
+            let bright = white - 0.5 * previous
+            previous = white
+            let hit = exp(-Double(beat) / 900) * (0.5 * sin(2 * .pi * 180 * Double(beat) / 48_000) + 0.35 * bright)
+            return Float(hit + 0.12 * sin(2 * .pi * 330 * Double(i) / 48_000))
+        }
+        try await media.movie("hits.mov", seconds: 6, draw: { TestMedia.fill($1, 0, 0, 0) }, sound: { samples[$0] })
+        let item = media.item("med_h", "hits.mov", seconds: 6, audio: true)
+        let sound = Clip(id: "clip_a", content: .media(mediaID: "med_h"), start: .zero, duration: t(6))
         let project = smallProject(video: [], audio: [Track(kind: .audio, name: "A1", clips: [sound])], media: [item])
-        let out = media.folder.appendingPathComponent("tone-out.mov")
-        let result = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: preset(loudness: nil), output: out).run()
-        XCTAssertEqual(try XCTUnwrap(result.integratedLUFS), -20, accuracy: 0.3)
+        let out = media.folder.appendingPathComponent("hits.mp4")
+        var loud = preset()
+        loud.audioBitrate = ExportPreset.youtube1080.audioBitrate
+        let result = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: loud, output: out).run()
+        var meter = LoudnessMeter(sampleRate: 48_000, channels: 2)
+        meter.process(interleaved: try await decodeAudio(out))
+        XCTAssertLessThanOrEqual(meter.truePeak, -1, "the file peaks at \(meter.truePeak) dBTP, the mix before AAC at \(result.truePeakDBTP ?? 0)")
+        XCTAssertGreaterThan(meter.truePeak, -2, "still close to the ceiling, not squashed")
+        // So much of it is limited that the loudness falls a little short.
+        XCTAssertEqual(meter.integrated, -14, accuracy: 0.5)
     }
 
     /// Dominant frequency by counting zero crossings on the left channel.
@@ -248,6 +275,48 @@ final class ExportTests: XCTestCase {
         _ = try await Exporter(context: RenderContext(project: project, folder: media.projectFolder), preset: small, output: out).run()
         let size = try await AVURLAsset(url: out).loadTracks(withMediaType: .video)[0].load(.naturalSize)
         XCTAssertEqual(size, CGSize(width: 160, height: 90))
+    }
+
+    /// A preset with a resolution class keeps the canvas's shape, and the
+    /// short renders a canvas that's already 9:16 (docs/RENDER.md).
+    func testPresetsKeepTheCanvasShape() async throws {
+        let media = try TestMedia()
+        try await media.movie("red.mov", seconds: 1, draw: { TestMedia.fill($1, 1, 0, 0) })
+        let clip = Clip(id: "clip_s", content: .media(mediaID: "med_r"), start: .zero, duration: t(1))
+        var portrait = smallProject(video: [Track(kind: .video, name: "V1", clips: [clip])], media: [media.item("med_r", "red.mov", seconds: 1)])
+        portrait.settings.width = 180
+        portrait.settings.height = 320
+        let context = RenderContext(project: portrait, folder: media.projectFolder)
+        func size(_ url: URL) async throws -> CGSize {
+            try await AVURLAsset(url: url).loadTracks(withMediaType: .video)[0].load(.naturalSize)
+        }
+
+        let small = ExportPreset(name: "Small", resolution: 90, codec: .h264, videoBitrate: 1_000_000, loudnessTarget: nil, truePeakCeiling: nil)
+        let smallOut = media.folder.appendingPathComponent("small.mp4")
+        _ = try await Exporter(context: context, preset: small, output: smallOut).run()
+        let smallSize = try await size(smallOut)
+        XCTAssertEqual(smallSize, CGSize(width: 90, height: 160), "90 on the short side, still portrait")
+
+        var short = small
+        short.name = "Short"
+        short.resolution = 180
+        short.format = OutputFormat.portrait.id
+        let shortOut = media.folder.appendingPathComponent("short.mp4")
+        _ = try await Exporter(context: context, preset: short, output: shortOut).run()
+        let shortSize = try await size(shortOut)
+        XCTAssertEqual(shortSize, CGSize(width: 180, height: 320), "the 9:16 canvas is the short")
+
+        // A landscape canvas without a portrait format has no short to render.
+        var landscape = portrait
+        landscape.settings.width = 320
+        landscape.settings.height = 180
+        let refused = Exporter(context: RenderContext(project: landscape, folder: media.projectFolder), preset: short, output: media.folder.appendingPathComponent("none.mp4"))
+        do {
+            _ = try await refused.run()
+            XCTFail("a landscape project without a portrait format has no short")
+        } catch {
+            XCTAssertEqual(error as? ExportPlanError, .noPortrait(width: 320, height: 180))
+        }
     }
 
     func testRefusesOutputsThatCouldDestroyWork() async throws {

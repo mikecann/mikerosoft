@@ -152,6 +152,14 @@ enum AppURLCommand: Equatable {
         return Set(registered).union(["tandem"])
     }
 
+    /// The project a link names with `project=` (its window title, file
+    /// name or path), or nil to use the front project.
+    static func project(in url: URL) -> String? {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        guard let value = items.first(where: { $0.name.lowercased() == "project" })?.value, !value.isEmpty else { return nil }
+        return value
+    }
+
     static func parse(_ url: URL) -> AppURLCommand? {
         guard let scheme = url.scheme?.lowercased(), schemes.contains(scheme), let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         let action = (url.host ?? components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))).lowercased()

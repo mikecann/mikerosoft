@@ -1,13 +1,16 @@
 import AppKit
 import TandemAPI
+import TandemAssets
 import TandemCore
 import TandemMedia
 
 /// A project that opens with media files missing (it came from another Mac,
 /// or its folder was tidied by hand) gets them looked for: files moved
-/// within the project folder are relinked straight away, and for the rest
-/// Mike is asked for a folder to search. A file is only taken when it's the
-/// same file (`MediaRelinker`, the same as `tandem relink`).
+/// within the project folder, or in this Mac's shared library (a sticker
+/// or sound the project used from the library on another Mac), are
+/// relinked straight away, and for the rest Mike is asked for a folder to
+/// search. A file is only taken when it's the same file (`MediaRelinker`,
+/// the same as `tandem relink`).
 ///
 /// The question waits until the window is in front: a project opened in
 /// the background (`open -g`, as scripts and agents do) isn't blocked by a
@@ -22,12 +25,14 @@ enum RelinkPrompt {
         let folder = session.folder
         let missing = MediaRelinker.missing(in: session.coordinator.project, folder: folder)
         guard !missing.isEmpty else { return }
+        let shared = (AssetLibraryHost.shared.library?.sharedLibrary ?? SharedLibrary.locate())
+        let fallback = shared.exists ? [shared.root] : []
         Task { @MainActor [weak controller] in
-            let found = await search(missing, in: [folder.root], folder: folder)
+            let found = await search(missing, in: [folder.root], then: fallback, folder: folder)
             guard let controller else { return }
             let relinked = apply(found, to: controller, author: ActivityLog.systemAuthor)
             if relinked > 0 {
-                controller.model.show(.info, "Found \(files(relinked)) that had moved in the project folder and relinked \(relinked == 1 ? "it" : "them").")
+                controller.model.show(.info, "Found \(files(relinked)) that had moved in the project folder or are in the shared library, and relinked \(relinked == 1 ? "it" : "them").")
             }
             let still = MediaRelinker.missing(in: session.coordinator.project, folder: folder)
             guard !still.isEmpty else { return }
@@ -54,7 +59,7 @@ enum RelinkPrompt {
         var names = missing.prefix(6).map { "  \($0.path)" }
         if missing.count > 6 { names.append("  and \(missing.count - 6) more") }
         alert.informativeText = """
-        Tandem couldn't find \(missing.count == 1 ? "it" : "these") in the project folder:
+        Tandem couldn't find \(missing.count == 1 ? "it" : "these") in the project folder or the shared library:
         \(names.joined(separator: "\n"))
 
         If you know where \(missing.count == 1 ? "it is" : "they are"), choose a folder to search. Its subfolders are searched too, and a file is only used when it's the same file. Clips using a missing file show nothing until it's found.
@@ -100,8 +105,8 @@ enum RelinkPrompt {
         }
     }
 
-    private static func search(_ items: [MediaItem], in folders: [URL], folder: ProjectFolder) async -> [MediaRelinker.Match] {
-        (try? await ProjectArchiver.onBackgroundThread { MediaRelinker.search(for: items, in: folders, folder: folder).found }) ?? []
+    private static func search(_ items: [MediaItem], in folders: [URL], then fallback: [URL] = [], folder: ProjectFolder) async -> [MediaRelinker.Match] {
+        (try? await ProjectArchiver.onBackgroundThread { MediaRelinker.search(for: items, in: folders, then: fallback, folder: folder).found }) ?? []
     }
 
     /// Points the project at what was found, as one undo step. Returns how

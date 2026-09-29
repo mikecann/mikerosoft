@@ -54,6 +54,25 @@ final class JSONTests: XCTestCase {
         XCTAssertEqual(patch.mergePatch(into: since), try json(#"{"id": "med_a", "path": "a.wav", "role": "music", "rate": {"n": 25, "d": 1}, "fingerprint": "f"}"#))
     }
 
+    func testALivePhotosMotionClipIsOptionalAndSurvivesARoundTrip() throws {
+        // Files from before Live Photos were paired have no such key, and a
+        // still without a motion clip doesn't write one.
+        let old = try JSONDecoder().decode(MediaItem.self, from: Data(#"{"id": "med_a", "path": "photos/IMG_0130.HEIC", "kind": "image", "role": "image"}"#.utf8))
+        XCTAssertNil(old.livePhotoVideo)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(old), as: UTF8.self).contains("livePhotoVideo"))
+
+        var still = old
+        still.livePhotoVideo = "photos/IMG_0130.mov"
+        let decoded = try JSONDecoder().decode(MediaItem.self, from: JSONEncoder().encode(still))
+        XCTAssertEqual(decoded, still)
+        XCTAssertEqual(decoded.livePhotoVideo, "photos/IMG_0130.mov")
+
+        // A scan that finds the clip gone takes it off with a merge patch.
+        let patch = try XCTUnwrap(JSONValue.mergePatch(from: try JSONValue.from(still), to: try JSONValue.from(old)))
+        XCTAssertEqual(patch, .object(["livePhotoVideo": .null]))
+        XCTAssertEqual(try JSONValue.applyMergePatch(patch, to: still), old)
+    }
+
     func testMinimalClipJSONDecodesWithDefaults() throws {
         let json = #"{"content": {"media": {"mediaID": "med_x"}}, "start": 3, "duration": 2}"#
         let clip = try JSONDecoder().decode(Clip.self, from: Data(json.utf8))

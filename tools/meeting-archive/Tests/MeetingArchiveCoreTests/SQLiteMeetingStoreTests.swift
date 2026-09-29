@@ -85,6 +85,36 @@ final class SQLiteMeetingStoreTests: XCTestCase {
         XCTAssertEqual(try store.listJobs().map(\.id), [job.id])
     }
 
+    func testRetryBackoffCanBeClearedWhenBruceBecomesReachable() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }
+        let store = try SQLiteMeetingStore(url: databaseURL)
+        let record = meetingRecord().resolvingAcceptance(.accept(trigger: .keepButton), at: Date())
+        let job = ArchiveJob(meetingID: record.id, manifestRevision: 1, createdAt: Date(timeIntervalSince1970: 1_800_000_000))
+        try store.insertAcceptedMeeting(record, job: job)
+        _ = try store.claimNextJob(now: Date(timeIntervalSince1970: 1_800_000_001), leaseDuration: 30)
+        try store.scheduleRetry(jobID: job.id, availableAt: Date(timeIntervalSince1970: 1_800_003_600), error: "Bruce asleep")
+
+        let now = Date(timeIntervalSince1970: 1_800_000_100)
+        XCTAssertNil(try store.claimNextJob(now: now, leaseDuration: 30))
+        XCTAssertEqual(try store.makeRetryableJobsAvailable(now: now), 1)
+        XCTAssertEqual(try store.claimNextJob(now: now, leaseDuration: 30)?.id, job.id)
+    }
+
+    func testCheckpointMovesCommittedPagesIntoTheMainDatabaseFile() throws {
+        let databaseURL = temporaryDatabaseURL()
+        defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }
+        let store = try SQLiteMeetingStore(url: databaseURL)
+        try store.insertMeeting(meetingRecord())
+        try store.checkpoint()
+
+        let walURL = URL(fileURLWithPath: databaseURL.path + "-wal")
+        let walSize = (try? FileManager.default.attributesOfItem(atPath: walURL.path)[.size] as? Int) ?? 0
+        XCTAssertEqual(walSize, 0)
+        let mainSize = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: databaseURL.path)[.size] as? Int)
+        XCTAssertGreaterThan(mainSize, 4096)
+    }
+
     func testRetryAndSuccessfulAcknowledgementRemainDurable() throws {
         let databaseURL = temporaryDatabaseURL()
         defer { try? FileManager.default.removeItem(at: databaseURL.deletingLastPathComponent()) }

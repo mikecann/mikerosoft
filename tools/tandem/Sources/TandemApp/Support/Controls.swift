@@ -358,6 +358,9 @@ struct SliderRow: View {
     var onPreview: (Double?) -> Void = { _ in }
     /// Something after the value, like a keyframe diamond.
     var accessory: AnyView? = nil
+    /// Draws the label in amber, for a value set here rather than taken
+    /// from somewhere else (a title's preset).
+    var marked = false
     let onCommit: (Double) -> Void
     @State private var draft: Double?
 
@@ -378,7 +381,7 @@ struct SliderRow: View {
         HStack(spacing: 10) {
             Text(label)
                 .font(.ui(12))
-                .foregroundStyle(Theme.textMuted.color)
+                .foregroundStyle(marked ? Theme.amber.color : Theme.textMuted.color)
                 .fixedSize()
                 .frame(minWidth: Self.labelWidth, alignment: .leading)
                 .contentShape(Rectangle())

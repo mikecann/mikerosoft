@@ -303,11 +303,12 @@ extension CommandSchema {
     ])
 
     static let textStyle = S.object([
-        "font": S.string(), "size": S.number("Points at 1080p."), "weight": S.number(),
-        "color": S.ref("Color"), "strokeColor": S.ref("Color"), "strokeWidth": S.number(), "backgroundColor": S.ref("Color"),
+        "font": S.string("A family (Tilt Warp), PostScript name or full name."), "size": S.number("Points at 1080p."), "weight": S.number("100 thin to 900 black."),
+        "color": S.ref("Color"), "strokeColor": S.ref("Color"), "strokeWidth": S.number("Outline width in points at 1080p. 0 switches the preset's outline off."),
+        "backgroundColor": S.ref("Color"),
         "alignment": S.enumeration(["left", "center", "right"]), "uppercase": S.boolean(), "shadow": S.boolean(),
         "lineSpacing": S.number()
-    ])
+    ], required: [], "The title's own style. Every field is optional, and one that's set wins over the preset even when it's false or 0. Leave a field out (or send null in a patch) to take the preset's. A backgroundColor with a 0 switches the preset's box off.")
 
     static let timedWord = S.object(["text": S.string(), "start": S.time(), "end": S.time()], required: ["text", "start", "end"])
 
@@ -315,9 +316,9 @@ extension CommandSchema {
         "text": S.string(),
         "preset": S.string("A title preset, like callout, label or sectionHeader."),
         "style": S.ref("TextStyle"),
-        "animationIn": S.string("Like popIn or slideUp."),
+        "animationIn": S.string("Like popIn or slideUp. none switches the preset's off."),
         "animationOut": S.string(),
-        "animationDuration": S.time(),
+        "animationDuration": S.time("Seconds each animation takes. Leave it out for the preset's."),
         "words": S.array(S.ref("TimedWord"), "For word-by-word captions.")
     ])
 
@@ -364,7 +365,8 @@ extension CommandSchema {
         "hasVideo": S.boolean(), "hasAudio": S.boolean(), "hasAlpha": S.boolean(), "variableFrameRate": S.boolean(),
         "undecodableCodec": S.string("Set by scanning: the codec macOS can't decode (\"rle \" or \"png \"). Tandem plays a converted copy."),
         "fingerprint": S.string(),
-        "look": S.array(S.ref("Effect"), "Colour grade for every clip of the file.")
+        "look": S.array(S.ref("Effect"), "Colour grade for every clip of the file."),
+        "livePhotoVideo": S.string("Set by scanning on a Live Photo's still: its motion clip (the short .mov beside it), which isn't media of its own.")
     ], required: ["path"])
 
     static let transition = S.object([
@@ -390,7 +392,7 @@ extension CommandSchema {
         "trackKind": S.enumeration(["video", "audio"]),
         "offset": S.time("Start relative to the template."),
         "clip": S.ref("Clip"),
-        "mediaPath": S.string("For media clips: the path of a file in the project."),
+        "mediaPath": S.string("For media clips: the path of the file, as the project has it. A clip may carry the item to add under media (saved segments and the section card's whooshes do) when the project has nothing there yet; its path is used when mediaPath is left out."),
         "media": S.ref("MediaItem")
     ], required: ["track", "clip"])
 
@@ -399,7 +401,14 @@ extension CommandSchema {
         "name": S.string(),
         "duration": S.time(),
         "fields": S.array(S.object(["key": S.string(), "label": S.string(), "defaultValue": S.string()], required: ["key"])),
-        "clips": S.array(S.ref("TemplateClip"))
+        "clips": S.array(S.ref("TemplateClip")),
+        "transitions": S.array(S.object([
+            "from": S.integer("The outgoing clip's index in clips; leave out for a transition at the head of to."),
+            "to": S.integer("The incoming clip's index; leave out for one at the tail of from."),
+            "type": S.enumeration(TransitionType.allCases.map(\.rawValue)),
+            "direction": S.enumeration(["up", "down", "left", "right"]),
+            "duration": S.time()
+        ], required: ["type"]), "Transitions between its clips (on one track), or at a clip's head or tail.")
     ], required: ["id", "duration", "clips"])
 
     static let timeRange = S.object([
@@ -551,7 +560,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .insertTemplate,
-            summary: "Expands a template (a section card, Like and Subscribe) into linked clips, filling {{field}} placeholders from values. Media it uses must already be in the project.",
+            summary: "Expands a template (a section card, Like and Subscribe, a saved segment) into linked clips, filling {{field}} placeholders from values. Media it uses is matched by path; a clip carrying its media item adds it when the project doesn't have it.",
             arguments: S.object([
                 "template": S.ref("Template"),
                 "at": S.time(),

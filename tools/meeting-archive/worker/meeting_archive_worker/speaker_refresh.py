@@ -7,6 +7,7 @@ import math
 import os
 import sqlite3
 import stat
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,6 +17,12 @@ from .db import closing_connection
 
 LOCK_NAME = ".speaker-refresh.lock"
 MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024
+RETRY_BASE_SECONDS = 30.0
+RETRY_MAXIMUM_SECONDS = 3600.0
+
+
+def _connect(database: Path) -> sqlite3.Connection:
+    return sqlite3.connect(database, timeout=30)
 
 
 @contextmanager
@@ -105,7 +112,7 @@ def _pending_generation(
     meeting_id: str,
     revision: int,
 ) -> int | None:
-    with closing_connection(lambda: sqlite3.connect(database)) as connection:
+    with closing_connection(lambda: _connect(database)) as connection:
         row = connection.execute(
             "SELECT generation FROM speaker_refreshes WHERE meeting_id=? "
             "AND manifest_revision=?",
@@ -119,7 +126,7 @@ def _accepted_archive(
     meeting_id: str,
     revision: int,
 ) -> tuple[Path, int] | None:
-    with closing_connection(lambda: sqlite3.connect(database)) as connection:
+    with closing_connection(lambda: _connect(database)) as connection:
         row = connection.execute(
             "SELECT acknowledgement_json FROM acceptances WHERE meeting_id=? "
             "AND manifest_revision=?",
@@ -149,13 +156,30 @@ def _record_error(
     revision: int,
     generation: int,
     error: BaseException,
+    now: float,
 ) -> None:
     message = f"{type(error).__name__}: {error}"[:1000]
-    with closing_connection(lambda: sqlite3.connect(database)) as connection:
-        connection.execute(
-            "UPDATE speaker_refreshes SET attempts=attempts+1, last_error=? "
+    print(
+        f"meeting-archive-service: speaker refresh {meeting_id} v{revision} failed: {message}",
+        file=sys.stderr,
+        flush=True,
+    )
+    with closing_connection(lambda: _connect(database)) as connection:
+        row = connection.execute(
+            "SELECT attempts FROM speaker_refreshes "
             "WHERE meeting_id=? AND manifest_revision=? AND generation=?",
-            (message, meeting_id, revision, generation),
+            (meeting_id, revision, generation),
+        ).fetchone()
+        if row is None:
+            return
+        # The sweep runs every poll. Back off so a broken archive is not
+        # re-read and re-logged every few seconds; a new request resets this.
+        attempts = int(row[0]) + 1
+        delay = min(RETRY_MAXIMUM_SECONDS, RETRY_BASE_SECONDS * (2 ** min(30, attempts - 1)))
+        connection.execute(
+            "UPDATE speaker_refreshes SET attempts=?, last_error=?, retry_after=? "
+            "WHERE meeting_id=? AND manifest_revision=? AND generation=?",
+            (attempts, message, now + delay, meeting_id, revision, generation),
         )
 
 
@@ -163,6 +187,8 @@ def reconcile_speaker_refresh(
     database: Path | str,
     meeting_id: str,
     revision: int,
+    *,
+    clock=time.time,
 ) -> bool:
     """Apply one pending generation; leave it durable when inputs are not ready."""
 
@@ -213,7 +239,7 @@ def reconcile_speaker_refresh(
             refresh_speaker_matches(transcript, registry)
             _write_transcript_artifacts(transcript_path.parent, transcript)
             PublicationQueue(database).refresh(processing_job_id, str(archive))
-            with closing_connection(lambda: sqlite3.connect(database)) as connection:
+            with closing_connection(lambda: _connect(database)) as connection:
                 connection.execute(
                     "DELETE FROM speaker_refreshes WHERE meeting_id=? "
                     "AND manifest_revision=? AND generation=?",
@@ -221,27 +247,29 @@ def reconcile_speaker_refresh(
                 )
         return True
     except Exception as error:
-        _record_error(database, meeting_id, revision, generation, error)
+        _record_error(database, meeting_id, revision, generation, error, clock())
         return False
 
 
-def reconcile_pending_speakers(database: Path | str) -> dict[str, int]:
-    """Attempt every pending meeting independently so one failure cannot block work."""
+def reconcile_pending_speakers(database: Path | str, *, clock=time.time) -> dict[str, int]:
+    """Attempt every due meeting independently so one failure cannot block work."""
 
     database = Path(database)
     from .speakers import SpeakerRegistry
 
     SpeakerRegistry(database)
-    with closing_connection(lambda: sqlite3.connect(database)) as connection:
+    with closing_connection(lambda: _connect(database)) as connection:
         pending = connection.execute(
             "SELECT meeting_id, manifest_revision FROM speaker_refreshes "
+            "WHERE retry_after IS NULL OR retry_after<=? "
             "ORDER BY requested_at, meeting_id, manifest_revision",
+            (clock(),),
         ).fetchall()
     processed = 0
     for meeting_id, revision in pending:
-        if reconcile_speaker_refresh(database, meeting_id, int(revision)):
+        if reconcile_speaker_refresh(database, meeting_id, int(revision), clock=clock):
             processed += 1
-    with closing_connection(lambda: sqlite3.connect(database)) as connection:
+    with closing_connection(lambda: _connect(database)) as connection:
         remaining, errors = connection.execute(
             "SELECT COUNT(*), COALESCE(SUM(last_error IS NOT NULL), 0) "
             "FROM speaker_refreshes",

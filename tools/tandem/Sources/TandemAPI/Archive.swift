@@ -1,4 +1,5 @@
 import Foundation
+import TandemAssets
 import TandemCore
 import TandemMedia
 
@@ -47,8 +48,8 @@ public struct ArchivedFile: Codable, Equatable, Sendable {
     public var bytes: Int64
     public var sha256: String?
     public var outcome: Outcome
-    /// What uses it: media IDs, `clipID effectID` for a clip's LUT, a font
-    /// family.
+    /// What uses it: media IDs (`<id> motion clip` for a Live Photo's
+    /// movie), `clipID effectID` for a clip's LUT, a font family.
     public var usedBy: [String]
 }
 
@@ -176,16 +177,28 @@ public struct ArchiveOptions: Sendable {
     public var author: String
     /// Finds the files of fonts titles use.
     public var fonts: any FontLocating
+    /// The shared library. Its files are brought in like any other file
+    /// from outside the folder, into `media/Tandem Library/<where they
+    /// were in it>`, and so are the asset library's converted copies of
+    /// them (a WebM sticker plays from one), named after the sticker.
+    public var sharedLibrary: SharedLibrary?
+    /// The asset library, where those converted copies are.
+    public var assetsRoot: URL?
     /// Tests turn clones off to take the copy path a network share takes.
     var clone = true
 
-    public init(destination: URL? = nil, withCache: Bool = false, dryRun: Bool = false, label: String? = nil, author: String = "user", fonts: any FontLocating = InstalledFonts()) {
+    public init(
+        destination: URL? = nil, withCache: Bool = false, dryRun: Bool = false, label: String? = nil, author: String = "user",
+        fonts: any FontLocating = InstalledFonts(), sharedLibrary: SharedLibrary? = SharedLibrary.locate(), assetsRoot: URL? = AssetLibrary.root()
+    ) {
         self.destination = destination
         self.withCache = withCache
         self.dryRun = dryRun
         self.label = label
         self.author = author
         self.fonts = fonts
+        self.sharedLibrary = sharedLibrary
+        self.assetsRoot = assetsRoot
     }
 }
 
@@ -222,12 +235,15 @@ extension TandemService {
     /// and cancelling the calling task stops it between chunks; what was
     /// copied stays, hidden, for the next run to pick up.
     public func archive(_ request: ArchiveRequest, context: CallContext) async throws -> ArchiveResult {
+        let shared = locateSharedLibrary()
         let options = ArchiveOptions(
             destination: request.to.map(outputURL),
             withCache: request.withCache ?? false,
             dryRun: request.dryRun ?? false,
             label: request.label,
-            author: request.author ?? context.author
+            author: request.author ?? context.author,
+            fonts: InstalledFonts(sharedLibrary: shared?.root),
+            sharedLibrary: shared
         )
         let control = ArchiveControl()
         let archiver = ProjectArchiver(session: session, options: options, control: control, applyEdit: { [self] batch in

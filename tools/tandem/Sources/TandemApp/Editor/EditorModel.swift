@@ -308,7 +308,7 @@ final class EditorModel {
         Task { @MainActor [weak self] in
             guard let self, !self.apiStopped else { return }
             do {
-                let host = try await TandemAPIHost.start(session: self.session)
+                let host = try await TandemAPIHost.start(session: self.session, fontInstaller: LibraryFontInstaller.shared)
                 // The window may have closed while the server started.
                 guard !self.apiStopped else { return host.stop() }
                 host.service.screenshotProvider = screenshot
@@ -364,6 +364,39 @@ final class EditorModel {
         }
         if let id = selectedTransitionID, project.location(ofTransition: id) == nil { selectedTransitionID = nil }
         playback.projectChanged(duration: project.duration, frameRate: project.settings.frameRate)
+        checkFonts()
+    }
+
+    // MARK: - Fonts
+
+    @ObservationIgnored private var fontsWork: Task<Void, Never>?
+    /// Install failures already shown, so an offline Mac hears it once, not
+    /// after every edit. The viewer's warnings keep naming the font.
+    @ObservationIgnored private var fontFailuresShown: Set<String> = []
+
+    /// Registers any new fonts in the project's assets/font, and installs
+    /// the fonts built-in presets need (the caption preset's Tilt Warp) when
+    /// a title uses one this Mac doesn't have. A title that stays in the
+    /// wrong font shows in the viewer's warnings. The viewer draws again by
+    /// itself when a font arrives.
+    func checkFonts() {
+        let folder = session.folder
+        ProjectFonts.registerNew(in: folder)
+        let project = self.project
+        guard fontsWork == nil, ProjectFonts.missing(in: project).contains(where: { $0.presetID != nil }) else { return }
+        let file = fileURL
+        fontsWork = Task { @MainActor [weak self] in
+            let outcome = await PresetFonts.install(missingFrom: project, folder: folder, projectFile: file, installer: LibraryFontInstaller.shared)
+            guard let self else { return }
+            self.fontsWork = nil
+            for font in outcome.installed {
+                self.show(.info, "Installed \(font.name), the \(font.presetID) preset's font, into the project.")
+            }
+            if let failure = outcome.failures.first(where: { !self.fontFailuresShown.contains($0) }) {
+                self.fontFailuresShown.insert(failure)
+                self.show(.warning, failure)
+            }
+        }
     }
 
     // MARK: - Analysis

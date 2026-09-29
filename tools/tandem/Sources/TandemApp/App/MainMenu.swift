@@ -19,6 +19,9 @@ enum MainMenu {
         let app = submenu(main, "Tandem")
         app.addItem(withTitle: "About Tandem", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(.separator())
+        let settings = app.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings(_:)), keyEquivalent: ",")
+        settings.image = Icons.menuImage("gearshape")
+        app.addItem(.separator())
         let services = NSMenu()
         app.addItem(withTitle: "Services", action: nil, keyEquivalent: "").submenu = services
         NSApp.servicesMenu = services
@@ -88,6 +91,10 @@ enum MainMenu {
         for command: EditorCommand in [.addTransition, .link, .nudgeLeft, .nudgeRight] {
             add(timeline, command, keymap)
         }
+        // Down the responder chain like Archive project…, so it acts on the
+        // front project window's selection.
+        let segment = timeline.addItem(withTitle: "Save selection as segment…", action: #selector(ProjectWindowController.saveSelectionAsSegment(_:)), keyEquivalent: "")
+        segment.image = Icons.menuImage(Icons.segment)
         timeline.addItem(.separator())
         let layout = NSMenu(title: "Layout")
         for command: EditorCommand in [.layoutFull, .layoutPipRight, .layoutPipLeft, .layoutSplit] {

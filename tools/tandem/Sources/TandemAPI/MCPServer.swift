@@ -260,7 +260,8 @@ public final class MCPServer: @unchecked Sendable {
     Start with `timeline` (add words: true to see what's said in each voice clip). Change things with `apply`, a batch of edit commands applied \
     atomically as one undo step credited to you; pass expectedRevision from your last read so you never edit a timeline that changed under you, \
     and try dryRun: true when unsure. `undo` reverts your last edit. `search` finds a phrase's timeline time, `pauses` lists silences and \
-    `tighten` shortens them (a dry run unless apply: true). `frame` shows a moment, `clip` renders a review MP4. Times are seconds or mm:ss.mmm. \
+    `tighten` shortens them (a dry run unless apply: true). `frame` shows a moment, `clip` renders a review MP4. Mike's saved segments (his intro, \
+    outro and calls to action) are in `segments_list` and go in with `segments_insert`. Times are seconds or mm:ss.mmm. \
     Pass `project` (a .tandem path) when the server wasn't started in the video's folder.
     """
 
@@ -648,10 +649,10 @@ enum MCPTools {
         ),
         Tool(
             name: "export", title: "Export the video",
-            description: "Renders the timeline (or a range) with an export preset, loudness-matched to the project target. Returns the file path and measured loudness.",
+            description: "Renders the timeline (or a range) with an export preset, loudness-matched to the project target. A preset sets the quality (codec, bitrate, resolution class) and the frame keeps the canvas's shape, so youtube1080 of a 1080x1920 project is 1080x1920. Returns the file path, the size, codec and bitrate used, and the measured loudness.",
             operation: .export,
             properties: [
-                "preset": S.string("youtube4k (default), youtube1080, review, short."),
+                "preset": S.string("youtube4k, youtube1080, review or short. Default: the one that fits the canvas, youtube1080 up to 1080 pixels on the short side (1920x1080, 1080x1920), youtube4k above. short renders the portrait format, or the canvas when it's 9:16."),
                 "output": S.string("Where to write the file. Default: exports/<name> r<revision>.mp4."),
                 "from": time("Start of the range."), "to": time("End of the range."),
                 "format": S.string("An alternate output format ID, like portrait.")
@@ -709,7 +710,7 @@ enum MCPTools {
         ),
         Tool(
             name: "assets_use", title: "Use an asset",
-            description: "Downloads and normalises an asset if needed, copies it into the project's assets folder, records the use for the credits and adds it to the project's media. With at it's also placed on the track for its kind (sound effects on SFX at -15 dB, music on Music at -31 dB with a fade out, stickers and logos on Graphics). One undo step, credited to you.",
+            description: "Downloads and normalises an asset if needed, copies it into the project's assets folder (a shared library asset, shared:..., is used where it is instead, and archiving copies it in), records the use for the credits and adds it to the project's media. With at it's also placed on the track for its kind (sound effects on SFX at -15 dB, music on Music at -31 dB with a fade out, stickers and logos on Graphics). One undo step, credited to you.",
             asset: .use,
             properties: [
                 "id": S.string("An asset ID from assets_search, like noto:1f680 or import:..."),
@@ -740,6 +741,38 @@ enum MCPTools {
                 "vocals": S.boolean("Music: allow vocals (instrumental by default).")
             ],
             required: ["kind", "prompt"], readOnly: false, openWorld: true
+        ),
+        Tool(
+            name: "segments_list", title: "List saved segments",
+            description: "Mike's saved segments (an intro, an outro, like and subscribe, comment below) in the shared library's Segments folder: each one's name, length, clips, the tracks it goes on and the fields it asks for.",
+            asset: .segments, properties: [:], readOnly: true, idempotent: true
+        ),
+        Tool(
+            name: "segments_save", title: "Save clips as a segment",
+            description: "Saves clips from the timeline as a reusable segment in the shared library (Segments/<name>/), with copies of the files they play beside it so it stands on its own. Name the clips exactly (clipIDs, linked partners aren't added) or give a range (from and to: every clip wholly inside). fields turns titles into words asked for on insert, each {\"clipID\": ..., \"label\": ...}. Doesn't change the project.",
+            asset: .saveSegment,
+            properties: [
+                "name": S.string("What it's called in the library, like Intro."),
+                "clipIDs": S.array(S.string(), "The clips to save."),
+                "from": time("Or: every clip wholly after this time..."),
+                "to": time("...and before this one."),
+                "fields": S.array(S.object(["clipID": S.string(), "key": S.string(), "label": S.string()], required: ["clipID"]), "Titles whose words are asked for on insert; the words now are the default."),
+                "replace": S.boolean("Replace a segment already called that. Files only the old one had stay (projects play them); the rest goes to the Trash.")
+            ],
+            required: ["name"], readOnly: false
+        ),
+        Tool(
+            name: "segments_insert", title: "Insert a segment",
+            description: "Puts a saved segment on the timeline at a time: its clips go on tracks of the same names (made if missing), linked, as one undo step credited to you. Its files are used where they are in the library, added to the project's media as needed; archiving the project copies them in. values fills its fields.",
+            asset: .insertSegment,
+            properties: [
+                "name": S.string("The segment's name, from segments_list."),
+                "at": time("Where it starts."),
+                "values": S.map(S.string(), "Words for its fields, by key."),
+                "mode": S.enumeration(["place", "overwrite", "insert"], "place (default) fails where a track is taken; overwrite replaces what's there; insert pushes later clips right."),
+                "label": S.string("Undo label.")
+            ],
+            required: ["name", "at"], readOnly: false
         ),
         Tool(
             name: "assets_providers", title: "Asset sources",

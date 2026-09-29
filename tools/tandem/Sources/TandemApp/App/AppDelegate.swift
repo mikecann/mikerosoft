@@ -113,22 +113,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             if url.isFileURL {
                 documents.open(url)
             } else if let command = AppURLCommand.parse(url) {
-                run(command)
+                guard let name = AppURLCommand.project(in: url) else {
+                    run(command, for: documents.frontmost)
+                    continue
+                }
+                // A named project gets the command or nothing does: falling
+                // back to the front window would act on the wrong project.
+                guard let target = documents.window(named: name) else {
+                    NSLog("Tandem: no open project called %@", name)
+                    continue
+                }
+                run(command, for: target)
             } else {
                 NSLog("Tandem: ignored %@", url.absoluteString)
             }
         }
     }
 
-    private func run(_ command: AppURLCommand) {
-        let front = documents.frontmost
+    private func run(_ command: AppURLCommand, for front: ProjectWindowController?) {
         switch command {
         case .screenshot(let out):
             // Give SwiftUI a moment to settle after any command that came
             // just before.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 MainActor.assumeIsolated {
-                    let window = ProjectDocuments.shared.frontmost?.window ?? NSApp.windows.first { $0.isVisible }
+                    let window = front?.window ?? NSApp.windows.first { $0.isVisible }
                     guard let window else { return NSLog("Tandem: no window to capture") }
                     do {
                         try WindowSnapshot.write(window, to: URL(fileURLWithPath: out))
@@ -213,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         let delay = Double(environment["TANDEM_SCREENSHOT_DELAY"] ?? "") ?? 2
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             MainActor.assumeIsolated {
-                self.run(.screenshot(out: path))
+                self.run(.screenshot(out: path), for: self.documents.frontmost)
                 if environment["TANDEM_SCREENSHOT_QUIT"] == "1" {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { NSApp.terminate(nil) }
                 }
@@ -239,6 +248,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         guard let command = MainMenu.command(of: item) else { return true }
         return command == .newProject || command == .openProject
+    }
+
+    /// Tandem > Settings…: where the shared library is.
+    @objc func showSettings(_ sender: Any?) {
+        SettingsWindowController.show()
     }
 
     @objc func showKeymapFile(_ sender: Any?) {

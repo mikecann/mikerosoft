@@ -5,6 +5,7 @@ import Observation
 import TandemAPI
 import TandemAssets
 import TandemCore
+import TandemRender
 
 /// The per-user asset library, shared by every window: opened once off
 /// the main thread (with the starter set added on first run), and the
@@ -53,9 +54,17 @@ final class AssetLibraryHost {
     /// of their built-in items.
     var looksShown = false
     var fontsShown = false
+    /// The Text tab shows saved segments.
+    var segmentsShown = false
     /// ElevenLabs permissions the key was refused (`sound_generation`,
     /// `music_generation`), remembered by the provider.
     private(set) var refused: Set<String> = []
+    /// The shared library folder (`~/Movies/Tandem Library`), once the
+    /// library is open.
+    private(set) var sharedRoot: URL?
+    /// Its saved segments, by name, and folders that couldn't be read.
+    private(set) var segments: [StoredSegment] = []
+    private(set) var segmentProblems: [String] = []
 
     /// A generation in progress or done, per kind (music, sfx).
     struct Generation: Equatable {
@@ -98,10 +107,14 @@ final class AssetLibraryHost {
 
     // MARK: - Opening
 
-    /// Opens the library the first time anything asks for it.
+    /// Opens the library the first time anything asks for it. The first
+    /// time after installing, that makes the shared library folder.
     func open() {
         guard !opened else { return }
         opened = true
+        // Titles draw in the shared library's fonts from the first render
+        // (each one registers what's new there), not only once this opens.
+        if !Self.isTesting { ProjectFonts.libraryFolders = [SharedLibrary.locate().url(.fonts)] }
         Task.detached(priority: .userInitiated) {
             do {
                 let library = try AssetService.standard().library
@@ -110,22 +123,32 @@ final class AssetLibraryHost {
                 if try library.count(AssetQuery(text: StarterContent.tag, limit: 1)) == 0 {
                     try library.installStarterContent()
                 }
+                // The shared library, made with its folders and READMEs if
+                // it isn't there (never from the tests).
+                if !Self.isTesting { _ = try? library.createSharedLibrary() }
                 let providers = await library.providerInfo()
                 let refused = Self.refusals(in: library)
-                // Downloaded fonts, so the Fonts list shows each in its face.
+                // Downloaded fonts, so the Fonts list shows each in its face,
+                // and the shared library's, so titles can use them.
                 _ = try? await library.registerFonts()
+                _ = await library.registerSharedFonts()
                 await MainActor.run {
                     let host = AssetLibraryHost.shared
                     host.library = library
                     host.providers = providers
                     host.refused = refused
                     host.media.library = library
+                    host.sharedRoot = library.sharedLibrary.root
                     host.state = .ready
                     host.revision += 1
                     host.watchImportFolders()
+                    host.watchSharedLibrary()
+                    host.reloadSegments()
                 }
-                // Files added to the import folders while Tandem was closed.
+                // Files added to the import folders and the shared library
+                // while Tandem was closed.
                 _ = try? await library.rescanImportFolders()
+                _ = try? await library.rescanSharedLibrary()
                 await MainActor.run { AssetLibraryHost.shared.revision += 1 }
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
@@ -142,6 +165,109 @@ final class AssetLibraryHost {
         guard let library else { return }
         watcher = try? library.watchImportFolders { _ in
             Task { @MainActor in AssetLibraryHost.shared.revision += 1 }
+        }
+    }
+
+    /// True under XCTest, which must never make the real shared library.
+    nonisolated static var isTesting: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil || NSClassFromString("XCTestCase") != nil
+    }
+
+    // MARK: - The shared library
+
+    @ObservationIgnored private var sharedWatcher: ImportFolderWatcher?
+
+    /// Rescans the shared library when anything in it changes: new files
+    /// show up in their tabs, changed ones a project uses are converted
+    /// again (the rescan does that), fonts are registered, and the segments
+    /// list reloads.
+    private func watchSharedLibrary() {
+        guard let library else { return }
+        sharedWatcher = library.watchSharedLibrary { _ in
+            Task.detached(priority: .utility) {
+                await MainActor.run {
+                    AssetLibraryHost.shared.revision += 1
+                    AssetLibraryHost.shared.reloadSegments()
+                }
+                _ = await library.registerSharedFonts()
+            }
+        }
+    }
+
+    /// Reads the saved segments again, off the main thread.
+    func reloadSegments() {
+        guard let library else { return }
+        let store = SegmentStore(library: library.sharedLibrary)
+        Task.detached(priority: .utility) {
+            let (segments, problems) = store.list()
+            SegmentShelf.shared.update(segments)
+            await MainActor.run {
+                AssetLibraryHost.shared.segments = segments
+                AssetLibraryHost.shared.segmentProblems = problems
+            }
+        }
+    }
+
+    /// Moves the shared library to `folder` (nil for the default,
+    /// ~/Movies/Tandem Library), making it there with its folders, and
+    /// watches it there.
+    func moveSharedLibrary(to folder: URL?, report: @escaping (String) -> Void) {
+        guard let library else { return }
+        Task {
+            do {
+                let scan = try await library.moveSharedLibrary(to: folder)
+                self.sharedRoot = library.sharedLibrary.root
+                ProjectFonts.libraryFolders = [library.sharedLibrary.url(.fonts)]
+                self.watchSharedLibrary()
+                self.reloadSegments()
+                self.revision += 1
+                _ = await library.registerSharedFonts()
+                let files = scan.map { $0.added + $0.updated + $0.unchanged } ?? 0
+                report("The shared library is \(ArchiveSheetView.display(library.sharedLibrary.root.path)) now, with \(files) file\(files == 1 ? "" : "s").")
+            } catch {
+                report("Couldn't move the shared library: \(Self.describe(error))")
+            }
+        }
+    }
+
+    /// Puts a saved segment on the timeline at `time`, over what's there,
+    /// as one undoable edit.
+    func insert(_ segment: StoredSegment, at time: Time, in model: EditorModel) {
+        let missing = segment.missingFiles
+        guard missing.isEmpty else {
+            model.show(.error, "\(segment.name) is missing \(missing.joined(separator: ", ")) from its folder in the shared library.")
+            return
+        }
+        if let result = model.apply(segment.insertBatch(at: max(.zero, time), mode: .overwrite, label: "Add \(segment.name.lowercased())")) {
+            let created = SelectionRules.pruned(Set(result.createdIDs), in: model.project)
+            if !created.isEmpty { model.selection = created }
+            // Warnings the edit had stay up.
+            if result.warnings.isEmpty { model.show(.info, "Added \(segment.name) at \(Timecode.string(time, rate: model.frameRate)).") }
+        }
+    }
+
+    /// Moves a saved segment's folder to the Trash, once Mike says so:
+    /// projects that inserted it play its files from there.
+    func trash(_ segment: StoredSegment, report: @escaping (String) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Move \u{201C}\(segment.name)\u{201D} to the Trash?"
+        alert.informativeText = "Projects it went into play its files from the shared library, so they'll be missing there until it's back. Projects you've archived have their own copies."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            do {
+                try FileManager.default.trashItem(at: segment.folder, resultingItemURL: nil)
+                self?.reloadSegments()
+                report("Moved \(segment.name) to the Trash.")
+            } catch {
+                report("Couldn't move \(segment.name) to the Trash: \(error.localizedDescription)")
+            }
+        }
+        if let window = NSApp.keyWindow, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window) { response in MainActor.assumeIsolated { finish(response) } }
+        } else {
+            finish(alert.runModal())
         }
     }
 
@@ -168,6 +294,7 @@ final class AssetLibraryHost {
         }
         looksShown = section == .looks
         fontsShown = section == .fonts
+        if fontsShown { segmentsShown = false }
         model.libraryTab = section.libraryTab
     }
 

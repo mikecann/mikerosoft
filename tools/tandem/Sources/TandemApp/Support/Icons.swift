@@ -65,6 +65,10 @@ enum Icons {
     static let project = "film"
     static let keys = "keyboard"
     static let selectAClip = "cursorarrow.click.2"
+    /// A saved segment: clips that go in together.
+    static let segment = "square.stack.3d.up"
+    /// The shared library folder.
+    static let sharedLibrary = "books.vertical"
 
     // A section card's fields, in the Video tab.
     static let sectionCard = "rectangle.stack"

@@ -18,7 +18,9 @@ public enum MediaScanner {
     /// Scans the folder for media, skipping `.tandem`, `exports`,
     /// `node_modules` and hidden folders. Known paths keep their IDs; new
     /// files get new items. record-it takes (`<base>-camera.mov` and
-    /// `<base>-screen.mov`) share a take ID and carry take offsets.
+    /// `<base>-screen.mov`) share a take ID and carry take offsets. A Live
+    /// Photo is one item, its still, with the movie in `livePhotoVideo`
+    /// (`LivePhotos`).
     ///
     /// Returns every media file found (plus known files the walk skips,
     /// outside the folder or in `exports/`, that still exist). Known files
@@ -47,6 +49,10 @@ public enum MediaScanner {
             if knownByPath[path] == nil { knownByPath[path] = item }
         }
 
+        // A known Live Photo's motion clip belongs to its still: it isn't
+        // media of its own, and isn't probed again on every scan.
+        let motionClips = Set(known.compactMap(\.livePhotoVideo).map { folder.path(for: folder.url(forPath: $0)) })
+
         // Pair each file with the known item at the same path, if any.
         var work: [(url: URL, path: String, known: MediaItem?)] = []
         var claimed = Set<String>()
@@ -54,6 +60,7 @@ public enum MediaScanner {
         for url in files {
             let path = folder.path(for: url)
             let match = knownByPath[path]
+            if match == nil, motionClips.contains(path) { continue }
             if let match { claimed.insert(match.id) }
             work.append((url, path, match))
             paths.insert(path)
@@ -116,8 +123,54 @@ public enum MediaScanner {
         var items = probed.map(\.item)
         let pairing = await TakePairing.pair(items: &items, probed: probed, folder: folder)
         report.notes += pairing.notes
+
+        // New movies that are Live Photo motion clips join their stills.
+        // One already in the project stays media of its own: a project from
+        // before pairing may use it.
+        let new = Set(probed.filter { $0.known == nil }.map(\.item.id))
+        report.livePhotos = await LivePhotos.pair(&items, folder: folder) { new.contains($0.id) }
+        LivePhotos.forgetMissingMotionClips(&items, folder: folder)
+
+        report.cameraTakes = await findCameraTakes(&items, new: new, folder: folder)
         report.items = items
         return report
+    }
+
+    /// Gives new videos nothing else explains a look and a listen, making
+    /// the ones with a voice and a face camera takes (`CameraTakes`), and
+    /// says why each new camera take is one.
+    static func findCameraTakes(_ items: inout [MediaItem], new: Set<String>, folder: ProjectFolder) async -> [CameraTakeNote] {
+        let candidates = items.indices.filter { new.contains(items[$0].id) && CameraTakes.isCandidate(items[$0]) }
+        var reasons: [String: String] = [:]
+        // A few at a time: each reads audio and decodes frames.
+        await withTaskGroup(of: (String, String?).self) { group in
+            var next = 0
+            func add() {
+                guard next < candidates.count else { return }
+                let item = items[candidates[next]]
+                next += 1
+                group.addTask { (item.id, await CameraTakes.reason(for: item, at: folder.url(for: item))) }
+            }
+            for _ in 0..<3 { add() }
+            while let (id, reason) = await group.next() {
+                if let reason { reasons[id] = reason }
+                add()
+            }
+        }
+        var notes: [CameraTakeNote] = []
+        for index in items.indices where new.contains(items[index].id) {
+            if let reason = reasons[items[index].id] { items[index].role = .camera }
+            guard items[index].role == .camera else { continue }
+            let reason = reasons[items[index].id] ?? cameraReason(forPath: items[index].path)
+            notes.append(CameraTakeNote(mediaID: items[index].id, path: items[index].path, reason: reason))
+        }
+        return notes
+    }
+
+    /// Why a file's name makes it a camera take.
+    static func cameraReason(forPath path: String) -> String {
+        let stem = ((path as NSString).lastPathComponent as NSString).deletingPathExtension.lowercased()
+        return stem.hasSuffix("-camera") ? "named like a record-it camera file" : "its name says camera"
     }
 
     /// Every media file under the folder, in path order.
@@ -310,13 +363,15 @@ public enum MediaScanner {
 
     // MARK: - Probing
 
-    /// Probes one file: duration, frame rate, size, streams, alpha, VFR.
+    /// Probes one file: duration, frame rate, size, streams, alpha, VFR, and
+    /// its role, including whether a video is a camera take.
     public static func probe(_ url: URL, folder: ProjectFolder, id: String? = nil) async throws -> MediaItem {
         let path = folder.path(for: url)
         let probe = try await MediaProbe.probe(url)
         var item = MediaItem(id: id ?? IDs.make("med"), path: path, kind: probe.kind, role: .other)
         probe.apply(to: &item)
         item.role = role(forPath: path, kind: probe.kind, duration: probe.duration)
+        if await CameraTakes.reason(for: item, at: url) != nil { item.role = .camera }
         item.fingerprint = try Fingerprint.compute(for: url).description
         return item
     }
@@ -335,8 +390,27 @@ public struct ScanReport: Sendable {
     public var skipped: [SkippedMedia] = []
     /// Things worth telling Mike, such as a take offset that was clamped.
     public var notes: [String] = []
+    /// New files taken for camera takes, and why, so `tandem new` can say.
+    public var cameraTakes: [CameraTakeNote] = []
+    /// How many Live Photo motion clips this scan put with their stills.
+    public var livePhotos = 0
 
     public init() {}
+}
+
+/// A new file the scan took for a camera take.
+public struct CameraTakeNote: Equatable, Sendable {
+    public var mediaID: String
+    public var path: String
+    /// Why, in words: "named like a record-it camera file", "an Apple iPhone
+    /// XS Max video with speech and a face in it".
+    public var reason: String
+
+    public init(mediaID: String, path: String, reason: String) {
+        self.mediaID = mediaID
+        self.path = path
+        self.reason = reason
+    }
 }
 
 public struct RenamedMedia: Equatable, Sendable {

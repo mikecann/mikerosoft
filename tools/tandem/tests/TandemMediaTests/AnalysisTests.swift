@@ -470,6 +470,33 @@ final class AnalysisTests: TempFolderTestCase {
         XCTAssertNil(analysis.waveform(for: try XCTUnwrap(changed.first)))
     }
 
+    func testTranscriptsAreAlignedToTheWaveformWhenRead() async throws {
+        // Quiet, voice, quiet, voice, quiet: a second each.
+        try SyntheticMedia.writeAudioFile(to: file("source/take-camera.wav"), segments: [(1, 0), (1, 0.3), (1, 0), (1, 0.3), (1, 0)])
+        let take = try await item("source/take-camera.wav")
+        let analysis = analysis()
+        // A transcript in the cache the way the engine times words: end to
+        // end, "one" running on over the pause.
+        let raw = Transcript(language: "en-US", engine: "SpeechAnalyzer", words: [
+            TranscriptWord(text: "one", start: Time(seconds: 1), end: Time(seconds: 2.9)),
+            TranscriptWord(text: "two", start: Time(seconds: 2.9), end: Time(seconds: 4))
+        ])
+        let key = try XCTUnwrap(analysis.cacheKey(.transcript, for: take))
+        let pending = try analysis.cache.begin(kind: .transcript, key: key)
+        try CacheJSON.write(raw, to: pending.folder.appendingPathComponent(TranscriptJob.file))
+        try analysis.cache.commit(pending, fingerprint: try XCTUnwrap(take.fingerprint), algorithmVersion: AnalysisKind.transcript.algorithmVersion,
+                                  settings: analysis.settings.canonical(for: .transcript, item: take), source: take.path)
+        XCTAssertEqual(analysis.transcript(for: take), raw, "no waveform yet: the engine's times")
+
+        await analysis.waitFor(.waveform, for: take)
+        let aligned = try XCTUnwrap(analysis.transcript(for: take))
+        XCTAssertEqual(aligned.words.map(\.text), ["one", "two"])
+        XCTAssertEqual(aligned.words[0].end.seconds, 2, accuracy: 0.011)
+        XCTAssertEqual(aligned.words[1].start.seconds, 3, accuracy: 0.011)
+        XCTAssertEqual(aligned.pauses(longerThan: Time(seconds: 0.9)).count, 1)
+        XCTAssertEqual(analysis.rawTranscript(for: take), raw, "the cache keeps the engine's times")
+    }
+
     func testFingerprintIsComputedForItemsWithoutOne() async throws {
         try SyntheticMedia.writeAudioFile(to: file("sfx/ping.wav"), segments: [(0.5, 0.5)])
         var ping = try await item("sfx/ping.wav")
@@ -576,40 +603,5 @@ final class PCMFillTests: XCTestCase {
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 3)!
         try samples.withUnsafeBufferPointer { try PCMFill.fill(buffer, from: $0.baseAddress!, frames: 3) }
         XCTAssertEqual(Array(UnsafeBufferPointer(start: buffer.floatChannelData![1], count: 3)), [-0.5, -0.25, -1.5])
-    }
-}
-
-final class SpeechEnvelopeTests: XCTestCase {
-    func testWordEdgesMoveInToTheVoice() {
-        // 1 s quiet, 1 s voice, 1 s quiet, 1 s voice at 16 kHz.
-        let rate = 16_000.0
-        var samples: [Float] = []
-        for second in 0..<4 {
-            let loud = second % 2 == 1
-            for i in 0..<Int(rate) {
-                samples.append(loud ? Float(0.3 * sin(2 * Double.pi * 200 * Double(i) / rate)) : Float(0.0005 * sin(Double(i))))
-            }
-        }
-        var envelope = SpeechEnvelope(origin: 10, sampleRate: rate)
-        samples.withUnsafeBufferPointer { all in
-            // Arrives in uneven chunks, stamped in media time.
-            var offset = 0
-            for size in [1000, 7000, 24_000, 32_000] {
-                envelope.add(UnsafeBufferPointer(rebasing: all[offset..<(offset + size)]), at: 10 + Double(offset) / rate)
-                offset += size
-            }
-        }
-        let words = [
-            TranscriptWord(text: "first", start: Time(seconds: 10.2), end: Time(seconds: 12.0)),
-            TranscriptWord(text: "second", start: Time(seconds: 12.0), end: Time(seconds: 14.0)),
-            TranscriptWord(text: "tight", start: Time(seconds: 13.2), end: Time(seconds: 13.5))
-        ]
-        let snapped = envelope.snap(words)
-        XCTAssertEqual(snapped[0].start.seconds, 10.98, accuracy: 0.011)
-        XCTAssertEqual(snapped[0].end.seconds, 12.0, accuracy: 0.001, "voice right to the end: unchanged")
-        XCTAssertEqual(snapped[1].start.seconds, 12.98, accuracy: 0.011)
-        XCTAssertEqual(snapped[2], words[2], "a word that's all voice stays as it was")
-        let pauses = Transcript(language: "en-US", engine: "test", words: Array(snapped.prefix(2))).pauses(longerThan: Time(seconds: 0.5))
-        XCTAssertEqual(pauses.count, 1)
     }
 }

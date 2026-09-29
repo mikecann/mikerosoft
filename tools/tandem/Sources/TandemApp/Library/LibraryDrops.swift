@@ -84,12 +84,12 @@ enum TitleSamples {
 enum BuiltInTemplates {
     static let all: [Template] = [sectionCard, likeAndSubscribe, commentBelow]
 
-    /// A template by ID. The section card comes with the whooshes when a
-    /// drag of its tile has copied them into the project (see
-    /// `SectionCardSoundCache`).
+    /// A built-in template, or a saved segment (`segment:<folder>`). The
+    /// section card comes with its whooshes when a drag of its tile has
+    /// copied them into the project (see `SectionCardSoundCache`).
     static func template(_ id: String) -> Template? {
-        if id == sectionCard.id { return makeSectionCard(sounds: SectionCardSoundCache.shared.latest) }
-        return all.first { $0.id == id }
+        if id == sectionCard.id, let sounds = SectionCardSoundCache.shared.latest { return makeSectionCard(sounds: sounds) }
+        return all.first { $0.id == id } ?? SegmentShelf.shared.template(id)
     }
 
     /// Mike's section card, silent.
@@ -107,7 +107,10 @@ enum BuiltInTemplates {
             SectionCard.Key.subtitle: .string("{{subtitle}}")
         ]
         var clips = [
+            // Inserting gives clips new IDs; fixed ones here keep the
+            // template the same every time it's made.
             TemplateClip(track: "Graphics", clip: Clip(
+                id: "clip_sectioncard",
                 content: .graphic(GraphicContent(template: SectionCard.template, props: props)),
                 start: .zero,
                 duration: length
@@ -119,10 +122,11 @@ enum BuiltInTemplates {
                 (sounds.media[0], sounds.soundIn, Time(seconds: motion.inStart(0)) + (sounds.soundIn.offset ?? SectionCard.soundInOffset)),
                 (sounds.media[1], sounds.soundOut, Time(seconds: motion.outStart(0)) + (sounds.soundOut.offset ?? .zero))
             ]
-            for (item, sound, offset) in sweeps {
+            for (index, (item, sound, offset)) in sweeps.enumerated() {
                 clips.append(TemplateClip(
                     track: "SFX", trackKind: .audio, offset: offset,
                     clip: Clip(
+                        id: index == 0 ? "clip_sectioncardin" : "clip_sectioncardout",
                         content: .media(mediaID: item.id),
                         start: .zero,
                         duration: item.duration ?? Time(seconds: 1),

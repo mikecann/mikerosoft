@@ -283,6 +283,51 @@ struct WorkerPublicationJob: Codable, Equatable, Sendable {
     }
 }
 
+struct WorkerSearchMatch: Codable, Equatable, Sendable {
+    var speaker: String?
+    var startSeconds: Double
+    var text: String
+
+    enum CodingKeys: String, CodingKey {
+        case speaker, text
+        case startSeconds = "start_seconds"
+    }
+}
+
+struct WorkerSearchResult: Codable, Equatable, Sendable, Identifiable {
+    var meetingID: UUID
+    var title: String?
+    var matches: [WorkerSearchMatch]
+    var id: UUID { meetingID }
+
+    enum CodingKeys: String, CodingKey {
+        case meetingID = "meeting_id"
+        case title, matches
+    }
+}
+
+private struct WorkerSearchResponse: Codable {
+    var schemaVersion: Int
+    var results: [WorkerSearchResult]
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case results
+    }
+}
+
+struct WorkerRenameResponse: Codable, Equatable, Sendable {
+    var schemaVersion: Int
+    var meetingID: UUID
+    var title: String
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case meetingID = "meeting_id"
+        case title
+    }
+}
+
 struct WorkerRetryResponse: Codable, Equatable, Sendable {
     var schemaVersion: Int
     var meetingID: UUID
@@ -378,6 +423,40 @@ enum WorkerStatusCommandBuilder {
         )
     }
 
+    static func rename(
+        meetingID: UUID,
+        title: String,
+        configuration: ArchiveTransferConfiguration
+    ) throws -> ArchiveProcessRequest {
+        try configuration.validate()
+        return remoteRequest(
+            arguments: workerPrefix(configuration) + [
+                "rename",
+                "--meeting-id", meetingID.uuidString.lowercased(),
+                // Joined with "=" so a title starting with "-" is not read as an option.
+                "--title=\(title)",
+                "--archive-root", configuration.archiveRoot,
+                "--db", configuration.workerDatabase,
+            ],
+            timeout: configuration.commandTimeout,
+            configuration: configuration
+        )
+    }
+
+    static func search(query: String, configuration: ArchiveTransferConfiguration) throws -> ArchiveProcessRequest {
+        try configuration.validate()
+        return remoteRequest(
+            arguments: workerPrefix(configuration) + [
+                "search",
+                "--query=\(query)",
+                "--archive-root", configuration.archiveRoot,
+                "--db", configuration.workerDatabase,
+            ],
+            timeout: configuration.commandTimeout,
+            configuration: configuration
+        )
+    }
+
     private static func workerPrefix(_ configuration: ArchiveTransferConfiguration) -> [String] {
         [configuration.workerPython, configuration.workerScript]
     }
@@ -389,9 +468,7 @@ enum WorkerStatusCommandBuilder {
     ) -> ArchiveProcessRequest {
         ArchiveProcessRequest(
             executable: configuration.sshExecutable,
-            arguments: [
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=5",
+            arguments: configuration.sshOptions + [
                 "--", configuration.host,
                 RemoteShellCommand.make(arguments),
             ],
@@ -495,6 +572,50 @@ actor WorkerStatusClient {
         return response
     }
 
+    func rename(
+        meetingID: UUID,
+        title: String,
+        configuration: ArchiveTransferConfiguration
+    ) async throws -> String {
+        await beginRemoteOperation()
+        defer { endRemoteOperation() }
+        let request = try WorkerStatusCommandBuilder.rename(meetingID: meetingID, title: title, configuration: configuration)
+        let result = try await processRunner.run(request)
+        guard result.exitCode == 0 else {
+            throw WorkerStatusError.commandFailed(exitCode: result.exitCode, stderr: result.stderr)
+        }
+        let response: WorkerRenameResponse
+        do {
+            response = try JSONDecoder().decode(WorkerRenameResponse.self, from: result.stdout)
+        } catch {
+            throw WorkerStatusError.invalidResponse("Bruce returned an invalid rename response: \(error.localizedDescription)")
+        }
+        guard response.schemaVersion == 1, response.meetingID == meetingID, !response.title.isEmpty else {
+            throw WorkerStatusError.invalidResponse("Rename returned the wrong meeting or schema")
+        }
+        cache.removeValue(forKey: meetingID)
+        return response.title
+    }
+
+    /// Not serialized behind status polls: a search is read-only and the user
+    /// is waiting on it.
+    func search(query: String, configuration: ArchiveTransferConfiguration) async throws -> [WorkerSearchResult] {
+        let request = try WorkerStatusCommandBuilder.search(query: query, configuration: configuration)
+        let result = try await processRunner.run(request)
+        guard result.exitCode == 0 else {
+            throw WorkerStatusError.commandFailed(exitCode: result.exitCode, stderr: result.stderr)
+        }
+        do {
+            let response = try JSONDecoder().decode(WorkerSearchResponse.self, from: result.stdout)
+            guard response.schemaVersion == 1 else { throw WorkerStatusError.invalidResponse("Unknown search schema") }
+            return response.results
+        } catch let error as WorkerStatusError {
+            throw error
+        } catch {
+            throw WorkerStatusError.invalidResponse("Bruce returned an invalid search response: \(error.localizedDescription)")
+        }
+    }
+
     private func beginRemoteOperation() async {
         if !remoteOperationActive {
             remoteOperationActive = true
@@ -511,5 +632,20 @@ actor WorkerStatusClient {
             return
         }
         remoteOperationWaiters.removeFirst().resume()
+    }
+}
+
+/// Routine status polls ssh into Bruce, so they only cover meetings whose
+/// state can still change without the user doing something in this app.
+enum WorkerStatusPolling {
+    static func isSettled(_ status: WorkerMeetingStatus?, revision: Int) -> Bool {
+        guard let status, status.manifestRevision == revision else { return false }
+        if status.processingState == .permanentFailure { return true }
+        return status.processingState == .succeeded && status.publicationState == .succeeded
+    }
+
+    static func interval(hasBusyMeetings: Bool, consecutiveFailures: Int) -> TimeInterval {
+        let base: TimeInterval = hasBusyMeetings ? 15 : 60
+        return min(900, base * pow(2, Double(min(consecutiveFailures, 10))))
     }
 }

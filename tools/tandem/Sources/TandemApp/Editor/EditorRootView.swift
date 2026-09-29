@@ -251,7 +251,7 @@ private struct LibraryTabButton: View {
     private var help: String {
         switch tab {
         case .media: return "Media: the project's recordings, graphics, B-roll and music"
-        case .text: return "Text: titles, captions and fonts"
+        case .text: return "Text: titles, templates, saved segments and fonts"
         case .transitions: return "Transitions: drag one onto a cut"
         case .effects: return "Effects: drag one onto a clip"
         case .graphics: return "Graphics: icons, logos, stickers and templates"

@@ -14,6 +14,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     var onClose: ((ProjectWindowController) -> Void)?
     /// File > Archive project…, while its sheet is up.
     private var archiveSheet: ArchiveSheetController?
+    /// Timeline > Save selection as segment…, while its sheet is up.
+    private var segmentSheet: SaveSegmentSheetController?
 
     init(model: EditorModel, keymap: Keymap, frame: NSRect? = nil) {
         self.model = model
@@ -41,7 +43,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // (a new version) and has that one's frame.
         shouldCascadeWindows = false
         let others = NSApplication.shared.windows.filter { $0 is EditorWindow && $0 !== window && $0.isVisible }.map(\.frame)
-        if frame == nil, let placed = WindowPlacement.restored(screens: NSScreen.screens.map(\.visibleFrame), occupied: others) {
+        if frame == nil, let placed = WindowPlacement.restored(screens: NSScreen.screens.map(\.visibleFrame), occupied: others, for: model.fileURL) {
             window.setFrame(placed, display: false)
         }
         window.delegate = self
@@ -59,9 +61,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
         window.layoutTrafficLights()
         // Fonts the project carries in assets/font, so its titles look the
-        // same here as on the Mac that made them.
-        let folder = model.folder
-        Task.detached(priority: .utility) { await AssetLibrary.registerFonts(in: folder) }
+        // same here as on the Mac that made them, and the fonts its presets
+        // need that aren't here yet.
+        model.checkFonts()
         // A project opened without an icon gets one once it has settled.
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.window?.isVisible == true else { return }
@@ -103,6 +105,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(revealProject(_:)) { return true }
         if item.action == #selector(archiveProject(_:)) { return archiveSheet == nil }
+        if item.action == #selector(saveSelectionAsSegment(_:)) { return segmentSheet == nil && !model.selection.isEmpty }
         guard let command = MainMenu.command(of: item) else { return true }
         switch command {
         case .undo:
@@ -138,6 +141,30 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         let sheet = ArchiveSheetController(model: sheetModel, parent: window)
         sheet.onDismiss = { [weak self] in self?.archiveSheet = nil }
         archiveSheet = sheet
+        sheet.present()
+    }
+
+    /// Opens the sheet that saves the selected clips as a segment in the
+    /// shared library (see `SaveSegmentSheet.swift`).
+    @objc func saveSelectionAsSegment(_ sender: Any?) {
+        guard segmentSheet == nil, let window, window.attachedSheet == nil else { return }
+        let ids = TimelineEdits.ordered(model.selection, in: model.project)
+        guard !ids.isEmpty else {
+            model.show(.info, "Select the clips to save as a segment first.")
+            return
+        }
+        let host = AssetLibraryHost.shared
+        let library = host.library?.sharedLibrary ?? SharedLibrary.locate()
+        let sheetModel = SaveSegmentModel(project: model.project, folder: model.folder, clipIDs: ids, library: library)
+        sheetModel.onSaved = { [weak self] stored in
+            host.reloadSegments()
+            var message = "Saved \(stored.name) to the shared library's Segments. It's in the Text tab under Segments."
+            if let note = stored.segment.notes.first { message += " \(note)" }
+            self?.model.show(.info, message)
+        }
+        let sheet = SaveSegmentSheetController(model: sheetModel, parent: window)
+        sheet.onDismiss = { [weak self] in self?.segmentSheet = nil }
+        segmentSheet = sheet
         sheet.present()
     }
 
@@ -185,12 +212,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// full screen or minimised window.
     private func saveFrame() {
         guard let window, !window.styleMask.contains(.fullScreen), !window.isMiniaturized else { return }
-        WindowPlacement.save(window.frame)
+        WindowPlacement.save(window.frame, for: model.fileURL)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
         (window as? EditorWindow)?.layoutTrafficLights()
         model.rescanMedia()
+        // A font dropped into assets/font while Tandem was in the background.
+        model.checkFonts()
         RelinkPrompt.windowBecameKey(self)
     }
 

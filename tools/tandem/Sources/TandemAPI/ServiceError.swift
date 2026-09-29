@@ -1,6 +1,7 @@
 import Foundation
 import TandemAssets
 import TandemCore
+import TandemRender
 
 /// An error any client can show as it is. `message` is written for people
 /// (and agents); `code` is stable for programs to branch on.
@@ -86,6 +87,9 @@ public struct ServiceError: Error, Codable, Equatable, CustomStringConvertible, 
             case .providerUnavailable, .permission, .rateLimited, .http, .network: return ServiceError(.unavailable, message)
             case .normaliseFailed, .database: return ServiceError(.internalError, message)
             }
+        case let error as ExportPlanError:
+            // The frame the preset asked for isn't in the project.
+            return ServiceError(.notFound, error.description)
         case let error as CancellationError:
             return ServiceError(.unavailable, "Cancelled. \(error.localizedDescription)")
         default:

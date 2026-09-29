@@ -52,7 +52,9 @@ public struct CaptionsRequest: ServiceCall {
     }
 
     public func run(on service: TandemService, context: CallContext) async throws -> CaptionsResult {
-        try service.captions(self, context: context)
+        var result = try service.captions(self, context: context)
+        await service.captionFonts(&result, applying: apply == true)
+        return result
     }
 }
 
@@ -71,6 +73,8 @@ public struct CaptionsResult: Codable, Sendable {
     public var applied: ApplyResult?
     public var warnings: [String]
     public var missing: [String]
+    /// The caption preset's font, when applying installed it.
+    public var installedFonts: [InstalledFont]?
 }
 
 extension TranscriptTools {
@@ -208,6 +212,9 @@ extension CaptionsResult: ReadableResult {
                 lines.append("  \(caption.start)-\(caption.end)  \(caption.text)")
             }
             if captions.count > 40 { lines.append("  ...and \(captions.count - 40) more.") }
+        }
+        for font in installedFonts ?? [] {
+            lines.append("Installed \(font.name), the \(font.presetID) preset's font, into the project: \(font.files.joined(separator: ", ")).")
         }
         for warning in warnings { lines.append("Warning: \(warning)") }
         if let applied {

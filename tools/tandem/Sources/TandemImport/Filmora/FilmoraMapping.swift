@@ -146,8 +146,10 @@ enum FilmoraText {
         text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         var notes: [String] = []
         let basic = data["Basic"]
+        // A Filmora title has no preset, so everything it says is the
+        // clip's own style.
         var style = TextStyle()
-        let font = basic["FontName"].string ?? style.font
+        let font = basic["FontName"].string ?? TextStyle.defaults.font
         style.font = font
         style.weight = weight(font: font, bold: basic["FontBold"].bool ?? false)
         let alpha = (basic["TextAlpha"].double ?? 255) / 255

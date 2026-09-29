@@ -24,13 +24,21 @@ struct FoundationArchiveProcessRunner: ArchiveProcessRunning {
     private let maximumStandardErrorBytes = 65_536
 
     func run(_ request: ArchiveProcessRequest) async throws -> ArchiveProcessResult {
-        try await Task.detached(priority: .utility) {
-            try runSynchronously(
-                request,
-                maximumStandardOutputBytes: maximumStandardOutputBytes,
-                maximumStandardErrorBytes: maximumStandardErrorBytes
-            )
-        }.value
+        // Blocking waits run on a GCD queue, not Swift's cooperative pool, so a
+        // two-hour rsync cannot starve other tasks of a thread.
+        let maximumStandardOutputBytes = maximumStandardOutputBytes
+        let maximumStandardErrorBytes = maximumStandardErrorBytes
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(with: Result {
+                    try runSynchronously(
+                        request,
+                        maximumStandardOutputBytes: maximumStandardOutputBytes,
+                        maximumStandardErrorBytes: maximumStandardErrorBytes
+                    )
+                })
+            }
+        }
     }
 
     private func runSynchronously(
@@ -59,23 +67,21 @@ struct FoundationArchiveProcessRunner: ArchiveProcessRunning {
         process.arguments = request.arguments
         process.standardOutput = standardOutput
         process.standardError = standardError
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         do {
             try process.run()
         } catch {
             throw ArchiveTransferError.processLaunchFailed(error.localizedDescription)
         }
 
-        let deadline = ProcessInfo.processInfo.systemUptime + request.timeout
-        while process.isRunning && ProcessInfo.processInfo.systemUptime < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if process.isRunning {
+        // Wall-clock deadline: uptime pauses while the Mac sleeps, which let a
+        // dead connection outlive its timeout by the length of the sleep.
+        if exited.wait(wallTimeout: .now() + request.timeout) == .timedOut {
             process.terminate()
-            let terminationDeadline = ProcessInfo.processInfo.systemUptime + 1
-            while process.isRunning && ProcessInfo.processInfo.systemUptime < terminationDeadline {
-                Thread.sleep(forTimeInterval: 0.05)
+            if exited.wait(wallTimeout: .now() + 1) == .timedOut {
+                Darwin.kill(process.processIdentifier, SIGKILL)
             }
-            if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
             process.waitUntilExit()
             throw ArchiveTransferError.processTimedOut(request.executable.path)
         }
@@ -139,6 +145,21 @@ struct ArchiveTransferConfiguration: Equatable, Sendable {
         transferTimeout: 7_200,
         workerTimeout: 7_200
     )
+
+    /// Keepalives make a dropped network or a sleeping Bruce fail within about a
+    /// minute instead of holding the upload queue until the two-hour timeout.
+    var sshOptions: [String] {
+        [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=5",
+            "-o", "ServerAliveInterval=15",
+            "-o", "ServerAliveCountMax=4",
+        ]
+    }
+
+    var rsyncOptions: [String] {
+        ["--archive", "--partial", "--timeout=120", "-e", ([sshExecutable.path] + sshOptions).joined(separator: " ")]
+    }
 
     func validate() throws {
         guard !host.isEmpty,
@@ -223,7 +244,7 @@ actor ArchiveTransfer {
         let rawManifestSHA256 = try verifyLocalBundle(sourceDirectory: sourceDirectory, manifest: manifest)
 
         let stagingPath = "\(configuration.incomingRoot)/\(manifest.meetingID.uuidString.lowercased())/r\(manifest.revision)"
-        let sshPrefix = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", configuration.host]
+        let sshPrefix = configuration.sshOptions + ["--", configuration.host]
         try await preflightRemoteStorage(configuration: configuration, sshPrefix: sshPrefix)
         _ = try await runChecked(
             ArchiveProcessRequest(
@@ -239,9 +260,7 @@ actor ArchiveTransfer {
         _ = try await runChecked(
             ArchiveProcessRequest(
                 executable: configuration.rsyncExecutable,
-                arguments: [
-                    "--archive",
-                    "--partial",
+                arguments: configuration.rsyncOptions + [
                     "--",
                     sourcePath,
                     "\(configuration.host):\(stagingPath)/",
@@ -299,7 +318,7 @@ actor ArchiveTransfer {
             throw ArchiveTransferError.unsupportedArtifactPath(relativePath)
         }
 
-        let sshPrefix = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", configuration.host]
+        let sshPrefix = configuration.sshOptions + ["--", configuration.host]
         let locateResult = try await runChecked(
             ArchiveProcessRequest(
                 executable: configuration.sshExecutable,
@@ -337,9 +356,7 @@ actor ArchiveTransfer {
         _ = try await runChecked(
             ArchiveProcessRequest(
                 executable: configuration.rsyncExecutable,
-                arguments: [
-                    "--archive",
-                    "--partial",
+                arguments: configuration.rsyncOptions + [
                     "--",
                     "\(configuration.host):\(remotePath)",
                     standardizedDestination.path,

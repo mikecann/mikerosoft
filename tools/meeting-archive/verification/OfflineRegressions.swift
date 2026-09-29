@@ -206,13 +206,13 @@ private func verifyZoomMenuSignals() throws {
         title: "Video render Mike Cann, Computer audio unmuted"
     )]
     let joinedWindow = zoomSignalWindow(title: "Zoom Meeting", id: 201, controls: hiddenToolbar)
-    var resolver = MeetingSignalResolver()
+    var resolver = MeetingSignalResolver(offGrace: .none)
     let on = resolver.resolve(zoomMenuObservation(item: "Stop video", windows: [joinedWindow]))
     try require(on.cameraActive == true && on.windowID == 201, "Zoom menu did not preserve hidden-toolbar camera-on")
     let off = resolver.resolve(zoomMenuObservation(item: "Start video", windows: [joinedWindow]))
     try require(off.cameraActive == false && off.session?.id == on.session?.id, "Zoom menu did not emit exact camera-off")
 
-    var previewResolver = MeetingSignalResolver()
+    var previewResolver = MeetingSignalResolver(offGrace: .none)
     let preview = zoomSignalWindow(
         title: "Mike Cann's Zoom Meeting",
         id: 202,
@@ -223,14 +223,14 @@ private func verifyZoomMenuSignals() throws {
         "global Zoom menu leaked onto preview"
     )
 
-    var ambiguousResolver = MeetingSignalResolver()
+    var ambiguousResolver = MeetingSignalResolver(offGrace: .none)
     let duplicate = zoomSignalWindow(title: "Zoom Meeting", id: 203, controls: [])
     try require(
         ambiguousResolver.resolve(zoomMenuObservation(item: "Stop video", windows: [joinedWindow, duplicate])).session == nil,
         "global Zoom menu leaked onto multiple candidate windows"
     )
 
-    var conflictResolver = MeetingSignalResolver()
+    var conflictResolver = MeetingSignalResolver(offGrace: .none)
     let visibleToolbar = zoomSignalWindow(
         title: "Zoom Meeting",
         id: 204,
@@ -247,7 +247,7 @@ private func verifyZoomMenuSignals() throws {
             zoomSignalControl(title: "", description: "Start video", help: "Stop video (⇧⌘V)"),
         ]
     )
-    var helpResolver = MeetingSignalResolver()
+    var helpResolver = MeetingSignalResolver(offGrace: .none)
     let helpOn = helpResolver.resolve(zoomMenuObservation(item: "Stop video", windows: [staleDescription]))
     try require(helpOn.cameraActive == true && helpOn.videoSafe, "Zoom AX Help did not override stale video description")
 

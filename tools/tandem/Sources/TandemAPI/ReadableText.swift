@@ -1,6 +1,7 @@
 import Foundation
 import TandemCore
 import TandemMedia
+import TandemRender
 
 // Plain-text forms of every result, shared by the CLI's default output and
 // MCP tool results. They lead with the answer, keep IDs visible (agents need
@@ -35,6 +36,7 @@ extension StatusResult: ReadableResult {
         for export in exports {
             lines.append("  exporting \((export.output as NSString).lastPathComponent) \(Int(export.progress * 100))%")
         }
+        for warning in warnings ?? [] { lines.append("Warning: \(warning)") }
         return lines.joined(separator: "\n")
     }
 }
@@ -52,6 +54,7 @@ extension MediaResult: ReadableResult {
             if let duration = item.duration { parts.append(duration.description) }
             if let w = item.width, let h = item.height { parts.append("\(w)x\(h)") }
             if let codec = item.undecodableCodec { parts.append(MediaItem.codecName(codec)) }
+            if let clip = item.livePhotoVideo { parts.append("Live Photo, motion clip \((clip as NSString).lastPathComponent)") }
             if let take = item.takeID { parts.append("take \(take) +\(TimeText.duration(item.takeOffset ?? .zero))") }
             parts.append(item.clips == 1 ? "1 clip" : "\(item.clips) clips")
             if !item.exists { parts.append("MISSING FILE") }
@@ -278,7 +281,12 @@ extension ImageResult: ReadableResult {
 
 extension ExportOutcome: ReadableResult {
     public var readableText: String {
-        var text = "Wrote \(path) (\(preset), \(duration) long) in \(String(format: "%.1f", elapsed))s."
+        var used = preset
+        if let width, let height, let codec, let videoBitrate {
+            used += ": \(width)x\(height) \(codec.displayName) at \(ExportPlan.megabits(videoBitrate))"
+            if let format { used += ", \(format) format" }
+        }
+        var text = "Wrote \(path) (\(used), \(duration) long) in \(String(format: "%.1f", elapsed))s."
         if let lufs = integratedLUFS, let peak = truePeakDBTP {
             text += String(format: " Loudness %.1f LUFS, true peak %.1f dBTP.", lufs, peak)
         }

@@ -4,9 +4,10 @@ import TandemCore
 import TandemRender
 
 /// The Text tab: title styles from the render module's presets,
-/// templates (a section card, calls to action) and fonts from the asset
-/// library. Double-click to add at the playhead, or drag to the timeline;
-/// a font goes on the selected titles, or the title it's dropped on.
+/// templates (a section card, calls to action), saved segments from the
+/// shared library and fonts from the asset library. Double-click to add at
+/// the playhead, or drag to the timeline; a font goes on the selected
+/// titles, or the title it's dropped on.
 struct TitleLibrary: View {
     let model: EditorModel
     @State private var showTemplates = false
@@ -15,25 +16,47 @@ struct TitleLibrary: View {
     var body: some View {
         if AssetLibraryHost.shared.fontsShown {
             AssetBrowser(model: model, sections: [.fonts], section: .constant(.fonts), tabs: AnyView(tabs(count: nil)))
+        } else if AssetLibraryHost.shared.segmentsShown {
+            SegmentLibrary(model: model, tabs: AnyView(tabs(count: AssetLibraryHost.shared.segments.count)))
         } else {
             builtIn
         }
     }
 
+    /// Titles, Templates, Segments and Fonts, closer together (and without
+    /// the count) when the panel is narrow.
     private func tabs(count: Int?) -> some View {
+        ViewThatFits(in: .horizontal) {
+            tabRow(count: count, spacing: 16, size: 13)
+            tabRow(count: nil, spacing: 12, size: 13)
+            tabRow(count: nil, spacing: 8, size: 12)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tabRow(count: Int?, spacing: CGFloat, size: CGFloat) -> some View {
         let host = AssetLibraryHost.shared
-        return HStack(spacing: 16) {
-            SubTab(title: "Titles", selected: !host.fontsShown && !showTemplates) {
+        return HStack(spacing: spacing) {
+            SubTab(title: "Titles", selected: !host.fontsShown && !host.segmentsShown && !showTemplates, size: size) {
                 host.fontsShown = false
+                host.segmentsShown = false
                 showTemplates = false
             }
-            SubTab(title: "Templates", selected: !host.fontsShown && showTemplates) {
+            SubTab(title: "Templates", selected: !host.fontsShown && !host.segmentsShown && showTemplates, size: size) {
                 host.fontsShown = false
+                host.segmentsShown = false
                 showTemplates = true
             }
-            SubTab(title: "Fonts", selected: host.fontsShown) { host.fontsShown = true }
-            Spacer(minLength: 4)
+            SubTab(title: "Segments", selected: host.segmentsShown, size: size) {
+                host.fontsShown = false
+                host.segmentsShown = true
+            }
+            SubTab(title: "Fonts", selected: host.fontsShown, size: size) {
+                host.segmentsShown = false
+                host.fontsShown = true
+            }
             if let count {
+                Spacer(minLength: 4)
                 Text(verbatim: String(count))
                     .font(.ui(11.5))
                     .foregroundStyle(Theme.textFaint.color)
@@ -114,7 +137,7 @@ private struct TitlePreview: View {
     let preset: TitlePreset
 
     var body: some View {
-        let style = preset.style
+        let style = TitlePresets.presetStyle(preset.id)
         let lines = TitleSamples.text(for: preset.id).components(separatedBy: "\n")
         let size = max(9, min(22, CGFloat(style.size) * 0.13))
         VStack(spacing: 1) {
@@ -139,7 +162,7 @@ private struct TitlePreview: View {
     }
 
     private func text(_ line: String, first: Bool) -> Text {
-        let shown = preset.style.uppercase ? line.uppercased() : line
+        let shown = TitlePresets.presetStyle(preset.id).uppercase ? line.uppercased() : line
         // Word captions light up the word being said.
         guard let highlight = preset.highlightColor else { return Text(shown) }
         let words = shown.split(separator: " ").map(String.init)
@@ -205,12 +228,13 @@ private struct TemplatePreview: View {
 struct SubTab: View {
     let title: String
     let selected: Bool
+    var size: CGFloat = 13
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.ui(13, selected ? .bold : .regular))
+                .font(.ui(size, selected ? .bold : .regular))
                 .foregroundStyle(selected ? Theme.text.color : Theme.textFaint.color)
         }
         .buttonStyle(.plain)

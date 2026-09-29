@@ -280,6 +280,18 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         return alert.runModal() == .alertSecondButtonReturn
     }
 
+    /// The open project a link names: by its name, its file's name (with
+    /// or without the extension) or its path, ignoring case.
+    func window(named name: String) -> ProjectWindowController? {
+        windows.first { Self.names(name, fileURL: $0.model.fileURL, projectName: $0.model.project.name) }
+    }
+
+    nonisolated static func names(_ name: String, fileURL: URL, projectName: String) -> Bool {
+        let file = fileURL.standardizedFileURL
+        let candidates = [projectName, file.lastPathComponent, file.deletingPathExtension().lastPathComponent, file.path]
+        return candidates.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
     var frontmost: ProjectWindowController? {
         windows.first { $0.window?.isKeyWindow == true } ?? windows.first { $0.window?.isMainWindow == true } ?? windows.last
     }

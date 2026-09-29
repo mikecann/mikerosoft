@@ -25,6 +25,7 @@ struct LevelSection: View {
             SliderRow(label: "Gain", value: gain, range: -60...12, bipolar: true, valueWidth: 62,
                       format: { AudioLevelText.minus(String(format: "%+.1f dB", $0)) },
                       parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-+0123456789.".contains($0) }) },
+                      help: "Clip gain in dB, added after normalising. 0 leaves the \(noun) at the level Normalise sets.",
                       accessory: targets.count == 1 ? AnyView(KeyframeButton(model: model, clip: first, parameter: "audio.gainDB")) : nil,
                       onCommit: { value in
                           let db = (value * 10).rounded() / 10
@@ -34,7 +35,6 @@ struct LevelSection: View {
                               model.apply(InspectorEdits.audio(ids, ["gainDB": .number(db)], label: "Gain"))
                           }
                       })
-                .help("Clip gain in dB, added after normalising. 0 leaves the \(noun) at the level Normalise sets.")
             switchRow("Muted", value: audio.muted ? "Yes" : "No", isOn: audio.muted,
                       help: audio.muted ? "Muted: this \(noun) plays nothing. Click to hear it again." : "Silences this \(noun) without removing it.") {
                 model.apply(InspectorEdits.audio(ids, ["muted": .bool(!audio.muted)], label: audio.muted ? "Unmute \(noun)" : "Mute \(noun)"))
@@ -91,6 +91,8 @@ struct SpeechLevelSection: View {
             SliderRow(label: "Level", value: level, range: AudioLevels.speechLoudnessRange, valueWidth: 70,
                       format: { AudioLevelText.lufs(($0 * 2).rounded() / 2) },
                       parse: { Double($0.replacingOccurrences(of: "−", with: "-").filter { "-+0123456789.".contains($0) }) },
+                      defaultValue: AudioLevels.defaultSpeechLoudness,
+                      help: "The level speech is normalised to, for the whole project. Camera and voice clips get it when they're placed, and so does every clip Normalise speech clips sets. Changing it moves the clips normalised to the old level. Export still brings the mix to \(AudioLevelText.lufs(project.settings.loudnessTarget)).",
                       onCommit: { value in
                           let rounded = (value * 2).rounded() / 2
                           guard rounded != level else { return }
@@ -99,7 +101,6 @@ struct SpeechLevelSection: View {
                               commands: [.updateSettings(patch: .object(["speechLoudness": .number(rounded)]))]
                           ))
                       })
-                .help("The level speech is normalised to, for the whole project. Camera and voice clips get it when they're placed, and so does every clip Normalise speech clips sets. Changing it moves the clips normalised to the old level. Export still brings the mix to \(AudioLevelText.lufs(project.settings.loudnessTarget)).")
             Text(AudioLevelText.speechStatus(speech: speech.count, unlevelled: unlevelled, level: level))
                 .font(.ui(11.5))
                 .foregroundStyle(Theme.textMuted.color)

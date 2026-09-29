@@ -48,8 +48,10 @@ final class AssetMedia {
                 return NSImage(contentsOf: local)
             }
             // A look in an import folder is a local file: reading it makes
-            // its before and after card, with nothing to download.
-            if asset.kind == .lut, asset.provider == "import", let read = try? await library.fetch(asset.id),
+            // its before and after card, with nothing to download. So is
+            // anything in the shared library, whose tiles make their
+            // thumbnails as they come into view.
+            if AssetMedia.makesItsOwnThumbnail(asset), let read = try? await library.fetch(asset.id),
                let local = library.url(for: read, .thumbnail), FileManager.default.fileExists(atPath: local.path) {
                 return NSImage(contentsOf: local)
             }
@@ -64,6 +66,13 @@ final class AssetMedia {
         loading[key] = nil
         if let image { thumbnails.setObject(image, forKey: key) }
         return image
+    }
+
+    /// Local files whose thumbnail is made by reading them: looks in
+    /// import folders, and the shared library's pictures and looks.
+    nonisolated static func makesItsOwnThumbnail(_ asset: Asset) -> Bool {
+        if asset.provider == "import" { return asset.kind == .lut }
+        return asset.provider == SharedLibraryProvider.providerID && (asset.kind.isVisual || asset.kind == .lut)
     }
 
     private static func key(_ asset: Asset) -> NSString {

@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import TandemAPI
 import TandemAssets
@@ -17,10 +18,15 @@ final class CLITests: XCTestCase {
         var stderr: String
     }
 
+    /// A shared library nothing makes, so commands run here never look in
+    /// the real ~/Movies/Tandem Library.
+    static let noSharedLibrary = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-tests-no-shared-library-\(UUID().uuidString)").path
+
     static func environment(_ extra: [String: String] = [:]) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment.removeValue(forKey: "TANDEM_PROJECT")
         environment.removeValue(forKey: "TANDEM_AUTHOR")
+        environment["TANDEM_LIBRARY"] = noSharedLibrary
         environment.merge(extra) { $1 }
         return environment
     }
@@ -425,6 +431,102 @@ final class NewProjectCLITests: XCTestCase {
         XCTAssertEqual(project.settings.height, 1920)
         let bad = try CLITests().tandem("new", "Odd.tandem", "--size", "big", in: folder.url)
         XCTAssertEqual(bad.status, 2)
+    }
+
+    /// A project made portrait is its own short: the short preset and the
+    /// default both render its 1080x1920 canvas at the 1080p rate, and say
+    /// what they used. (It used to fail with "No output format".)
+    func testPortraitProjectExports() async throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        let cli = CLITests()
+        let folder = TempFolder()
+        try FileManager.default.createDirectory(at: folder.file("source"), withIntermediateDirectories: true)
+        try ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x2040c0:s=1080x1920:d=2:r=30",
+                        "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                        "-c:a", "aac", "-shortest", folder.file("source/take1-camera.mp4").path])
+        let created = try cli.tandem("new", "Short.tandem", "--portrait", in: folder.url)
+        XCTAssertEqual(created.status, 0, created.stderr)
+        let project = try ProjectFile.load(from: folder.file("Short.tandem")).project
+        let media = try XCTUnwrap(project.media.first { $0.path == "source/take1-camera.mp4" })
+        let placed = try cli.tandem("apply", "-", in: folder.url, stdin: #"{"placeMedia": {"mediaIDs": ["\#(media.id)"], "at": 0}}"#)
+        XCTAssertEqual(placed.status, 0, placed.stderr)
+
+        // Into exports/, as the snapshot beside each export is a .tandem too.
+        let short = try cli.tandem("export", "--preset", "short", "-o", "exports/short.mp4", in: folder.url)
+        XCTAssertEqual(short.status, 0, short.stderr)
+        XCTAssertTrue(short.stdout.contains("(Short 9:16: 1080x1920 H.264 at 20 Mbps, 00:02.000 long)"), short.stdout)
+        let standard = try cli.tandem("export", "-o", "exports/default.mp4", "--json", in: folder.url)
+        XCTAssertEqual(standard.status, 0, standard.stderr)
+        let outcome = try ServiceJSON.decoder().decode(ExportOutcome.self, from: Data(standard.stdout.utf8))
+        XCTAssertEqual(outcome.preset, "YouTube 1080p")
+        XCTAssertEqual([outcome.width, outcome.height], [1080, 1920])
+        XCTAssertEqual(outcome.videoBitrate, 20_000_000)
+        for name in ["exports/short.mp4", "exports/default.mp4"] {
+            let asset = AVURLAsset(url: folder.file(name))
+            let size = try await asset.loadTracks(withMediaType: .video)[0].load(.naturalSize)
+            XCTAssertEqual(size, CGSize(width: 1080, height: 1920), name)
+        }
+        // Laying a short over a project that's already one is refused.
+        let layout = try cli.tandem("short", in: folder.url)
+        XCTAssertEqual(layout.status, 1)
+        XCTAssertTrue(layout.stderr.contains("already 9:16"), layout.stderr)
+
+        let help = try cli.tandem("help", "export", in: folder.url)
+        XCTAssertTrue(help.stdout.contains("1080x1920 for a 9:16 one"), help.stdout)
+        XCTAssertTrue(help.stdout.contains("`tandem new --portrait`"), help.stdout)
+    }
+
+    /// A photo like an iPhone's, for a Live Photo.
+    static func writeJPEG(to url: URL) throws {
+        let context = CGContext(data: nil, width: 64, height: 48, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        context.setFillColor(CGColor(red: 0.6, green: 0.45, blue: 0.3, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+    }
+
+    func testSaysWhichFileIsTheCameraAndKeepsLivePhotosTogether() throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
+        func movie(_ path: String, seconds: Int, in folder: TempFolder) throws {
+            try FileManager.default.createDirectory(at: folder.file(path).deletingLastPathComponent(), withIntermediateDirectories: true)
+            try ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x806040:s=320x240:d=\(seconds):r=30", "-f", "lavfi", "-i", "sine=frequency=440:duration=\(seconds)",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", folder.file(path).path])
+        }
+        // A record-it camera file, and a Live Photo: the still and its two
+        // second movie.
+        let folder = TempFolder()
+        try movie("source/t1-camera.mov", seconds: 2, in: folder)
+        try movie("photos/IMG_0130.mov", seconds: 2, in: folder)
+        try Self.writeJPEG(to: folder.file("photos/IMG_0130.jpg"))
+
+        let result = try CLITests().tandem("new", "Bench.tandem", in: folder.url)
+        XCTAssertEqual(result.status, 0, result.stderr)
+        let project = try ProjectFile.load(from: folder.file("Bench.tandem")).project
+        XCTAssertEqual(project.media.map(\.path).sorted(), ["photos/IMG_0130.jpg", "source/t1-camera.mov"])
+        XCTAssertEqual(project.media.first { $0.path == "photos/IMG_0130.jpg" }?.livePhotoVideo, "photos/IMG_0130.mov")
+        let camera = try XCTUnwrap(project.media.first { $0.path == "source/t1-camera.mov" })
+        XCTAssertEqual(camera.role, .camera)
+        XCTAssertTrue(result.stdout.contains("Added 2 media files from the folder.\n"), result.stdout)
+        XCTAssertTrue(result.stdout.contains("1 is a Live Photo: "), result.stdout)
+        XCTAssertTrue(result.stdout.contains("Camera take: source/t1-camera.mov (\(camera.id)), named like a record-it camera file.\n"), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#"tandem apply '{"updateMedia": {"mediaID": "\#(camera.id)", "patch": {"role": "other"}}}'"#), result.stdout)
+        let media = try CLITests().tandem("media", in: folder.url)
+        XCTAssertTrue(media.stdout.contains("photos/IMG_0130.jpg  image  64x48  Live Photo, motion clip IMG_0130.mov  0 clips"), media.stdout)
+
+        // With no camera take it names the likeliest video to make one.
+        let bare = TempFolder()
+        try movie("source/talk.mov", seconds: 3, in: bare)
+        try movie("source/short.mov", seconds: 1, in: bare)
+        let none = try CLITests().tandem("new", "Bare.tandem", in: bare.url)
+        XCTAssertEqual(none.status, 0, none.stderr)
+        let talk = try XCTUnwrap(ProjectFile.load(from: bare.file("Bare.tandem")).project.media.first { $0.path == "source/talk.mov" })
+        XCTAssertEqual(talk.role, .other)
+        XCTAssertTrue(none.stdout.contains("No camera take: "), none.stdout)
+        XCTAssertTrue(none.stdout.contains(#"tandem apply '{"updateMedia": {"mediaID": "\#(talk.id)", "patch": {"role": "camera"}}}'"#), none.stdout)
     }
 }
 

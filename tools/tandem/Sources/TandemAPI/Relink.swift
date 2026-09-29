@@ -14,6 +14,15 @@ public enum MediaRelinker {
         public var from: String
         /// The path it gets: relative when the file is in the project folder.
         public var to: String
+        /// For a Live Photo: its movie, found beside the still.
+        public var livePhotoVideo: String?
+
+        public init(mediaID: String, from: String, to: String, livePhotoVideo: String? = nil) {
+            self.mediaID = mediaID
+            self.from = from
+            self.to = to
+            self.livePhotoVideo = livePhotoVideo
+        }
     }
 
     /// Media whose files aren't there.
@@ -50,9 +59,32 @@ public enum MediaRelinker {
                 ambiguous.append(item.path)
             }
             if let chosen {
-                found.append(Match(mediaID: item.id, from: item.path, to: storedPath(for: chosen, in: folder)))
+                // A Live Photo's movie travels with its still.
+                var movie: String?
+                if let clip = item.livePhotoVideo {
+                    let beside = chosen.deletingLastPathComponent().appendingPathComponent((clip as NSString).lastPathComponent)
+                    if FileCopier.fileInfo(beside) != nil { movie = storedPath(for: beside, in: folder) }
+                }
+                found.append(Match(mediaID: item.id, from: item.path, to: storedPath(for: chosen, in: folder), livePhotoVideo: movie))
             }
         }
+        return (found, ambiguous)
+    }
+
+    /// Looks in `folders` first, then in `fallback` (the shared library) for
+    /// what they didn't have. The fallback is searched without anyone
+    /// choosing it, so it only gives a file whose content matches the
+    /// item's fingerprint, never one that merely has the name. A file with
+    /// several candidates in the first folders stays undecided rather than
+    /// being settled by the fallback.
+    public static func search(for items: [MediaItem], in folders: [URL], then fallback: [URL], folder: ProjectFolder, control: ArchiveControl? = nil) -> (found: [Match], ambiguous: [String]) {
+        var (found, ambiguous) = search(for: items, in: folders, folder: folder, control: control)
+        let settled = Set(found.map(\.mediaID))
+        let rest = items.filter { !settled.contains($0.id) && !ambiguous.contains($0.path) && $0.fingerprint != nil }
+        guard !rest.isEmpty, !fallback.isEmpty else { return (found, ambiguous) }
+        let more = search(for: rest, in: fallback, folder: folder, control: control)
+        found += more.found
+        ambiguous += more.ambiguous
         return (found, ambiguous)
     }
 
@@ -84,9 +116,14 @@ public enum MediaRelinker {
         }
     }
 
-    /// The edit that points each match's media at its file.
+    /// The edit that points each match's media at its file (and a Live
+    /// Photo at its movie).
     public static func commands(for matches: [Match]) -> [EditCommand] {
-        matches.map { .updateMedia(mediaID: $0.mediaID, patch: .object(["path": .string($0.to)])) }
+        matches.map { match in
+            var patch: [String: JSONValue] = ["path": .string(match.to)]
+            if let movie = match.livePhotoVideo { patch["livePhotoVideo"] = .string(movie) }
+            return .updateMedia(mediaID: match.mediaID, patch: .object(patch))
+        }
     }
 }
 
@@ -152,8 +189,17 @@ extension TandemService {
         let (project, revision) = coordinator.snapshot()
         let missing = MediaRelinker.missing(in: project, folder: folder)
         let control = ArchiveControl()
+        // The shared library last: a project from another Mac finds its
+        // stickers and sounds in this Mac's library.
+        let fallback: [URL]
+        if let shared = locateSharedLibrary(), shared.exists,
+           !roots.contains(where: { $0.standardizedFileURL.path == shared.root.path }) {
+            fallback = [shared.root]
+        } else {
+            fallback = []
+        }
         let (found, ambiguous) = try await withTaskCancellationHandler {
-            try await ProjectArchiver.onBackgroundThread { MediaRelinker.search(for: missing, in: roots, folder: folder, control: control) }
+            try await ProjectArchiver.onBackgroundThread { MediaRelinker.search(for: missing, in: roots, then: fallback, folder: folder, control: control) }
         } onCancel: {
             control.cancel()
         }
@@ -165,7 +211,7 @@ extension TandemService {
         var result = RelinkResult(
             revision: revision,
             dryRun: request.dryRun == true,
-            searched: roots.map(\.path),
+            searched: (roots + (missing.isEmpty ? [] : fallback)).map(\.path),
             relinked: found.map { RelinkedMedia(mediaID: $0.mediaID, from: $0.from, to: $0.to) },
             missing: missing.filter { !relinkedIDs.contains($0.id) }.map {
                 StillMissing(mediaID: $0.id, path: $0.path, clips: clipCounts[$0.id] ?? 0, ambiguous: ambiguous.contains($0.path))

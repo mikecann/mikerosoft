@@ -22,18 +22,21 @@ public final class AssetService: @unchecked Sendable {
 
     /// The per-user library. `$TANDEM_ASSETS_ROOT` moves it (for tests),
     /// and `$TANDEM_ASSETS_OFFLINE=1` keeps it off the network and out of
-    /// the Keychain: providers fail as if offline and have no keys.
+    /// the Keychain: providers fail as if offline and have no keys. The
+    /// shared library is where `SharedLibrary.locate` says
+    /// (`$TANDEM_LIBRARY`, the settings, or `~/Movies/Tandem Library`).
     public static func standard(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> AssetService {
         let offline = environment["TANDEM_ASSETS_OFFLINE"] == "1"
         let transport: HTTPTransport = offline ? OfflineTransport() : URLSessionTransport()
         let secrets: SecretStore = offline ? StaticSecretStore() : KeychainSecretStore()
+        let shared = SharedLibrary.locate(environment: environment).root
         let library: AssetLibrary
         do {
             if let root = environment["TANDEM_ASSETS_ROOT"], !root.isEmpty {
                 let url = URL(fileURLWithPath: NSString(string: root).expandingTildeInPath, isDirectory: true)
-                library = try AssetLibrary(root: url, previewFolder: url.appendingPathComponent("previews", isDirectory: true), transport: transport, secrets: secrets)
+                library = try AssetLibrary(root: url, previewFolder: url.appendingPathComponent("previews", isDirectory: true), transport: transport, secrets: secrets, sharedLibrary: shared)
             } else {
-                library = try AssetLibrary(transport: transport, secrets: secrets)
+                library = try AssetLibrary(transport: transport, secrets: secrets, sharedLibrary: shared)
             }
         } catch {
             throw ServiceError.wrap(error)
@@ -73,6 +76,12 @@ public final class AssetService: @unchecked Sendable {
             maxDuration: request.maxDuration,
             limit: limit
         )
+        // Files dropped into the shared library while the app was closed
+        // (or before it looked) are found too: a rescan only reads files
+        // that changed.
+        if request.providers.isEmpty || request.providers.contains(SharedLibraryProvider.providerID) {
+            _ = try? await library.rescanSharedLibrary()
+        }
         var online: [AssetLibrary.ProviderResults]?
         if request.online {
             // Ask first, so what the providers found is in the catalogue and
@@ -98,14 +107,32 @@ public final class AssetService: @unchecked Sendable {
 
     /// Fetches an asset, explaining an unknown ID.
     func fetched(_ id: String) async throws -> Asset {
+        // A shared file dropped in since the last scan.
+        if id.hasPrefix(SharedLibraryProvider.providerID + ":"), (try? library.asset(id)) == nil {
+            _ = try? await library.rescanSharedLibrary()
+        }
         do {
             return try await library.fetch(id)
         } catch let error as AssetError {
             if case .notFound = error, (try? library.asset(id)) == nil {
+                // A missing-font warning names the font's Fontsource ID, so
+                // that works without a search first.
+                if await lookUpFontsource(id) { return try await fetched(id) }
                 throw ServiceError(.notFound, "No asset \(id) in the library. Search for it first (tandem assets search \"...\" --online), then use the ID the search gives.")
             }
             throw ServiceError.wrap(error)
         }
+    }
+
+    /// Asks Fontsource for a family from its ID alone (`fontsource:tilt-warp`
+    /// is "tilt warp"), which puts it in the catalogue. True when it's there
+    /// now.
+    func lookUpFontsource(_ id: String) async -> Bool {
+        let prefix = "fontsource:"
+        guard id.hasPrefix(prefix), id.count > prefix.count else { return false }
+        let words = id.dropFirst(prefix.count).replacingOccurrences(of: "-", with: " ")
+        _ = await library.searchProviders(ProviderQuery(text: words, kinds: [.font], perPage: 50), providerIDs: ["fontsource"])
+        return (try? library.asset(id)) != nil
     }
 
     // MARK: - use
@@ -122,11 +149,21 @@ public final class AssetService: @unchecked Sendable {
         }
         let asset = placement.asset
         var result = AssetUseResult(
-            asset: asset, mediaID: nil, files: placement.files, role: placement.role, trackName: placement.trackName,
+            asset: asset, mediaID: nil, files: placement.files, referencedInPlace: placement.referencedInPlace ? true : nil,
+            role: placement.role, trackName: placement.trackName,
             gainDB: placement.gainDB, at: request.at, applied: nil,
             fonts: (asset.remote["fonts"] ?? "").split(separator: "\n").map(String.init),
             licence: try? library.licence(for: asset.id)
         )
+        if asset.kind == .font, case .remote(_, let owner, _) = client.route {
+            // This process registered the font for itself. The app (or
+            // `tandem serve`) registers new files in assets/font/ when it's
+            // asked for the status, so it draws with the font straight away.
+            if let status = try? await client.call(StatusRequest()) {
+                result.fontsReached = owner
+                result.fontWarnings = status.warnings
+            }
+        }
         // The project can change between reading it and editing it (the
         // app's folder watcher may add the copied file itself), so a stale
         // revision means read again and rebuild the edit.

@@ -68,12 +68,21 @@ extension ParamValue {
             return t < 1 ? a : b
         }
     }
+
+    /// Blends two angles in degrees the short way round the circle, into
+    /// 0..<360: from 350 to 10 passes 0, not 180.
+    public static func interpolateAngle(_ a: Double, _ b: Double, _ t: Double) -> Double {
+        var delta = (b - a).truncatingRemainder(dividingBy: 360)
+        if delta > 180 { delta -= 360 } else if delta < -180 { delta += 360 }
+        return ColourWheels.normalised(a + delta * t)
+    }
 }
 
 extension Array where Element == Keyframe {
     /// The animated value at a clip-relative time. Before the first keyframe
-    /// it holds the first value, after the last it holds the last.
-    public func value(at time: Time) -> ParamValue? {
+    /// it holds the first value, after the last it holds the last. A
+    /// `circular` value is an angle that blends the short way round.
+    public func value(at time: Time, circular: Bool = false) -> ParamValue? {
         guard let first = first else { return nil }
         let sorted = self.sorted { $0.time < $1.time }
         if time <= first.time || sorted.count == 1 { return sorted[0].value }
@@ -84,7 +93,11 @@ extension Array where Element == Keyframe {
             if time >= a.time && time < b.time {
                 let span = Double((b.time - a.time).flicks)
                 let linear = span > 0 ? Double((time - a.time).flicks) / span : 1
-                return ParamValue.interpolate(a.value, b.value, Easing.apply(a.interpolation, linear))
+                let eased = Easing.apply(a.interpolation, linear)
+                if circular, case .number(let x) = a.value, case .number(let y) = b.value {
+                    return .number(ParamValue.interpolateAngle(x, y, eased))
+                }
+                return ParamValue.interpolate(a.value, b.value, eased)
             }
         }
         return sorted.last?.value
@@ -128,7 +141,7 @@ extension Clip {
     public func resolvedVideo(at clipTime: Time) -> VideoProperties {
         var video = self.video ?? VideoProperties()
         for (path, list) in keyframes where path.hasPrefix("video.") {
-            guard let value = list.value(at: clipTime) else { continue }
+            guard let value = list.value(at: clipTime, circular: Self.isWheelHue(path, in: video)) else { continue }
             switch path {
             case "video.transform.position":
                 if case .point(let p) = value { video.transform.position = p }
@@ -155,6 +168,14 @@ extension Clip {
             }
         }
         return video
+    }
+
+    /// True for a colour wheel's hue, an angle: a keyframe from 350 to 10
+    /// should pass through red, not the rest of the wheel.
+    static func isWheelHue(_ path: String, in video: VideoProperties) -> Bool {
+        let parts = path.split(separator: ".", maxSplits: 3).map(String.init)
+        guard parts.count == 4, parts[1] == "effects", ColourWheels.Wheel.allCases.contains(where: { $0.hueKey == parts[3] }) else { return false }
+        return video.effects.first { $0.id == parts[2] }?.type == "colorWheels"
     }
 
     /// Audio properties at a clip-relative time with keyframes applied.

@@ -209,15 +209,30 @@ public final class FrameRenderer: @unchecked Sendable {
     }
 }
 
+/// How an export is encoded. A preset sets the quality and the project sets
+/// the shape: `plan(for:)` (ExportPlan.swift) works out the frame, size and
+/// bitrate for a project, and the exporter renders that plan.
 public struct ExportPreset: Codable, Equatable, Sendable {
-    public enum Codec: String, Codable, Sendable { case hevc, h264 }
+    public enum Codec: String, Codable, Sendable {
+        case hevc, h264
+
+        /// As people write it.
+        public var displayName: String { self == .hevc ? "HEVC" : "H.264" }
+    }
 
     public var name: String
-    /// Nil keeps the project (or format) size.
+    /// An exact frame size. Nil leaves the size to `resolution`, or keeps
+    /// the canvas (or format) size when that's nil too.
     public var width: Int?
     public var height: Int?
+    /// The resolution class: the frame's short side in pixels, 2160 for 4K
+    /// and 1080 for 1080p. The frame keeps the canvas's shape, so 1080 is
+    /// 1920x1080 on a landscape canvas and 1080x1920 on a 9:16 one.
+    public var resolution: Int?
     public var codec: Codec
-    /// Bits per second.
+    /// Bits per second. With a `resolution` this is the rate for a 16:9
+    /// frame of that class at up to 30 fps, and the plan scales it to the
+    /// frame's area and frame rate.
     public var videoBitrate: Int
     public var audioBitrate: Int
     /// Master loudness; nil leaves the mix as it is.
@@ -225,16 +240,19 @@ public struct ExportPreset: Codable, Equatable, Sendable {
     public var truePeakCeiling: Double?
     /// Export only this part of the timeline.
     public var range: TimeRange?
-    /// Alternate output format ID, for example "portrait".
+    /// Alternate output format ID, for example "portrait", or "main" for
+    /// the canvas. "portrait" on a project whose own canvas is 9:16 renders
+    /// that canvas: the project is its own short.
     public var format: String?
 
     public init(
         name: String,
         width: Int? = nil,
         height: Int? = nil,
+        resolution: Int? = nil,
         codec: Codec = .hevc,
         videoBitrate: Int = 80_000_000,
-        audioBitrate: Int = 256_000,
+        audioBitrate: Int = 320_000,
         loudnessTarget: Double? = -14,
         truePeakCeiling: Double? = -1,
         range: TimeRange? = nil,
@@ -243,6 +261,7 @@ public struct ExportPreset: Codable, Equatable, Sendable {
         self.name = name
         self.width = width
         self.height = height
+        self.resolution = resolution
         self.codec = codec
         self.videoBitrate = videoBitrate
         self.audioBitrate = audioBitrate
@@ -252,10 +271,20 @@ public struct ExportPreset: Codable, Equatable, Sendable {
         self.format = format
     }
 
-    public static let youtube4K = ExportPreset(name: "YouTube 4K", codec: .hevc, videoBitrate: 80_000_000)
-    public static let youtube1080 = ExportPreset(name: "YouTube 1080p", width: 1920, height: 1080, codec: .h264, videoBitrate: 20_000_000)
-    public static let review = ExportPreset(name: "Review 720p", width: 1280, height: 720, codec: .h264, videoBitrate: 5_000_000)
-    public static let short = ExportPreset(name: "Short 9:16", codec: .h264, videoBitrate: 20_000_000, format: "portrait")
+    // Checked against YouTube's recommended upload settings in September
+    // 2026: 8 Mbps for 1080p and 35 to 45 for 4K at 24 to 30 fps, half as
+    // much again at 48 to 60 fps, all H.264. 20 Mbps is 2.5 times YouTube's
+    // 1080p rate, and HEVC at 80 is about as generous for 4K, since HEVC
+    // needs roughly a third fewer bits than H.264 for the same picture.
+    // That's the headroom a speed-priority hardware encoder and YouTube's
+    // own re-encode want, and it's what Mike's Filmora presets used. The
+    // plan adds YouTube's half again for high frame rates. YouTube asks
+    // for 384 kbps AAC stereo, more than Apple's AAC encoder takes at
+    // 48 kHz, so audio gets the most it takes: 320.
+    public static let youtube4K = ExportPreset(name: "YouTube 4K", resolution: 2160, codec: .hevc, videoBitrate: 80_000_000)
+    public static let youtube1080 = ExportPreset(name: "YouTube 1080p", resolution: 1080, codec: .h264, videoBitrate: 20_000_000)
+    public static let review = ExportPreset(name: "Review 720p", resolution: 720, codec: .h264, videoBitrate: 5_000_000)
+    public static let short = ExportPreset(name: "Short 9:16", resolution: 1080, codec: .h264, videoBitrate: 20_000_000, format: OutputFormat.portrait.id)
 
     public static let all: [ExportPreset] = [.youtube4K, .youtube1080, .review, .short]
 }

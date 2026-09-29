@@ -1,6 +1,7 @@
 import Foundation
 import TandemCore
 import TandemMedia
+import TandemRender
 
 // A 9:16 short from the landscape edit, the way Mike made his: the screen
 // (and B-roll and graphics) in the top half, the camera in the bottom half
@@ -52,7 +53,14 @@ extension TandemService {
         if let expected = request.expectedRevision, expected != revision {
             throw ServiceError.wrap(EditError.staleRevision(expected: expected, actual: revision))
         }
-        let format = project.settings.alternateFormats.first { $0.id == OutputFormat.portrait.id } ?? .portrait
+        let existing = project.settings.alternateFormats.first { $0.id == OutputFormat.portrait.id }
+        // A project made 9:16 (`tandem new --portrait`) is its own short.
+        // Laying a portrait format over it would stack the screen and the
+        // camera again, and the short preset would render that instead.
+        if existing == nil, OutputFrames.isNineBySixteen(width: project.settings.width, height: project.settings.height) {
+            throw ServiceError(.invalid, "This project's canvas is already 9:16 (\(project.settings.width)x\(project.settings.height)), so it is the short and there's nothing to lay out. Export it with `tandem export --preset short`.")
+        }
+        let format = existing ?? .portrait
         var commands: [EditCommand] = []
         if !project.settings.alternateFormats.contains(where: { $0.id == format.id }) {
             let formats = project.settings.alternateFormats + [format]

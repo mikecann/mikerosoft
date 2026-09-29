@@ -32,6 +32,12 @@ claude mcp add tandem -- ~/Applications/Tandem.app/Contents/MacOS/tandem mcp
 Old Filmora projects and agent EDLs import with `tandem import filmora
 "Video v3.wfp"` and `tandem import edl --recipe decision-models`.
 
+Stickers, graphics, sounds, music, looks, fonts and saved segments that
+every video reuses live in `~/Movies/Tandem Library`, which Tandem makes
+the first time it opens. Projects use those files where they are; `tandem
+archive` (File > Archive project…) copies the ones a project uses into it
+before it moves to another Mac.
+
 ## Working on Tandem
 
 ```bash

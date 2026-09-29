@@ -133,10 +133,16 @@ actor BaseVideo {
 enum CompositionAssembler {
     static func build(_ context: RenderContext) async throws -> BuiltComposition {
         let project = context.project
+        // The project's own fonts first, so a font added to assets/font/
+        // while the app is open is drawn from the next build on.
+        ProjectFonts.registerNew(in: context.folder)
         let plan = RenderPlanner.plan(project, format: context.format, assets: context.assets)
         guard plan.duration > .zero else { throw RenderError.emptyTimeline }
         var warnings = RenderPlanner.Warnings()
         plan.warnings.forEach { warnings.add($0) }
+        for font in ProjectFonts.missing(in: project, drawnOnly: true, format: context.format) {
+            warnings.add(font.warning)
+        }
         let media = Dictionary(project.media.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let clips = Dictionary(project.videoTracks.flatMap(\.clips).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let frameDuration = project.settings.frameRate.frameDuration

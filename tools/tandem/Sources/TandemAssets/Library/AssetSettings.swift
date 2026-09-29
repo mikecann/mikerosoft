@@ -9,11 +9,15 @@ public struct AssetSettings: Codable, Equatable, Sendable {
     public var iconColour: String
     /// Size cap for cached previews, in bytes.
     public var previewCacheLimit: Int64
+    /// Where the shared library folder is, when Mike moved it from the
+    /// default (`~/Movies/Tandem Library`; see `SharedLibrary`).
+    public var sharedLibrary: String?
 
-    public init(freesoundEnabled: Bool = false, iconColour: String = "#FFFFFF", previewCacheLimit: Int64 = 2 * 1024 * 1024 * 1024) {
+    public init(freesoundEnabled: Bool = false, iconColour: String = "#FFFFFF", previewCacheLimit: Int64 = 2 * 1024 * 1024 * 1024, sharedLibrary: String? = nil) {
         self.freesoundEnabled = freesoundEnabled
         self.iconColour = iconColour
         self.previewCacheLimit = previewCacheLimit
+        self.sharedLibrary = sharedLibrary
     }
 
     public static let fileName = "settings.json"
@@ -38,5 +42,6 @@ extension AssetSettings {
         freesoundEnabled = try c.decodeIfPresent(Bool.self, forKey: .freesoundEnabled) ?? d.freesoundEnabled
         iconColour = try c.decodeIfPresent(String.self, forKey: .iconColour) ?? d.iconColour
         previewCacheLimit = try c.decodeIfPresent(Int64.self, forKey: .previewCacheLimit) ?? d.previewCacheLimit
+        sharedLibrary = try c.decodeIfPresent(String.self, forKey: .sharedLibrary).flatMap { $0.isEmpty ? nil : $0 }
     }
 }

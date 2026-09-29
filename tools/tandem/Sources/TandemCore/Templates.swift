@@ -12,13 +12,20 @@ public struct Template: Codable, Equatable, Identifiable, Sendable {
     /// Values the template asks for, like the section title.
     public var fields: [TemplateField]
     public var clips: [TemplateClip]
+    /// Transitions between its clips, or at a clip's head or tail.
+    public var transitions: [TemplateTransition]
 
-    public init(id: String, name: String, duration: Time, fields: [TemplateField] = [], clips: [TemplateClip]) {
+    public init(id: String, name: String, duration: Time, fields: [TemplateField] = [], clips: [TemplateClip], transitions: [TemplateTransition] = []) {
         self.id = id
         self.name = name
         self.duration = duration
         self.fields = fields
         self.clips = clips
+        self.transitions = transitions
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, duration, fields, clips, transitions
     }
 
     public init(from decoder: Decoder) throws {
@@ -28,6 +35,47 @@ public struct Template: Codable, Equatable, Identifiable, Sendable {
         duration = try c.decode(Time.self, forKey: .duration)
         fields = try c.decode(.fields, or: [])
         clips = try c.decode([TemplateClip].self, forKey: .clips)
+        transitions = try c.decode(.transitions, or: [])
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(duration, forKey: .duration)
+        try c.encode(fields, forKey: .fields)
+        try c.encode(clips, forKey: .clips)
+        if !transitions.isEmpty { try c.encode(transitions, forKey: .transitions) }
+    }
+}
+
+/// A transition in a template, naming its clips by their place in
+/// `clips`: between two clips on one track, or at one clip's head (no
+/// `from`) or tail (no `to`), like a fade from black on an intro card.
+public struct TemplateTransition: Codable, Equatable, Sendable {
+    /// The outgoing clip's index in the template's clips.
+    public var from: Int?
+    /// The incoming clip's index.
+    public var to: Int?
+    public var type: TransitionType
+    public var direction: Direction?
+    public var duration: Time
+
+    public init(from: Int?, to: Int?, type: TransitionType, direction: Direction? = nil, duration: Time) {
+        self.from = from
+        self.to = to
+        self.type = type
+        self.direction = direction
+        self.duration = duration
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        from = try c.decodeIfPresent(Int.self, forKey: .from)
+        to = try c.decodeIfPresent(Int.self, forKey: .to)
+        type = try c.decode(TransitionType.self, forKey: .type)
+        direction = try c.decodeIfPresent(Direction.self, forKey: .direction)
+        duration = try c.decode(.duration, or: type.defaultDuration)
     }
 }
 
@@ -59,13 +107,15 @@ public struct TemplateClip: Codable, Equatable, Sendable {
     /// The clip to create. Its `start` and `id` are replaced. Text may use
     /// `{{field}}` placeholders.
     public var clip: Clip
-    /// For media clips: the path of a file already added to the project.
-    /// The clip's `mediaID` is looked up from it, so a template doesn't need
-    /// to know the project's media IDs.
+    /// For media clips: the path of the file, as the project has it. The
+    /// clip's `mediaID` is looked up from it, so a template doesn't need to
+    /// know the project's media IDs.
     public var mediaPath: String?
     /// For media clips: the media item to add when the project has nothing
-    /// at `mediaPath` yet (its path is used when `mediaPath` is left out),
-    /// so a template can bring its own sounds.
+    /// at `mediaPath` yet (its path becomes `mediaPath`, and is used when
+    /// `mediaPath` is left out). A saved segment carries the items for its
+    /// files, and the section card tile its whooshes, so inserting them adds
+    /// them; without one, the file must already be in the project.
     public var media: MediaItem?
 
     public init(track: String, trackKind: TrackKind = .video, offset: Time = .zero, clip: Clip, mediaPath: String? = nil, media: MediaItem? = nil) {
@@ -124,6 +174,20 @@ extension Template {
 }
 
 extension Editing {
+    /// The media at `path`, adding the item a template clip carries when the
+    /// project has nothing there yet. The carried item keeps its ID unless
+    /// the project already uses it.
+    static func mediaID(for path: String, carried: MediaItem?, in p: inout Project, template: String, _ context: inout EditContext) throws -> String {
+        if let media = p.media.first(where: { $0.path == path }) { return media.id }
+        guard var item = carried else {
+            throw EditError.notFound("media \(path) for template \(template); add it to the project first")
+        }
+        item.path = path
+        if item.id.isEmpty || p.allIDs.contains(item.id) { item.id = context.makeID("med") }
+        try addMedia(&p, item)
+        return item.id
+    }
+
     static func insertTemplate(_ p: inout Project, _ template: Template, at: Time, values: [String: String], mode: InsertMode, _ context: inout EditContext) throws {
         guard at >= .zero else { throw EditError.invalid("templates can't start before 0") }
         guard !template.clips.isEmpty else { throw EditError.invalid("template \(template.id) has no clips") }
@@ -144,19 +208,7 @@ extension Editing {
             clip.linkGroup = group
             if !clip.tags.contains("template:\(template.id)") { clip.tags.append("template:\(template.id)") }
             if let path = item.mediaPath {
-                if let media = p.media.first(where: { $0.path == path }) {
-                    clip.content = .media(mediaID: media.id)
-                } else if var media = item.media {
-                    // The template brings its own file: add it once.
-                    media.path = path
-                    if let other = p.media(media.id), other.path != path {
-                        throw EditError.invalid("template \(template.id) adds media \(media.id), but that ID is already \(other.path)")
-                    }
-                    if p.media(media.id) == nil { try addMedia(&p, media) }
-                    clip.content = .media(mediaID: media.id)
-                } else {
-                    throw EditError.notFound("media \(path) for template \(template.id); add it to the project first")
-                }
+                clip.content = .media(mediaID: try mediaID(for: path, carried: item.media, in: &p, template: template.id, &context))
             }
             try requireUnlocked(p[location])
             try checkContent(clip, fits: p[location], in: p)
@@ -177,6 +229,25 @@ extension Editing {
         for (location, clip) in planned {
             p[location].add(clip)
             context.createdIDs.append(clip.id)
+        }
+        for item in template.transitions {
+            func clip(at index: Int?) throws -> (TrackLocation, Clip)? {
+                guard let index else { return nil }
+                guard planned.indices.contains(index) else {
+                    throw EditError.invalid("template \(template.id) has a transition on clip \(index), which it doesn't have")
+                }
+                return planned[index]
+            }
+            let from = try clip(at: item.from)
+            let to = try clip(at: item.to)
+            guard let location = (from ?? to)?.0 else {
+                throw EditError.invalid("template \(template.id) has a transition with no clip")
+            }
+            if let from, let to, from.0 != to.0 {
+                throw EditError.invalid("template \(template.id) has a transition between clips on different tracks")
+            }
+            let transition = Transition(id: context.makeID("tr"), type: item.type, direction: item.direction, duration: item.duration, fromClipID: from?.1.id, toClipID: to?.1.id)
+            try addTransition(&p, trackID: p[location].id, transition, &context)
         }
     }
 }

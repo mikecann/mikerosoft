@@ -9,6 +9,15 @@ enum NativeRecordingStartOutcome: Equatable, Sendable {
     case cancelled
 }
 
+/// Stopping always yields the track timeline, even when a writer or the stream
+/// reported an error, so `tracks.json` is never lost with it.
+struct NativeRecordingStopResult {
+    var tracks: [String: TrackProgress]
+    var error: Error?
+    /// What the microphone file actually contains (a stereo USB mic writes 2).
+    var microphoneChannels: Int?
+}
+
 /// ScreenCaptureKit supplies all three sources, so one host-clock origin is used
 /// for every writer. No camera capture session is opened by this recorder.
 final class NativeRecording: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
@@ -26,8 +35,18 @@ final class NativeRecording: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var startedUptime: TimeInterval = 0
     private var lastMicrophoneUptime: TimeInterval = 0
     private var consecutiveVideoDrops = 0
+    private var consecutiveAudioDrops = 0
+    private var lastVideoSample: CMSampleBuffer?
+    private var lastVideoAppendUptime: TimeInterval = 0
+    private var lastVideoTimestamp = CMTime.invalid
+    private var videoStallLogged = false
+    private var lastMicrophoneRestartUptime: TimeInterval = 0
+    private var streamEndedBySystem = false
     var onStarted: (@Sendable () -> Void)?
     var onFailure: (@Sendable (String) -> Void)?
+    /// ScreenCaptureKit stops the stream itself when the captured window
+    /// closes, which is how most meetings end. That is not a failure.
+    var onStreamEnded: (@Sendable () -> Void)?
 
     /// Used by startup error handling to distinguish an empty setup failure
     /// from a partial capture whose successfully appended media must be kept.
@@ -59,22 +78,9 @@ final class NativeRecording: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let filter = SCContentFilter(desktopIndependentWindow: window)
-        let config = SCStreamConfiguration()
-        config.width = 1920
-        config.height = 1080
-        config.preservesAspectRatio = true
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 15)
-        config.queueDepth = 4
-        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        config.showsCursor = true
-        config.capturesAudio = true
-        config.captureMicrophone = true
-        // Nil explicitly means the current system-default microphone. Its
-        // capture is independent of the meeting application's mute control.
-        config.microphoneCaptureDeviceID = nil
-        config.excludesCurrentProcessAudio = true
-        config.sampleRate = 48_000
-        config.channelCount = 2
+        // A nil microphone device means the current system default. Its capture
+        // is independent of the meeting application's mute control.
+        let config = SCStreamConfiguration.meetingCapture(microphone: true)
         let capture = SCStream(filter: filter, configuration: config, delegate: self)
         try capture.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         try capture.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
@@ -87,7 +93,10 @@ final class NativeRecording: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             failure = nil
             startedUptime = ProcessInfo.processInfo.systemUptime
             lastMicrophoneUptime = startedUptime
+            lastVideoAppendUptime = startedUptime
+            streamEndedBySystem = false
         }
+        Log.capture.notice("Starting capture of window \(windowID, privacy: .public)")
         guard withLifecycle({ $0.beginActivation() }) else {
             return finishCancelledStartup()
         }
@@ -123,33 +132,114 @@ final class NativeRecording: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 
     func setVideoAllowed(_ allowed: Bool) {
-        queue.async { self.videoAllowed = allowed }
+        queue.async {
+            guard self.videoAllowed != allowed else { return }
+            self.videoAllowed = allowed
+            Log.capture.notice("Meeting video \(allowed ? "allowed" : "withheld", privacy: .public)")
+        }
     }
 
     func checkHealth() {
         queue.async {
             guard self.acceptsSamples, self.startedUptime > 0 else { return }
             let now = ProcessInfo.processInfo.systemUptime
-            if now - self.lastMicrophoneUptime > 10 {
-                self.report(CaptureFailure.message("The microphone stopped supplying audio. The partial recording has been preserved."))
-            } else if !self.announcedStart, now - self.startedUptime > 15 {
+            if !self.announcedStart, now - self.startedUptime > 15 {
                 self.report(CaptureFailure.message("Capture did not produce both meeting video and microphone audio within 15 seconds."))
+                return
+            }
+            self.fillVideoGap(now: now)
+            // A USB microphone that reconfigures (the Yeti does this) can leave
+            // ScreenCaptureKit's microphone capture dead. Restart just that
+            // source rather than ending video and call audio with it.
+            if now - self.lastMicrophoneUptime > 3, now - self.lastMicrophoneRestartUptime > 10 {
+                self.lastMicrophoneRestartUptime = now
+                Log.capture.error("Microphone silent for \(Int(now - self.lastMicrophoneUptime), privacy: .public)s; restarting microphone capture")
+                self.restartMicrophone()
             }
         }
     }
 
-    func stop() async throws -> [String: TrackProgress] {
+    /// ScreenCaptureKit stops delivering complete frames when a window is
+    /// static, hidden, or being dragged. Without this, the video file simply
+    /// ends while both audio tracks carry on (one 82-minute call kept 193s of
+    /// video). Repeat the last frame about once a second instead.
+    private func fillVideoGap(now: TimeInterval) {
+        guard now - lastVideoAppendUptime >= 1, let last = lastVideoSample,
+              let writer = writers[.video], writer.ready else { return }
+        if now - lastVideoAppendUptime > 5, !videoStallLogged {
+            videoStallLogged = true
+            Log.capture.error("No new meeting video frames for \(Int(now - self.lastVideoAppendUptime), privacy: .public)s; holding the last frame")
+        }
+        appendRetimedVideo(last, at: CMClockGetTime(CMClockGetHostTimeClock()), writer: writer)
+    }
+
+    private func appendRetimedVideo(_ sample: CMSampleBuffer, at time: CMTime, writer: TrackWriter) {
+        guard time > lastVideoTimestamp else { return }
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
+        var copy: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sample, sampleTimingEntryCount: 1,
+                                                    sampleTimingArray: &timing, sampleBufferOut: &copy) == noErr,
+              let copy else { return }
+        do {
+            try writer.append(copy)
+            lastVideoTimestamp = time
+            lastVideoAppendUptime = ProcessInfo.processInfo.systemUptime
+            try timeline?.accept(track: .video, timestamp: time.seconds, duration: 0)
+        } catch {
+            Log.capture.error("Could not repeat the last video frame: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func restartMicrophone() {
+        guard let stream else { return }
+        let off = SCStreamConfiguration.meetingCapture(microphone: false)
+        let on = SCStreamConfiguration.meetingCapture(microphone: true)
+        Task {
+            do {
+                try await stream.updateConfiguration(off)
+                try await stream.updateConfiguration(on)
+            } catch {
+                Log.capture.error("Microphone restart failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Points the running stream at another window without touching the
+    /// writers, so the same files continue with no gap in either audio track.
+    func retarget(windowID: CGWindowID) async throws {
+        guard let stream else { return }
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
+            throw CaptureFailure.message("The meeting moved to a window that is no longer available.")
+        }
+        try await stream.updateContentFilter(SCContentFilter(desktopIndependentWindow: window))
+        Log.capture.notice("Capture now follows window \(windowID, privacy: .public)")
+    }
+
+    func stop() async -> NativeRecordingStopResult {
         // Flip the gate before awaiting ScreenCaptureKit. Samples already
         // queued after this call are discarded even if native shutdown takes
         // time to complete.
         let shouldStopStream = withLifecycle { $0.beginStop() }
         let end = CMClockGetTime(CMClockGetHostTimeClock())
         var stopFailure: Error?
-        if shouldStopStream, let stream {
-            do { try await stream.stopCapture() } catch { stopFailure = error }
+        let endedBySystem = queue.sync { streamEndedBySystem }
+        if shouldStopStream, !endedBySystem, let stream {
+            do { try await stream.stopCapture() } catch {
+                // Already stopped by the system is the normal end of a call.
+                Log.capture.notice("stopCapture: \(error.localizedDescription, privacy: .public)")
+            }
         }
         stream = nil
+        // Hold the final frame to the end so the video is as long as the audio.
+        queue.sync {
+            if let last = lastVideoSample, let writer = writers[.video], writer.ready {
+                appendRetimedVideo(last, at: end, writer: writer)
+            }
+            lastVideoSample = nil
+        }
         let snapshot = queue.sync { (writers, timeline, failure) }
+        let microphoneChannels = snapshot.0[.microphone]?.channels
         // A final host timestamp extends a static last frame without creating
         // artificial 15 fps catch-up samples.
         for writer in snapshot.0.values {
@@ -157,14 +247,18 @@ final class NativeRecording: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         queue.sync { writers.removeAll() }
         withLifecycle { $0.didStop() }
-        if let error = snapshot.2 ?? stopFailure { throw error }
-        return Dictionary(uniqueKeysWithValues: (snapshot.1?.tracks ?? [:]).map { ($0.key.rawValue, $0.value) })
+        let tracks = Dictionary(uniqueKeysWithValues: (snapshot.1?.tracks ?? [:]).map { ($0.key.rawValue, $0.value) })
+        let error = snapshot.2 ?? stopFailure
+        Log.capture.notice("Capture stopped; tracks: \(tracks.keys.sorted().joined(separator: ","), privacy: .public); error: \(error?.localizedDescription ?? "none", privacy: .public)")
+        return NativeRecordingStopResult(tracks: tracks, error: error, microphoneChannels: microphoneChannels)
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         queue.async {
+            Log.capture.notice("Stream stopped by the system: \((error as NSError).domain, privacy: .public) \((error as NSError).code, privacy: .public)")
+            self.streamEndedBySystem = true
             guard self.reportsFailures else { return }
-            self.report(error)
+            self.onStreamEnded?()
         }
     }
 
@@ -193,13 +287,31 @@ final class NativeRecording: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             }
             guard let writer = writers[track] else { return }
             guard writer.ready else {
-                if track != .video { throw CaptureFailure.message("Audio encoder fell behind. The partial recording has been preserved.") }
+                if track != .video {
+                    // One busy moment in the encoder should cost a few
+                    // milliseconds of audio, not the rest of the meeting.
+                    consecutiveAudioDrops += 1
+                    if consecutiveAudioDrops >= 50 { throw CaptureFailure.message("Audio encoder fell behind. The partial recording has been preserved.") }
+                    return
+                }
                 consecutiveVideoDrops += 1
                 if consecutiveVideoDrops >= 60 { throw CaptureFailure.message("The video encoder stopped accepting frames. The partial recording has been preserved.") }
                 return // dropping video must not backlog microphone audio
             }
+            if track == .video, timestamp <= lastVideoTimestamp { return }
             try writer.append(sampleBuffer)
-            if track == .video { consecutiveVideoDrops = 0 }
+            if track == .video {
+                consecutiveVideoDrops = 0
+                lastVideoSample = sampleBuffer
+                lastVideoTimestamp = timestamp
+                lastVideoAppendUptime = ProcessInfo.processInfo.systemUptime
+                if videoStallLogged {
+                    videoStallLogged = false
+                    Log.capture.notice("Meeting video frames resumed")
+                }
+            } else {
+                consecutiveAudioDrops = 0
+            }
             if track == .microphone { lastMicrophoneUptime = ProcessInfo.processInfo.systemUptime }
             try timeline?.accept(track: track, timestamp: timestamp.seconds, duration: duration)
             withLifecycle { $0.recordAcceptedSample() }
@@ -212,6 +324,7 @@ final class NativeRecording: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
 
     private func report(_ error: Error) {
         guard reportsFailures, failure == nil else { return }
+        Log.capture.error("Capture failure: \(error.localizedDescription, privacy: .public)")
         failure = error
         onFailure?(error.localizedDescription)
     }
@@ -240,10 +353,33 @@ final class NativeRecording: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
 }
 
+private extension SCStreamConfiguration {
+    /// Restarting the microphone reapplies this with the flag off, then on;
+    /// ScreenCaptureKit applies each update to the running stream.
+    static func meetingCapture(microphone enabled: Bool) -> SCStreamConfiguration {
+        let config = SCStreamConfiguration()
+        config.width = 1920
+        config.height = 1080
+        config.preservesAspectRatio = true
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 15)
+        config.queueDepth = 6
+        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        config.showsCursor = true
+        config.capturesAudio = true
+        config.captureMicrophone = enabled
+        config.microphoneCaptureDeviceID = nil
+        config.excludesCurrentProcessAudio = true
+        config.sampleRate = 48_000
+        config.channelCount = 2
+        return config
+    }
+}
+
 final class TrackWriter {
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
     private var hasSamples = false
+    private(set) var channels: Int?
     var ready: Bool { input.isReadyForMoreMediaData }
 
     init(track: MediaTrack, directory: URL, sample: CMSampleBuffer, origin: CMTime) throws {
@@ -263,6 +399,7 @@ final class TrackWriter {
                 throw CaptureFailure.message("Audio capture did not provide a usable format.")
             }
             let channels = min(2, max(1, Int(audio.pointee.mChannelsPerFrame)))
+            self.channels = channels
             settings = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: audio.pointee.mSampleRate,
                         AVNumberOfChannelsKey: channels, AVEncoderBitRateKey: channels == 1 ? 96_000 : 128_000]
         }

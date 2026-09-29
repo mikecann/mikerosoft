@@ -563,6 +563,45 @@ class QueueTests(unittest.TestCase):
             self.assertEqual(status["state"], "retry_wait")
             self.assertIn("lease renewal failed", status["last_error"])
 
+    def test_publication_loop_publishes_while_heavy_processing_runs(self) -> None:
+        import threading
+
+        from meeting_archive_worker.service import _publication_loop, run_processing
+
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Path(temporary) / "worker.sqlite3"
+            queue = JobQueue(database)
+            finished_id = queue.enqueue(str(uuid.uuid4()), 1, "a" * 64, temporary)
+            queue.complete(queue.claim_ready("earlier", 60))  # type: ignore[arg-type]
+            queue.enqueue(str(uuid.uuid4()), 1, "b" * 64, temporary)
+            processing = threading.Event()
+            release = threading.Event()
+            published = threading.Event()
+            stop = threading.Event()
+
+            def slow_processor(_archive, _job):
+                processing.set()
+                release.wait(5)
+
+            heavy = threading.Thread(target=run_processing, args=(database, slow_processor, 60))
+            heavy.start()
+            self.assertTrue(processing.wait(2))
+            light = threading.Thread(
+                target=_publication_loop,
+                args=(database, 0.01, stop),
+                kwargs={"publisher": lambda _archive: published.set()},
+            )
+            light.start()
+            try:
+                self.assertTrue(published.wait(5))
+                self.assertTrue(heavy.is_alive())
+            finally:
+                stop.set()
+                release.set()
+                light.join(5)
+                heavy.join(5)
+            self.assertEqual(PublicationQueue(database).status({finished_id})["phase"], "succeeded")
+
     def test_notion_failure_does_not_retranscribe_completed_media(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -618,20 +657,63 @@ class QueueTests(unittest.TestCase):
             claimed = queue.claim_ready("worker-one", lease_seconds=5)
             self.assertIsNotNone(claimed)
 
-            recovered = JobQueue(database, clock=lambda: 106.0).claim_ready(
+            # A worker that died mid-job backs off like any other failure, so a
+            # job that crashes the worker cannot be retried in a tight loop.
+            self.assertIsNone(JobQueue(database, clock=lambda: 106.0).claim_ready("worker-two", 5))
+            status = JobQueue(database).status()["jobs"][0]
+            self.assertEqual(status["state"], "retry_wait")
+            self.assertEqual(status["available_at"], 166.0)
+            self.assertIn("lease expired", status["last_error"])
+            recovered = JobQueue(database, clock=lambda: 166.0).claim_ready(
                 "worker-two",
                 lease_seconds=5,
             )
             self.assertEqual(recovered.id, claimed.id)  # type: ignore[union-attr]
-            retry_at = JobQueue(database, clock=lambda: 106.0).fail(
+            retry_at = JobQueue(database, clock=lambda: 166.0).fail(
                 recovered,  # type: ignore[arg-type]
                 "temporary",
                 transient=True,
                 base_delay_seconds=10,
             )
-            self.assertEqual(retry_at, 126.0)
-            self.assertIsNone(JobQueue(database, clock=lambda: 125.0).claim_ready("early", 5))
-            self.assertIsNotNone(JobQueue(database, clock=lambda: 126.0).claim_ready("later", 5))
+            self.assertEqual(retry_at, 186.0)
+            self.assertIsNone(JobQueue(database, clock=lambda: 185.0).claim_ready("early", 5))
+            self.assertIsNotNone(JobQueue(database, clock=lambda: 186.0).claim_ready("later", 5))
+
+    def test_transient_failures_become_permanent_after_attempt_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Path(temporary) / "worker.sqlite3"
+            now = [100.0]
+            queue = JobQueue(database, clock=lambda: now[0])
+            meeting_id = str(uuid.uuid4())
+            queue.enqueue(meeting_id, 1, "a" * 64, temporary)
+            for attempt in range(1, 9):
+                job = queue.claim_ready("worker", 60)
+                self.assertEqual(job.attempts, attempt)  # type: ignore[union-attr]
+                retry_at = queue.fail(job, f"failure {attempt}", transient=True)  # type: ignore[arg-type]
+                if retry_at is not None:
+                    now[0] = retry_at
+            self.assertIsNone(retry_at)
+            status = queue.status()["jobs"][0]
+            self.assertEqual(status["state"], "permanent_failure")
+            self.assertEqual(status["last_error"], "failure 8")
+
+    def test_service_records_permanent_processing_error_without_retry(self) -> None:
+        from meeting_archive_worker.cli import PermanentProcessingError
+
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Path(temporary) / "worker.sqlite3"
+            queue = JobQueue(database)
+            queue.enqueue(str(uuid.uuid4()), 1, "a" * 64, temporary)
+
+            def processor(_archive, _job):
+                raise PermanentProcessingError("unsupported codec")
+
+            result = run_once(database, processor=processor, publisher=lambda *_: None)
+
+            self.assertFalse(result["processed"])
+            status = JobQueue(database).status()["jobs"][0]
+            self.assertEqual(status["state"], "permanent_failure")
+            self.assertEqual(status["last_error"], "unsupported codec")
 
 
 class ProcessingTests(unittest.TestCase):
@@ -668,6 +750,38 @@ class ProcessingTests(unittest.TestCase):
                     ensure_output.assert_not_called()
                     transcriber.assert_not_called()
                     self.assertFalse((incoming / "transcripts").exists())
+
+    def test_diarization_memory_budget_is_checked_before_loading_whisper(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            incoming, _ = write_bundle(Path(temporary))
+            verified = verify_incoming(incoming)
+            job = SimpleNamespace(
+                meeting_id=verified.meeting_id,
+                manifest_revision=verified.revision,
+                manifest_sha256=verified.manifest_sha256,
+            )
+            with patch.dict(os.environ, {"HF_TOKEN": "token"}, clear=True), patch(
+                "meeting_archive_worker.model_processor.probe_duration",
+                return_value=10 * 3600.0,
+            ), patch(
+                "meeting_archive_worker.model_processor.WhisperPyannoteTranscriber",
+            ) as transcriber:
+                with self.assertRaisesRegex(RuntimeError, "memory budget"):
+                    model_process(incoming, job)
+
+            transcriber.assert_not_called()
+
+    def test_channel_without_speech_skips_diarization(self) -> None:
+        transcriber = WhisperPyannoteTranscriber.__new__(WhisperPyannoteTranscriber)
+        transcriber.whisper = SimpleNamespace(transcribe=lambda *_args, **_kwargs: ([], None))
+        transcriber.diarizer = object()
+        transcriber.embeddings = {}
+        with patch.object(
+            WhisperPyannoteTranscriber,
+            "_diarize_without_torchcodec",
+            side_effect=AssertionError("diarized a silent channel"),
+        ):
+            self.assertEqual(transcriber.transcribe(Path("silent.m4a"), "incoming"), [])
 
     def test_valid_json_checkpoint_rebuilds_missing_markdown_without_models(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -769,21 +883,84 @@ class ProcessingTests(unittest.TestCase):
             self.assertEqual(len(decode_commands), 2)
             self.assertTrue(all("-xerror" in command for command in decode_commands))
 
-    def test_media_validator_rejects_duration_shorter_than_metadata(self) -> None:
+    def _validate_with_probes(self, files, claimed, probes):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "microphone.m4a").write_bytes(b"fixture")
-            manifest = SimpleNamespace(
-                files=(VerifiedFile("microphone.m4a", 7, "0" * 64, "microphone_audio"),),
-                metadata={"duration_seconds": 1800.0},
-            )
-            probe = {"streams": [{"codec_type": "audio", "duration": "0.1"}], "format": {"duration": "0.1"}}
+            for item in files:
+                (root / item.path).write_bytes(b"fixture")
+            manifest = SimpleNamespace(files=tuple(files), metadata={"duration_seconds": claimed})
+            remaining = iter(probes)
+
+            def run(command, **kwargs):
+                if command[0] == "ffprobe":
+                    return SimpleNamespace(stdout=json.dumps(next(remaining)), stderr="")
+                return SimpleNamespace(stdout="", stderr="")
+
             with patch("meeting_archive_worker.media_validation._executable", side_effect=lambda name: name), patch(
                 "meeting_archive_worker.media_validation.subprocess.run",
-                return_value=SimpleNamespace(stdout=json.dumps(probe), stderr=""),
+                side_effect=run,
             ):
-                with self.assertRaisesRegex(MediaValidationError, "covers only"):
-                    validate_media_files(root, manifest)
+                return validate_media_files(root, manifest)
+
+    def test_media_validator_flags_truncated_video_even_when_audio_covers_meeting(self) -> None:
+        # An 82-minute meeting whose video stopped after 193s used to pass
+        # silently because coverage took the longest file.
+        result = self._validate_with_probes(
+            [
+                VerifiedFile("video.mov", 7, "0" * 64, "video"),
+                VerifiedFile("microphone.m4a", 7, "0" * 64, "microphone_audio"),
+            ],
+            4920.0,
+            [
+                {"streams": [{"codec_type": "video", "duration": "193.0", "start_time": "0"}], "format": {}},
+                {"streams": [{"codec_type": "audio", "duration": "4920.0", "start_time": "0"}], "format": {}},
+            ],
+        )
+
+        self.assertEqual(result["status"], "passed")
+        self.assertTrue(result["full_decode"])
+        self.assertEqual(result["validator_version"], 2)
+        video, audio = result["files"]
+        self.assertTrue(video["truncated"])
+        self.assertEqual(video["coverage_end_seconds"], 193.0)
+        self.assertFalse(audio["truncated"])
+        self.assertEqual(result["warnings"], [{
+            "code": "video_truncated",
+            "path": "video.mov",
+            "kind": "video",
+            "covered_seconds": 193.0,
+            "claimed_seconds": 4920.0,
+        }])
+
+    def test_media_validator_accepts_all_short_streams_with_warning(self) -> None:
+        # The bytes are hash-verified, so retrying can never recover more
+        # media. Accept with a warning instead of refusing cleanup forever.
+        result = self._validate_with_probes(
+            [VerifiedFile("microphone.m4a", 7, "0" * 64, "microphone_audio")],
+            1800.0,
+            [{"streams": [{"codec_type": "audio", "duration": "0.1"}], "format": {"duration": "0.1"}}],
+        )
+
+        self.assertEqual(result["status"], "passed")
+        self.assertTrue(result["files"][0]["truncated"])
+        self.assertEqual(
+            [warning["code"] for warning in result["warnings"]],
+            ["audio_truncated", "media_shorter_than_claimed_duration"],
+        )
+        self.assertEqual(result["warnings"][1]["covered_seconds"], 0.1)
+        self.assertEqual(result["warnings"][1]["claimed_seconds"], 1800.0)
+
+    def test_media_validator_treats_unavailable_start_time_as_zero(self) -> None:
+        result = self._validate_with_probes(
+            [VerifiedFile("microphone.m4a", 7, "0" * 64, "microphone_audio")],
+            10.0,
+            [{"streams": [{"codec_type": "audio", "duration": "10.0", "start_time": "N/A"}],
+              "format": {"duration": "10.0", "start_time": "N/A"}}],
+        )
+
+        self.assertEqual(result["files"][0]["start_time_seconds"], 0.0)
+        self.assertFalse(result["files"][0]["truncated"])
+        self.assertEqual(result["warnings"], [])
 
     def test_diarizer_receives_waveform_dictionary_not_media_path(self) -> None:
         calls = []
@@ -823,7 +1000,7 @@ class ProcessingTests(unittest.TestCase):
         class Whisper:
             def transcribe(self, _path, **kwargs):
                 whisper_calls.update(kwargs)
-                return [], None
+                return [SimpleNamespace(start=0.0, end=1.0, text="Hello")], None
 
         output = SimpleNamespace(
             exclusive_speaker_diarization=Annotation(["EXCLUSIVE_WRONG"]),
@@ -1136,7 +1313,12 @@ class CliTests(unittest.TestCase):
                         "--db", str(root / "worker.sqlite3"), "--validate-media",
                     ])
             self.assertEqual(code, 0)
-            store.assert_called_once_with(archive, root / "worker.sqlite3", validate_media=True)
+            store.assert_called_once_with(
+                archive,
+                root / "worker.sqlite3",
+                validate_media=True,
+                incoming_root=Path(os.path.abspath(archive)).parent / "incoming",
+            )
             self.assertEqual(json.loads(output.getvalue()), acknowledgement)
 
     def test_swift_accept_argv_returns_decodable_acknowledgement(self) -> None:

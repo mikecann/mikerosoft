@@ -95,6 +95,29 @@ final class ColourWheelsTests: XCTestCase {
         XCTAssertEqual(centre.amount, 0)
     }
 
+    /// A keyframed wheel hue goes the short way round the wheel: from 350
+    /// to 10 it passes through red, not through green and blue. Other
+    /// numbers, rotation included, still move in a straight line.
+    func testKeyframedHuesTakeTheShortWayRound() {
+        let wheels = Effect(id: "fx_wheels", type: "colorWheels", params: ["midtonesHue": .number(350), "midtonesAmount": .number(40)])
+        let clip = Clip(
+            content: .solid(color: RGBA(r: 0, g: 0, b: 0)), start: .zero, duration: t(10),
+            video: VideoProperties(effects: [wheels]),
+            keyframes: [
+                "video.effects.fx_wheels.midtonesHue": [Keyframe(time: .zero, value: .number(350), interpolation: .linear), Keyframe(time: t(4), value: .number(10))],
+                "video.effects.fx_wheels.midtonesAmount": [Keyframe(time: .zero, value: .number(0), interpolation: .linear), Keyframe(time: t(4), value: .number(40))],
+                "video.transform.rotation": [Keyframe(time: .zero, value: .number(350), interpolation: .linear), Keyframe(time: t(4), value: .number(10))]
+            ]
+        )
+        func hue(at seconds: Double) -> Double? { clip.resolvedVideo(at: t(seconds)).effects[0].params["midtonesHue"]?.number }
+        XCTAssertEqual(try XCTUnwrap(hue(at: 1)), 355, accuracy: 1e-9)
+        XCTAssertEqual(ColourWheels.normalised(try XCTUnwrap(hue(at: 2))), 0, accuracy: 1e-9, "red, halfway")
+        XCTAssertEqual(try XCTUnwrap(hue(at: 3)), 5, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(hue(at: 5)), 10, accuracy: 1e-9)
+        XCTAssertEqual(clip.resolvedVideo(at: t(2)).effects[0].params["midtonesAmount"]?.number ?? 0, 20, accuracy: 1e-9)
+        XCTAssertEqual(clip.resolvedVideo(at: t(2)).transform.rotation, 180, accuracy: 1e-9, "a rotation from 350 to 10 is a real spin")
+    }
+
     func testRegistryDefinesTheWheels() throws {
         let definition = try XCTUnwrap(EffectRegistry.standard.definition("colorWheels"))
         XCTAssertEqual(definition.category, "Colour")

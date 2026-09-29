@@ -1,6 +1,8 @@
 import Foundation
 import TandemAPI
+import TandemAssets
 import TandemCore
+import TandemRender
 
 /// The `tandem` command. Each subcommand builds a service request, sends
 /// it through `ProjectClient` (to the app when it has the project open,
@@ -34,6 +36,9 @@ struct CLI {
             print(Help.overview)
             return parsed.has("help") ? 0 : 2
         }
+        // Titles can use the shared library's fonts wherever this process
+        // draws them (an export, a frame, tandem serve).
+        ProjectFonts.libraryFolders = [SharedLibrary.locate(environment: environment).url(.fonts)]
         if name == "help" {
             if let topic = parsed.positionals.first {
                 guard let command = Help.command(topic) else { return usage("There's no `\(topic)` command.", command: nil) }
@@ -83,6 +88,8 @@ struct CLI {
             return try await ImportCommand(directory: directory).run(args)
         case "assets":
             return try await AssetsCommand(directory: directory, environment: environment).run(args, author: author(args)) { try project(args) }
+        case "segments":
+            return try await SegmentsCommand(directory: directory, environment: environment).run(args, author: author(args)) { try project(args) }
         case "archive":
             try args.expectPositionals(atMost: 1, command: name)
             if args.has("with-cache"), args.options["to"] == nil {
@@ -241,7 +248,7 @@ struct CLI {
         }
         let session = try ProjectSession.create(at: url, name: args.options["name"], settings: settings, owner: .cli)
         defer { session.close() }
-        let added = try await session.refreshMedia()
+        let refresh = try await session.refreshMediaReport()
         let project = session.coordinator.project
         if args.has("json") {
             let service = TandemService(session: session, mode: .headless)
@@ -249,8 +256,39 @@ struct CLI {
             return show(service.status(), json: true)
         }
         print("Created \(url.path), \(project.settings.width)x\(project.settings.height), with \(project.allTracks.count) tracks (\(project.allTracks.map(\.name).joined(separator: ", "))).")
+        let added = refresh.added
         print(added.isEmpty ? "No media found in the folder yet. Add files and run `tandem media --refresh`." : "Added \(added.count) media file\(added.count == 1 ? "" : "s") from the folder.")
+        for line in Self.newMediaLines(refresh, in: project) { print(line) }
         return 0
+    }
+
+    /// What `tandem new` says about the media it found: the Live Photos, and
+    /// which file it treated as the camera take, why, and how to change it.
+    static func newMediaLines(_ refresh: MediaRefresh, in project: Project) -> [String] {
+        let added = refresh.added.compactMap { project.media($0) }
+        var lines: [String] = []
+        let livePhotos = added.filter { $0.livePhotoVideo != nil }.count
+        if livePhotos > 0 {
+            lines.append("\(livePhotos) \(livePhotos == 1 ? "is a Live Photo" : "are Live Photos"): the still is the media item, with its motion clip kept on it (livePhotoVideo) rather than added on its own.")
+        }
+        func command(_ id: String, role: MediaRole) -> String {
+            #"tandem apply '{"updateMedia": {"mediaID": "\#(id)", "patch": {"role": "\#(role.rawValue)"}}}'"#
+        }
+        let takes = refresh.cameraTakes
+        if !takes.isEmpty {
+            let shown = 5
+            for take in takes.prefix(shown) { lines.append("Camera take: \(take.path) (\(take.mediaID)), \(take.reason).") }
+            if takes.count > shown { lines.append("And \(takes.count - shown) more camera takes; `tandem media` lists them.") }
+            lines.append("Not the camera? \(command(takes.count == 1 ? takes[0].mediaID : "<id>", role: .other))")
+        } else if added.contains(where: { $0.kind == .video }) {
+            // The likeliest take is the longest video with sound that nothing
+            // else claimed.
+            let likely = added.filter { $0.kind == .video && $0.role == .other && $0.hasAudio }.max { ($0.duration ?? .zero) < ($1.duration ?? .zero) }
+            var line = "No camera take: no video is named like one, or is a recording (from a phone or camera, or in source/) with speech and a face in it. To make one the camera: \(command(likely?.id ?? "<id>", role: .camera))"
+            if let likely { line += " (\(likely.id) is \((likely.path as NSString).lastPathComponent), the longest video with sound)." }
+            lines.append(line)
+        }
+        return lines
     }
 
     private func serve(_ args: Arguments) async throws -> Int32 {
@@ -261,7 +299,7 @@ struct CLI {
         let session = try ProjectSession.open(url, owner: .cli)
         let host: TandemAPIHost
         do {
-            host = try await TandemAPIHost.start(session: session, port: UInt16(port))
+            host = try await TandemAPIHost.start(session: session, fontInstaller: LibraryFontInstaller.shared, port: UInt16(port))
         } catch {
             session.close()
             throw error

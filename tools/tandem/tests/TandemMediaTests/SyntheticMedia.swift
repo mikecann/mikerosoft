@@ -1,10 +1,12 @@
 import Accelerate
 import AVFoundation
 import CoreMedia
+import CoreText
 import CoreVideo
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
+import Vision
 @testable import TandemMedia
 import XCTest
 
@@ -34,6 +36,14 @@ enum SyntheticMedia {
         var creationDate: Date?
         /// Keyframe every frame, so tests that seek are exact and fast.
         var allIntra = false
+        /// When set, the sound comes from this file (speech, music) instead
+        /// of the sine, padded with silence or cut to the picture's length.
+        var audioFile: URL?
+        /// When set, every frame shows this picture instead of a colour.
+        var picture: CGImage?
+        /// QuickTime metadata strings, like a phone's make and model or a
+        /// Live Photo's content identifier.
+        var metadata: [AVMetadataIdentifier: String] = [:]
     }
 
     /// Writes a movie of solid colour frames (the colour steps each frame)
@@ -62,26 +72,37 @@ enum SyntheticMedia {
         ])
         writer.add(videoInput)
 
+        // A sound file is read up front; it's a few seconds at most.
+        let recorded = try spec.audioFile.map(readInterleaved)
         var audioInput: AVAssetWriterInput?
-        if let audio = spec.audio {
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+        if let format = recorded.map({ Audio(sampleRate: $0.sampleRate, channels: $0.channels) }) ?? spec.audio {
+            var settings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: audio.sampleRate,
-                AVNumberOfChannelsKey: audio.channels,
-                AVEncoderBitRateKey: 128_000
-            ])
+                AVSampleRateKey: format.sampleRate,
+                AVNumberOfChannelsKey: format.channels
+            ]
+            // The system voice speaks at 22.05 kHz in mono, too little for
+            // 128 kbps, so a recording gets the encoder's own bit rate.
+            if recorded == nil { settings[AVEncoderBitRateKey] = 128_000 }
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
             input.expectsMediaDataInRealTime = false
             writer.add(input)
             audioInput = input
         }
 
+        var metadata: [AVMetadataItem] = []
+        var strings = spec.metadata
         if let date = spec.creationDate {
-            let item = AVMutableMetadataItem()
-            item.identifier = .quickTimeMetadataCreationDate
-            item.value = ISO8601DateFormatter.fractional.string(from: date) as NSString
-            item.dataType = kCMMetadataBaseDataType_UTF8 as String
-            writer.metadata = [item]
+            strings[.quickTimeMetadataCreationDate] = ISO8601DateFormatter.fractional.string(from: date)
         }
+        for (identifier, value) in strings.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            let item = AVMutableMetadataItem()
+            item.identifier = identifier
+            item.value = value as NSString
+            item.dataType = kCMMetadataBaseDataType_UTF8 as String
+            metadata.append(item)
+        }
+        writer.metadata = metadata
 
         guard writer.startWriting() else { throw writer.error ?? TestMediaError("could not start writing \(url.lastPathComponent)") }
         writer.startSession(atSourceTime: .zero)
@@ -93,7 +114,8 @@ enum SyntheticMedia {
             let timescale: CMTimeScale = 600 * 1000
             for (index, time) in times.enumerated() {
                 while !videoInput.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 1_000_000) }
-                let buffer = try makeFrame(width: spec.width, height: spec.height, index: index, pool: adaptor.pixelBufferPool)
+                let buffer = try spec.picture.map { try makeFrame(width: spec.width, height: spec.height, picture: $0, pool: adaptor.pixelBufferPool) }
+                    ?? makeFrame(width: spec.width, height: spec.height, index: index, pool: adaptor.pixelBufferPool)
                 let pts = CMTime(value: CMTimeValue((time * Double(timescale)).rounded()), timescale: timescale)
                 guard adaptor.append(buffer, withPresentationTime: pts) else {
                     throw writer.error ?? TestMediaError("video append failed")
@@ -102,6 +124,25 @@ enum SyntheticMedia {
             videoInput.markAsFinished()
         }
         let audioDone = Task.detached {
+            if let audioInput, let recorded {
+                // The recording, then silence to the end of the picture.
+                let total = Int(endTime * recorded.sampleRate)
+                var written = 0
+                while written < total {
+                    while !audioInput.isReadyForMoreMediaData { try await Task.sleep(nanoseconds: 1_000_000) }
+                    let count = min(4096, total - written)
+                    var chunk = [Float](repeating: 0, count: count * recorded.channels)
+                    let available = max(0, min(count, recorded.samples.count / recorded.channels - written))
+                    if available > 0 {
+                        chunk.replaceSubrange(0..<(available * recorded.channels), with: recorded.samples[(written * recorded.channels)..<((written + available) * recorded.channels)])
+                    }
+                    let buffer = try makeSampleBuffer(chunk, channels: recorded.channels, sampleRate: recorded.sampleRate, startFrame: written)
+                    guard audioInput.append(buffer) else { throw writer.error ?? TestMediaError("audio append failed") }
+                    written += count
+                }
+                audioInput.markAsFinished()
+                return
+            }
             guard let audioInput, let audio = spec.audio else { return }
             let totalFrames = Int(endTime * audio.sampleRate)
             let chunk = 4096
@@ -188,6 +229,26 @@ enum SyntheticMedia {
         return buffer
     }
 
+    /// A BGRA frame showing `picture`, stretched to fill it.
+    static func makeFrame(width: Int, height: Int, picture: CGImage, pool: CVPixelBufferPool?) throws -> CVPixelBuffer {
+        var buffer: CVPixelBuffer?
+        if let pool {
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+        } else {
+            CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, nil, &buffer)
+        }
+        guard let buffer else { throw TestMediaError("no pixel buffer") }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        guard let context = CGContext(
+            data: CVPixelBufferGetBaseAddress(buffer), width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer), space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { throw TestMediaError("no context for the frame") }
+        context.draw(picture, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return buffer
+    }
+
     static func makeSineSampleBuffer(_ audio: Audio, startFrame: Int, frames: Int) throws -> CMSampleBuffer {
         let channels = audio.channels
         var samples = [Float](repeating: 0, count: frames * channels)
@@ -195,8 +256,14 @@ enum SyntheticMedia {
             let value = Float(audio.amplitude * sin(2 * Double.pi * audio.frequency * Double(startFrame + i) / audio.sampleRate))
             for c in 0..<channels { samples[i * channels + c] = value }
         }
+        return try makeSampleBuffer(samples, channels: channels, sampleRate: audio.sampleRate, startFrame: startFrame)
+    }
+
+    /// Interleaved Float32 samples as an audio sample buffer.
+    static func makeSampleBuffer(_ samples: [Float], channels: Int, sampleRate: Double, startFrame: Int) throws -> CMSampleBuffer {
+        let frames = samples.count / channels
         var asbd = AudioStreamBasicDescription(
-            mSampleRate: audio.sampleRate,
+            mSampleRate: sampleRate,
             mFormatID: kAudioFormatLinearPCM,
             mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
             mBytesPerPacket: UInt32(4 * channels),
@@ -216,7 +283,7 @@ enum SyntheticMedia {
             _ = CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: byteCount)
         }
         var sampleBuffer: CMSampleBuffer?
-        let pts = CMTime(value: CMTimeValue(startFrame), timescale: CMTimeScale(audio.sampleRate))
+        let pts = CMTime(value: CMTimeValue(startFrame), timescale: CMTimeScale(sampleRate))
         CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block, formatDescription: format, sampleCount: frames, presentationTimeStamp: pts, packetDescriptions: nil, sampleBufferOut: &sampleBuffer)
         guard let sampleBuffer else { throw TestMediaError("no audio sample buffer") }
         return sampleBuffer
@@ -329,5 +396,113 @@ extension SyntheticMedia {
             "-i", "color=c=red:s=\(width)x\(height):d=\(seconds):r=\(fps),format=rgba,geq=r='255':g='0':b='0':a='if(lt(X,W/3),255,if(lt(X,2*W/3),128,0))'",
             "-c:v", codec, "-pix_fmt", pixelFormat, url.path
         ])
+    }
+}
+
+extension SyntheticMedia {
+    /// A sound file's samples, interleaved Float32.
+    static func readInterleaved(_ url: URL) throws -> (samples: [Float], sampleRate: Double, channels: Int) {
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(file.length)) else {
+            throw TestMediaError("no buffer for \(url.lastPathComponent)")
+        }
+        try file.read(into: buffer)
+        let channels = Int(format.channelCount)
+        let frames = Int(buffer.frameLength)
+        var samples = [Float](repeating: 0, count: frames * channels)
+        guard let data = buffer.floatChannelData else { throw TestMediaError("\(url.lastPathComponent) isn't Float32") }
+        for c in 0..<channels {
+            for i in 0..<frames { samples[i * channels + c] = data[c][i] }
+        }
+        return (samples, format.sampleRate, channels)
+    }
+
+    /// A few seconds of something the sound classifier calls music: plucked
+    /// chords (C, G, A minor, F) with overtones, a kick on every beat and a
+    /// hi-hat between them.
+    static func writeMusic(to url: URL, seconds: Double) throws {
+        try? FileManager.default.removeItem(at: url)
+        let sampleRate = 44_100.0
+        let frames = Int(seconds * sampleRate)
+        let chords: [[Double]] = [[261.63, 329.63, 392.00], [196.00, 246.94, 293.66], [220.00, 261.63, 329.63], [174.61, 220.00, 261.63]]
+        let beat = 0.5
+        var noise: UInt64 = 0x2545_F491_4F6C_DD1D
+        var samples = [Float](repeating: 0, count: frames)
+        for i in 0..<frames {
+            let t = Double(i) / sampleRate
+            let chord = chords[Int(t / (beat * 4)) % chords.count]
+            let sinceBeat = t.truncatingRemainder(dividingBy: beat)
+            var value = 0.0
+            for (n, frequency) in chord.enumerated() {
+                let pluck = exp(-3 * sinceBeat) * 0.12
+                for harmonic in 1...4 {
+                    value += pluck / Double(harmonic) * sin(2 * .pi * frequency * Double(harmonic) * t + Double(n))
+                }
+                // The bass an octave below the root.
+                if n == 0 { value += 0.15 * exp(-2 * sinceBeat) * sin(2 * .pi * frequency / 2 * t) }
+            }
+            // Kick: a falling thump at each beat.
+            value += 0.5 * exp(-25 * sinceBeat) * sin(2 * .pi * (50 + 80 * exp(-30 * sinceBeat)) * sinceBeat)
+            // Hi-hat: a burst of noise halfway between beats.
+            let sinceHat = (t + beat / 2).truncatingRemainder(dividingBy: beat)
+            noise ^= noise << 13; noise ^= noise >> 7; noise ^= noise << 17
+            let white = Double(noise % 2001) / 1000 - 1
+            value += 0.08 * exp(-60 * sinceHat) * white
+            samples[i] = Float(max(-1, min(1, value)))
+        }
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
+        buffer.frameLength = AVAudioFrameCount(frames)
+        buffer.floatChannelData![0].update(from: samples, count: frames)
+        let file = try AVAudioFile(forWriting: url, settings: [
+            AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: sampleRate, AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false
+        ], commonFormat: .pcmFormatFloat32, interleaved: false)
+        try file.write(from: buffer)
+    }
+
+    /// A photo, as an iPhone writes it when `contentIdentifier` is set: the
+    /// Live Photo's asset identifier in Apple's maker note (key 17).
+    /// HEIC or JPEG by extension.
+    static func writeStill(to url: URL, width: Int = 160, height: Int = 120, contentIdentifier: String? = nil) throws {
+        try? FileManager.default.removeItem(at: url)
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        )!
+        context.setFillColor(CGColor(red: 0.6, green: 0.45, blue: 0.3, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let type: UTType = ["heic", "heif"].contains(url.pathExtension.lowercased()) ? .heic : .jpeg
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil) else {
+            throw TestMediaError("can't write \(url.lastPathComponent)")
+        }
+        var properties: [CFString: Any] = [
+            kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFMake: "Apple", kCGImagePropertyTIFFModel: "iPhone XS Max"]
+        ]
+        if let contentIdentifier { properties[kCGImagePropertyMakerAppleDictionary] = ["17": contentIdentifier] }
+        CGImageDestinationAddImage(destination, context.makeImage()!, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { throw TestMediaError("can't write \(url.lastPathComponent)") }
+    }
+
+    /// A picture of a face Vision can find: the person emoji, drawn big on
+    /// grey. Nil when Vision doesn't see a face in it on this Mac (the
+    /// emoji's artwork changes between macOS versions).
+    static func face(width: Int = 320, height: Int = 240) -> CGImage? {
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(CGColor(red: 0.3, green: 0.35, blue: 0.4, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let font = CTFontCreateWithName("Apple Color Emoji" as CFString, CGFloat(height) * 0.65, nil)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: "\u{1F9D1}\u{1F3FB}", attributes: [kCTFontAttributeName as NSAttributedString.Key: font]))
+        let bounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        context.textPosition = CGPoint(x: (CGFloat(width) - bounds.width) / 2 - bounds.minX, y: (CGFloat(height) - bounds.height) / 2 - bounds.minY)
+        CTLineDraw(line, context)
+        guard let image = context.makeImage() else { return nil }
+        let request = VNDetectFaceRectanglesRequest()
+        try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        return (request.results ?? []).isEmpty ? nil : image
     }
 }

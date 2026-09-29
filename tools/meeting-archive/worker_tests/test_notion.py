@@ -129,6 +129,75 @@ def visible_text(value) -> str:
     return ""
 
 
+def notion_response_shape(block: dict) -> dict:
+    """Render a stored block the way Notion's GET API returns it."""
+    block_type = block.get("type")
+    result = {
+        "object": "block",
+        "id": block["id"],
+        "parent": {"type": "page_id", "page_id": "page-1"},
+        "created_time": "2026-09-17T01:00:00.000Z",
+        "last_edited_time": "2026-09-17T01:00:00.000Z",
+        "has_children": False,
+        "in_trash": bool(block.get("in_trash")),
+        "type": block_type,
+    }
+    content = block.get(block_type)
+    if not isinstance(content, dict) or "rich_text" not in content:
+        result[block_type] = content
+        return result
+    rich_text = []
+    for item in content["rich_text"]:
+        text = item["text"]
+        url = text.get("link", {}).get("url") if text.get("link") else None
+        rich_text.append({
+            "type": "text",
+            "text": {"content": text["content"], "link": {"url": url} if url else None},
+            "annotations": {
+                "bold": False, "italic": False, "strikethrough": False,
+                "underline": False, "code": False, "color": "default",
+            },
+            "plain_text": text["content"],
+            "href": url,
+        })
+    result[block_type] = {"rich_text": rich_text, "color": "default"}
+    if block_type.startswith("heading_"):
+        result[block_type]["is_toggleable"] = False
+    return result
+
+
+class RealResponseTransport(MockTransport):
+    def __call__(self, request):
+        method = request.method or "GET"
+        path = urlparse(request.full_url).path.removeprefix("/v1/")
+        response = super().__call__(request)
+        if method == "GET" and path.endswith("/children"):
+            status, headers, body = response
+            body = dict(body, results=[notion_response_shape(block) for block in body["results"]])
+            return status, headers, body
+        return response
+
+
+class FlakyTransport(MockTransport):
+    """Fail selected requests once before passing them to the mock."""
+
+    def __init__(self, failures: dict[tuple[str, str], object]) -> None:
+        super().__init__()
+        self.failures = dict(failures)
+
+    def __call__(self, request):
+        method = request.method or "GET"
+        path = urlparse(request.full_url).path.removeprefix("/v1/")
+        for (want_method, want_path), failure in list(self.failures.items()):
+            if method == want_method and want_path in path:
+                del self.failures[(want_method, want_path)]
+                self.calls.append((method, path, {}))
+                if isinstance(failure, BaseException):
+                    raise failure
+                return failure
+        return super().__call__(request)
+
+
 class NotionPublicationTests(unittest.TestCase):
     def test_publish_is_idempotent_and_preserves_manual_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -322,6 +391,71 @@ class NotionPublicationTests(unittest.TestCase):
             delays: list[float] = []
             publish(archive, token="token", data_source="source", transport=transport, sleep=delays.append)
             self.assertEqual(delays, [0.0])
+
+    def test_rename_patches_only_changed_blocks_against_real_response_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            turns = [{"start": i, "end": i + 1, "speaker": "A", "text": f"Turn {i}"} for i in range(30)]
+            archive = write_archive(Path(temporary), turns=turns)
+            transport = RealResponseTransport()
+            publish(archive, token="token", data_source="source", transport=transport)
+            metadata_path = archive / "metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["title"] = "Renamed planning"
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+            calls_before = len(transport.calls)
+
+            publish(archive, token="token", data_source="source", transport=transport)
+
+            block_updates = [
+                body for method, path, body in transport.calls[calls_before:]
+                if method == "PATCH" and path.startswith("blocks/") and not path.endswith("/children")
+            ]
+            self.assertEqual(len(block_updates), 1)
+            self.assertIn("Renamed planning", json.dumps(block_updates[0]))
+
+    def test_transient_server_and_network_errors_are_retried_with_bounded_backoff(self) -> None:
+        from urllib.error import URLError
+
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = write_archive(Path(temporary))
+            transport = FlakyTransport({
+                ("POST", "/query"): (503, {}, {"message": "service unavailable"}),
+                ("PATCH", "pages/"): (409, {}, {"message": "conflict"}),
+                ("GET", "/children"): URLError(TimeoutError("timed out")),
+            })
+            delays: list[float] = []
+            receipt = publish(archive, token="token", data_source="source", transport=transport, sleep=delays.append)
+
+            self.assertEqual(receipt["page_id"], "page-1")
+            self.assertEqual(len(delays), 3)
+            self.assertTrue(all(0 < delay <= 30 for delay in delays))
+
+    def test_server_errors_stop_after_retry_budget(self) -> None:
+        from meeting_archive_worker.notion import NotionError
+
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = write_archive(Path(temporary))
+            delays: list[float] = []
+
+            def unavailable(_request):
+                return 502, {}, {"message": "bad gateway"}
+
+            with self.assertRaisesRegex(NotionError, "HTTP 502"):
+                publish(archive, token="token", data_source="source", transport=unavailable, sleep=delays.append)
+            self.assertEqual(len(delays), 3)
+
+    def test_uncertain_page_create_is_not_blindly_retried(self) -> None:
+        from meeting_archive_worker.notion import NotionError
+
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = write_archive(Path(temporary))
+            transport = FlakyTransport({("POST", "pages"): (502, {}, {"message": "bad gateway"})})
+            delays: list[float] = []
+            with self.assertRaisesRegex(NotionError, "HTTP 502"):
+                publish(archive, token="token", data_source="source", transport=transport, sleep=delays.append)
+            creates = [call for call in transport.calls if call[0] == "POST" and call[1] == "pages"]
+            self.assertEqual(len(creates), 1)
+            self.assertEqual(transport.pages, [])
 
     def test_correction_updates_owned_block_and_keeps_manual_and_unknown_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

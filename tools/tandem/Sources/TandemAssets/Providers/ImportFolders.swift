@@ -149,6 +149,9 @@ public struct ImportScanReport: Codable, Equatable, Sendable {
     /// Assets deleted from the catalogue because their file went, so the
     /// library can delete what it made from them.
     public var removedIDs: [String] = []
+    /// Assets whose file changed, so what the library made from them (a
+    /// converted sticker a project plays) can be made again.
+    public var updatedIDs: [String] = []
     /// Identifies the scan that made this report. Callers who shared a scan
     /// get the same ID, so its changes are handled once.
     public var scanID: String = UUID().uuidString
@@ -162,21 +165,69 @@ public struct ImportScanReport: Codable, Equatable, Sendable {
 /// SFX, Sonniss and anything else. Files stay where they are; the library
 /// indexes them, normalises copies into its own folder on first use and
 /// reads the folder's licence note.
-public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
-    public let id = "import"
-    public let displayName = "Import folders"
+public class ImportFolderProvider: AssetProvider, @unchecked Sendable {
+    public let id: String
+    public let displayName: String
     public let kinds: Set<AssetKind> = [.music, .sfx, .sticker, .overlay, .video, .image, .font, .icon, .logo, .lut]
     public let capabilities = ProviderCapabilities(search: false)
-    public let rules = ProviderRules(cacheTTL: 0, notes: ["Each folder's tandem-licence.json says what its files may be used for."])
+    public let rules: ProviderRules
     let catalog: AssetCatalog
 
-    public init(catalog: AssetCatalog) {
+    public convenience init(catalog: AssetCatalog) {
+        self.init(catalog: catalog, id: "import", displayName: "Import folders", rules: ProviderRules(cacheTTL: 0, notes: ["Each folder's tandem-licence.json says what its files may be used for."]))
+    }
+
+    /// For providers built on the same folder indexing (the shared library).
+    init(catalog: AssetCatalog, id: String, displayName: String, rules: ProviderRules) {
         self.catalog = catalog
+        self.id = id
+        self.displayName = displayName
+        self.rules = rules
     }
 
     public func status() async -> ProviderStatus {
         let folders = (try? catalog.importFolders()) ?? []
         return folders.isEmpty ? ProviderStatus(.ready, "No import folders yet") : .ready
+    }
+
+    // MARK: - What differs between folder providers
+
+    /// The folder a scan or a licence lookup is about, by its ID.
+    func folderRecord(_ folderID: String) throws -> AssetCatalog.ImportFolderRecord? {
+        try catalog.importFolders().first { $0.id == folderID }
+    }
+
+    /// Saves a scan's rows, unless the folder went away during the scan.
+    func saveScan(_ assets: [Asset], folderID: String) throws -> Bool {
+        try catalog.upsert(assets, ifImportFolderExists: folderID)
+    }
+
+    /// Notes that a folder was scanned.
+    func scanned(_ folderID: String) throws {
+        try catalog.recordImportFolderScan(id: folderID, at: Date())
+    }
+
+    /// The licence note for the files in `folder` (relative to the root,
+    /// "" for the root itself): an import folder has one, at its root.
+    func licenceNote(forFolder folder: String, root: URL) -> FolderLicence? {
+        FolderLicence.read(in: root)
+    }
+
+    /// What a file is when the file alone can't say, from where it is.
+    func kindHint(forPath relative: String) -> AssetKind? { nil }
+
+    /// Folders and files the index leaves out.
+    func skips(_ relative: String, isFolder: Bool) -> Bool { false }
+
+    /// The provider ID for a file in a folder.
+    func providerID(folderID: String, relative: String) -> String {
+        "\(folderID)/\(relative)"
+    }
+
+    /// The folder of the file an asset stands for, relative to its root.
+    static func folderPart(of asset: Asset) -> String {
+        let relative = asset.remote["relativePath"] ?? ""
+        return (relative as NSString).deletingLastPathComponent
     }
 
     /// Import folders are searched through the catalogue, not here.
@@ -191,12 +242,12 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
 
     public func licence(for asset: Asset) async throws -> AssetLicence {
         let folderID = asset.remote["folder"] ?? String(asset.providerID.split(separator: "/").first ?? "")
-        let record = try catalog.importFolders().first { $0.id == folderID }
-        let note = record.flatMap { FolderLicence.read(in: URL(fileURLWithPath: $0.path)) }
+        let record = try folderRecord(folderID)
+        let note = record.flatMap { licenceNote(forFolder: Self.folderPart(of: asset), root: URL(fileURLWithPath: $0.path, isDirectory: true)) }
         guard let note else {
             return AssetLicence(
                 name: "No licence note", licenceClass: .unknown,
-                notes: "The import folder has no \(FolderLicence.fileName). Add one so this asset's terms are on record."
+                notes: "The \(id == "import" ? "import folder" : "file's folder") has no \(FolderLicence.fileName). Add one so this asset's terms are on record."
             )
         }
         let text = (try? JSONEncoder.sorted.encode(note)).flatMap { String(data: $0, encoding: .utf8) }
@@ -229,7 +280,7 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
 
     private func performScan(_ folderID: String) async throws -> ImportScanReport {
         // Read the record again: a watcher may outlive the folder's removal.
-        guard let record = try catalog.importFolders().first(where: { $0.id == folderID }) else {
+        guard let record = try folderRecord(folderID) else {
             throw AssetError.notFound("import folder \(folderID) is no longer registered")
         }
         let root = URL(fileURLWithPath: record.path, isDirectory: true).standardizedFileURL
@@ -239,18 +290,25 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
         do {
             _ = try FileManager.default.contentsOfDirectory(atPath: root.path)
         } catch {
-            throw AssetError.notFound("can't read import folder \(record.path): \(error.localizedDescription)")
+            throw AssetError.notFound("can't read \(id == "import" ? "import folder" : "folder") \(record.path): \(error.localizedDescription)")
         }
-        let note = FolderLicence.read(in: root)
-        let noteSignature = FolderLicence.signature(note)
-        report.missingLicence = note == nil
+        // Each folder's note, read once a scan.
+        var notes: [String: (note: FolderLicence?, signature: String)] = [:]
+        func note(forFolder folder: String) -> (note: FolderLicence?, signature: String) {
+            if let known = notes[folder] { return known }
+            let found = licenceNote(forFolder: folder, root: root)
+            let entry = (found, FolderLicence.signature(found))
+            notes[folder] = entry
+            return entry
+        }
+        report.missingLicence = note(forFolder: "").note == nil
 
         let existing = try catalog.search(AssetQuery(providers: [id], limit: Int.max)).filter { $0.remote["folder"] == record.id }
         let before = Dictionary(existing.map { ($0.providerID, $0) }, uniquingKeysWith: { first, _ in first })
         var known = before
         let pinned = try catalog.pinnedIDs()
 
-        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey, .isHiddenKey]
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .isHiddenKey]
         let problems = ProblemList()
         let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles, .skipsPackageDescendants]) { url, error in
             problems.add("\(url.path): \(error.localizedDescription)")
@@ -260,25 +318,33 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
         var relicensed: [(Asset, Date)] = []
         while let file = enumerator?.nextObject() as? URL {
             let values = try? file.resourceValues(forKeys: Set(keys))
+            if values?.isDirectory == true {
+                if let relative = Paths.relative(file, to: root), skips(relative, isFolder: true) { enumerator?.skipDescendants() }
+                continue
+            }
             guard values?.isRegularFile == true else { continue }
             guard let relative = Paths.relative(file, to: root) else { continue }
-            if file.lastPathComponent == FolderLicence.fileName { continue }
+            if file.lastPathComponent == FolderLicence.fileName || skips(relative, isFolder: false) { continue }
             let ext = file.pathExtension.lowercased()
             let format = FormatSniffer.fromExtension(ext)
             guard format != .unknown || ext == "json" else {
                 report.skipped.append(relative)
                 continue
             }
-            let providerID = "\(record.id)/\(relative)"
+            let providerID = providerID(folderID: record.id, relative: relative)
             let size = Int64(values?.fileSize ?? 0)
             let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
             let signature = "\(size)-\(Int(modified))"
-            // Checked before anything expensive (probing, parsing JSON).
-            if let old = known.removeValue(forKey: providerID), old.remote["signature"] == signature, old.remote["missing"] == nil {
+            let (fileNote, noteSignature) = note(forFolder: (relative as NSString).deletingLastPathComponent)
+            // Checked before anything expensive (probing, parsing JSON). A
+            // row for the same file somewhere else (the folder moved) is
+            // described again, so it points at the file where it is now.
+            if let old = known.removeValue(forKey: providerID), old.remote["signature"] == signature, old.remote["missing"] == nil,
+               old.files.original == file.standardizedFileURL.path {
                 if old.remote["note"] == noteSignature {
                     report.unchanged += 1
                 } else {
-                    relicensed.append((relicense(old, note: note, signature: noteSignature), old.updatedAt))
+                    relicensed.append((relicense(old, note: fileNote, signature: noteSignature), old.updatedAt))
                     report.relicensed += 1
                 }
                 continue
@@ -288,7 +354,7 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 report.skipped.append(relative)
                 continue
             }
-            var asset = await describe(file: file, relative: relative, format: isLottie ? .lottie : format, folderID: record.id, note: note)
+            var asset = await describe(file: file, relative: relative, format: isLottie ? .lottie : format, folderID: record.id, note: fileNote)
             asset.size = size
             asset.remote["signature"] = signature
             asset.remote["note"] = noteSignature
@@ -297,13 +363,14 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 // but keeps the date it first arrived.
                 asset.addedAt = old.addedAt
                 report.updated += 1
+                report.updatedIDs.append(asset.id)
             } else {
                 report.added += 1
             }
             changes.append(asset)
         }
-        guard try catalog.upsert(changes, ifImportFolderExists: record.id) else {
-            throw AssetError.notFound("import folder \(record.name) was removed during the scan")
+        guard try saveScan(changes, folderID: record.id) else {
+            throw AssetError.notFound("\(id == "import" ? "import folder" : "folder") \(record.name) was removed during the scan")
         }
         for (asset, stamp) in relicensed {
             // Skip rows changed meanwhile; the next scan catches them.
@@ -334,7 +401,7 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 report.removed += 1
             }
         }
-        try catalog.recordImportFolderScan(id: record.id, at: Date())
+        try scanned(record.id)
         return report
     }
 
@@ -342,9 +409,8 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
     /// note changed since the asset was last scanned. A fetch uses this so
     /// it never writes back licence details the scan has since corrected.
     public func applyingCurrentNote(to asset: Asset) throws -> Asset {
-        guard let folderID = asset.remote["folder"],
-              let record = try catalog.importFolders().first(where: { $0.id == folderID }) else { return asset }
-        let note = FolderLicence.read(in: URL(fileURLWithPath: record.path, isDirectory: true))
+        guard let folderID = asset.remote["folder"], let record = try folderRecord(folderID) else { return asset }
+        let note = licenceNote(forFolder: Self.folderPart(of: asset), root: URL(fileURLWithPath: record.path, isDirectory: true))
         let signature = FolderLicence.signature(note)
         return asset.remote["note"] == signature ? asset : relicense(asset, note: note, signature: signature)
     }
@@ -355,7 +421,7 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
         updated.licenceClass = note?.licenceClass ?? .unknown
         updated.creditLine = note?.credit
         updated.summary = note.map { "From \($0.source)" }
-        if let kind = Self.noteKind(note, forFileKind: asset.kind) { updated.kind = kind }
+        if let kind = Self.noteKind(note?.kind ?? kindHint(forPath: asset.remote["relativePath"] ?? ""), forFileKind: asset.kind) { updated.kind = kind }
         updated.remote["note"] = signature
         updated.updatedAt = Date()
         return updated
@@ -365,7 +431,12 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
     /// audio, a picture kind for pictures. A Sonniss note saying "sfx"
     /// shouldn't turn a stray PNG into a sound effect.
     static func noteKind(_ note: FolderLicence?, forFileKind kind: AssetKind) -> AssetKind? {
-        guard let wanted = note?.kind else { return nil }
+        noteKind(note?.kind, forFileKind: kind)
+    }
+
+    /// `wanted`, when it suits a file of `kind`.
+    static func noteKind(_ wanted: AssetKind?, forFileKind kind: AssetKind) -> AssetKind? {
+        guard let wanted else { return nil }
         if wanted.isAudio && kind.isAudio { return wanted }
         if wanted.isVisual && kind.isVisual { return wanted }
         return nil
@@ -376,9 +447,11 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
     func describe(file: URL, relative: String, format: AssetFormat, folderID: String, note: FolderLicence?) async -> Asset {
         let name = ProviderFiles.title(file.deletingPathExtension().lastPathComponent.replacingOccurrences(of: ".", with: " "))
         let folders = relative.split(separator: "/").dropLast().map(String.init)
+        // What the note says the files are, or else where the file is.
+        let wanted = note?.kind ?? kindHint(forPath: relative)
         var asset = Asset(
             provider: id,
-            providerID: "\(folderID)/\(relative)",
+            providerID: providerID(folderID: folderID, relative: relative),
             kind: .image,
             name: name,
             tags: folders + LocalMatcher.tokens(file.deletingPathExtension().lastPathComponent),
@@ -395,7 +468,7 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
             if let audio = try? AVAudioFile(forReading: file) {
                 asset.duration = Double(audio.length) / audio.fileFormat.sampleRate
             }
-            asset.kind = Self.noteKind(note, forFileKind: .sfx) ?? Self.audioKind(path: lowerPath, duration: asset.duration)
+            asset.kind = Self.noteKind(wanted, forFileKind: .sfx) ?? Self.audioKind(path: lowerPath, duration: asset.duration)
         } else if format == .mov || format == .mp4 {
             if let info = try? await MediaProbe.video(file) {
                 asset.duration = info.duration
@@ -403,12 +476,12 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 asset.height = info.height
                 asset.hasAlpha = info.hasAlpha
             }
-            asset.kind = Self.noteKind(note, forFileKind: .video) ?? (asset.hasAlpha || lowerPath.contains("overlay") ? .overlay : .video)
+            asset.kind = Self.noteKind(wanted, forFileKind: .video) ?? (asset.hasAlpha || lowerPath.contains("overlay") ? .overlay : .video)
         } else if format == .webm || format == .lottie {
-            asset.kind = Self.noteKind(note, forFileKind: .sticker) ?? (lowerPath.contains("overlay") ? .overlay : .sticker)
+            asset.kind = Self.noteKind(wanted, forFileKind: .sticker) ?? (lowerPath.contains("overlay") ? .overlay : .sticker)
             asset.hasAlpha = true
         } else if format == .svg {
-            asset.kind = Self.noteKind(note, forFileKind: .icon) ?? (lowerPath.contains("logo") ? .logo : .icon)
+            asset.kind = Self.noteKind(wanted, forFileKind: .icon) ?? (lowerPath.contains("logo") ? .logo : .icon)
             asset.hasAlpha = true
         } else if format.isFont {
             asset.kind = .font
@@ -420,10 +493,10 @@ public final class ImportFolderProvider: AssetProvider, @unchecked Sendable {
                 asset.height = info.height
                 asset.hasAlpha = info.hasAlpha || format == .gif
                 // Animated GIF, WebP and APNG are stickers.
-                if info.frames > 1 { asset.kind = Self.noteKind(note, forFileKind: .sticker) ?? (lowerPath.contains("overlay") ? .overlay : .sticker) }
+                if info.frames > 1 { asset.kind = Self.noteKind(wanted, forFileKind: .sticker) ?? (lowerPath.contains("overlay") ? .overlay : .sticker) }
             }
             if asset.kind == .image {
-                asset.kind = Self.noteKind(note, forFileKind: .image) ?? (lowerPath.contains("overlay") ? .overlay : .image)
+                asset.kind = Self.noteKind(wanted, forFileKind: .image) ?? (lowerPath.contains("overlay") ? .overlay : .image)
             }
         }
         return asset

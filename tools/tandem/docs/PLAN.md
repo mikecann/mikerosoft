@@ -93,10 +93,14 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] ElevenLabs Generate, the big Space preview, looks and fonts dropped onto clips [app]
 - [x] Sources as providers; paid libraries through watched import folders. ElevenLabs sound effects need the key's `sound_generation` permission (music works)
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card, Like and Subscribe, Comment Below
+- [x] Shared library: one watched folder on this Mac (`~/Movies/Tandem Library`, moved in Settings) for stickers, graphics, sounds, music, looks, fonts and segments; its files are used where they are (its fonts registered by every render), archiving copies them in (Live Photo movies too), relink looks there [assets, api, app]
+- [x] Saved segments: Save selection as segment (menu bar and clip menu), the Text tab's Segments, `tandem segments list/save/insert` and `segments_*` MCP tools; a segment carries copies of its files [core, api, app]
+- [ ] The app asks for a segment's words when it goes in (agents pass them already); relink finds LUTs too, not just media, and a Live Photo movie that went missing while its still didn't
 - [ ] Stickers: Lottie and HEVC with alpha
 - [x] Word-by-word captions from the transcripts (`tandem captions`, MCP `captions`) [integration]
 - [x] Colour tab like other editors': whole take or this clip, then Light, Colour, colour wheels (the new `colorWheels` effect), a Lightroom-style colour mixer, vignette, sharpen and LUT; sliders with gradient tracks, reset, scrubbing and typing [app, render]
 - [x] Portrait short from the same edit: `setFormatLayout`, `tandem short`, portrait frames and the short export preset [integration]
+- [x] Export presets set quality, not shape: a resolution class on the frame's short side, the default preset follows the canvas, `--preset short` renders a 9:16 canvas, and the Export dialog shows each preset's size (`ExportPreset.plan(for:)`) [render, api, app]
 - [ ] Segment render cache for fast re-exports
 - [ ] Remotion graphics clips with props, rendered in the background
 - [ ] Own playback engine (VTDecompressionSession, frame cache, audio clock) if AVPlayer scrubbing isn't fast enough

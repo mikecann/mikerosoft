@@ -5,14 +5,14 @@ import XCTest
 final class MeetingRecordTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
 
-    func testFinalizedMeetingDefaultsToAcceptanceAfterTwentySeconds() {
+    func testFinalizedMeetingDefaultsToAcceptanceAfterNinetySeconds() {
         let record = makeRecord()
 
-        XCTAssertEqual(record.acceptance, .pending(deadline: start.addingTimeInterval(80)))
-        XCTAssertNil(record.resolvingDeadline(at: start.addingTimeInterval(79)))
+        XCTAssertEqual(record.acceptance, .pending(deadline: start.addingTimeInterval(150)))
+        XCTAssertNil(record.resolvingDeadline(at: start.addingTimeInterval(149)))
         XCTAssertEqual(
-            record.resolvingDeadline(at: start.addingTimeInterval(80))?.acceptance,
-            .accepted(at: start.addingTimeInterval(80), trigger: .deadline)
+            record.resolvingDeadline(at: start.addingTimeInterval(150))?.acceptance,
+            .accepted(at: start.addingTimeInterval(150), trigger: .deadline)
         )
     }
 
@@ -48,6 +48,14 @@ final class MeetingRecordTests: XCTestCase {
         let decoded = try ModelCodec.decoder.decode(MeetingRecord.self, from: data)
         XCTAssertEqual(decoded, makeRecord())
         XCTAssertEqual(decoded.schemaVersion, 1)
+    }
+
+    func testRenamingAnArchivedMeetingKeepsItsRevision() {
+        let record = makeRecord().resolvingAcceptance(.accept(trigger: .deadline), at: start.addingTimeInterval(200))
+        let renamed = record.renamingArchived("Weekly planning", at: start.addingTimeInterval(300))
+        XCTAssertEqual(renamed.title, "Weekly planning")
+        XCTAssertEqual(renamed.metadataRevision, record.metadataRevision, "a new revision would re-upload and reprocess the whole meeting")
+        XCTAssertEqual(renamed.acceptance, record.acceptance)
     }
 
     private func makeRecord() -> MeetingRecord {
