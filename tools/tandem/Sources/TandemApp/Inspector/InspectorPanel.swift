@@ -206,6 +206,7 @@ struct VideoInspector: View {
                     case .pipRight: return "PiP ↘"
                     case .pipLeft: return "PiP ↙"
                     case .split: return "Split"
+                    case .fill: return "Fill"
                     }
                 },
                 action: { preset in

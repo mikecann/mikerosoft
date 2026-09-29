@@ -13,6 +13,9 @@ public enum LayoutPreset: String, Codable, CaseIterable, Sendable {
     case pipLeft
     /// Camera on the right half, everything else on the left half.
     case split
+    /// Covers the whole frame, cropping what doesn't fit, so a landscape
+    /// still fills a 9:16 short instead of sitting in a thin band.
+    case fill
 
     public var name: String {
         switch self {
@@ -20,6 +23,7 @@ public enum LayoutPreset: String, Codable, CaseIterable, Sendable {
         case .pipRight: return "PiP right"
         case .pipLeft: return "PiP left"
         case .split: return "Split"
+        case .fill: return "Fill"
         }
     }
 
@@ -35,8 +39,16 @@ public enum LayoutPreset: String, Codable, CaseIterable, Sendable {
     }
 
     /// The clip's video properties with this layout applied. Effects other
-    /// than the PiP shadow are kept.
-    public func apply(to video: VideoProperties?, role: MediaRole?, shadowID: String) -> VideoProperties {
+    /// than the PiP shadow are kept. `fill` needs the source and canvas
+    /// sizes to work out how far to scale; without them it behaves like
+    /// `full`.
+    public func apply(
+        to video: VideoProperties?,
+        role: MediaRole?,
+        shadowID: String,
+        sourceSize: (width: Double, height: Double)? = nil,
+        canvasSize: (width: Double, height: Double)? = nil
+    ) -> VideoProperties {
         var v = video ?? VideoProperties()
         v.layoutPreset = rawValue
         v.transform.rotation = 0
@@ -61,8 +73,80 @@ public enum LayoutPreset: String, Codable, CaseIterable, Sendable {
             v.crop = Crop(left: 0.25, top: 0, right: 0.25, bottom: 0)
             if v.cutout != nil { v.cutout?.enabled = false }
             v.effects.removeAll { $0.type == "dropShadow" }
+        case .fill:
+            if let source = sourceSize, let canvas = canvasSize {
+                v.transform = Transform.filling(.full, sourceWidth: source.width, sourceHeight: source.height, canvasWidth: canvas.width, canvasHeight: canvas.height)
+            } else {
+                v.transform = Transform()
+            }
+            v.crop = Crop()
+            if v.cutout != nil { v.cutout?.enabled = false }
+            v.effects.removeAll { $0.type == "dropShadow" }
         }
         return v
+    }
+}
+
+/// Slow moves for stills (the Ken Burns effect), over the whole clip.
+public enum MotionStyle: String, Codable, CaseIterable, Sendable {
+    case zoomIn, zoomOut, panLeft, panRight, panUp, panDown
+
+    public var name: String {
+        switch self {
+        case .zoomIn: return "Zoom in"
+        case .zoomOut: return "Zoom out"
+        case .panLeft: return "Pan left"
+        case .panRight: return "Pan right"
+        case .panUp: return "Pan up"
+        case .panDown: return "Pan down"
+        }
+    }
+
+    /// Start and end transforms for a move from `base` (usually the fill
+    /// transform). `amount` is how much bigger the zoomed end is (1.12 is a
+    /// gentle push). Pans travel across whatever overflows the frame, zooming
+    /// in by `amount` first when nothing does, and stop short of the edge.
+    public func keyframes(from base: Transform, amount: Double, sourceWidth: Double, sourceHeight: Double, canvasWidth: Double, canvasHeight: Double) -> (start: Transform, end: Transform) {
+        let fit = min(canvasWidth / sourceWidth, canvasHeight / sourceHeight)
+        func overflow(scale: Double) -> (x: Double, y: Double) {
+            // How far the centre can move from the middle while the source
+            // still covers the frame, in canvas units.
+            let w = sourceWidth * fit * scale / canvasWidth
+            let h = sourceHeight * fit * scale / canvasHeight
+            return (max(0, (w - 1) / 2), max(0, (h - 1) / 2))
+        }
+        var zoomed = base
+        zoomed.scale = base.scale * amount
+        switch self {
+        case .zoomIn: return (base, zoomed)
+        case .zoomOut: return (zoomed, base)
+        case .panLeft, .panRight, .panUp, .panDown:
+            var start = base
+            var room = overflow(scale: base.scale)
+            let horizontal = self == .panLeft || self == .panRight
+            if (horizontal ? room.x : room.y) < 0.02 {
+                start = zoomed
+                room = overflow(scale: zoomed.scale)
+            }
+            let travel = (horizontal ? room.x : room.y) * 0.8
+            var end = start
+            switch self {
+            // The picture moves left, so its centre starts right of middle.
+            case .panLeft:
+                start.position.x = 0.5 + travel
+                end.position.x = 0.5 - travel
+            case .panRight:
+                start.position.x = 0.5 - travel
+                end.position.x = 0.5 + travel
+            case .panUp:
+                start.position.y = 0.5 + travel
+                end.position.y = 0.5 - travel
+            default:
+                start.position.y = 0.5 - travel
+                end.position.y = 0.5 + travel
+            }
+            return (start, end)
+        }
     }
 }
 

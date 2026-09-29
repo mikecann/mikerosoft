@@ -84,3 +84,57 @@ final class PortraitLayoutTests: XCTestCase {
         XCTAssertEqual(override.cutout, false)
     }
 }
+
+final class StillsTests: XCTestCase {
+    /// A landscape photo in a 1080x1920 short.
+    func shortWithPhoto() throws -> (ProjectCoordinator, String) {
+        var p = Project.standard(name: "Short")
+        p.settings.width = 1080
+        p.settings.height = 1920
+        p.media = [MediaItem(id: "med_photo", path: "photos/bench.jpg", kind: .image, role: .image, width: 4032, height: 3024, hasVideo: false)]
+        let c = ProjectCoordinator(project: p)
+        try c.run("Place", .placeMedia(mediaIDs: ["med_photo"], at: .zero, duration: Time(seconds: 4)))
+        return (c, c.project.track(named: "B-roll")!.clips[0].id)
+    }
+
+    func testFillCoversAPortraitFrame() throws {
+        let (c, photo) = try shortWithPhoto()
+        try c.run("Fill", .applyLayout(clipIDs: [photo], preset: .fill))
+        // 4032x3024 fitted into 1080x1920 is 1080x810; covering 1920 tall
+        // needs 1920 / 810.
+        let scale = try XCTUnwrap(c.project.clip(photo)?.video?.transform.scale)
+        XCTAssertEqual(scale, 1920 / 810, accuracy: 1e-9)
+        XCTAssertEqual(c.project.clip(photo)?.video?.layoutPreset, "fill")
+    }
+
+    func testZoomInMovesFromTheFillToABitCloser() throws {
+        let (c, photo) = try shortWithPhoto()
+        try c.run("Fill", .applyLayout(clipIDs: [photo], preset: .fill))
+        try c.run("Push", .addMotion(clipIDs: [photo], style: .zoomIn))
+        let clip = try XCTUnwrap(c.project.clip(photo))
+        let fill = 1920.0 / 810
+        XCTAssertEqual(clip.resolvedVideo(at: .zero).transform.scale, fill, accuracy: 1e-6)
+        XCTAssertEqual(clip.resolvedVideo(at: clip.duration).transform.scale, fill * 1.12, accuracy: 1e-6)
+        XCTAssertEqual(clip.resolvedVideo(at: Time(seconds: 2)).transform.scale, fill * 1.06, accuracy: 1e-6, "linear, not eased")
+    }
+
+    func testPanLeftTravelsAcrossTheOverflowWithoutShowingAnEdge() throws {
+        let (c, photo) = try shortWithPhoto()
+        try c.run("Fill", .applyLayout(clipIDs: [photo], preset: .fill))
+        try c.run("Pan", .addMotion(clipIDs: [photo], style: .panLeft))
+        let clip = try XCTUnwrap(c.project.clip(photo))
+        let start = clip.resolvedVideo(at: .zero).transform.position.x
+        let end = clip.resolvedVideo(at: clip.duration).transform.position.x
+        XCTAssertGreaterThan(start, 0.5)
+        XCTAssertLessThan(end, 0.5)
+        // The photo is 1080 * 1920/810 = 2560 px wide on a 1080 px frame:
+        // its centre can move 0.685 either way; the pan uses 80% of that.
+        let room = (2560.0 / 1080 - 1) / 2
+        XCTAssertEqual(start - 0.5, room * 0.8, accuracy: 1e-6)
+    }
+
+    func testMotionAmountIsChecked() throws {
+        let (c, photo) = try shortWithPhoto()
+        XCTAssertThrowsError(try c.run("Too much", .addMotion(clipIDs: [photo], style: .zoomIn, amount: 5)))
+    }
+}

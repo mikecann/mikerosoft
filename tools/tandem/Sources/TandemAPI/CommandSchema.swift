@@ -607,7 +607,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .applyLayout,
-            summary: "Sets a one-key layout on video clips: full, pipRight (50% with the cutout and shadow, bottom right), pipLeft, or split. Audio clips in the list are skipped.",
+            summary: "Sets a one-key layout on video clips: full, pipRight (50% with the cutout and shadow, bottom right), pipLeft, split, or fill (covers the whole frame, cropping the edges, for stills in a short). Audio clips in the list are skipped.",
             arguments: S.object(["clipIDs": S.ids("Video clips."), "preset": S.enumeration(LayoutPreset.allCases.map(\.rawValue))], required: ["clipIDs", "preset"]),
             example: #"{"applyLayout": {"clipIDs": ["clip_cam1"], "preset": "pipRight"}}"#
         ),
@@ -629,6 +629,16 @@ extension CommandSchema {
                 "cutout": S.boolean("Cutout on or off in this format. Leave out to keep the clip's setting.")
             ], required: ["clipIDs", "format", "slot"]),
             example: #"{"setFormatLayout": {"clipIDs": ["clip_cam1"], "format": "portrait", "slot": "bottom", "cutout": false}}"#
+        ),
+        Entry(
+            command: .addMotion,
+            summary: "A slow zoom or pan over the whole of each clip (Ken Burns), for stills and photos. Starts from the clip's current placement, so apply the fill layout first in a short. amount is how much bigger the zoomed end is (default 1.12). Replaces the clip's position and scale animation.",
+            arguments: S.object([
+                "clipIDs": S.ids("Video clips."),
+                "style": S.enumeration(MotionStyle.allCases.map(\.rawValue)),
+                "amount": S.number("How much bigger the zoomed end is, 1 to 3. Default 1.12.", minimum: 1, maximum: 3)
+            ], required: ["clipIDs", "style"]),
+            example: #"{"addMotion": {"clipIDs": ["clip_photo1"], "style": "zoomIn", "amount": 1.15}}"#
         ),
         Entry(
             command: .addTransition,

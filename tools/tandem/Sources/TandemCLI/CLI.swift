@@ -201,7 +201,20 @@ struct CLI {
         } else if url.pathExtension != ProjectFile.fileExtension {
             url = url.appendingPathExtension(ProjectFile.fileExtension)
         }
-        let session = try ProjectSession.create(at: url, name: args.options["name"], owner: .cli)
+        var settings = ProjectSettings()
+        if args.has("portrait") {
+            settings.width = 1080
+            settings.height = 1920
+        }
+        if let size = args.options["size"] {
+            let parts = size.lowercased().split(separator: "x").compactMap { Int($0) }
+            guard parts.count == 2, parts[0] > 0, parts[1] > 0 else {
+                throw UsageError(message: "--size takes width x height in pixels, like 1080x1920 or 3840x2160.")
+            }
+            settings.width = parts[0]
+            settings.height = parts[1]
+        }
+        let session = try ProjectSession.create(at: url, name: args.options["name"], settings: settings, owner: .cli)
         defer { session.close() }
         let added = try await session.refreshMedia()
         let project = session.coordinator.project
@@ -210,7 +223,7 @@ struct CLI {
             defer { service.shutdown() }
             return show(service.status(), json: true)
         }
-        print("Created \(url.path) with \(project.allTracks.count) tracks (\(project.allTracks.map(\.name).joined(separator: ", "))).")
+        print("Created \(url.path), \(project.settings.width)x\(project.settings.height), with \(project.allTracks.count) tracks (\(project.allTracks.map(\.name).joined(separator: ", "))).")
         print(added.isEmpty ? "No media found in the folder yet. Add files and run `tandem media --refresh`." : "Added \(added.count) media file\(added.count == 1 ? "" : "s") from the folder.")
         return 0
     }

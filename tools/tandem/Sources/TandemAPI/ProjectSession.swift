@@ -114,12 +114,13 @@ public final class ProjectSession: @unchecked Sendable {
     }
 
     /// Creates a new project with Mike's usual tracks in `url`'s folder.
-    public static func create(at url: URL, name: String? = nil, owner: Owner) throws -> ProjectSession {
+    public static func create(at url: URL, name: String? = nil, settings: ProjectSettings? = nil, owner: Owner) throws -> ProjectSession {
         let url = url.standardizedFileURL
         guard !FileManager.default.fileExists(atPath: url.path) else {
             throw ServiceError(.invalid, "\(url.path) already exists. Open it instead, or pick another name.")
         }
-        let project = Project.standard(name: name ?? url.deletingPathExtension().lastPathComponent)
+        var project = Project.standard(name: name ?? url.deletingPathExtension().lastPathComponent)
+        if let settings { project.settings = settings }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         // A deleted project of this name may have left a journal or undo
         // history; opening would replay it over the new project.

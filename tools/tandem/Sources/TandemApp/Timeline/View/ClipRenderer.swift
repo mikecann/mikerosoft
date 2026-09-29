@@ -326,6 +326,7 @@ struct ClipRenderer {
             case .pipRight: parts.append("PiP ↘")
             case .pipLeft: parts.append("PiP ↙")
             case .split: parts.append("Split")
+            case .fill: parts.append("Fill")
             }
         } else if video.transform.scale > 1.001, clip.keyframes["video.transform.scale"] == nil {
             parts.append("Zoom \(Int((video.transform.scale * 100).rounded()))%")

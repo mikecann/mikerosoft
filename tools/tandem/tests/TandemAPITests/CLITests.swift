@@ -410,3 +410,18 @@ final class ScreenshotCLITests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.file("shot.png").path))
     }
 }
+
+final class NewProjectCLITests: XCTestCase {
+    func testPortraitProject() throws {
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        let folder = TempFolder()
+        let result = try CLITests().tandem("new", "Short.tandem", "--portrait", in: folder.url)
+        XCTAssertEqual(result.status, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains("1080x1920"), result.stdout)
+        let project = try ProjectFile.load(from: folder.file("Short.tandem")).project
+        XCTAssertEqual(project.settings.width, 1080)
+        XCTAssertEqual(project.settings.height, 1920)
+        let bad = try CLITests().tandem("new", "Odd.tandem", "--size", "big", in: folder.url)
+        XCTAssertEqual(bad.status, 2)
+    }
+}

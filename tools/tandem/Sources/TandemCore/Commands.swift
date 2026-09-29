@@ -115,6 +115,11 @@ public enum EditCommand: Codable, Equatable, Sendable {
     /// `ProjectSettings.alternateFormats`), for example the top or bottom
     /// half of the 9:16 short. `cutout` turns the cutout on or off there.
     case setFormatLayout(clipIDs: [String], format: String, slot: PortraitSlot, cutout: Bool? = nil)
+    /// A slow zoom or pan over the whole of each clip (the Ken Burns
+    /// effect), for stills and photos. Starts from the clip's current
+    /// placement (apply the `fill` layout first for a short). `amount`
+    /// defaults to 1.12. Replaces the clip's position and scale animation.
+    case addMotion(clipIDs: [String], style: MotionStyle, amount: Double? = nil)
 
     // MARK: Transitions
 

@@ -68,6 +68,8 @@ public enum Editing {
             try applyLayout(&project, clipIDs, preset, &context)
         case .zoomToRegion(let clipID, let rect, let at, let duration):
             try zoomToRegion(&project, clipID, rect: rect, at: at, duration: duration)
+        case .addMotion(let clipIDs, let style, let amount):
+            try addMotion(&project, clipIDs, style: style, amount: amount)
         case .setFormatLayout(let clipIDs, let format, let slot, let cutout):
             try setFormatLayout(&project, clipIDs, format: format, slot: slot, cutout: cutout)
         case .addTransition(let trackID, let transition):
@@ -929,11 +931,54 @@ public enum Editing {
             guard p[location].kind == .video else { continue }
             try requireUnlocked(p[location])
             var clip = p[location].clips[index]
-            let role = clip.mediaID.flatMap { p.media($0)?.role }
-            clip.video = preset.apply(to: clip.video, role: role, shadowID: context.makeID("fx"))
+            let item = clip.mediaID.flatMap { p.media($0) }
+            clip.video = preset.apply(
+                to: clip.video, role: item?.role, shadowID: context.makeID("fx"),
+                sourceSize: sourceSize(of: clip, in: p),
+                canvasSize: (Double(p.settings.width), Double(p.settings.height))
+            )
             for key in ["video.transform.position", "video.transform.scale", "video.transform.rotation"] {
                 clip.keyframes.removeValue(forKey: key)
             }
+            p[location].clips[index] = clip
+            changed += 1
+        }
+        if changed == 0 { throw EditError.invalid("none of those clips are on a video track") }
+    }
+
+    /// The pixel size a clip shows: its media's, or the canvas for text,
+    /// solids and media that hasn't been probed.
+    static func sourceSize(of clip: Clip, in p: Project) -> (width: Double, height: Double) {
+        if let mediaID = clip.mediaID, let item = p.media(mediaID), let width = item.width, let height = item.height, width > 0, height > 0 {
+            return (Double(width), Double(height))
+        }
+        return (Double(p.settings.width), Double(p.settings.height))
+    }
+
+    static func addMotion(_ p: inout Project, _ clipIDs: [String], style: MotionStyle, amount: Double?) throws {
+        let amount = amount ?? 1.12
+        guard amount >= 1, amount <= 3 else { throw EditError.invalid("amount is how much bigger the zoom gets, from 1 to 3 (1.12 is gentle)") }
+        var changed = 0
+        for id in clipIDs {
+            let (location, index) = try requireClip(p, id)
+            guard p[location].kind == .video else { continue }
+            try requireUnlocked(p[location])
+            var clip = p[location].clips[index]
+            let size = sourceSize(of: clip, in: p)
+            let base = (clip.video ?? VideoProperties()).transform
+            let (start, end) = style.keyframes(
+                from: base, amount: amount, sourceWidth: size.width, sourceHeight: size.height,
+                canvasWidth: Double(p.settings.width), canvasHeight: Double(p.settings.height)
+            )
+            // An even, unhurried move from the first frame to the last.
+            clip.keyframes["video.transform.scale"] = [
+                Keyframe(time: .zero, value: .number(start.scale), interpolation: .linear),
+                Keyframe(time: clip.duration, value: .number(end.scale), interpolation: .linear)
+            ]
+            clip.keyframes["video.transform.position"] = [
+                Keyframe(time: .zero, value: .point(start.position), interpolation: .linear),
+                Keyframe(time: clip.duration, value: .point(end.position), interpolation: .linear)
+            ]
             p[location].clips[index] = clip
             changed += 1
         }

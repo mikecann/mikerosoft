@@ -632,8 +632,9 @@ Takes clips out of their link group.
 
 Sets a one-key layout on video clips: `full` (fills the frame), `pipRight`
 (50% with the cutout and Filmora's drop shadow, bottom right, Mike's usual
-PiP), `pipLeft`, or `split` (camera on the right half, everything else on
-the left). Audio clips in the list are skipped.
+PiP), `pipLeft`, `split` (camera on the right half, everything else on
+the left), or `fill` (covers the whole frame and crops the edges, so a
+landscape photo fills a 9:16 short). Audio clips in the list are skipped.
 
 ```json
 {"applyLayout": {"clipIDs": ["clip_cam1"], "preset": "pipRight"}}
@@ -648,6 +649,19 @@ rectangle `{"x": 0, "y": 0, "width": 1, "height": 1}`.
 
 ```json
 {"zoomToRegion": {"clipID": "clip_scr1", "rect": {"x": 0.5, "y": 0.25, "width": 0.5, "height": 0.5}, "at": 42, "duration": 0.5}}
+```
+
+#### addMotion
+
+A slow zoom or pan over the whole of each clip, the Ken Burns effect, for
+stills and photos: `zoomIn`, `zoomOut`, `panLeft`, `panRight`, `panUp`,
+`panDown`. It starts from the clip's current placement, so in a short apply
+the `fill` layout first. `amount` is how much bigger the zoomed end is
+(default 1.12, a gentle push). Pans travel across whatever part of the photo
+overflows the frame. It replaces the clip's position and scale animation.
+
+```json
+{"addMotion": {"clipIDs": ["clip_photo1"], "style": "zoomIn", "amount": 1.15}}
 ```
 
 #### setFormatLayout
