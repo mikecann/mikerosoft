@@ -9,8 +9,30 @@ final class TimelineRulerView: TimelineChildView {
     private var model: EditorModel? { container?.model }
     private var draggingMarker: (id: String, offset: Double)?
     private var markerPreview: Time?
+    private var trackingArea: NSTrackingArea?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    // A marker grabs, to move it; anywhere else a press moves the playhead.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect, .cursorUpdate], owner: self)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        updateCursor(event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateCursor(event)
+    }
+
+    private func updateCursor(_ event: NSEvent) {
+        (marker(at: convert(event.locationInWindow, from: nil)) != nil ? CursorKind.grab : .arrow).set()
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         let started = CACurrentMediaTime()
@@ -139,6 +161,7 @@ final class TimelineRulerView: TimelineChildView {
                 return
             }
             draggingMarker = (marker.id, model.timeline.scale.seconds(atX: point.x) - marker.time.seconds)
+            CursorKind.grabbing.set()
             markerPreview = marker.time
             return
         }
@@ -162,6 +185,7 @@ final class TimelineRulerView: TimelineChildView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        defer { updateCursor(event) }
         guard let model else { return }
         if let drag = draggingMarker, let time = markerPreview,
            let marker = model.project.markers.first(where: { $0.id == drag.id }), marker.time != time {

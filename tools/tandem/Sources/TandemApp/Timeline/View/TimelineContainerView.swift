@@ -53,6 +53,8 @@ final class TimelineContainerView: NSView {
         }
         loops.append(ObservationLoop(read: { [weak self] in self?.readDrawingState() }, onChange: { [weak self] in self?.modelChangeArrived() }))
         loops.append(ObservationLoop(read: { [weak self] in _ = self?.model.playback.time }, onChange: { [weak self] in self?.playheadMoved() }))
+        // A new tool changes what a press would do, so the cursor too.
+        loops.append(ObservationLoop(read: { [weak self] in _ = self?.model.tool }, onChange: { [weak self] in self?.lanes.refreshCursor() }))
         // New thumbnails, waveforms or transcripts: look again and redraw.
         // Job progress alone doesn't redraw the timeline.
         artwork.onDecoded = { [weak self] in self?.lanes.artworkDecoded() }
@@ -272,7 +274,7 @@ final class TimelineContainerView: NSView {
     override func otherMouseDown(with event: NSEvent) {
         guard event.buttonNumber == 2 else { return super.otherMouseDown(with: event) }
         pan = TimelinePan(start: convert(event.locationInWindow, from: nil), scrollSeconds: model.timeline.scale.scrollSeconds, verticalOffset: model.timeline.verticalOffset)
-        NSCursor.closedHand.set()
+        CursorKind.grabbing.set()
     }
 
     override func otherMouseDragged(with event: NSEvent) {
@@ -283,7 +285,7 @@ final class TimelineContainerView: NSView {
         )
         if next.scrollSeconds != model.timeline.scale.scrollSeconds { model.timeline.scale.scrollSeconds = next.scrollSeconds }
         if next.verticalOffset != model.timeline.verticalOffset { model.timeline.verticalOffset = next.verticalOffset }
-        NSCursor.closedHand.set()
+        CursorKind.grabbing.set()
     }
 
     override func otherMouseUp(with event: NSEvent) {

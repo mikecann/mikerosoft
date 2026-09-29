@@ -33,7 +33,7 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
             hoverTrackID = id
             needsDisplay = true
         }
-        if resizeLane(at: event) != nil { NSCursor.resizeUpDown.set() } else { NSCursor.arrow.set() }
+        (resizeLane(at: event) != nil ? CursorKind.rowResize : .arrow).set()
     }
 
     /// The lane whose bottom edge is under the pointer, for resizing.
@@ -61,7 +61,7 @@ final class TimelineHeaderView: TimelineChildView, NSTextFieldDelegate {
             reorder = (press.trackID, press.kind, position)
             needsDisplay = true
         }
-        NSCursor.closedHand.set()
+        CursorKind.grabbing.set()
     }
 
     override func mouseUp(with event: NSEvent) {

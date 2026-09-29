@@ -75,6 +75,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Hosts the API while a project is open [app]
 - [x] Keyframe editing in the timeline, drops from Finder, save failures shown and retried [app]
 - [x] Exact paused frames from original files, including remuxed open-GOP files without a keyframe table [render]
+- [x] Cursors that say what a press does: diagonal arrows on the viewer's corner handles, a hand on the selected layer and on markers, trim and roll arrows on clip edges, a blade, row resize on lane edges, zoom with Z held (`CursorKind`) [app]
 
 ## Milestone 6: real projects
 

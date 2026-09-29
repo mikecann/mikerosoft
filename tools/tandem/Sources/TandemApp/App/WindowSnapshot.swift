@@ -61,7 +61,9 @@ enum WindowSnapshot {
         // commands (`open -g`) leave focus alone.
         var lines: [String] = [
             "app active: \(NSApp.isActive ? "yes" : "no"), window key: \(window.isKeyWindow ? "yes" : "no")",
-            "window frame: \(NSStringFromRect(window.frame)), resizable: \(window.styleMask.contains(.resizable) ? "yes" : "no")"
+            "window frame: \(NSStringFromRect(window.frame)), resizable: \(window.styleMask.contains(.resizable) ? "yes" : "no")",
+            // What the last hover set, so a simulated hover can be checked.
+            "cursor: \(CursorKind.describe(NSCursor.current))"
         ]
         func visit(_ view: NSView, depth: Int) {
             let pad = String(repeating: "  ", count: depth)

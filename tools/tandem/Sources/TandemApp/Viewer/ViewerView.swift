@@ -45,6 +45,12 @@ final class ViewerView: NSView, CaptureAware {
             guard let self else { return }
             self.model.playback.previewVideo(self.model.videoPreview)
         }))
+        // Holding Z or picking another clip changes what a press would do
+        // without the pointer moving.
+        loops.append(ObservationLoop(read: { [weak self] in
+            _ = self?.model.zoomKeyHeld
+            _ = self?.model.selection
+        }, onChange: { [weak self] in self?.overlay.refreshCursor() }))
     }
 
     @available(*, unavailable)
@@ -341,10 +347,22 @@ final class ViewerOverlayView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
     private enum Drag {
         case move(clipID: String, start: CGPoint, original: VideoProperties)
-        case scale(clipID: String, start: CGPoint, centre: CGPoint, original: VideoProperties)
+        case scale(clipID: String, corner: ViewerCorner, start: CGPoint, centre: CGPoint, original: VideoProperties)
         case zoomRect(start: CGPoint, end: CGPoint)
+
+        var cursor: CursorKind {
+            switch self {
+            case .move: return .grabbing
+            case .scale(_, let corner, _, _, _): return .scaleCorner(corner)
+            case .zoomRect: return .zoomIn
+            }
+        }
     }
-    private var drag: Drag?
+    private var drag: Drag? {
+        // AppKit sends no cursor updates while the button is down.
+        didSet { drag?.cursor.set() }
+    }
+    private var trackingArea: NSTrackingArea?
 
     override var isFlipped: Bool { true }
 
@@ -364,12 +382,36 @@ final class ViewerOverlayView: NSView {
         return nil
     }
 
-    private func handles(for rect: CGRect) -> [CGRect] {
-        let size: CGFloat = 7
-        return [
-            CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
-            CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)
-        ].map { CGRect(x: $0.x - size / 2, y: $0.y - size / 2, width: size, height: size) }
+    // MARK: - Cursor
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect, .cursorUpdate], owner: self)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        updateCursor(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateCursor(at: convert(event.locationInWindow, from: nil))
+    }
+
+    /// Sets the cursor for where the pointer is now, when something else
+    /// changed what a press there would do.
+    func refreshCursor() {
+        guard drag == nil, let window, window.isKeyWindow else { return }
+        let location = window.mouseLocationOutsideOfEventStream
+        guard let under = window.contentView?.hitTest(location), under === self else { return }
+        updateCursor(at: convert(location, from: nil))
+    }
+
+    private func updateCursor(at point: CGPoint) {
+        guard let model else { return }
+        ViewerHandles.cursor(at: point, box: selectedLayer()?.frame, zoomKeyHeld: model.zoomKeyHeld).set()
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -393,7 +435,7 @@ final class ViewerOverlayView: NSView {
             context.setLineWidth(1.5)
             context.stroke(frame.insetBy(dx: 0.75, dy: 0.75))
             context.setFillColor(Theme.amber.cg)
-            for handle in handles(for: frame) { context.fill(handle) }
+            for handle in ViewerHandles.rects(for: frame) { context.fill(handle.rect) }
         }
         if case .zoomRect(let start, let end) = drag {
             let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
@@ -419,9 +461,9 @@ final class ViewerOverlayView: NSView {
             return
         }
         if let (clip, video, frame) = selectedLayer() {
-            if handles(for: frame).contains(where: { $0.insetBy(dx: -4, dy: -4).contains(point) }) {
+            if let corner = ViewerHandles.corner(at: point, box: frame) {
                 let full = viewer.frame(of: clip, video: video)
-                drag = .scale(clipID: clip.id, start: point, centre: CGPoint(x: full.midX, y: full.midY), original: video)
+                drag = .scale(clipID: clip.id, corner: corner, start: point, centre: CGPoint(x: full.midX, y: full.midY), original: video)
                 return
             }
             if frame.contains(point) {
@@ -450,7 +492,7 @@ final class ViewerOverlayView: NSView {
             var video = original
             video.transform = CanvasGeometry.moved(original.transform, by: CGSize(width: point.x - start.x, height: point.y - start.y), canvas: viewer.canvasRect)
             model.videoPreview[id] = video
-        case .scale(let id, let start, let centre, let original):
+        case .scale(let id, _, let start, let centre, let original):
             var video = original
             video.transform = CanvasGeometry.scaled(original.transform, centre: centre, from: start, to: point)
             model.videoPreview[id] = video
@@ -461,10 +503,11 @@ final class ViewerOverlayView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        defer { updateCursor(at: convert(event.locationInWindow, from: nil)) }
         guard let viewer, let model, let drag else { return }
         self.drag = nil
         switch drag {
-        case .move(let id, _, let original), .scale(let id, _, _, let original):
+        case .move(let id, _, let original), .scale(let id, _, _, _, let original):
             let preview = model.videoPreview[id]
             model.videoPreview[id] = nil
             guard let preview, preview.transform != original.transform, let clip = model.project.clip(id) else { return }
