@@ -20,14 +20,18 @@ PYTHONPATH=tools/meeting-archive/worker python3 -m meeting_archive_worker.servic
 Every command writes one compact JSON object. Validation and contract errors
 use exit code 2. A processor failure uses exit code 1 and records either a
 retry with bounded exponential backoff or a visible permanent failure when the
-adapter raises `meeting_archive_worker.cli.PermanentProcessingError`.
+adapter raises `meeting_archive_worker.cli.PermanentProcessingError`. After 8
+attempts a transient failure also becomes a permanent failure; an expired lease
+(the worker died mid-job) counts as a failed attempt and backs off the same way.
 
 Production transfers pass `--validate-media`. The worker probes every declared
 audio/video file in permanent storage for the expected stream and a positive
-duration, checks that the media covers the claimed meeting duration, fully
-decodes each stream, and re-verifies its manifest hash before it commits the
-cleanup acknowledgement. The acknowledgement then includes a
-`media_validation` audit object. Omitting the flag is intended for lightweight
+duration, fully decodes each stream, and re-verifies its manifest hash before
+it commits the cleanup acknowledgement. The acknowledgement then includes a
+`media_validation` audit object. Each file records `coverage_end_seconds` and
+`truncated`; a track that ends before the claimed meeting duration adds a
+`warnings` entry such as `video_truncated` rather than blocking cleanup, since
+the Mac holds the same hash-verified bytes and a retry cannot recover more. Omitting the flag is intended for lightweight
 fixture tests and does not add that object.
 
 `ARCHIVE_ROOT` and the parent directory of `WORKER_DB` must already exist. The
@@ -58,7 +62,10 @@ run transcription or playback generation again. Credentials are read only from
 `HF_TOKEN`; the worker never includes them in status or result JSON.
 The service accepts `--db WORKER_DB` and optional `--poll-seconds SECONDS`. It
 holds one process lock for that database, while both media processing and
-publication also use durable leases for crash recovery.
+publication also use durable leases for crash recovery. Heavy processing runs
+one job at a time in a child process with a time budget of max(1 hour, 6x the
+meeting duration); speaker refresh and Notion publication run on a separate
+thread so they never wait behind a long transcription.
 
 Whisper defaults to two CPU threads and enables its voice-activity filter to
 avoid inventing text across long silent spans. Diarization decodes through
@@ -82,6 +89,27 @@ job in `retry_wait`. It never takes a live lease and never moves succeeded
 processing back to ready, so a Notion retry cannot retranscribe the meeting.
 The JSON response identifies the processing and optional publication stage and
 whether this call changed either queue.
+
+`rename --meeting-id UUID --title TEXT --archive-root ROOT --db WORKER_DB` sets
+a meeting's display title without touching the manifest-hashed `metadata.json`.
+It atomically writes `title.json` beside it, which Notion and the viewer prefer
+over the captured title, and queues a Notion republish once processing has
+succeeded. Titles are trimmed, at most 200 characters, with no control
+characters. It is idempotent and prints
+`{"schema_version":1,"meeting_id":...,"title":...}`.
+
+After `accept` commits a receipt it removes the staged copy at
+`INCOMING_ROOT/<meeting>/r<revision>` and then that meeting directory if it is
+empty. `INCOMING_ROOT` defaults to `incoming` beside the archive root and can be
+set with `--incoming-root`; symlinked or out-of-layout paths are left alone, and
+a removal failure is only logged. A retried accept whose staging is already gone
+returns the committed receipt when `--manifest-sha256` matches it.
+
+`search --query TEXT --archive-root ROOT --db WORKER_DB [--limit N]` finds a
+case-insensitive substring in each accepted meeting's transcript and prints
+`{"schema_version":1,"results":[{"meeting_id","title","matches":[{"start_seconds","speaker","text"}]}]}`,
+newest meeting first, at most 5 matches per meeting and `N` meetings (default
+20, maximum 100). Queries are trimmed and must be 2 to 200 characters.
 
 Confirming a speaker name rewrites
 the JSON and Markdown views with fsync plus atomic replacement, then requests a
@@ -193,13 +221,13 @@ when the service is explicitly enabled again.
 The optional playback viewer resolves canonical meeting UUIDs only through the
 durable acceptance database and exposes the fixed generated playback and
 transcript resources on localhost. Its production wrapper is locked to
-`127.0.0.1:8765`, the verified CannMedia meetings root, four request threads,
+`127.0.0.1:8791`, the verified CannMedia meetings root, four request threads,
 and the Tailscale identity `mike.cann@gmail.com`. It receives no model or
 publication credentials.
 
 Installation stages an owner-only LaunchAgent by default. Starting the viewer
 requires `--enable`, and Tailscale routing remains a separate explicit action.
-The intended tailnet-only route is HTTPS port 10443 to localhost port 8765, so
+The intended tailnet-only route is HTTPS port 10443 to localhost port 8791, so
 Bruce's existing 443 and 8443 routes remain untouched. See
 [`VIEWER.md`](VIEWER.md) for the route contract, security checks, isolated
 fixture command, staging steps, and exact rollback commands.

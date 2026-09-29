@@ -142,14 +142,30 @@ struct MeetingAccessibilityObservation: Equatable, Sendable {
 /// signals. It owns only the camera-session epoch. Capture state remains in
 /// `CaptureStateMachine`.
 struct MeetingSignalResolver: Sendable {
+    /// How long off evidence must persist before a session ends. A brief
+    /// camera toggle, or one poll where Zoom's toolbar reads oddly, used to
+    /// split one call into two recordings.
+    struct OffGrace: Sendable {
+        var cameraOff: TimeInterval
+        var surfaceGone: TimeInterval
+
+        static let standard = OffGrace(cameraOff: 20, surfaceGone: 3)
+        static let none = OffGrace(cameraOff: 0, surfaceGone: 0)
+    }
+
     private struct ActiveEpoch: Sendable {
         let descriptor: MeetingSessionDescriptor
-        let windowID: CGWindowID
+        var windowID: CGWindowID
+        var offSince: Date?
     }
 
     private var activeEpoch: ActiveEpoch?
+    private let offGrace: OffGrace
 
-    init(restoring session: MeetingSessionDescriptor? = nil) {
+    var hasActiveSession: Bool { activeEpoch != nil }
+
+    init(restoring session: MeetingSessionDescriptor? = nil, offGrace: OffGrace = .standard) {
+        self.offGrace = offGrace
         guard let session, let windowID = Self.windowID(from: session.surface.id) else {
             activeEpoch = nil
             return
@@ -158,10 +174,10 @@ struct MeetingSignalResolver: Sendable {
     }
 
     mutating func restore(_ session: MeetingSessionDescriptor?) {
-        self = MeetingSignalResolver(restoring: session)
+        self = MeetingSignalResolver(restoring: session, offGrace: offGrace)
     }
 
-    mutating func resolve(_ observation: MeetingAccessibilityObservation) -> MeetingSignalSnapshot {
+    mutating func resolve(_ observation: MeetingAccessibilityObservation, at now: Date = Date()) -> MeetingSignalSnapshot {
         guard observation.accessibilityTrusted else {
             return retainedUnknown(status: .accessibilityPermissionRequired)
         }
@@ -195,7 +211,8 @@ struct MeetingSignalResolver: Sendable {
             return resolveActive(
                 activeEpoch,
                 candidates: candidates,
-                observation: observation
+                observation: observation,
+                now: now
             )
         }
 
@@ -263,27 +280,41 @@ struct MeetingSignalResolver: Sendable {
     private mutating func resolveActive(
         _ epoch: ActiveEpoch,
         candidates: [ClassifiedMeetingWindow],
-        observation: MeetingAccessibilityObservation
+        observation: MeetingAccessibilityObservation,
+        now: Date
     ) -> MeetingSignalSnapshot {
         let matching = candidates.first { candidate in
             candidate.window.bundleIdentifier == epoch.descriptor.sourceApplication.bundleIdentifier
                 && candidate.mapping.windowID == epoch.windowID
         }
 
+        // Zoom sometimes moves a call into a new window (pop-out, screen share,
+        // layout changes). When the recorded window stops being the meeting
+        // and exactly one other joined, camera-on window of the same app is,
+        // follow it rather than ending the recording or recording a dead window.
+        if matching?.surfaceState != .joined,
+           let replacement = Self.handoffCandidate(for: epoch, in: candidates),
+           let windowID = replacement.mapping.windowID {
+            Log.detector.notice("Meeting moved from window \(epoch.windowID, privacy: .public) to \(windowID, privacy: .public); following it")
+            activeEpoch?.windowID = windowID
+            activeEpoch?.offSince = nil
+            return snapshot(descriptor: epoch.descriptor, candidate: replacement, windowID: windowID)
+        }
+
         if let matching {
-            if matching.surfaceState == .ended || (matching.surfaceState == .joined && matching.cameraActive == false) {
-                activeEpoch = nil
-                return MeetingSignalSnapshot(
-                    session: epoch.descriptor,
-                    windowID: epoch.windowID,
-                    cameraActive: false,
-                    videoSafe: false,
-                    status: .ready
-                )
+            if matching.surfaceState == .ended {
+                return endAfterGrace(epoch, grace: offGrace.surfaceGone, videoSafe: false, now: now)
+            }
+            if matching.surfaceState == .joined && matching.cameraActive == false {
+                return endAfterGrace(epoch, grace: offGrace.cameraOff, videoSafe: matching.videoSafe, now: now)
             }
 
             guard matching.surfaceState == .joined else {
                 return retainedUnknown(status: .ambiguous("The active meeting surface is temporarily unproven."))
+            }
+            if matching.cameraActive == true, activeEpoch?.offSince != nil {
+                activeEpoch?.offSince = nil
+                Log.detector.notice("Camera back on within the grace period; keeping the same recording")
             }
             return snapshot(descriptor: epoch.descriptor, candidate: matching, windowID: epoch.windowID)
         }
@@ -302,7 +333,41 @@ struct MeetingSignalResolver: Sendable {
             return retainedUnknown(status: .ambiguous("The active meeting surface is temporarily unproven."))
         }
         if !cgWindowStillExists {
+            return endAfterGrace(epoch, grace: offGrace.surfaceGone, videoSafe: false, now: now)
+        }
+
+        return retainedUnknown(status: .ambiguous("The active meeting surface is temporarily unproven."))
+    }
+
+    private static func handoffCandidate(
+        for epoch: ActiveEpoch,
+        in candidates: [ClassifiedMeetingWindow]
+    ) -> ClassifiedMeetingWindow? {
+        let others = candidates.filter {
+            $0.window.bundleIdentifier == epoch.descriptor.sourceApplication.bundleIdentifier
+                && $0.surfaceState == .joined
+                && $0.cameraActive == true
+                && $0.mapping.windowID != nil
+                && $0.mapping.windowID != epoch.windowID
+        }
+        return others.count == 1 ? others.first : nil
+    }
+
+    /// Holds the session while off evidence is younger than `grace`. The
+    /// recording keeps running; only an off state that persists ends it.
+    private mutating func endAfterGrace(
+        _ epoch: ActiveEpoch,
+        grace: TimeInterval,
+        videoSafe: Bool,
+        now: Date
+    ) -> MeetingSignalSnapshot {
+        let since = epoch.offSince ?? now
+        if epoch.offSince == nil, grace > 0 {
+            Log.detector.notice("Meeting off evidence seen; waiting \(Int(grace), privacy: .public)s before stopping")
+        }
+        guard now.timeIntervalSince(since) < grace else {
             activeEpoch = nil
+            Log.detector.notice("Meeting ended after \(Int(now.timeIntervalSince(since)), privacy: .public)s of off evidence")
             return MeetingSignalSnapshot(
                 session: epoch.descriptor,
                 windowID: epoch.windowID,
@@ -311,8 +376,14 @@ struct MeetingSignalResolver: Sendable {
                 status: .ready
             )
         }
-
-        return retainedUnknown(status: .ambiguous("The active meeting surface is temporarily unproven."))
+        activeEpoch?.offSince = since
+        return MeetingSignalSnapshot(
+            session: epoch.descriptor,
+            windowID: epoch.windowID,
+            cameraActive: nil,
+            videoSafe: videoSafe,
+            status: .ready
+        )
     }
 
     private func snapshot(
@@ -394,6 +465,13 @@ final class MeetingSignalProvider {
 
     @discardableResult
     func poll() -> MeetingSignalSnapshot {
+        // Nothing can start recording without a camera in use, so skip the
+        // expensive cross-process Accessibility walk until one is.
+        if !resolver.hasActiveSession, AXIsProcessTrusted(), CameraActivity.anyCameraRunning() == false {
+            let idle = MeetingSignalSnapshot(session: nil, windowID: nil, cameraActive: nil, videoSafe: false, status: .noSupportedMeeting)
+            onSnapshot?(idle)
+            return idle
+        }
         let snapshot = resolver.resolve(MeetingAccessibilityCollector.collect())
         onSnapshot?(snapshot)
         return snapshot
@@ -673,11 +751,10 @@ private enum MeetingWindowMapper {
 
 @MainActor
 private enum MeetingAccessibilityCollector {
+    // Chrome is left out while Google Meet capture is disabled: walking its
+    // accessibility tree every poll cost CPU in both apps and could never
+    // start a recording.
     private static let supportedBundleIDs: Set<String> = [
-        "com.google.Chrome",
-        "com.google.Chrome.beta",
-        "com.google.Chrome.canary",
-        "com.google.Chrome.dev",
         "us.zoom.xos",
         "com.microsoft.teams",
         "com.microsoft.teams2",
@@ -690,7 +767,15 @@ private enum MeetingAccessibilityCollector {
     private static let maxMenuTreeDepth = 4
     private static let messagingTimeout: Float = 0.2
 
+    /// The per-application timeout does not reach window and child elements;
+    /// the system-wide one does, so a hung meeting app cannot stall the main
+    /// thread for AX's six-second default on every element.
+    private static let applySystemWideTimeout: Void = {
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), messagingTimeout)
+    }()
+
     static func collect() -> MeetingAccessibilityObservation {
+        _ = applySystemWideTimeout
         guard AXIsProcessTrusted() else {
             return MeetingAccessibilityObservation(
                 accessibilityTrusted: false,

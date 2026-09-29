@@ -21,9 +21,11 @@ from threading import BoundedSemaphore
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .titles import MAX_TITLE_FILE_BYTES, TITLE_NAME, title_override
+
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8765
+DEFAULT_PORT = 8791
 DEFAULT_ALLOWED_LOGIN = "mike.cann@gmail.com"
 MAX_METADATA_BYTES = 1024 * 1024
 MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024
@@ -340,6 +342,17 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
             return
         self._empty_response(405, allow="GET, HEAD")
 
+    def _renamed_title(self, acceptance: Acceptance) -> str | None:
+        # Same no-symlink open as other archive files; see titles.effective_title.
+        try:
+            record = _read_json(
+                self.viewer.open_generated(acceptance, (TITLE_NAME,)),
+                MAX_TITLE_FILE_BYTES,
+            )
+        except (ViewerNotFound, ViewerTooLarge):
+            return None
+        return title_override(record)
+
     def _landing_page(self, acceptance: Acceptance) -> tuple[bytes, str]:
         metadata = _read_json(
             self.viewer.open_generated(acceptance, ("metadata.json",)),
@@ -365,7 +378,9 @@ class ViewerRequestHandler(BaseHTTPRequestHandler):
         ):
             raise ViewerNotFound
 
-        title = _escaped_text(metadata.get("title") or metadata.get("subject") or "Meeting")
+        title = _escaped_text(
+            self._renamed_title(acceptance) or metadata.get("title") or metadata.get("subject") or "Meeting",
+        )
         started_at = _escaped_text(_human_date(metadata))
         duration = _escaped_text(_human_duration(metadata.get("duration_seconds")))
         turns: list[str] = []

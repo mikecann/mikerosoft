@@ -17,6 +17,18 @@ class QueueConflict(RuntimeError):
     pass
 
 
+# Transient failures back off exponentially. After this many attempts a job
+# stops retrying and waits for an explicit operator retry instead.
+MAX_ATTEMPTS = 8
+RETRY_BASE_SECONDS = 60.0
+RETRY_MAXIMUM_SECONDS = 3600.0
+
+
+def _retry_delay(attempts: int, base: float, maximum: float) -> float:
+    exponent = min(30, max(0, attempts - 1))
+    return min(maximum, base * (2**exponent))
+
+
 @dataclass(frozen=True)
 class Job:
     id: int
@@ -258,15 +270,30 @@ class JobQueue:
             if live:
                 connection.commit()
                 return None
-            connection.execute(
-                """
-                UPDATE jobs
-                SET state = 'ready', lease_owner = NULL, lease_expires_at = NULL,
-                    available_at = ?, updated_at = ?
-                WHERE state = 'leased' AND lease_expires_at <= ?
-                """,
-                (now, now, now),
-            )
+            # An expired lease means the worker died mid-job. Treat it like a
+            # transient failure so a job that crashes the worker backs off.
+            expired = connection.execute(
+                "SELECT id, attempts FROM jobs WHERE state = 'leased' AND lease_expires_at <= ?",
+                (now,),
+            ).fetchall()
+            for expired_row in expired:
+                attempts = int(expired_row["attempts"])
+                exhausted = attempts >= MAX_ATTEMPTS
+                connection.execute(
+                    """
+                    UPDATE jobs
+                    SET state = ?, lease_owner = NULL, lease_expires_at = NULL,
+                        available_at = ?, updated_at = ?, last_error = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        "permanent_failure" if exhausted else "retry_wait",
+                        now + _retry_delay(attempts, RETRY_BASE_SECONDS, RETRY_MAXIMUM_SECONDS),
+                        now,
+                        "Worker lease expired before the job finished (worker stopped or crashed).",
+                        expired_row["id"],
+                    ),
+                )
             row = connection.execute(
                 """
                 SELECT * FROM jobs
@@ -313,12 +340,12 @@ class JobQueue:
         error: str,
         *,
         transient: bool,
-        base_delay_seconds: float = 60,
-        maximum_delay_seconds: float = 3600,
+        base_delay_seconds: float = RETRY_BASE_SECONDS,
+        maximum_delay_seconds: float = RETRY_MAXIMUM_SECONDS,
+        max_attempts: int = MAX_ATTEMPTS,
     ) -> float | None:
-        if transient:
-            exponent = min(30, max(0, job.attempts - 1))
-            delay = min(maximum_delay_seconds, base_delay_seconds * (2**exponent))
+        if transient and job.attempts < max_attempts:
+            delay = _retry_delay(job.attempts, base_delay_seconds, maximum_delay_seconds)
             available_at = self.clock() + delay
             self._finish_lease(job, "retry_wait", error, available_at)
             return available_at

@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import json
+import math
 import os
+import signal
 import socket
 import sqlite3
+import sys
+import threading
 import time
+import traceback
 import uuid
 from contextlib import AbstractContextManager
 from pathlib import Path
 
-from .cli import _Heartbeat
+from .cli import PermanentProcessingError, _Heartbeat
 from .db import closing_connection
 from .notion import publish
 from .processor import process
@@ -22,7 +28,7 @@ class PublicationQueue:
     def __init__(self, database: Path | str, clock=time.time):
         self.database = Path(database)
         self.clock = clock
-        with closing_connection(lambda: sqlite3.connect(self.database)) as connection:
+        with closing_connection(lambda: sqlite3.connect(self.database, timeout=30)) as connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS publication_jobs (
                 processing_job_id INTEGER PRIMARY KEY, archive_path TEXT NOT NULL,
@@ -43,7 +49,7 @@ class PublicationQueue:
 
     def reconcile(self, jobs: list[dict]) -> None:
         now = self.clock()
-        with closing_connection(lambda: sqlite3.connect(self.database)) as connection:
+        with closing_connection(lambda: sqlite3.connect(self.database, timeout=30)) as connection:
             for job in jobs:
                 if job["state"] == "succeeded":
                     connection.execute(
@@ -109,7 +115,7 @@ class PublicationQueue:
             }
 
     def status(self, processing_job_ids: set[int] | None = None) -> dict:
-        with closing_connection(lambda: sqlite3.connect(self.database)) as connection:
+        with closing_connection(lambda: sqlite3.connect(self.database, timeout=30)) as connection:
             connection.row_factory = sqlite3.Row
             query = (
                 "SELECT processing_job_id, archive_path, state, attempts, available_at, "
@@ -186,7 +192,7 @@ class PublicationQueue:
             publisher(Path(row[1]))
         except Exception as error:
             delay = min(3600, 60 * (2 ** min(6, row[2])))
-            with closing_connection(lambda: sqlite3.connect(self.database)) as connection:
+            with closing_connection(lambda: sqlite3.connect(self.database, timeout=30)) as connection:
                 connection.execute(
                     "UPDATE publication_jobs SET state='retry_wait', available_at=?, last_error=?, "
                     "lease_owner=NULL, lease_expires_at=NULL "
@@ -194,7 +200,7 @@ class PublicationQueue:
                     (self.clock() + delay, str(error), row[0], owner),
                 )
             return False
-        with closing_connection(lambda: sqlite3.connect(self.database)) as connection:
+        with closing_connection(lambda: sqlite3.connect(self.database, timeout=30)) as connection:
             cursor = connection.execute(
                 "UPDATE publication_jobs SET "
                 "state=CASE WHEN refresh_requested=1 THEN 'ready' ELSE 'succeeded' END, "
@@ -207,34 +213,102 @@ class PublicationQueue:
         return cursor.rowcount == 1
 
 
-def _process_child(connection, target, archive_path: Path, job) -> None:
+def _log(message: str) -> None:
+    print(f"meeting-archive-service: {message}", file=sys.stderr, flush=True)
+
+
+def _exit_when_orphaned(parent_pid: int, *, interval: float = 2.0, getppid=os.getppid, exit=None) -> None:
+    """Stop the job once the service that owns its lease is gone.
+
+    Without this, a killed service leaves an orphaned child writing into an
+    archive whose lease has expired and may be claimed by the next service.
+    """
+    while getppid() == parent_pid:
+        time.sleep(interval)
+    if exit is not None:
+        exit(1)
+        return
+    if hasattr(os, "killpg") and os.getpgrp() == os.getpid():
+        # The child leads its own process group, so this also stops ffmpeg.
+        os.killpg(os.getpgrp(), signal.SIGKILL)
+    os._exit(1)
+
+
+def _process_child(connection, target, archive_path: Path, job, parent_pid: int | None = None) -> None:
+    if hasattr(os, "setpgrp"):
+        # Lead a process group so a timeout can stop ffmpeg grandchildren too.
+        os.setpgrp()
+    if parent_pid is not None:
+        threading.Thread(target=_exit_when_orphaned, args=(parent_pid,), daemon=True).start()
     try:
         target(archive_path, job)
         connection.send(None)
     except BaseException as error:  # report any failure to the parent
-        connection.send(f"{type(error).__name__}: {error}")
+        kind = "permanent" if isinstance(error, PermanentProcessingError) else "transient"
+        connection.send({"kind": kind, "message": f"{type(error).__name__}: {error}"})
         raise SystemExit(1)
     finally:
         connection.close()
 
 
-def process_isolated(archive_path: Path, job, target=None) -> None:
+def _processing_budget(archive_path: Path) -> float:
+    """Allow max(1 hour, 6x the recorded meeting length) for one job."""
+    try:
+        metadata = json.loads(Path(archive_path, "metadata.json").read_text(encoding="utf-8"))
+        duration = float(metadata.get("duration_seconds", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        duration = 0.0
+    if not math.isfinite(duration) or duration < 0:
+        duration = 0.0
+    return max(3600.0, 6 * duration)
+
+
+def _stop_child(child) -> None:
+    """SIGTERM the child's process group, then SIGKILL whatever is left."""
+    steps = (
+        (signal.SIGTERM, child.terminate, 30),
+        (getattr(signal, "SIGKILL", signal.SIGTERM), child.kill, None),
+    )
+    for sig, fallback, grace in steps:
+        try:
+            os.killpg(child.pid, sig)
+        except (AttributeError, OSError):
+            # No process groups here, or the child had not yet led its own.
+            fallback()
+        child.join(grace)
+        if not child.is_alive():
+            return
+
+
+def process_isolated(archive_path: Path, job, target=None, timeout: float | None = None) -> None:
     """Run one heavy job in a fresh process.
 
     Transcription and diarization load torch, Whisper and pyannote, which
     keep hundreds of MB allocated in a long-running process even after the
     job ends. A child process gives all of that back to the OS, so the idle
     service polling the queue stays small on Bruce's 8 GB of RAM.
+
+    The heartbeat renews the lease for as long as this waits, so the wait is
+    bounded: a hung child is stopped and the job retries with backoff.
     """
     import multiprocessing
 
+    budget = _processing_budget(archive_path) if timeout is None else timeout
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
     # `target` must be a module-level function so the spawned child can import it.
-    child = context.Process(target=_process_child, args=(sender, target or process, archive_path, job), daemon=False)
+    child = context.Process(
+        target=_process_child,
+        args=(sender, target or process, archive_path, job, os.getpid()),
+        daemon=False,
+    )
     child.start()
     sender.close()
-    child.join()
+    child.join(budget)
+    if child.is_alive():
+        _stop_child(child)
+        receiver.close()
+        raise RuntimeError(f"Processing exceeded its {budget:.0f}s time budget and was stopped.")
     crashed = f"Processing exited with code {child.exitcode}."
     try:
         # A child that dies without reporting (killed, os._exit) closes the
@@ -243,52 +317,85 @@ def process_isolated(archive_path: Path, job, target=None) -> None:
     except EOFError:
         message = crashed
     receiver.close()
-    if message is not None:
-        raise RuntimeError(message)
+    if message is None:
+        return
+    if isinstance(message, dict):
+        if message.get("kind") == "permanent":
+            raise PermanentProcessingError(str(message.get("message")))
+        message = message.get("message")
+    raise RuntimeError(str(message))
 
 
-def run_once(database: Path, processor=process_isolated, publisher=publish, lease_seconds: float = 900) -> dict:
-    # Speaker confirmations use a durable outbox. Reconcile it before claiming
-    # heavy work, but never let one derived-artifact failure block other jobs.
+def refresh_speakers(database: Path) -> None:
+    # Speaker confirmations use a durable outbox. Never let one derived-artifact
+    # failure block other jobs, but leave a trace in the service log.
     try:
         from .speaker_refresh import reconcile_pending_speakers
 
         reconcile_pending_speakers(database)
     except Exception:
-        pass
+        _log("speaker refresh sweep failed:\n" + traceback.format_exc())
+
+
+def run_publication(database: Path, publisher=publish) -> bool:
+    """Queue and publish one succeeded job. Cheap enough to run beside processing."""
+    publications = PublicationQueue(database)
+    publications.reconcile(JobQueue(database).status()["jobs"])
+    return publications.run_one(publisher)
+
+
+def run_processing(database: Path, processor=process_isolated, lease_seconds: float = 900) -> bool:
+    """Claim and run at most one heavy job; the queue allows only one lease."""
     queue = JobQueue(database)
     job = queue.claim_ready(f"{socket.gethostname()}:{uuid.uuid4()}", lease_seconds)
-    processed = False
-    if job is not None:
+    if job is None:
+        return False
+    try:
+        os.environ["MEETING_ARCHIVE_WORKER_DB"] = str(database)
+        os.environ.setdefault("MEETING_ARCHIVE_SCRATCH", str(database.parent / "runtime" / "tmp"))
+        for key, value in {
+            "DO_NOT_TRACK": "1",
+            "HF_HUB_DISABLE_TELEMETRY": "1",
+            "PYANNOTE_METRICS_ENABLED": "0",
+            "TOKENIZERS_PARALLELISM": "false",
+            "OMP_NUM_THREADS": "2",
+            "MKL_NUM_THREADS": "2",
+            "MEETING_ARCHIVE_TORCH_THREADS": "2",
+            "MEETING_ARCHIVE_WHISPER_CPU_THREADS": "2",
+        }.items():
+            os.environ.setdefault(key, value)
+        with _Heartbeat(queue, job, lease_seconds) as heartbeat:
+            processor(Path(job.archive_path), job)
+        if heartbeat.error is not None:
+            raise QueueConflict(f"Lost the job lease during processing: {heartbeat.error}")
+        queue.complete(job)
+        return True
+    except Exception as error:
         try:
-            os.environ["MEETING_ARCHIVE_WORKER_DB"] = str(database)
-            os.environ.setdefault("MEETING_ARCHIVE_SCRATCH", str(database.parent / "runtime" / "tmp"))
-            for key, value in {
-                "DO_NOT_TRACK": "1",
-                "HF_HUB_DISABLE_TELEMETRY": "1",
-                "PYANNOTE_METRICS_ENABLED": "0",
-                "TOKENIZERS_PARALLELISM": "false",
-                "OMP_NUM_THREADS": "2",
-                "MKL_NUM_THREADS": "2",
-                "MEETING_ARCHIVE_TORCH_THREADS": "2",
-                "MEETING_ARCHIVE_WHISPER_CPU_THREADS": "2",
-            }.items():
-                os.environ.setdefault(key, value)
-            with _Heartbeat(queue, job, lease_seconds) as heartbeat:
-                processor(Path(job.archive_path), job)
-            if heartbeat.error is not None:
-                raise QueueConflict(f"Lost the job lease during processing: {heartbeat.error}")
-            queue.complete(job)
-            processed = True
-        except Exception as error:
-            try:
-                queue.fail(job, str(error), transient=True)
-            except QueueConflict:
-                pass
-    publications = PublicationQueue(database)
-    publications.reconcile(queue.status()["jobs"])
-    published = publications.run_one(publisher)
+            queue.fail(job, str(error), transient=not isinstance(error, PermanentProcessingError))
+        except QueueConflict:
+            pass
+        return False
+
+
+def run_once(database: Path, processor=process_isolated, publisher=publish, lease_seconds: float = 900) -> dict:
+    refresh_speakers(database)
+    processed = run_processing(database, processor, lease_seconds)
+    published = run_publication(database, publisher)
     return {"processed": processed, "published": published}
+
+
+def _publication_loop(database: Path, poll_seconds: float, stop: threading.Event, publisher=publish) -> None:
+    """Keep speaker refresh and Notion moving while a multi-hour job runs."""
+    while not stop.is_set():
+        refresh_speakers(database)
+        try:
+            # Drain what is ready; each call publishes at most one meeting.
+            while run_publication(database, publisher) and not stop.is_set():
+                pass
+        except Exception:
+            _log("publication pass failed:\n" + traceback.format_exc())
+        stop.wait(max(1, poll_seconds))
 
 
 class _ServiceLock(AbstractContextManager["_ServiceLock"]):
@@ -342,9 +449,25 @@ def main() -> int:
     parser.add_argument("--poll-seconds", type=float, default=15)
     args = parser.parse_args()
     with _ServiceLock(args.db):
-        while True:
-            run_once(args.db)
-            time.sleep(max(1, args.poll_seconds))
+        # Heavy processing stays on this thread, one job at a time. Publication
+        # and speaker refresh run beside it so they never wait for hours.
+        stop = threading.Event()
+        light = threading.Thread(
+            target=_publication_loop,
+            args=(args.db, args.poll_seconds, stop),
+            name="meeting-archive-publication",
+            daemon=True,
+        )
+        light.start()
+        try:
+            while True:
+                try:
+                    run_processing(args.db)
+                except Exception:
+                    _log("processing pass failed:\n" + traceback.format_exc())
+                time.sleep(max(1, args.poll_seconds))
+        finally:
+            stop.set()
 
 
 if __name__ == "__main__":

@@ -26,6 +26,38 @@ PLAYBACK_PATH = "playback/meeting.mp4"
 PLAYBACK_RECEIPT_PATH = "playback/meeting-playback.json"
 PLAYBACK_RECIPE_VERSION = 2
 RESERVED_GENERATED_NAMESPACES = frozenset({"playback", "transcripts"})
+DIARIZATION_SAMPLE_RATE = 16000
+
+
+def _timeout(name: str, default: float) -> float:
+    """Bound every ffmpeg/ffprobe call so one bad file cannot hang the job."""
+    value = float(os.environ.get(name, str(default)))
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(f"{name} must be a positive number of seconds.")
+    return value
+
+
+def _probe_timeout() -> float:
+    return _timeout("MEETING_ARCHIVE_FFPROBE_TIMEOUT_SECONDS", 30)
+
+
+def _check_diarization_budget(sample_count: int) -> None:
+    estimated_waveform_bytes = sample_count * 4
+    memory_limit = int(
+        os.environ.get(
+            "MEETING_ARCHIVE_MAX_DIARIZATION_MEMORY_BYTES",
+            str(1536 * 1024 * 1024),
+        ),
+    )
+    if memory_limit <= 0:
+        raise RuntimeError("MEETING_ARCHIVE_MAX_DIARIZATION_MEMORY_BYTES must be positive.")
+    if estimated_waveform_bytes > memory_limit:
+        hours = sample_count / DIARIZATION_SAMPLE_RATE / 3600
+        raise RuntimeError(
+            f"The {hours:.1f} hour track needs about {estimated_waveform_bytes} bytes "
+            f"for diarization, above the {memory_limit}-byte memory budget. "
+            "Chunked diarization is not implemented yet; the complete source remains queued.",
+        )
 
 
 class WhisperPyannoteTranscriber:
@@ -74,7 +106,9 @@ class WhisperPyannoteTranscriber:
             {"start": float(item.start), "end": float(item.end), "text": item.text.strip()}
             for item in segments if item.text.strip()
         ]
-        if self.diarizer is None:
+        # A channel with no transcribed speech has nothing to label, so skip
+        # decoding it again and loading audio for pyannote.
+        if self.diarizer is None or not turns:
             return turns
         output = self._diarize_without_torchcodec(path)
         annotation = getattr(output, "exclusive_speaker_diarization", None) or getattr(
@@ -119,24 +153,10 @@ class WhisperPyannoteTranscriber:
             subprocess.run(
                 [ffmpeg, "-v", "error", "-threads", "1", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-y", str(raw_path)],
                 check=True,
+                timeout=_timeout("MEETING_ARCHIVE_MEDIA_DECODE_TIMEOUT_SECONDS", 7200),
             )
-            sample_count = raw_path.stat().st_size // 2
-            estimated_waveform_bytes = sample_count * 4
-            memory_limit = int(
-                os.environ.get(
-                    "MEETING_ARCHIVE_MAX_DIARIZATION_MEMORY_BYTES",
-                    str(1536 * 1024 * 1024),
-                ),
-            )
-            if memory_limit <= 0:
-                raise RuntimeError("MEETING_ARCHIVE_MAX_DIARIZATION_MEMORY_BYTES must be positive.")
-            if estimated_waveform_bytes > memory_limit:
-                hours = sample_count / 16000 / 3600
-                raise RuntimeError(
-                    f"The {hours:.1f} hour track needs about {estimated_waveform_bytes} bytes "
-                    f"for diarization, above the {memory_limit}-byte memory budget. "
-                    "Chunked diarization is not implemented yet; the complete source remains queued.",
-                )
+            # Backstop for the ffprobe estimate checked before Whisper ran.
+            _check_diarization_budget(raw_path.stat().st_size // 2)
             import numpy as np
             import torch
 
@@ -189,6 +209,13 @@ def process(archive_directory: Path, job: Job) -> None:
         if os.environ.get("MEETING_ARCHIVE_WORKER_DB"):
             video_label_evidence(archive_directory, existing, SpeakerRegistry(os.environ["MEETING_ARCHIVE_WORKER_DB"]))
         return
+    if os.environ.get("HF_TOKEN", "").strip():
+        # Fail an over-budget track in seconds, not after a full Whisper pass.
+        for item in manifest.files:
+            if TranscriptProcessor.CHANNEL_KINDS.get(item.kind):
+                duration = probe_duration(archive_directory / item.path)
+                if duration is not None:
+                    _check_diarization_budget(math.ceil(duration * DIARIZATION_SAMPLE_RATE))
     transcriber = WhisperPyannoteTranscriber()
     offsets = {}
     for item in manifest.files:
@@ -353,6 +380,7 @@ def create_playback(archive_directory: Path, manifest) -> Path | None:
                     check=True,
                     capture_output=True,
                     text=True,
+                    timeout=_timeout("MEETING_ARCHIVE_PLAYBACK_TIMEOUT_SECONDS", 4 * 3600),
                 )
                 last_error = None
                 break
@@ -462,8 +490,9 @@ def _playback_is_h264(path: Path) -> bool:
             check=True,
             capture_output=True,
             text=True,
+            timeout=_probe_timeout(),
         )
-    except (OSError, subprocess.CalledProcessError):
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return False
     return completed.stdout.strip().lower() == "h264"
 
@@ -477,9 +506,30 @@ def probe_start_time(path: Path) -> float | None:
         check=True,
         capture_output=True,
         text=True,
+        timeout=_probe_timeout(),
     )
     value = completed.stdout.strip()
     return float(value) if value and value != "N/A" else None
+
+
+def probe_duration(path: Path) -> float | None:
+    """Container duration in seconds, or None when ffprobe cannot say."""
+    ffprobe = find_executable("ffprobe")
+    if ffprobe is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=_probe_timeout(),
+        )
+        value = float(completed.stdout.strip())
+    except (OSError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        # The decode-time check still guards diarization memory.
+        return None
+    return value if math.isfinite(value) and value > 0 else None
 
 
 def find_executable(name: str) -> str | None:

@@ -28,6 +28,8 @@ swiftc -j 2 -I "$BUILD_ROOT" -L "$BUILD_ROOT" -lMeetingArchiveCore \
   "$TOOL_DIR/Sources/MeetingArchiveApp/ArchiveCleanup.swift" \
   "$TOOL_DIR/Sources/MeetingArchiveApp/SpoolBundle.swift" \
   "$TOOL_DIR/Sources/MeetingArchiveApp/CaptureTimeline.swift" \
+  "$TOOL_DIR/Sources/MeetingArchiveApp/Log.swift" \
+  "$TOOL_DIR/Sources/MeetingArchiveApp/CameraActivity.swift" \
   "$SCRIPT_DIR/OfflineRegressions.swift" \
   -o "$BUILD_ROOT/offline-regressions"
 

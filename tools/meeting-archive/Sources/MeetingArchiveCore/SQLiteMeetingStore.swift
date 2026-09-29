@@ -248,6 +248,41 @@ public final class SQLiteMeetingStore: @unchecked Sendable {
         }
     }
 
+    /// Clears retry backoff after a wake or network change, so a job does not
+    /// sit out an hour-long delay once Bruce is reachable again.
+    @discardableResult
+    public func makeRetryableJobsAvailable(now: Date) throws -> Int {
+        try withLock {
+            let statement = try prepareUnlocked(
+                "SELECT record FROM archive_jobs WHERE status = 'retry_scheduled' AND available_at > ?"
+            )
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, now.timeIntervalSince1970)
+            var jobs: [ArchiveJob] = []
+            while true {
+                let result = sqlite3_step(statement)
+                if result == SQLITE_DONE { break }
+                guard result == SQLITE_ROW else { throw lastErrorUnlocked() }
+                jobs.append(try ModelCodec.decoder.decode(ArchiveJob.self, from: data(from: statement, column: 0)))
+            }
+            for var job in jobs {
+                job.availableAt = now
+                try updateJobUnlocked(job)
+            }
+            return jobs.count
+        }
+    }
+
+    /// The app never closes its connection, so SQLite's automatic checkpoint
+    /// (at 1,000 WAL pages) was the only thing that would ever fold the WAL
+    /// back into the main file.
+    public func checkpoint() throws {
+        try withLock {
+            let result = sqlite3_wal_checkpoint_v2(database, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil)
+            guard result == SQLITE_OK else { throw lastErrorUnlocked(code: result) }
+        }
+    }
+
     public func acknowledgeJob(id: UUID, acknowledgement: ArchiveAcknowledgement) throws {
         try withLock {
             guard var job = try fetchJobUnlocked(id: id) else { throw MeetingStoreError.missingJob(id) }

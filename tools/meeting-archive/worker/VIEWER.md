@@ -1,7 +1,7 @@
 # Private meeting playback viewer
 
 The viewer is a small, read-only HTTP service designed to run behind Tailscale
-Serve. It binds only to `127.0.0.1:8765`; it does not implement TLS, listen on
+Serve. It binds only to `127.0.0.1:8791`; it does not implement TLS, listen on
 the LAN, or configure Tailscale itself.
 
 The intended private URL is:
@@ -65,7 +65,7 @@ python3 -m meeting_archive_worker.viewer \
   --archive-root /path/to/isolated/meetings \
   --db /path/to/isolated/worker.sqlite \
   --host 127.0.0.1 \
-  --port 8765 \
+  --port 8791 \
   --allowed-login mike.cann@gmail.com \
   --max-threads 2
 ```
@@ -107,7 +107,7 @@ Creating this route is a separate, explicit networking action:
 /usr/local/bin/tailscale serve \
   --bg \
   --https=10443 \
-  http://127.0.0.1:8765
+  http://127.0.0.1:8791
 ```
 
 It is deliberately separate from Bruce's existing ports 443 and 8443. Never

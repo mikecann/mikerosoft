@@ -12,6 +12,8 @@ mkdir -p "$CLANG_MODULE_CACHE_PATH" "$FIXTURE_ROOT/output"
 
 swiftc \
   "$TOOL_DIR/Sources/MeetingArchiveApp/CaptureTimeline.swift" \
+  "$TOOL_DIR/Sources/MeetingArchiveApp/Log.swift" \
+  "$TOOL_DIR/Sources/MeetingArchiveApp/NativeCaptureLifecycle.swift" \
   "$TOOL_DIR/Sources/MeetingArchiveApp/NativeRecording.swift" \
   "$SCRIPT_DIR/ForcedExitWriter.swift" \
   -o "$FIXTURE_ROOT/forced-exit-writer"
