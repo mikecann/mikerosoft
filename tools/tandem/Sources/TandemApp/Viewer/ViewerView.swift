@@ -174,7 +174,7 @@ final class ViewerView: NSView, CaptureAware {
             default:
                 fill(visible, Theme.brollClip, context)
             }
-            let name = ClipRenderer(project: project, scale: model.timeline.scale, artwork: nil, visible: 0...0).name(of: clip)
+            let name = ClipRenderer.name(of: clip, in: project)
             label(name, in: visible, colour: Theme.textSecondary, context: context)
         }
         context.restoreGState()
@@ -518,7 +518,7 @@ final class ViewerOverlayView: NSView {
         guard !layers.isEmpty else { return nil }
         let menu = NSMenu()
         if let screen = layers.first(where: { model.project.media($0.clip.mediaID ?? "")?.role == .screen }) {
-            menu.add("Zoom back out at playhead") {
+            menu.add("Zoom back out at playhead", icon: "minus.magnifyingglass") {
                 model.apply(EditBatch(label: "Zoom out at playhead", commands: [
                     .zoomToRegion(clipID: screen.clip.id, rect: Rect(x: 0, y: 0, width: 1, height: 1), at: model.playback.time, duration: Time(seconds: 0.5))
                 ]))
@@ -526,12 +526,12 @@ final class ViewerOverlayView: NSView {
             menu.addItem(.separator())
         }
         for preset in LayoutPreset.allCases {
-            menu.add("Layout: \(preset.name)") {
+            menu.add("Layout: \(preset.name)", icon: Icons.layout(preset), command: TimelineLanesView.layoutCommand(preset)) {
                 model.apply(TimelineEdits.applyLayout(model.project, preset: preset, playhead: model.playback.time, selection: model.selection))
             }
         }
         menu.addItem(.separator())
-        menu.add("Safe margins", checked: model.showSafeMargins) { model.showSafeMargins.toggle() }
+        menu.add("Safe margins", command: .toggleSafeMargins, checked: model.showSafeMargins) { model.showSafeMargins.toggle() }
         return menu
     }
 }

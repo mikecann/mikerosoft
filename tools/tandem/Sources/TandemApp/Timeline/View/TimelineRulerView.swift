@@ -15,26 +15,29 @@ final class TimelineRulerView: TimelineChildView {
     override func draw(_ dirtyRect: NSRect) {
         let started = CACurrentMediaTime()
         defer { DrawTiming.record("ruler", CACurrentMediaTime() - started) }
-        guard let model, let context = NSGraphicsContext.current?.cgContext else { return }
-        let scale = model.timeline.scale
-        let rate = model.frameRate
+        // The container's copy of the model, never the model itself: see
+        // `TimelineDrawState`.
+        guard let state = container?.drawState, let context = NSGraphicsContext.current?.cgContext else { return }
+        // Scrolled to the whole point the lanes are painted at.
+        guard let scale = container?.drawScale else { return }
+        let rate = state.frameRate
         context.setFillColor(Theme.window.cg)
         context.fill(bounds)
 
         // In to out.
-        if model.inPoint != nil || model.outPoint != nil {
-            let start = model.inPoint ?? .zero
-            let end = model.outPoint ?? model.project.duration
+        if state.inPoint != nil || state.outPoint != nil {
+            let start = state.inPoint ?? .zero
+            let end = state.outPoint ?? state.project.duration
             let x0 = scale.x(start)
             let x1 = scale.x(max(start, end))
             context.setFillColor(Theme.amber.opacity(0.14).cg)
             context.fill(CGRect(x: x0, y: bounds.height - 9, width: max(0, x1 - x0), height: 8))
             context.setFillColor(Theme.amber.opacity(0.9).cg)
-            if model.inPoint != nil {
+            if state.inPoint != nil {
                 context.fill(CGRect(x: x0, y: bounds.height - 12, width: 1.5, height: 11))
                 context.fill(CGRect(x: x0, y: bounds.height - 12, width: 5, height: 1.5))
             }
-            if model.outPoint != nil {
+            if state.outPoint != nil {
                 context.fill(CGRect(x: x1 - 1.5, y: bounds.height - 12, width: 1.5, height: 11))
                 context.fill(CGRect(x: x1 - 5, y: bounds.height - 12, width: 5, height: 1.5))
             }
@@ -44,7 +47,7 @@ final class TimelineRulerView: TimelineChildView {
         let markerFont = Theme.Fonts.ui(10.5, .semibold)
         var occupied: [CGRect] = []
         var markerDrawings: [(CGRect, Marker, Time)] = []
-        let placed = model.project.markers.map { marker -> (Marker, Time) in
+        let placed = state.project.markers.map { marker -> (Marker, Time) in
             (marker, marker.id == draggingMarker?.id ? (markerPreview ?? marker.time) : marker.time)
         }.sorted { $0.1 < $1.1 }
         for (index, (marker, time)) in placed.enumerated() {

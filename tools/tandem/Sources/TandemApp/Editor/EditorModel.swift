@@ -456,7 +456,18 @@ final class EditorModel {
 @MainActor
 @Observable
 final class TimelineViewState {
-    var scale = TimelineScale(pixelsPerSecond: 12)
+    // Zoom and scroll are stored apart so the zoom slider, which reads
+    // only the zoom, doesn't update on every step of a scroll.
+    private var pixelsPerSecond = TimelineScale(pixelsPerSecond: 12).pixelsPerSecond
+    private var scrollSeconds = 0.0
+
+    var scale: TimelineScale {
+        get { TimelineScale(pixelsPerSecond: pixelsPerSecond, scrollSeconds: scrollSeconds) }
+        set {
+            if newValue.pixelsPerSecond != pixelsPerSecond { pixelsPerSecond = newValue.pixelsPerSecond }
+            if newValue.scrollSeconds != scrollSeconds { scrollSeconds = newValue.scrollSeconds }
+        }
+    }
     /// Pixels scrolled down when the tracks don't fit.
     var verticalOffset: CGFloat = 0
     /// Width of the lanes area, kept up to date by the view.
@@ -474,13 +485,13 @@ final class TimelineViewState {
         get {
             let low = log(TimelineScale.minimumPixelsPerSecond)
             let high = log(TimelineScale.maximumPixelsPerSecond)
-            return (log(scale.pixelsPerSecond) - low) / (high - low)
+            return (log(pixelsPerSecond) - low) / (high - low)
         }
         set {
             let low = log(TimelineScale.minimumPixelsPerSecond)
             let high = log(TimelineScale.maximumPixelsPerSecond)
             let target = exp(low + min(max(newValue, 0), 1) * (high - low))
-            zoom(by: target / scale.pixelsPerSecond, anchorX: nil)
+            zoom(by: target / pixelsPerSecond, anchorX: nil)
         }
     }
 

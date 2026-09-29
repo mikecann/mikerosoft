@@ -14,12 +14,19 @@ extension NSHostingView: NSHostingViewMarker {}
 ///     open -g "tandem://simulate?drag=600,700,900,760&steps=120&interval=8"
 ///     open -g "tandem://simulate?menu=600,700&out=/tmp/menu.txt"
 ///     open -g "tandem://simulate?drop=tandem-effect:vignette&at=600,700"
+///     open -g "tandem://simulate?scroll=900,1100,-12,0&steps=90&interval=16"
+///     open -g "tandem://simulate?dragover=tandem-title:label&at=600,700&to=900,700&steps=60&interval=16"
 ///
 /// A drop hands a library payload (see `LibraryDrag`) to the drop target
-/// under the point, as if it had been dragged there from a library tab.
+/// under the point, as if it had been dragged there from a library tab. A
+/// drag over moves one from `at` to `to` in steps, showing its preview
+/// along the way, and leaves without dropping (or with `stay=1`, stays
+/// there, for a screenshot of the preview).
 /// A drag with an `interval` (milliseconds) sends its steps that far apart
 /// so the app draws between them, as it does for a real mouse; without
-/// one they all go at once.
+/// one they all go at once. A scroll sends `steps` wheel events of the
+/// same size (one by default), paced the same way, like a trackpad swipe;
+/// with `mods=option` they zoom.
 ///
 /// Points are in window coordinates measured from the top left.
 @MainActor
@@ -33,8 +40,11 @@ enum InputSimulator {
             /// Picks an item from the context menu by its title, as if
             /// clicked. Items in submenus are found too.
             case choose(String)
-            case scroll(dx: CGFloat, dy: CGFloat)
+            case scroll(dx: CGFloat, dy: CGFloat, steps: Int)
             case drop(payload: String)
+            /// A library payload dragged over the view from `at` to `to`
+            /// and away again, without dropping.
+            case dragOver(payload: String, to: CGPoint, steps: Int, stay: Bool)
             /// Files dropped as if from Finder.
             case dropFiles([String])
             /// Moves the pointer to the point and leaves it there, for
@@ -50,7 +60,8 @@ enum InputSimulator {
         var heldKey: String? = nil
         /// The button a drag holds down: the middle one pans the timeline.
         var button: Button = .left
-        /// Seconds between a drag's steps, or nil to send them all at once.
+        /// Seconds between a drag's or scroll's steps, or nil to send them
+        /// all at once.
         var interval: TimeInterval? = nil
 
         enum Button: String, Equatable {
@@ -72,6 +83,12 @@ enum InputSimulator {
             default: break
             }
         }
+        // Milliseconds between a drag's or scroll's steps, up to a second.
+        var interval: TimeInterval?
+        if let text = query["interval"] {
+            guard let milliseconds = Double(text), (0...1_000).contains(milliseconds) else { return nil }
+            interval = milliseconds / 1_000
+        }
         let drag = numbers(query["drag"])
         if drag.count == 4 {
             let steps = Int(query["steps"] ?? "") ?? 12
@@ -79,11 +96,6 @@ enum InputSimulator {
             if let name = query["button"] {
                 guard let named = Gesture.Button(rawValue: name) else { return nil }
                 button = named
-            }
-            var interval: TimeInterval?
-            if let text = query["interval"] {
-                guard let milliseconds = Double(text), (0...1_000).contains(milliseconds) else { return nil }
-                interval = milliseconds / 1_000
             }
             return Gesture(
                 kind: .drag(to: CGPoint(x: drag[2], y: drag[3]), steps: max(1, steps)), at: CGPoint(x: drag[0], y: drag[1]),
@@ -106,7 +118,8 @@ enum InputSimulator {
         }
         let scroll = numbers(query["scroll"])
         if scroll.count == 4 {
-            return Gesture(kind: .scroll(dx: scroll[2], dy: scroll[3]), at: CGPoint(x: scroll[0], y: scroll[1]), modifiers: flags)
+            let steps = max(1, Int(query["steps"] ?? "") ?? 1)
+            return Gesture(kind: .scroll(dx: scroll[2], dy: scroll[3], steps: steps), at: CGPoint(x: scroll[0], y: scroll[1]), modifiers: flags, interval: interval)
         }
         if let text = query["type"], !text.isEmpty {
             return Gesture(kind: .type(text), at: .zero, modifiers: flags)
@@ -118,6 +131,14 @@ enum InputSimulator {
         let at = numbers(query["at"])
         if let payload = query["drop"], at.count == 2, LibraryDrag.parse(payload) != nil {
             return Gesture(kind: .drop(payload: payload), at: CGPoint(x: at[0], y: at[1]), modifiers: flags)
+        }
+        let to = numbers(query["to"])
+        if let payload = query["dragover"], at.count == 2, to.count == 2, LibraryDrag.parse(payload) != nil {
+            let steps = max(1, Int(query["steps"] ?? "") ?? 12)
+            return Gesture(
+                kind: .dragOver(payload: payload, to: CGPoint(x: to[0], y: to[1]), steps: steps, stay: query["stay"] == "1"), at: CGPoint(x: at[0], y: at[1]),
+                modifiers: flags, interval: interval
+            )
         }
         if let files = query["files"], at.count == 2 {
             let paths = files.split(separator: ",").map { NSString(string: String($0)).expandingTildeInPath }.filter { $0.hasPrefix("/") }
@@ -218,11 +239,20 @@ enum InputSimulator {
                 return false
             }
             if !pick(in: menu) { NSLog("Tandem: no enabled menu item called %@", title) }
-        case .scroll(let dx, let dy):
-            guard let cgEvent = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0) else { return }
-            cgEvent.location = CGPoint(x: window.frame.minX + start.x, y: (NSScreen.screens.first?.frame.height ?? 0) - (window.frame.minY + start.y))
-            cgEvent.flags = CGEventFlags(rawValue: UInt64(gesture.modifiers.rawValue))
-            if let event = NSEvent(cgEvent: cgEvent) { target.scrollWheel(with: event) }
+        case .scroll(let dx, let dy, let steps):
+            func send() {
+                guard let cgEvent = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0) else { return }
+                cgEvent.location = CGPoint(x: window.frame.minX + start.x, y: (NSScreen.screens.first?.frame.height ?? 0) - (window.frame.minY + start.y))
+                cgEvent.flags = CGEventFlags(rawValue: UInt64(gesture.modifiers.rawValue))
+                if let event = NSEvent(cgEvent: cgEvent) { target.scrollWheel(with: event) }
+            }
+            let actions = [() -> Void](repeating: send, count: steps)
+            if let interval = gesture.interval {
+                finished = false
+                PacedReplay(actions: actions, done: done).start(every: interval)
+            } else {
+                for action in actions { action() }
+            }
         case .hover:
             // Tracking areas (and SwiftUI's hover) hear about the pointer
             // from the view under it, not from the window.
@@ -236,6 +266,29 @@ enum InputSimulator {
             }
         case .type:
             break
+        case .dragOver(let payload, let to, let steps, let stay):
+            var view: NSView? = target
+            while let candidate = view, candidate.registeredDraggedTypes.isEmpty { view = candidate.superview }
+            guard let destination = view else { return }
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.mikerosoft.tandem.simulated-drop"))
+            pasteboard.clearContents()
+            pasteboard.setString(payload, forType: .string)
+            let end = windowPoint(to)
+            var actions: [() -> Void] = [{ _ = destination.draggingEntered(SimulatedDrop(window: window, location: start, pasteboard: pasteboard)) }]
+            for step in 1...steps {
+                let fraction = CGFloat(step) / CGFloat(steps)
+                let point = NSPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction)
+                actions.append { _ = destination.draggingUpdated(SimulatedDrop(window: window, location: point, pasteboard: pasteboard)) }
+            }
+            if !stay {
+                actions.append { destination.draggingExited(SimulatedDrop(window: window, location: end, pasteboard: pasteboard)) }
+            }
+            if let interval = gesture.interval {
+                finished = false
+                PacedReplay(actions: actions, done: done).start(every: interval)
+            } else {
+                for action in actions { action() }
+            }
         case .drop, .dropFiles:
             // The nearest view up the chain that takes drops.
             var view: NSView? = target

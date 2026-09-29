@@ -40,9 +40,20 @@ enum LibraryDrops {
 
     /// A title style dropped at `time`: a text clip in that style on the
     /// Text track, over whatever was there.
-    static func title(_ preset: TitlePreset, at time: Time, in project: Project, duration: Time = Time(seconds: 3)) -> EditBatch? {
-        guard let track = project.track(named: "Text", kind: .video) ?? project.videoTracks.last, !track.locked else { return nil }
+    /// A title dropped at `time`: on the video track it's dropped on, on a
+    /// new top track above the tracks, and otherwise on the Text track.
+    static func title(_ preset: TitlePreset, at time: Time, in project: Project, target: DropTarget = .track(nil), duration: Time = Time(seconds: 3)) -> EditBatch? {
         let clip = Clip(name: preset.name, content: .text(TextContent(text: TitleSamples.text(for: preset.id), preset: preset.id)), start: time, duration: duration)
+        if target == .newVideoTrackOnTop {
+            let trackID = IDs.make("trk")
+            return EditBatch(label: "Add \(preset.name.lowercased()) on a new track", commands: [
+                .addTrack(kind: .video, id: trackID),
+                .insertClip(trackID: trackID, clip: clip, mode: .overwrite)
+            ])
+        }
+        var dropped: Track?
+        if case .track(let trackID?) = target, let track = project.track(trackID), track.kind == .video, !track.locked { dropped = track }
+        guard let track = dropped ?? project.track(named: "Text", kind: .video) ?? project.videoTracks.last, !track.locked else { return nil }
         return EditBatch(label: "Add \(preset.name.lowercased())", commands: [.insertClip(trackID: track.id, clip: clip, mode: .overwrite)])
     }
 
