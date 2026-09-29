@@ -2,8 +2,8 @@ import Foundation
 import TandemCore
 
 /// A title style: the look and motion a text clip gets from
-/// `TextContent.preset`. The clip's own `style` overrides any field it
-/// changes from the `TextStyle()` defaults.
+/// `TextContent.preset`. Any field the clip's own `style` sets wins over
+/// the preset's, and fields neither sets come from `TextStyle.defaults`.
 public struct TitlePreset: Codable, Equatable, Sendable {
     public var id: String
     public var name: String
@@ -111,16 +111,30 @@ public enum TitlePresets {
         guard let id else { return nil }
         return builtIn.first { $0.id.caseInsensitiveCompare(id) == .orderedSame }
     }
+
+    /// What a text clip is drawn with: its own style over its preset's,
+    /// over the defaults.
+    public static func style(for content: TextContent) -> TextStyle.Resolved {
+        content.style.resolved(over: presetStyle(content.preset))
+    }
+
+    /// What a clip gets from its preset alone, which is what a field goes
+    /// back to when the clip stops setting it.
+    public static func presetStyle(_ presetID: String?) -> TextStyle.Resolved {
+        (preset(presetID)?.style ?? TextStyle()).resolved()
+    }
 }
 
 enum TextAnimation: Equatable {
     case fade, pop, slideUp, typewriter
 
     /// Accepts the names agents and presets use: `fade`, `fadeIn`, `pop`,
-    /// `popIn`, `slideUp`, `typewriter`...
+    /// `popIn`, `slideUp`, `typewriter`... `none` (or any name it doesn't
+    /// know) is no animation, which is how a clip switches its preset's off.
     init?(name: String?) {
         guard let name else { return nil }
         switch name.lowercased() {
+        case "none", "off": return nil
         case "fade", "fadein", "fadeout", "dissolve": self = .fade
         case "pop", "popin", "popout", "scale": self = .pop
         case "slide", "slideup", "slideupin", "rise": self = .slideUp
@@ -133,7 +147,7 @@ enum TextAnimation: Equatable {
 /// A text clip with its preset merged in.
 struct ResolvedText {
     var text: String
-    var style: TextStyle
+    var style: TextStyle.Resolved
     var animationIn: TextAnimation?
     var animationOut: TextAnimation?
     var animationDuration: Time
@@ -145,26 +159,12 @@ struct ResolvedText {
 
     init(_ content: TextContent) {
         let preset = TitlePresets.preset(content.preset)
-        let defaults = TextStyle()
-        var style = preset?.style ?? defaults
-        let own = content.style
-        if own.font != defaults.font { style.font = own.font }
-        if own.size != defaults.size { style.size = own.size }
-        if own.weight != defaults.weight { style.weight = own.weight }
-        if own.color != defaults.color { style.color = own.color }
-        if own.strokeColor != defaults.strokeColor { style.strokeColor = own.strokeColor }
-        if own.strokeWidth != defaults.strokeWidth { style.strokeWidth = own.strokeWidth }
-        if own.backgroundColor != defaults.backgroundColor { style.backgroundColor = own.backgroundColor }
-        if own.alignment != defaults.alignment { style.alignment = own.alignment }
-        if own.uppercase != defaults.uppercase { style.uppercase = own.uppercase }
-        if own.shadow != defaults.shadow { style.shadow = own.shadow }
-        if own.lineSpacing != defaults.lineSpacing { style.lineSpacing = own.lineSpacing }
+        let style = TitlePresets.style(for: content)
         self.style = style
 
         animationIn = TextAnimation(name: content.animationIn ?? preset?.animationIn)
         animationOut = TextAnimation(name: content.animationOut ?? preset?.animationOut)
-        let defaultDuration = TextContent(text: "").animationDuration
-        animationDuration = content.animationDuration != defaultDuration ? content.animationDuration : (preset?.animationDuration ?? defaultDuration)
+        animationDuration = content.animationDuration ?? preset?.animationDuration ?? TextContent.defaultAnimationDuration
         position = preset?.position
         highlightColor = preset?.highlightColor ?? TitlePresets.builtIn.first { $0.id == "caption" }?.highlightColor ?? TitlePresets.accent
         firstLineScale = preset?.firstLineScale ?? 1

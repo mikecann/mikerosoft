@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import TandemCore
 import TandemMedia
+import TandemRender
 
 /// The right panel: the selected clip's Video, Colour, Audio and Info, and
 /// the activity feed.
@@ -654,13 +655,23 @@ struct TransitionInspector: View {
     }
 }
 
-/// A text clip's words and look. Edits patch `content.text`.
+/// A text clip's words and look. Edits patch `content.text`. The style
+/// rows show what the title is drawn with. A row the clip sets itself,
+/// rather than taking from its preset, has an amber label and a button
+/// that goes back to the preset's value.
 private struct TextSection: View {
     let model: EditorModel
     let clip: Clip
     let text: TextContent
     @State private var draft = ""
     @FocusState private var editing: Bool
+
+    /// What the title is drawn with.
+    private var style: TextStyle.Resolved { TitlePresets.style(for: text) }
+    /// What it would be drawn with if the clip set nothing itself.
+    private var base: TextStyle.Resolved { TitlePresets.presetStyle(text.preset) }
+    private var own: TextStyle { text.style }
+    private var presetName: String? { TitlePresets.preset(text.preset)?.name }
 
     var body: some View {
         InspectorSection(title: "Text", icon: Icons.text) {
@@ -677,38 +688,119 @@ private struct TextSection: View {
                 .onAppear { draft = text.text }
                 .onChange(of: text.text) { _, new in if !editing { draft = new } }
                 .onChange(of: editing) { _, now in if !now { commitText() } }
-            Text("Changes apply when you click away.")
+            Text(presetName.map { "Changes apply when you click away. The \($0) preset styles this title; amber settings are this clip's own." }
+                 ?? "Changes apply when you click away.")
                 .font(.ui(11))
                 .foregroundStyle(Theme.textFaint.color)
-            SliderRow(label: "Size", value: text.style.size, range: 12...240, format: { String(format: "%.0f pt", $0) }) { value in
-                patch(["style": .object(["size": .number(value.rounded())])], "Text size")
+                .fixedSize(horizontal: false, vertical: true)
+            fontRow
+            SliderRow(
+                label: "Size", value: style.size, range: 12...240, format: { String(format: "%.0f pt", $0) },
+                accessory: resetAccessory(["size"], own.size != nil, String(format: "%.0f pt", base.size)), marked: own.size != nil
+            ) { value in
+                set(["size": .number(value.rounded())], "Text size")
             }
-            SliderRow(label: "Weight", value: text.style.weight, range: 300...900, format: { String(format: "%.0f", $0) }) { value in
-                patch(["style": .object(["weight": .number((value / 100).rounded() * 100)])], "Text weight")
+            SliderRow(
+                label: "Weight", value: style.weight, range: 100...900, format: { String(format: "%.0f", $0) },
+                accessory: resetAccessory(["weight"], own.weight != nil, String(format: "%.0f", base.weight)), marked: own.weight != nil
+            ) { value in
+                set(["weight": .number((value / 100).rounded() * 100)], "Text weight")
+            }
+            colourRow("Colour", field: "color", value: style.color, preset: base.color, opacity: false)
+            SliderRow(
+                label: "Outline", value: style.hasOutline ? style.strokeWidth : 0, range: 0...20,
+                format: { $0 == 0 ? "None" : String(format: "%.0f pt", $0) }, step: 1,
+                accessory: resetAccessory(["strokeWidth", "strokeColor"], own.strokeWidth != nil || own.strokeColor != nil, base.hasOutline ? String(format: "%.0f pt", base.strokeWidth) : "none"),
+                marked: own.strokeWidth != nil || own.strokeColor != nil
+            ) { value in
+                set(TextStyleEdits.outline(width: value, current: style), value == 0 ? "No text outline" : "Text outline")
+            }
+            if style.hasOutline, let outline = style.strokeColor {
+                colourRow("Outline colour", field: "strokeColor", value: outline, preset: base.strokeColor ?? .black, opacity: false)
             }
             HStack(spacing: 10) {
-                Text("Colour").font(.ui(12)).foregroundStyle(Theme.textMuted.color).frame(width: 86, alignment: .leading)
-                ColorPicker("", selection: colourBinding(text.style.color) { patch(["style": .object(["color": ParamValue.color($0).json])], "Text colour") }, supportsOpacity: false)
-                    .labelsHidden()
-                Spacer()
-            }
-            HStack(spacing: 10) {
-                Text("Background").font(.ui(12)).foregroundStyle(Theme.textMuted.color).frame(width: 86, alignment: .leading)
-                ColorPicker("", selection: colourBinding(text.style.backgroundColor ?? RGBA(r: 0, g: 0, b: 0, a: 0)) {
-                    patch(["style": .object(["backgroundColor": ParamValue.color($0).json])], "Text background")
+                label("Background", marked: own.backgroundColor != nil)
+                ColorPicker("", selection: colourBinding(style.backgroundColor ?? RGBA(r: 0, g: 0, b: 0, a: 0)) {
+                    set(["backgroundColor": ParamValue.color($0).json], "Text background")
                 }, supportsOpacity: true)
                     .labelsHidden()
-                if text.style.backgroundColor != nil {
-                    OutlineButton(title: "None") { patch(["style": .object(["backgroundColor": .null])], "No text background") }
+                if style.backgroundColor != nil {
+                    OutlineButton(title: "None") { set(TextStyleEdits.noBackground(preset: base), "No text background") }
                 }
                 Spacer()
+                resetButton(["backgroundColor"], own.backgroundColor != nil, base.backgroundColor == nil ? "no box" : "its box")
             }
-            HStack(spacing: 10) {
-                Text("Shadow").font(.ui(12)).foregroundStyle(Theme.textMuted.color).frame(width: 86, alignment: .leading)
-                Spacer()
-                GraphiteSwitch(isOn: text.style.shadow) { patch(["style": .object(["shadow": .bool(!text.style.shadow)])], "Text shadow") }
+            switchRow("Capitals", field: "uppercase", isOn: style.uppercase, preset: base.uppercase)
+            switchRow("Shadow", field: "shadow", isOn: style.shadow, preset: base.shadow)
+        }
+    }
+
+    /// The font's name.
+    private var fontRow: some View {
+        HStack(spacing: 10) {
+            label("Font", marked: own.font != nil)
+            Text(style.font)
+                .font(.ui(12))
+                .foregroundStyle(Theme.text.color)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer()
+            resetButton(["font"], own.font != nil, base.font)
+        }
+    }
+
+    private func colourRow(_ title: String, field: String, value: RGBA, preset: RGBA, opacity: Bool) -> some View {
+        let marked = field == "color" ? own.color != nil : own.strokeColor != nil
+        return HStack(spacing: 10) {
+            label(title, marked: marked)
+            ColorPicker("", selection: colourBinding(value) { set([field: ParamValue.color($0).json], title == "Colour" ? "Text colour" : "Text outline colour") }, supportsOpacity: opacity)
+                .labelsHidden()
+            Spacer()
+            resetButton([field], marked, Self.describe(preset))
+        }
+    }
+
+    private func switchRow(_ title: String, field: String, isOn: Bool, preset: Bool) -> some View {
+        let marked = field == "uppercase" ? own.uppercase != nil : own.shadow != nil
+        return HStack(spacing: 10) {
+            label(title, marked: marked)
+            Spacer()
+            GraphiteSwitch(isOn: isOn) { set([field: .bool(!isOn)], "\(isOn ? "No" : "Text") \(title.lowercased())") }
+            resetButton([field], marked, preset ? "on" : "off")
+        }
+    }
+
+    private func label(_ title: String, marked: Bool) -> some View {
+        Text(title)
+            .font(.ui(12))
+            .foregroundStyle(marked ? Theme.amber.color : Theme.textMuted.color)
+            .frame(width: SliderRow.labelWidth, alignment: .leading)
+    }
+
+    /// The button back to the preset's value, or the room it takes so the
+    /// rows line up.
+    private func resetButton(_ fields: [String], _ shown: Bool, _ presetValue: String) -> some View {
+        Group {
+            if shown {
+                IconButton(symbol: Icons.reset, help: TextStyleEdits.resetHelp(preset: presetName, value: presetValue)) {
+                    set(TextStyleEdits.reset(fields), "\(fields[0] == "strokeWidth" ? "Outline" : fields[0].capitalized) from the preset")
+                }
+            } else {
+                Color.clear.frame(width: 18, height: 18)
             }
         }
+    }
+
+    private func resetAccessory(_ fields: [String], _ shown: Bool, _ presetValue: String) -> AnyView {
+        AnyView(resetButton(fields, shown, presetValue))
+    }
+
+    private static func describe(_ colour: RGBA) -> String {
+        String(format: "#%02X%02X%02X", Int((colour.r * 255).rounded()), Int((colour.g * 255).rounded()), Int((colour.b * 255).rounded()))
+    }
+
+    private func set(_ fields: [String: JSONValue], _ label: String) {
+        patch(["style": .object(fields)], label)
     }
 
     private func commitText() {

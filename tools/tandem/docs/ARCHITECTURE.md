@@ -92,6 +92,16 @@ no forks or branches inside a project.
   drops it only makes the next scan look again, so it didn't need a schema
   version.
 - Keyframe times are relative to the clip start and move with the clip.
+- A text clip's `style` fields are all optional. One that's set wins over
+  the clip's preset even when it's the default value (`"uppercase": false`
+  on a label); one that isn't comes from the preset, then
+  `TextStyle.defaults` (`TitlePresets.style(for:)` resolves it). Only set
+  fields are written, and an empty style not at all, so a caption is its
+  preset and its words. `animationDuration` works the same way.
+  Schema 1 wrote every field and read a default value as "not set", so
+  loading a schema 1 file (or a journal entry or headless undo snapshot
+  written by that build) drops the fields equal to the old defaults
+  (`LegacyTextStyles`) and it looks the same; only values set since win.
 - Adding a field that matters means bumping `Project.currentSchemaVersion`
   (with a `ProjectFile.migrate` step if old files need it). Lenient decoding
   lets an older build open a newer file, and it would silently drop the new

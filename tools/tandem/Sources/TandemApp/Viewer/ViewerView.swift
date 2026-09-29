@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import TandemCore
+import TandemRender
 
 /// The viewer canvas. Plays the composition through an `AVPlayerLayer`
 /// when the render module can build one; until then it draws a schematic of
@@ -231,7 +232,8 @@ final class ViewerView: NSView, CaptureAware {
     }
 
     private func drawText(_ text: TextContent, in rect: CGRect, canvas: CGRect, scaleFactor: CGFloat, context: CGContext) {
-        let style = text.style
+        // As the renderer draws it: the clip's own style over its preset's.
+        let style = TitlePresets.style(for: text)
         let size = max(6, CGFloat(style.size) * scaleFactor)
         let weight: NSFont.Weight = style.weight >= 750 ? .heavy : (style.weight >= 650 ? .bold : (style.weight >= 550 ? .semibold : .regular))
         let font = NSFont(name: style.font, size: size).map { NSFontManager.shared.convert($0, toHaveTrait: style.weight >= 650 ? .boldFontMask : []) } ?? NSFont.systemFont(ofSize: size, weight: weight)

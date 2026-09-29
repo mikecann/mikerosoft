@@ -718,7 +718,7 @@ final class FilmoraRun {
         }
         var content = mapped.content
         if let transform, transform.scale != 1 {
-            content.style.size = (content.style.size * transform.scale).rounded()
+            content.style.size = ((content.style.size ?? TextStyle.defaults.size) * transform.scale).rounded()
         }
         let text = content.text.replacingOccurrences(of: "\n", with: " ")
         var clipValue = Clip(

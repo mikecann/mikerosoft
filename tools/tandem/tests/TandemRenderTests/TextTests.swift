@@ -48,6 +48,54 @@ final class TextTests: XCTestCase {
         XCTAssertNil(plain.animationIn)
     }
 
+    func testExplicitValuesBeatThePresetEvenWhenTheyAreTheDefaults() {
+        // The feedback's cases: a URL on a label, a callout without its
+        // outline or shadow.
+        let url = ResolvedText(TextContent(text: "github.com/mikecann/workbench", preset: "label", style: TextStyle(uppercase: false)))
+        XCTAssertEqual(url.text, "github.com/mikecann/workbench")
+        XCTAssertTrue(url.style.shadow, "what the clip doesn't set still comes from the label")
+        let callout = ResolvedText(TextContent(text: "14 tips", preset: "callout", style: TextStyle(strokeColor: .black, strokeWidth: 0, shadow: false)))
+        XCTAssertFalse(callout.style.shadow)
+        XCTAssertFalse(callout.style.hasOutline)
+        XCTAssertEqual(callout.text, "14 TIPS")
+        let caption = ResolvedText(TextContent(text: "so this is", preset: "caption", style: TextStyle(strokeWidth: 0)))
+        XCTAssertFalse(caption.style.hasOutline, "0 switches the caption's outline off")
+
+        // Animations the same way: an explicit default length, and "none".
+        XCTAssertEqual(ResolvedText(TextContent(text: "x", preset: "callout", animationDuration: t(0.4))).animationDuration, t(0.4))
+        let still = ResolvedText(TextContent(text: "x", preset: "callout", animationIn: "none"))
+        XCTAssertNil(still.animationIn)
+        XCTAssertEqual(still.animationOut, .pop)
+    }
+
+    func testTheInspectorsEffectiveAndPresetValues() {
+        let own = TextContent(text: "x", preset: "callout", style: TextStyle(size: 120, shadow: false))
+        let effective = TitlePresets.style(for: own)
+        let preset = TitlePresets.presetStyle(own.preset)
+        XCTAssertEqual(effective.size, 120)
+        XCTAssertEqual(preset.size, 88)
+        XCTAssertFalse(effective.shadow)
+        XCTAssertTrue(preset.shadow)
+        XCTAssertEqual(TitlePresets.presetStyle(nil), TextStyle.defaults)
+    }
+
+    func testASeeThroughBackgroundDrawsNoBox() {
+        func yellowPixels(_ style: TextStyle) -> Int {
+            let clip = Clip(id: "clip_t", content: .text(TextContent(text: "14 tips", preset: "callout", style: style)), start: .zero, duration: t(3))
+            let frame = CompositorHarness(smallProject(video: [Track(kind: .video, name: "Text", clips: [clip])], media: [])).render(at: t(1.5))
+            var count = 0
+            for y in 0..<frame.height {
+                for x in 0..<frame.width {
+                    let p = frame[x, y]
+                    if p[0] > 200 && p[1] > 150 && p[2] < 90 { count += 1 }
+                }
+            }
+            return count
+        }
+        XCTAssertGreaterThan(yellowPixels(TextStyle()), 1_000, "the callout's yellow box")
+        XCTAssertEqual(yellowPixels(TextStyle(backgroundColor: RGBA(r: 0, g: 0, b: 0, a: 0))), 0)
+    }
+
     func testAnimationNames() {
         XCTAssertEqual(TextAnimation(name: "popIn"), .pop)
         XCTAssertEqual(TextAnimation(name: "fadeOut"), .fade)
