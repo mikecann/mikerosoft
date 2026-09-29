@@ -39,6 +39,22 @@ final class WindowPlacementTests: XCTestCase {
         XCTAssertFalse(WindowPlacement.isOnScreen(NSRect(x: 1_300, y: 100, width: 1_200, height: 700), screens: [laptop]))
     }
 
+    /// Two projects open side by side each come back where they were; a
+    /// project with no frame of its own opens where the last window was.
+    func testEachProjectKeepsItsOwnFrame() {
+        let defaults = store()
+        let decisions = URL(fileURLWithPath: "/videos/decision-models/v14.tandem")
+        let workbench = URL(fileURLWithPath: "/videos/workbench/Workbench.tandem")
+        let left = NSRect(x: -2_560, y: -237, width: 1_280, height: 1_408)
+        let right = NSRect(x: -1_280, y: -237, width: 1_280, height: 1_408)
+        WindowPlacement.save(left, for: decisions, to: defaults)
+        WindowPlacement.save(right, for: workbench, to: defaults)
+        XCTAssertEqual(WindowPlacement.restored(screens: [laptop, monitor], occupied: [], for: decisions, store: defaults), left)
+        XCTAssertEqual(WindowPlacement.restored(screens: [laptop, monitor], occupied: [], for: workbench, store: defaults), right)
+        let other = URL(fileURLWithPath: "/videos/new/New.tandem")
+        XCTAssertEqual(WindowPlacement.restored(screens: [laptop, monitor], occupied: [], for: other, store: defaults), right, "the last window's frame")
+    }
+
     func testSteppedPastAWindowAlreadyThere() {
         let defaults = store()
         let frame = NSRect(x: 100, y: 200, width: 1_200, height: 700)

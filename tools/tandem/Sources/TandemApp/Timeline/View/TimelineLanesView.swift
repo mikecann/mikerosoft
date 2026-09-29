@@ -79,6 +79,13 @@ final class TimelineLanesView: TimelineChildView {
     /// Tiles by index: tile `i` shows content x from `i * tileWidth`.
     private var tiles: [Int: LanesPaintView] = [:]
     private lazy var strip = LanesPaintView(role: .strip, lanes: self)
+    /// Where a transcript phrase runs past the right edge, a fade and an
+    /// ellipsis: tiles draw phrases whole, so the edge cut them mid-word.
+    private lazy var transcriptEdge: TranscriptEdgeView = {
+        let view = TranscriptEdgeView()
+        addSubview(view)
+        return view
+    }()
     private lazy var canvas = LanesPaintView(role: .canvas, lanes: self)
     /// The zoom, height and layout the tiles were painted for; when any
     /// changes they all paint again.
@@ -280,13 +287,28 @@ final class TimelineLanesView: TimelineChildView {
     private func updateStrip(repaint: Bool) {
         guard let container, !usesCanvas else { return }
         let origin = container.contentOrigin
-        let reach = painter(for: .strip).pinnedReach()
+        let painter = painter(for: .strip)
+        let reach = painter.pinnedReach()
+        updateTranscriptEdge(painter, origin: origin)
         let width = min(bounds.width, max(0, (reach - origin.x).rounded(.up) + 2))
         strip.isHidden = width <= 2
         let frame = CGRect(x: 0, y: 0, width: width, height: bounds.height)
         let resized = strip.frame != frame
         if resized { strip.frame = frame }
         if !strip.isHidden && (repaint || resized) { strip.needsDisplay = true }
+    }
+
+    private func updateTranscriptEdge(_ painter: LanesPainter, origin: CGPoint) {
+        guard let container, container.drawState.showTranscript,
+              let lane = container.layoutCache.lanes.first(where: \.isTranscript),
+              painter.transcriptRunsPast(origin.x + bounds.width) else {
+            if !transcriptEdge.isHidden { transcriptEdge.isHidden = true }
+            return
+        }
+        let width: CGFloat = 30
+        let frame = CGRect(x: bounds.width - width, y: lane.y - origin.y, width: width, height: lane.height)
+        if transcriptEdge.frame != frame { transcriptEdge.frame = frame }
+        transcriptEdge.isHidden = false
     }
 
     /// Everything paints again: new thumbnails, a new layout.
@@ -1371,5 +1393,35 @@ enum MediaDrag {
     static func ids(from text: String) -> [String] {
         guard text.hasPrefix(prefix) else { return [] }
         return text.dropFirst(prefix.count).split(separator: ",").map(String.init).filter { !$0.isEmpty }
+    }
+}
+
+/// The end of a transcript phrase at the lanes' right edge: the text fades
+/// into an ellipsis, as it did before the lanes drew in tiles.
+final class TranscriptEdgeView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let ground = Theme.window
+        let colours = [ground.opacity(0).cg, ground.cg] as CFArray
+        if let fade = CGGradient(colorsSpace: nil, colors: colours, locations: [0, 1]) {
+            context.drawLinearGradient(fade, start: CGPoint(x: 0, y: 0), end: CGPoint(x: bounds.width - 12, y: 0), options: [.drawsAfterEndLocation])
+        }
+        let font = Theme.Fonts.ui(10.5)
+        let dots = "…" as NSString
+        let size = dots.size(withAttributes: [.font: font])
+        dots.draw(at: CGPoint(x: bounds.width - size.width - 4, y: (bounds.height - size.height) / 2), withAttributes: [.font: font, .foregroundColor: Theme.textFaint.ns])
     }
 }
