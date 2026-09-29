@@ -231,6 +231,20 @@ final class SectionCardCommandTests: XCTestCase {
         assertValid(c.project)
     }
 
+    /// A transition on the cut at the marker can't survive room made there;
+    /// the card covers that cut, so it takes the transition's place.
+    func testInsertReplacesATransitionOnTheSectionCut() throws {
+        let (_, c) = try marked()
+        try c.run("Cut", .blade(at: t(12), clipIDs: [c.clips("Camera")[0].id]))
+        let camera = c.clips("Camera")
+        try c.run("Dissolve", .addTransition(trackID: c.project.track(named: "Camera")!.id, transition: Transition(id: "tr_cut", type: .dissolve, duration: t(0.5), fromClipID: camera[0].id, toClipID: camera[1].id)))
+        let result = try c.run("Cards", .addSectionCards(markerIDs: ["mk_method"], mode: .insert))
+        XCTAssertFalse(c.project.track(named: "Camera")!.transitions.contains { $0.id == "tr_cut" })
+        XCTAssertTrue(result.warnings.contains { $0.contains("dissolve") && $0.contains("section card covers that cut") }, "\(result.warnings)")
+        XCTAssertEqual(cards(c).count, 1)
+        assertValid(c.project)
+    }
+
     func testMistakesAreExplained() throws {
         let (fixture, c) = try Fixture.edited()
         var plain = fixture.project

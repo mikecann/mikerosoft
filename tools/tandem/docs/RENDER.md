@@ -31,6 +31,7 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
 | `Kernels.swift` | Runtime-compiled Metal Core Image kernels |
 | `Transitions.swift` | All transition types |
 | `TextRenderer.swift`, `TitlePresets.swift` | Core Text titles, presets, animations, word captions |
+| `SectionCardRenderer.swift`, `CardFonts.swift` | The built-in section card (`sectionCard` graphic clips): layout, drawing and its bundled typefaces (`Resources/Fonts`) |
 | `Limiter.swift` | Lookahead true-peak limiter |
 | `Export.swift` | Loudness passes, VideoToolbox encoder, mastered audio, snapshot |
 | `RenderAssets.swift` | `RenderAssets`: proxies, mattes, isolated voice, loudness, converted copies (from `MediaAnalysis`) |
@@ -52,8 +53,10 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
 - Speed uses `scaleTimeRange`; a freeze frame is one frame stretched; media
   that runs out holds its last frame (video) or goes quiet (audio).
 - Instructions split at every visible clip edge and transition edge.
-- Graphic clips (`.graphic`) aren't rendered yet: there's no rendered-file
-  contract. They produce a warning.
+- Graphic clips (`.graphic`) with a built-in template, the section card
+  (`sectionCard`), are drawn by the compositor like titles. Other graphic
+  templates aren't rendered yet: there's no rendered-file contract, and
+  they produce a warning.
 - A file macOS can't decode (`MediaItem.undecodableCodec`: QuickTime
   Animation or PNG stickers) plays from its `converted` HEVC copy
   (docs/MEDIA.md). Frame grabs and exports make a missing copy before they
@@ -167,6 +170,80 @@ highlighted). The clip's `style` overrides any field it changes from
 without video properties sits at the preset's position. Animation names:
 `fade`, `pop` (scale with overshoot), `slideUp`, `typewriter`, plus common
 aliases (`popIn`, `fadeOut`...).
+
+## Section cards
+
+A `sectionCard` graphic clip is Mike's section card, the design he picked
+from `~/dev/me/tandem-research/title-cards/mockup-template.html`: card B's
+Convex bands (yellow #F3B01C, red #EE342F, purple #8D2676 on #141418)
+with card D's progress row. `SectionCardRenderer` draws each frame with
+Core Graphics and Core Text at the output size and hands it to the layer
+pipeline as a canvas-sized picture, so a clip transform, opacity or effect
+applies as to any other, and the viewer, paused stills, frame grabs and
+export all show the same frame.
+
+- **Layout** (`SectionCardLayout`) is the mockup's CSS in cqw, a hundredth
+  of the frame's width, so the card scales with the frame. A grid centred
+  both ways, rows 1.6cqw apart: the number chip (JetBrains Mono 700 at
+  1.6cqw, letter-spacing .08em, padding .55cqw by 1cqw, radius .5cqw, the
+  card's colour on the accent) with the kicker 1.4cqw to its right
+  (Instrument Sans 600 at 1.45cqw, .2em, #D9DCE1, centred on the chip);
+  the title (Anton at 9.4cqw, line height .95, .01em, white, at most
+  84cqw wide and balanced like `text-wrap: balance`); the subtitle
+  (Instrument Sans 600 at 1.7cqw, .34em with as much again on the left so
+  the words sit in the middle, accent); then .6cqw further, D's progress
+  row: bars .35cqw by 5cqw, .6cqw apart, lit up to this section in the
+  accent and the rest white at 28%, or past six sections one 30cqw bar in
+  proportion and the count (JetBrains Mono 500 at 1.5cqw, #CFD3D9). Text
+  is upper case except the count. Baselines sit where CSS puts them: the
+  font's ascent and descent centred in the line box.
+- **Motion** (`SectionCard.Motion`, in Core, which `addSectionCards` uses
+  too): each band is 46% of the width wide and 140% of the height tall,
+  skewed 16 degrees, and sweeps left to right in 0.72 s with
+  `cubic-bezier(.65, 0, .35, 1)`, the next 0.08 s behind. The sweep in
+  starts with the clip; the sweep out starts 0.88 s before the end, so the
+  last band leaves as the clip does. A longer or shorter card holds longer
+  or shorter; a card under 1.76 s shrinks both wipes to fit. The words
+  come in 0.52 s after the start over 0.45 s with `cubic-bezier(.16, 1,
+  .3, 1)`, from transparent, 2.5cqw lower and 98% of their size, about the
+  frame's centre.
+- **Wipes.** The card shows behind the first band on the way in (left of
+  its left edge) and the next shot shows behind the last band on the way
+  out, so the wipes reveal the shots either side; the bands are drawn on
+  top, first to last. The card hides the whole frame from about 0.43 s to
+  0.41 s before the end at 16:9, which is where `addSectionCards` puts the
+  cut.
+- **On purpose, not the mockup.** Rendered in Chrome, the mockup's second
+  `b-sweep` animation (fill mode both) held the bands off screen during
+  the first, so they never swept in and the card popped in at 1.28 s;
+  both sweeps play here. Its bands travelled 360% of their width, which
+  left a purple sliver bottom right; they travel 372% (more on a tall
+  frame) and leave. Its card switched in and out at single moments
+  (1.28 s and 3.62 s), which showed as a pop across the right fifth of
+  the frame; here the reveal follows the bands. Timings count from the
+  clip. D's lit bars were Tandem's amber and sat at the top of the row
+  beside the count; here they're the accent and centred on it.
+- **Checked against the mockup.** `title-cards/tandem/reference-b-with-
+  progress.html` is the mockup's CSS with those changes (the reveal is a
+  clip-path set from where Chrome put the bands). Its frames from headless
+  Chrome and Tandem's for the same moments of the four sample cards, 1920
+  by 1080, differ by under 1 level on average and in under 1% of pixels by
+  more than 24, all on antialiased edges: positions agree to a pixel.
+  `SectionCardRenderTests` pins the chip, title, subtitle and bars to
+  Chrome's positions at 1080p and 4K, and checks every pixel of two rows
+  against the motion at moments in both sweeps.
+- **Fonts.** Anton, Instrument Sans and JetBrains Mono (the last two
+  variable, set to their weights) ship in `Resources/Fonts` with their
+  OFL licences and are read straight into font descriptors from the
+  resource bundle, wherever it is (the app's Resources, beside the CLI,
+  beside a test bundle), so nothing is installed and every process and Mac
+  draws the same card. Without the bundle the card falls back to Impact,
+  the system font and SF Mono or Menlo.
+- **Cost.** The words are drawn once per card and frame size; a wipe
+  frame fills the card, draws them over it, clips and draws the bands,
+  about 22 ms at 4K in a debug build. The hold is drawn once and reused.
+  A 3.2 s card exports at 4K in 1.1 s against 0.9 s for a plain solid
+  (release build).
 
 ## Audio
 
@@ -469,6 +546,7 @@ last one at or before the time, so mid-scroll the two can be a frame apart.
 | Frame grab, 4K composite (first grab builds the composition) | 0.05 to 0.4 s |
 | Frame grab that decodes leading frames directly | 0.1 to 0.25 s |
 | 20 s of a 4K still with a title and shadow | 4.0x |
+| A 3.2 s section card alone, 4K HEVC 80 Mbps | 1.1 s, 2.9x (a plain solid: 0.9 s) |
 
 The spike's plain composite managed about 3.5x; the encoder is the limit.
 

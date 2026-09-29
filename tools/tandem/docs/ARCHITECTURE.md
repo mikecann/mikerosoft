@@ -93,6 +93,8 @@ path yet and reuses what's there otherwise. A template's `transitions` name
 its clips by index and are added once the clips are in. Inserting a segment
 is one `insertTemplate` whose files are the segment's own, where they are
 in the library.
+The Section card tile's template carries its whooshes the same way, once
+the app has copied them in from the asset library.
 
 ## Model conventions
 
@@ -298,6 +300,14 @@ one. RENDER.md has the rules.
 Colour: sources are treated as BT.709 SDR, honouring each file's video range;
 exports are tagged TV-range BT.709.
 
+Graphic clips are drawn by the compositor when their template is built
+in: the section card (`sectionCard`, RENDER.md has the design). Its props
+are plain values (`SectionCard.Props`: title, subtitle, number, total,
+kicker and four colours) that the inspector, agents and templates edit
+alike, and its motion (`SectionCard.Motion`) is in Core, so
+`addSectionCards` knows when a card hides the frame and puts the cut
+there. Other templates warn until Remotion renders exist.
+
 Text and fonts:
 
 - Core Text fonts are registered per process. Every composition build
@@ -319,6 +329,11 @@ Text and fonts:
   naming the font and the `tandem assets use` that installs it, in the
   build's warnings (viewer, `frame`, `clip`, `export`) and in `captions`,
   `status` and `validate`.
+- The section card's typefaces (Anton, Instrument Sans, JetBrains Mono,
+  OFL) ship in TandemRender's resource bundle and are read straight into
+  font descriptors, not registered, so a card draws the same in every
+  process and on every Mac and needs nothing from the project or the
+  libraries (archiving has nothing to collect for it).
 - A built-in preset whose font doesn't come with macOS names its asset
   (`TitlePreset.fontAsset`, the caption preset's `fontsource:tilt-warp`).
   The first time a title needs it (captions applied, a render, the app

@@ -178,7 +178,10 @@ extension Editing {
                 // shows it.
                 let reveal = start + Time(seconds: covered.upperBound)
                 let room = Time.frames((reveal - marker.time).frameIndex(at: rate), at: rate)
-                if room > .zero { try insertTime(&p, at: marker.time, duration: room, trackIDs: nil, &context) }
+                if room > .zero {
+                    removeTransitions(onCutAt: marker.time, in: &p, &context)
+                    try insertTime(&p, at: marker.time, duration: room, trackIDs: nil, &context)
+                }
             }
             let group = soundIn != nil || soundOut != nil ? context.makeID("lnk") : nil
             let card = Clip(
@@ -202,6 +205,25 @@ extension Editing {
             ]
             for case let (sound?, sweep, defaultOffset) in sweeps {
                 try placeCardSound(&p, sound, at: max(.zero, sweep + (sound.offset ?? defaultOffset)), group: group, &context)
+            }
+        }
+    }
+
+    /// Removes transitions between two clips that meet at `time`, which
+    /// room made there would pull apart. The card hides that cut, so it
+    /// takes the transition's place.
+    static func removeTransitions(onCutAt time: Time, in p: inout Project, _ context: inout EditContext) {
+        for location in p.trackLocations where !p[location].locked {
+            let track = p[location]
+            let clips = Dictionary(track.clips.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            let onCut = track.transitions.filter { transition in
+                guard let from = transition.fromClipID.flatMap({ clips[$0] }), let to = transition.toClipID.flatMap({ clips[$0] }) else { return false }
+                return from.end == time && to.start == time
+            }
+            guard !onCut.isEmpty else { continue }
+            p[location].transitions.removeAll { transition in onCut.contains { $0.id == transition.id } }
+            for transition in onCut {
+                context.warn("The \(transition.type.rawValue) on \(track.name) at \(time) is gone: its section card covers that cut now.")
             }
         }
     }

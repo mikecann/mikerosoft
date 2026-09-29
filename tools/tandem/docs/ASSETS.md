@@ -268,6 +268,50 @@ and the app look in that Mac's shared library after the project folder.
 - Optional: Envato Core at $16.50/mo is the cheapest broad library whose
   licence covers client work (import folder, no API).
 
+## The section card's sounds and fonts
+
+The section card (RENDER.md) is part of Tandem, like the title presets,
+so its typefaces ship with it; its two whooshes are ordinary library
+assets, so their licence and every use are recorded.
+
+- **Fonts.** Anton, Instrument Sans and JetBrains Mono, all SIL Open Font
+  Licence 1.1 with no reserved names, unmodified from google/fonts
+  (`Anton-Regular.ttf`, and the variable `InstrumentSans[wdth,wght].ttf`
+  and `JetBrainsMono[wght].ttf` saved as `InstrumentSans-Variable.ttf` and
+  `JetBrainsMono-Variable.ttf`, 544 KB together), with each licence beside
+  it in `Sources/TandemRender/Resources/Fonts`. Bundled rather than taken
+  from Fontsource because the renderer has to draw the card in every
+  process, CLI exports included, and on Bruce, without anything installed.
+- **Sounds.** Two ElevenLabs sound effects made for the card on
+  2026-09-29 on Mike's paid plan (commercial use, no credit), one a sweep
+  (`SectionCardSounds` in TandemAPI names them):
+  - in, `elevenlabs:sfx_vda2xhs6`, 1.2 s: "A big airy whoosh passing from
+    left to right across the stereo field as a bold stripe of colour
+    sweeps across the screen, swelling to a peak in the middle and fading
+    out cleanly, a little deeper than a light swoosh. No music, no voice."
+    It peaks about 0.1 s in and is nearly mono (-20.3 LUFS, -17.4 at its
+    loudest 400 ms). It starts 0.2 s into the card at -14 dB, so it peaks
+    as the bands cross the frame.
+  - out, `elevenlabs:sfx_2ybnc2tu`, 1.0 s: "A quick light swoosh sweeping
+    from left to right as a stripe of colour slides off the screen,
+    brighter and softer than a big whoosh, with a short clean tail. No
+    music, no voice." It builds on the left and passes to the right,
+    peaking 0.37 s in (-12.7 LUFS, -11.7 at its loudest). It starts with
+    the sweep out at -19 dB.
+
+  Both land about -31 LUFS at their loudest, some 11 LU under speech at
+  -20. A first take of the whoosh in, `elevenlabs:sfx_2z7iwkfd`, peaked
+  at once and was plain mono; it's in the library, unused.
+- **Into projects.** `tandem cards --apply`, the Section card tile (a
+  double-click, or a drag, which copies them as it starts) and Timeline >
+  Add section cards at section markers copy both into `assets/sfx/` with
+  `use` before the edit, so the card and its sounds are one undo step.
+  A Mac whose library doesn't have them makes silent cards and says so.
+  To make them there, generate the prompts above (`tandem assets generate
+  sfx "<prompt>" --duration 1.2`) and point `SectionCardSounds` at the new
+  IDs, or copy the two `elevenlabs/` asset folders across and rebuild the
+  catalogue from disk (`AssetLibrary.rebuildCatalogFromDisk()`).
+
 ## Implementation (TandemAssets)
 
 Built on the `tandem-assets` branch as the `TandemAssets` library (depends
