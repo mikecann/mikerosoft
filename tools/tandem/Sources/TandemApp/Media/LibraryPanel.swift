@@ -25,7 +25,7 @@ struct LibraryPanel: View {
             case .media:
                 // Files and folders from Finder join the project folder and the media.
                 FileDropZone(onFiles: { model.importFiles($0, at: nil, trackID: nil) }) {
-                    MediaBrowser(model: model, title: "Media", filter: nil)
+                    MediaBrowser(model: model, filter: nil)
                 }
             case .graphics:
                 AssetBrowser(model: model, sections: AssetSection.graphics, section: Binding(get: { AssetLibraryHost.shared.graphicsSection }, set: { AssetLibraryHost.shared.graphicsSection = $0 }))
@@ -71,7 +71,6 @@ struct PanelHeader<Trailing: View>: View {
 
 struct MediaBrowser: View {
     let model: EditorModel
-    let title: String
     /// Groups to show; nil shows everything with filter chips.
     let filter: Set<MediaGroupKind>?
     @State private var chip: MediaGroupKind?
@@ -84,7 +83,9 @@ struct MediaBrowser: View {
         }
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                PanelHeader(title: title, detail: nil) {
+                // The Media tab above says what this is, so no heading.
+                HStack(spacing: 8) {
+                    SearchField(text: Binding(get: { model.mediaSearch }, set: { model.mediaSearch = $0 }), prompt: "Search clips and what's said in them")
                     Button {
                         rescan()
                     } label: {
@@ -97,7 +98,6 @@ struct MediaBrowser: View {
                     .buttonStyle(.plain)
                     .help("Look for new files in the project folder")
                 }
-                SearchField(text: Binding(get: { model.mediaSearch }, set: { model.mediaSearch = $0 }), prompt: "Search clips and what's said in them")
                 if filter == nil {
                     FlowLayout(spacing: 6) {
                         ChipView(title: "All", selected: chip == nil) { chip = nil }
