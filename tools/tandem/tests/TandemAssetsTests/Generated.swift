@@ -63,6 +63,12 @@ enum Generated {
     /// Alpha of the pixel at (x, y) from the top left, in the frame nearest
     /// `seconds`, decoded the way the renderer will decode it.
     static func alpha(of movie: URL, x: Int, y: Int, at seconds: Double = 0) async throws -> UInt8 {
+        UInt8(try await pixel(of: movie, x: x, y: y, at: seconds).alpha)
+    }
+
+    /// The pixel at (x, y) from the top left, in the frame nearest
+    /// `seconds`, decoded the way the renderer will decode it.
+    static func pixel(of movie: URL, x: Int, y: Int, at seconds: Double = 0) async throws -> (red: Int, green: Int, blue: Int, alpha: Int) {
         let asset = AVURLAsset(url: movie)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw AssetError.invalid("no video track") }
         let reader = try AVAssetReader(asset: asset)
@@ -79,7 +85,8 @@ enum Generated {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
-        return base[y * CVPixelBufferGetBytesPerRow(buffer) + x * 4 + 3]
+        let offset = y * CVPixelBufferGetBytesPerRow(buffer) + x * 4
+        return (Int(base[offset + 2]), Int(base[offset + 1]), Int(base[offset]), Int(base[offset + 3]))
     }
 
     /// Number of video frames in a movie.

@@ -67,9 +67,10 @@ with "Cannot Decode".
   WebM too). Animation and PNG frames are RGB, so they're converted with the
   BT.709 matrix and the frames tagged BT.709: ffmpeg ignores `-colorspace`
   here, and untagged, the export guessed SMPTE-C for a small picture and
-  turned red (255, 0, 0) into (223, 29, 0). The copy is video only, at the
-  original's size and frame times, with straight alpha; the sound plays
-  from the original.
+  turned red (255, 0, 0) into (223, 29, 0). WebM is YUV already and is
+  tagged with what that YUV is (ASSETS.md, WebM colour). The copy is video
+  only, at the original's size and frame times, with straight alpha; the
+  sound plays from the original.
 - `AnalysisNeeds` asks for the conversion first, for every such file in the
   folder, so the browser can show it. Thumbnails, proxies and mattes of the
   file are made from the copy: asking for one before the copy exists queues
