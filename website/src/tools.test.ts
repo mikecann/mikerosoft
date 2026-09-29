@@ -74,5 +74,6 @@ test('publishes Mikey Mouse as a macOS tool', () => {
   assert.ok(tool);
   assert.deepEqual(tool.platforms, ['macos']);
   assert.match(tool.icon, /mikey-mouse\/icons\/mikey-mouse\.png$/);
+  assert.match(tool.header ?? '', /mikey-mouse\/docs\/header\.webp$/);
   assert.match(tool.url, /tools\/mikey-mouse$/);
 });

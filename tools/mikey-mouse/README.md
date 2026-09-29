@@ -1,5 +1,7 @@
 # Mikey Mouse
 
+![A black mouse whose glowing side buttons send back and forward arrows toward a Finder window, with a ribbon of light rising from its scroll wheel](docs/header.webp)
+
 A small macOS menu-bar tool that makes a normal mouse behave like it belongs
 on a Mac. It replaces the two Mac Mouse Fix features I actually used.
 

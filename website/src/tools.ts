@@ -186,6 +186,7 @@ export const tools: Tool[] = [
     name: 'mikey-mouse',
     desc: 'Menu-bar helper that makes a normal mouse feel at home on macOS: side buttons go back and forward in Finder and Safari, and a notched scroll wheel glides smoothly',
     icon: `${base}/mikey-mouse/icons/mikey-mouse.png`,
+    header: `${base}/mikey-mouse/docs/header.webp`,
     screenshots: [],
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/mikey-mouse',
     platforms: ['macos'],
