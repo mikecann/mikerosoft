@@ -193,6 +193,25 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://assets?section=trumpets")!))
     }
 
+    /// With two projects open and Tandem in the background, the "front"
+    /// window is whichever was last main, so a check meant for one project
+    /// landed on the other. `project=` names the one a command is for.
+    func testCommandsCanNameTheirProject() throws {
+        let url = try XCTUnwrap(URL(string: "tandem://select?clips=clip_a&project=Decision%20Models%20v14"))
+        XCTAssertEqual(AppURLCommand.parse(url), .select(clipIDs: ["clip_a"]))
+        XCTAssertEqual(AppURLCommand.project(in: url), "Decision Models v14")
+        XCTAssertNil(AppURLCommand.project(in: try XCTUnwrap(URL(string: "tandem://seek?t=3"))))
+        XCTAssertNil(AppURLCommand.project(in: try XCTUnwrap(URL(string: "tandem://seek?t=3&project="))))
+
+        let file = URL(fileURLWithPath: "/Users/mike/Movies/Workbench Short/Workbench.tandem")
+        for name in ["Workbench", "workbench", "Workbench.tandem", "/Users/mike/Movies/Workbench Short/Workbench.tandem", "Workbench Short"] {
+            XCTAssertTrue(ProjectDocuments.names(name, fileURL: file, projectName: "Workbench Short"), name)
+        }
+        for name in ["Decision Models v14", "Work", "Short"] {
+            XCTAssertFalse(ProjectDocuments.names(name, fileURL: file, projectName: "Workbench Short"), name)
+        }
+    }
+
     func testRejectsNonsense() {
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://command?name=launchRockets")!))
         XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://screenshot")!))
