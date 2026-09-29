@@ -43,7 +43,7 @@ If you want to use any of this, the recommended approach is:
 | <img src="tools/last-window-quits/docs/header.webp" width="220"><br>[last-window-quits](tools/last-window-quits/README.md) | Mac - menu bar | Quit normal Dock apps when their final window closes, while preserving minimized windows and normal save prompts |
 | <img src="tools/mikey-mouse/docs/header.webp" width="220"><br>[mikey-mouse](tools/mikey-mouse/README.md) | Mac - menu bar | Makes a normal mouse feel at home on macOS: side buttons go back and forward in Finder and Safari, and the notched wheel scrolls smoothly |
 | <img src="tools/record-it/docs/header.webp" width="220"><br>[record-it](tools/record-it/README.md) | Mac - GUI | Native SwiftUI screen and camera recorder with 4K/30 capture, project-aware output folders, and separate full-resolution files |
-| <img src="tools/phone-mirror/docs/header.webp" width="220"><br>[phone-mirror](tools/phone-mirror/README.md) | Mac - GUI | Mirror and control several iPhones and iPads at once over USB, each in its own window: click to tap, drag to swipe, type to type |
+| <img src="tools/phonebooth/docs/header.webp" width="220"><br>[phonebooth](tools/phonebooth/README.md) | Mac - GUI | Mirror and control several iPhones and iPads at once over USB, each in its own window: click to tap, drag to swipe, type to type |
 | <img src="tools/token-stats/docs/header.png" width="220"><br>[token-stats](tools/token-stats/README.md) | Mac - GUI | Native SwiftUI dashboard for Codex, Claude, and OpenRouter token usage with API-equivalent costs and shareable graph exports |
 | <img src="tools/record-meeting/docs/header.webp" width="220"><br>[record-meeting](tools/record-meeting/README.md) | Mac - GUI | Always-on-top meeting recorder with system audio + microphone capture, live waveform, synchronized transcript review, MP3 export, speaker-labelled transcription, and Notion publishing |
 | <img src="tools/meeting-archive/docs/header.webp" width="220"><br>[meeting-archive](tools/meeting-archive/README.md) | Mac - GUI (preview) | Camera-triggered meeting archive with a validated Zoom capture-to-Notion path; wider app coverage remains in validation |
@@ -103,8 +103,8 @@ For macOS, set tools up individually where mac support exists:
   `bash tools/mikey-mouse/setup_mac.sh`
 - `record-it`:
   `bash tools/record-it/setup_mac.sh`
-- `phone-mirror`:
-  `bash tools/phone-mirror/setup_mac.sh`
+- `phonebooth`:
+  `bash tools/phonebooth/setup_mac.sh`
 - `token-stats`:
   `bash tools/token-stats/setup_mac.sh`
 - `record-meeting`:
@@ -134,7 +134,7 @@ while still not covering the Windows-only integrations.
 | `last-window-quits` | Supported | `bash tools/last-window-quits/setup_mac.sh` | `last-window-quits restart` | Menu-bar daemon that quits regular Dock apps after their final window closes. Requires Accessibility permission |
 | `mikey-mouse` | Supported | `bash tools/mikey-mouse/setup_mac.sh` | `mikey-mouse restart` | Menu-bar daemon for side-button back/forward and smooth wheel scrolling. Requires Accessibility permission |
 | `record-it` | Supported | `bash tools/record-it/setup_mac.sh` | `record-it` | SwiftUI + ScreenCaptureKit + AVFoundation recorder. Saves into the selected project's `source` folder |
-| `phone-mirror` | Supported | `bash tools/phone-mirror/setup_mac.sh` | Launch `Phone Mirror` from Spotlight, or `phone-mirror` after `bash install_mac.sh` | Video works with any cabled iPhone or iPad. Control needs Xcode signed into a developer team and Developer Mode on the phone; the first connection builds a helper app for that phone |
+| `phonebooth` | Supported | `bash tools/phonebooth/setup_mac.sh` | Launch `Phonebooth` from Spotlight, or `phonebooth` after `bash install_mac.sh` | Video works with any cabled iPhone or iPad. Control needs Xcode signed into a developer team and Developer Mode on the phone; the first connection builds a helper app for that phone |
 | `token-stats` | Supported | `bash tools/token-stats/setup_mac.sh` | `token-stats` | SwiftUI dashboard that reads local Codex and Claude histories, pulls exact OpenRouter Activity API usage, and can import older CSV history |
 | `record-meeting` | Supported | `bash tools/record-meeting/setup_mac.sh` | `record-meeting` | SwiftUI meeting audio recorder with diarized transcripts and optional Notion publishing |
 | `meeting-archive` | Preview | `bash tools/meeting-archive/setup_mac.sh` | `meeting-archive` | Zoom capture, Bruce processing, and Notion publication validated. Chrome automatic capture is blocked pending the capture-mode decision; Teams and Slack remain live-unverified |
