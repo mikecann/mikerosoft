@@ -6,11 +6,18 @@ import TandemCore
 import TandemMedia
 import TandemRender
 
-/// Left panel tabs, from the top bar.
+/// Left panel tabs. Transitions share a panel with effects and looks, so
+/// they're a sub-tab of Effects rather than a tab of their own.
 enum LibraryTab: String, CaseIterable, Identifiable {
     case media, text, transitions, effects, graphics, audio
 
     var id: String { rawValue }
+
+    /// The tabs across the top of the library panel.
+    static let shown: [LibraryTab] = [.media, .text, .effects, .graphics, .audio]
+
+    /// The tab lit for this one: Effects for transitions.
+    var shownTab: LibraryTab { self == .transitions ? .effects : self }
 
     var title: String {
         switch self {
@@ -105,7 +112,12 @@ final class EditorModel {
     var outPoint: Time?
 
     // Panels
-    var libraryTab: LibraryTab = .media
+    var libraryTab: LibraryTab = .media {
+        didSet { if libraryTab.shownTab == .effects { lastEffectsTab = libraryTab } }
+    }
+    /// Effects or transitions, whichever the Effects tab showed last, so
+    /// coming back to it lands where you were.
+    private(set) var lastEffectsTab: LibraryTab = .effects
     var inspectorTab: InspectorTab = .video
     var mediaSearch = ""
     var showExportSheet = false

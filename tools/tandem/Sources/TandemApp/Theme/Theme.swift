@@ -101,7 +101,7 @@ enum Theme {
     // MARK: - Sizes
 
     enum Metrics {
-        static let topBarHeight: CGFloat = 48
+        static let topBarHeight: CGFloat = 40
         static let mediaPanelWidth: CGFloat = 300
         static let inspectorWidth: CGFloat = 330
         static let transportHeight: CGFloat = 46

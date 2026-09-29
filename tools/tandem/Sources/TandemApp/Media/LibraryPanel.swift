@@ -10,6 +10,16 @@ struct LibraryPanel: View {
     let actions: EditorActions
 
     var body: some View {
+        VStack(spacing: 0) {
+            LibraryTabBar(model: model)
+            content
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .background(Theme.panel.color)
+    }
+
+    private var content: some View {
         Group {
             switch model.libraryTab {
             case .media:
@@ -30,8 +40,6 @@ struct LibraryPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .clipped()
-        .background(Theme.panel.color)
     }
 }
 
