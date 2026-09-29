@@ -53,6 +53,8 @@ enum Icons {
     static let level = "speaker.wave.2"
     static let fades = "chart.line.uptrend.xyaxis"
     static let voiceIsolation = "waveform.badge.mic"
+    /// The project's speech level, in the Audio tab.
+    static let speechLevel = "person.wave.2"
     static let effects = "sparkles"
     static let look = "camera.filters"
     static let clipOnly = "film"
