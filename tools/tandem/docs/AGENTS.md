@@ -51,6 +51,8 @@ tandem undo [--expect N]    tandem redo    tandem history    tandem validate
 tandem frame <time> [-o out.png]   tandem clip <start> <end> [-o out.mp4]
 tandem export [--preset youtube4k] [-o out.mp4] [--from T] [--to T]
 tandem loudness    tandem effects    tandem schema    tandem watch [--once]
+tandem archive [<project>] [--to <folder>] [--with-cache] [--dry-run]
+tandem relink [--search <folder>]... [--dry-run]    find missing media
 tandem new <path.tandem>           tandem serve    tandem mcp
 tandem import filmora <file.wfp> [--out DIR] [--keep-levels]   a Filmora project as a .tandem
 tandem import edl [edl.json] --recipe decision-models [--out DIR]
@@ -119,8 +121,8 @@ args = ["mcp"]
 
 The tools mirror the operations: `status`, `timeline`, `media`,
 `transcript`, `search`, `pauses`, `tighten`, `apply`, `undo`, `redo`,
-`history`, `validate`, `frame`, `screenshot`, `clip`, `export`, `loudness`,
-`watch` and `effects`, plus the asset library's `assets_search`,
+`history`, `validate`, `frame`, `screenshot`, `clip`, `export`, `archive`,
+`relink`, `loudness`, `watch` and `effects`, plus the asset library's `assets_search`,
 `assets_use`, `assets_credits`, `assets_generate` and `assets_providers`.
 Tool results are readable text; pass `json: true` for the raw JSON. `frame` and `screenshot` return the picture as an image.
 The `apply` tool's input schema describes every edit command. The server
@@ -1076,6 +1078,80 @@ removing media the cut no longer uses. Sort out everything under "Before
 publishing" first. `--optional` adds courtesy credits nobody requires
 (Pexels creators).
 
+### Archive a finished video
+
+When a video's done it moves to Bruce, Mike's other Mac, which keeps the
+archive. A project there has to open with nothing missing, but projects use
+files from outside their folder: an import's absolute paths, a sound from
+another video's folder, a LUT, a font installed only on this Mac. Look first:
+
+```bash
+tandem archive --dry-run
+```
+
+```
+Dry run, nothing changed. Making Decision Models.tandem standalone would bring in 19 files from outside its folder (2.89 GB).
+From outside the folder:
+  media/music/score.wav  192.2 MB  from ~/dev/convex/convex-videos/decision-models/music/score.wav
+  media/main vid/2026-09-24_105434-camera.mov  1.16 GB  from ~/dev/convex/...
+  ...
+Missing, so left as they are (1):
+  /Users/m5-mike/Desktop/old-take.mov  (med_x, 2 clips)
+```
+
+Then either make the project's own folder standalone (the files are copied
+in and the project points at them, as one undo step credited to you):
+
+```bash
+tandem archive
+```
+
+or write a standalone copy of the whole folder somewhere else, leaving the
+original as it is:
+
+```bash
+tandem archive --to "/Volumes/CannMedia/Archive" --dry-run   # the folder by top-level folder, with sizes
+tandem archive --to "/Volumes/CannMedia/Archive"
+```
+
+The copy is `/Volumes/CannMedia/Archive/<project folder name>/`, with every
+path relative, so it opens anywhere. Proxies, mattes, thumbnails and
+isolated voice are left out (Tandem makes them again; `--with-cache` keeps
+them), as are `node_modules` folders; transcripts always go. Files outside
+the folder land in `media/<the folder they were in>/`, LUTs in `assets/lut/`
+and fonts in `assets/font/`. Other `.tandem` files in the folder (versions)
+get the same treatment.
+
+Every copy is an APFS clone when it can be (instant, no extra space) and is
+checked against the original by SHA-256 when it isn't. A different file with
+the same name is never replaced; the copy goes beside it as `name 2`.
+`archive.json` in the archived folder says where each file came from, with
+its checksum and date. Missing files are listed and left as they are.
+
+A run that stops part way (Ctrl-C, a share that went away) changed nothing in
+the project; run the same command again and it carries on, using what it
+already copied. An archive to the same place later brings that archive up to
+date. With the app closed the project stays locked while it copies, so a big
+archive to a network share is best run when Mike isn't about to open it; with
+the app open, the archive runs in the app.
+
+### Relink missing media
+
+A project opened on another Mac, or a folder tidied by hand, can lose track
+of files. `tandem media` marks them `MISSING FILE` and `tandem validate`
+fails. The app offers to search a folder when it opens such a project; from
+the command line:
+
+```bash
+tandem relink --dry-run                        # what it would find in the project folder
+tandem relink --search "/Volumes/CannMedia/decision-models"
+```
+
+It looks in the project folder and each `--search` folder (subfolders too)
+for a file with the same name, and takes it only when its content matches
+what the project knew (its fingerprint). A file with no fingerprint is taken
+when it's the only one with that name. It's one undo step.
+
 ### Work alongside Mike
 
 - Read before you write: take the revision from `timeline` or `status` and
@@ -1108,6 +1184,8 @@ publishing" first. `--optional` adds courtesy credits nobody requires
 | screenshot | | `POST /v1/screenshot` | `screenshot` (app only) |
 | clip | `tandem clip <start> <end> -o out.mp4` | `POST /v1/clip {"start", "end"}` | `clip` |
 | export | `tandem export [--preset] -o out.mp4` | `POST /v1/export {"preset", "output"}` | `export` |
+| archive | `tandem archive [<project>] [--to <folder>] [--with-cache] [--dry-run]` | `POST /v1/archive {"to", "withCache", "dryRun"}` | `archive` |
+| relink | `tandem relink [--search <folder>]... [--dry-run]` | `POST /v1/relink {"search": [...], "dryRun"}` | `relink` |
 | loudness | `tandem loudness` | `POST /v1/loudness` | `loudness` |
 | watch | `tandem watch [--once]` | `GET /v1/watch` (events), `POST /v1/watch` (wait) | `watch` |
 | effects | `tandem effects` | `POST /v1/effects` | `effects` |
@@ -1152,3 +1230,10 @@ reach the project (through the app's API when it's open).
   for the key in ElevenLabs; `tandem assets providers` says when it's fixed.
 - **"No asset ... in the library"**: search for it first (with `--online`
   for provider assets), then use the ID the search gives.
+- **"There's no folder at /Volumes/... to archive into"**: the share isn't
+  mounted. Mike connects to it in Finder first.
+- **"archive.json ... isn't a Tandem archive manifest"**: a file of that name
+  that Tandem didn't write is in the way; it's never written over. Rename it.
+- **"The copy of ... didn't match the original"**: a copy failed its
+  checksum and was thrown away, and nothing in the project changed. Run it
+  again; if it keeps failing, the destination disk is suspect.

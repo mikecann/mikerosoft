@@ -642,6 +642,29 @@ enum MCPTools {
             readOnly: false
         ),
         Tool(
+            name: "archive", title: "Archive the project",
+            description: "Makes the project standalone so it opens on another Mac. Without `to`, the media, LUTs and fonts it uses from outside its folder are copied into it (media/<folder they were in>/, assets/lut/, assets/font/) and the project is pointed at the copies as one undo step. With `to`, a standalone copy of the whole project folder is written inside that folder (proxies and mattes left out unless withCache), and the original is left alone. Copies are checked, never replace a different file, and are recorded in archive.json; missing files are listed and left as they are. dryRun: true lists what would be copied and the sizes first.",
+            operation: .archive,
+            properties: [
+                "to": S.string("Folder to write a standalone copy into (absolute, or relative to the project folder). Leave out to make the project's own folder standalone."),
+                "withCache": S.boolean("With to: also copy proxies, mattes, thumbnails and isolated voice. Transcripts, waveforms and loudness always go."),
+                "dryRun": S.boolean("List what would be copied, and the sizes, without changing anything."),
+                "label": S.string("Undo label."), "author": S.string("Who made the edit.")
+            ],
+            readOnly: false, idempotent: true
+        ),
+        Tool(
+            name: "relink", title: "Relink missing media",
+            description: "Finds media files that aren't where the project says (moved, or the project opened on another Mac) by name in the project folder and any search folders, checking their content against what the project knew, and points the project at them as one undo step. dryRun: true only reports.",
+            operation: .relink,
+            properties: [
+                "search": S.array(S.string(), "Folders to look in as well as the project's own, subfolders included."),
+                "dryRun": S.boolean("Say what would be relinked without changing anything."),
+                "label": S.string("Undo label."), "author": S.string("Who made the edit.")
+            ],
+            readOnly: false, idempotent: true
+        ),
+        Tool(
             name: "loudness", title: "Loudness",
             description: "Measured loudness of each file with sound, the project's speech level (-20 LUFS unless changed) and master target (-14 LUFS), the gain each levelled clip gets, and how many speech clips aren't at the speech level (apply normalizeSpeech to level them).",
             operation: .loudness, properties: ["mediaID": S.string("Just this file.")], readOnly: true, idempotent: true

@@ -128,12 +128,13 @@ public final class TandemHTTPClient: @unchecked Sendable {
         return ServiceError.wrap(error)
     }
 
-    /// Renders and waits can take a while; everything else should be quick.
+    /// Renders, archives and waits can take a while; everything else should
+    /// be quick.
     static func timeout<C: ServiceCall>(for operation: ServiceOperation, call: C) -> TimeInterval {
         switch operation {
-        case .export, .clip: return 24 * 3600
+        case .export, .clip, .archive: return 24 * 3600
         case .watch: return ((call as? WatchRequest)?.timeout ?? 30) + 30
-        case .media: return 1800
+        case .media, .relink: return 1800
         default: return 600
         }
     }

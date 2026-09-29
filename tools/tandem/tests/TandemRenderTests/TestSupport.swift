@@ -78,6 +78,7 @@ struct CompositorHarness {
     var format: String?
     var folder = ProjectFolder(root: URL(fileURLWithPath: NSTemporaryDirectory()))
     var registry = EffectRegistry.standard
+    var overrides: LiveVideoOverrides?
 
     init(_ project: Project) {
         self.project = project
@@ -108,7 +109,7 @@ struct CompositorHarness {
         }
         let scene = RenderScene(
             canvas: canvas, frameDuration: project.settings.frameRate.frameDuration,
-            format: format, clips: clips, registry: registry, folder: folder
+            format: format, clips: clips, registry: registry, folder: folder, overrides: overrides
         )
         let stack = plan.instructions.first { $0.range.contains(time) }?.stack ?? []
         return FrameComposer(scene: scene).compose(stack, at: time, sources: Sources(plan: plan, time: time, pictures: pictures, mattes: mattes))

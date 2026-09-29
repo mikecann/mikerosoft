@@ -42,6 +42,10 @@ enum MainMenu {
         add(file, .saveVersion, keymap)
         file.addItem(.separator())
         add(file, .export, keymap)
+        // Down the responder chain like "Show project in Finder", so it acts
+        // on the front project window and is off without one.
+        let archive = file.addItem(withTitle: "Archive project…", action: #selector(ProjectWindowController.archiveProject(_:)), keyEquivalent: "")
+        archive.image = Icons.menuImage("archivebox")
         file.addItem(.separator())
         file.addItem(withTitle: "Show project in Finder", action: #selector(ProjectWindowController.revealProject(_:)), keyEquivalent: "")
 
