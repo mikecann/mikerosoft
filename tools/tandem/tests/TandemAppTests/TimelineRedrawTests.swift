@@ -376,6 +376,32 @@ final class TimelineRedrawTests: XCTestCase {
         XCTAssertEqual(DrawTiming.samples("review marks").count, 0)
     }
 
+    /// Resting on the ruler's band says who changed what there, as a tip
+    /// like the rest of the app's; moving off it puts the tip away.
+    func testHoveringTheReviewBandSaysWhoChangedWhat() throws {
+        try showTimeline()
+        try agentPlacesAShot(at: 40)
+        let ruler = try XCTUnwrap(timeline?.ruler)
+        TipCenter.shared.hide()
+        defer { TipCenter.shared.hide() }
+        // 40.5 s at 10 points a second.
+        hover(at: CGPoint(x: 405, y: 5), in: ruler)
+        RunLoop.main.run(until: Date().addingTimeInterval(TipCenter.delay + 0.2))
+        let shown = try XCTUnwrap(TipCenter.shared.shown)
+        XCTAssertTrue(shown.text.hasPrefix("Claude · Whoosh · "), shown.text)
+        hover(at: CGPoint(x: 100, y: 5), in: ruler)
+        XCTAssertNil(TipCenter.shared.shown)
+    }
+
+    /// Sends a mouse move to `view` at `point` in its coordinates.
+    private func hover(at point: CGPoint, in view: NSView) {
+        guard let event = NSEvent.mouseEvent(
+            with: .mouseMoved, location: view.convert(point, to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0
+        ) else { return }
+        view.mouseMoved(with: event)
+    }
+
     private var timeline: TimelineContainerView? { window?.contentView as? TimelineContainerView }
 
     /// The share of the lanes painted since the timings were reset.

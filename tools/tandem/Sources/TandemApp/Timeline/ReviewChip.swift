@@ -19,7 +19,7 @@ struct ReviewChip: View {
                     .font(.ui(11.5, .medium))
                     .foregroundStyle(Theme.agent.color)
                     .padding(.horizontal, 2)
-                    .help(summary)
+                    .tip(summary)
                 StepButton(icon: "chevron.right", help: Shortcuts.help("Next agent change", .nextAgentChange)) {
                     actions.perform(.nextAgentChange)
                 }
@@ -37,7 +37,7 @@ struct ReviewChip: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(Shortcuts.help("Mark reviewed: clear the agent edits highlighted on the timeline", .markAgentChangesReviewed))
+                .tip(Shortcuts.help("Mark reviewed: clear the agent edits highlighted on the timeline", .markAgentChangesReviewed))
             }
             .frame(height: 24)
             .background(RoundedRectangle(cornerRadius: 6).fill(Theme.agent.opacity(0.12).color))
@@ -70,6 +70,6 @@ private struct StepButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
+        .tip(help)
     }
 }
