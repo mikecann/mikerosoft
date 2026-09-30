@@ -1,7 +1,10 @@
 import { parseRoute, toolPath } from './toolPages';
 
-/** The Mikerosoft window is `home`; every tool gets `tool:<name>`. */
-export type WindowId = 'home' | `tool:${string}`;
+/**
+ * The Mikerosoft window is `home`, every tool gets `tool:<name>`, and little
+ * system windows like Date and Time are `app:<name>`.
+ */
+export type WindowId = 'home' | `tool:${string}` | `app:${string}`;
 
 export interface Geometry {
   x: number;
@@ -88,8 +91,11 @@ export function focusedWindow(desktop: Desktop): WindowState | undefined {
   return [...desktop.windows].reverse().find(window => !window.minimised);
 }
 
-export function pathForWindow(id: WindowId): string {
-  return id === 'home' ? '/' : toolPath(id.slice('tool:'.length));
+/** The address for a window, or undefined for app windows, which aren't pages. */
+export function pathForWindow(id: WindowId): string | undefined {
+  if (id === 'home') return '/';
+  if (id.startsWith('tool:')) return toolPath(id.slice('tool:'.length));
+  return undefined;
 }
 
 export function windowForPath(pathname: string): WindowId | undefined {
@@ -115,5 +121,15 @@ export function defaultGeometry(area: { width: number; height: number }, openCou
     y: Math.max(0, Math.round((area.height - height) / 2)) + step,
     width,
     height,
+  };
+}
+
+/** Where a small fixed-size window like Date and Time opens: the middle of the screen. */
+export function dialogGeometry(area: { width: number; height: number }, size: { width: number; height: number }): Geometry {
+  if (area.width < SMALL_SCREEN) return { x: 0, y: 0, width: area.width, height: area.height };
+  return {
+    x: Math.round((area.width - size.width) / 2),
+    y: Math.max(0, Math.round((area.height - size.height) / 2)),
+    ...size,
   };
 }

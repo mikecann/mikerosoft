@@ -181,35 +181,32 @@ function Calendar({ now }: { now: Date }) {
   );
 }
 
-export function DateTimeDialog({ onClose }: { onClose: () => void }) {
+/** The inside of the Date and Time Properties window. */
+export function DateTimeContent({ onClose }: { onClose: () => void }) {
   const now = useNow('second');
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   return (
-    <DialogFrame title="Date and Time Properties" icon="/icons/ui-calendar.png" className="datetime" onClose={onClose}>
-      <div className="window-body">
-        <menu role="tablist">
-          <li role="tab" aria-selected="true"><a href="#date-time">Date &amp; Time</a></li>
-        </menu>
-        <div className="window" role="tabpanel" id="date-time">
-          <div className="window-body datetime-body">
-            <fieldset>
-              <legend>Date</legend>
-              <Calendar now={now} />
-            </fieldset>
-            <fieldset>
-              <legend>Time</legend>
-              <AnalogClock now={now} />
-              <p className="datetime-digital">{now.toLocaleTimeString('en-AU')}</p>
-            </fieldset>
-          </div>
-        </div>
+    <div className="system-window">
+      <menu role="tablist">
+        <button type="button" role="tab" aria-selected="true" aria-controls="date-time-panel">Date &amp; Time</button>
+      </menu>
+      <article role="tabpanel" id="date-time-panel" className="datetime-panel">
+        <fieldset>
+          <legend>Date</legend>
+          <Calendar now={now} />
+        </fieldset>
+        <fieldset>
+          <legend>Time</legend>
+          <AnalogClock now={now} />
+          <p className="datetime-digital">{now.toLocaleTimeString('en-AU')}</p>
+        </fieldset>
         <p className="datetime-zone">Current time zone: {zone.replace(/_/g, ' ')}</p>
+      </article>
+      <div className="system-window-buttons">
+        <button type="button" onClick={onClose}>OK</button>
       </div>
-      <div className="dialog-buttons">
-        <button type="button" onClick={onClose} autoFocus>OK</button>
-      </div>
-    </DialogFrame>
+    </div>
   );
 }
 

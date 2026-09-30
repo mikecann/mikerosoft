@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   closeWindow,
   defaultGeometry,
+  dialogGeometry,
   focusedWindow,
   focusWindow,
   maximiseWindow,
@@ -124,4 +125,14 @@ test('Show Desktop minimises everything, and a second press puts it all back', (
   const back = restoreWindows(hidden, hiddenIds);
   assert.equal(focusedWindow(back)?.id, 'tool:b');
   assert.equal(back.windows.find(window => window.id === 'tool:a')?.minimised, true);
+});
+
+test('app windows like Date and Time have no URL of their own', () => {
+  assert.equal(pathForWindow('app:datetime'), undefined);
+});
+
+test('small windows open centred at their own size', () => {
+  const geometry = dialogGeometry({ width: 1600, height: 900 }, { width: 480, height: 400 });
+  assert.deepEqual(geometry, { x: 560, y: 250, width: 480, height: 400 });
+  assert.deepEqual(dialogGeometry({ width: 390, height: 800 }, { width: 480, height: 400 }), { x: 0, y: 0, width: 390, height: 800 });
 });

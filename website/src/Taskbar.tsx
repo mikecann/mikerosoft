@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { Link } from './router';
+import { formatToolDate } from './toolDates';
+import { TOOL_DATES } from './toolDates.generated';
 import { toolPath } from './toolPages';
 import { CATEGORY_ICON, CATEGORY_ORDER, groupToolsByCategory, tools, type Category, type Tool } from './tools';
-
-const REPO_URL = 'https://github.com/mikecann/mikerosoft';
 
 export interface TaskbarItem {
   id: string;
@@ -96,6 +96,7 @@ function StartMenu({
   recent,
   onClose,
   onOpenHome,
+  onOpenGithub,
   onShowCategory,
   onSearch,
   onSurprise,
@@ -107,6 +108,7 @@ function StartMenu({
   recent: Tool[];
   onClose: () => void;
   onOpenHome: () => void;
+  onOpenGithub: () => void;
   onShowCategory: (category: Category) => void;
   onSearch: () => void;
   onSurprise: () => void;
@@ -160,10 +162,10 @@ function StartMenu({
             <img src="/logo.png" alt="" />
             <span><strong>Mikerosoft</strong><small>Every tool in one place</small></span>
           </button>
-          <a className="start-item start-item-big" href={REPO_URL} target="_blank" rel="noopener" onClick={onClose}>
+          <button type="button" className="plain start-item start-item-big" onClick={then(onOpenGithub)}>
             <img src="/xp/github.png" alt="" />
             <span><strong>GitHub</strong><small>All the source code</small></span>
-          </a>
+          </button>
           <hr />
           {recent.map(tool => (
             <Link key={tool.name} href={toolPath(tool.name)} className="start-item" onClick={onClose}>
@@ -239,6 +241,75 @@ function StartMenu({
   );
 }
 
+const BALLOON_SEEN_KEY = 'mikerosoft:updates-balloon-seen';
+
+/** The tray icon for what's new. Like XP, its balloon pops up once by itself, then only when you click. */
+function TrayUpdates() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const latest = [...tools]
+    .filter(tool => TOOL_DATES[tool.name])
+    .sort((a, b) => Date.parse(TOOL_DATES[b.name].updated) - Date.parse(TOOL_DATES[a.name].updated))
+    .slice(0, 3);
+
+  useEffect(() => {
+    let seen = false;
+    try {
+      seen = sessionStorage.getItem(BALLOON_SEEN_KEY) === '1';
+      sessionStorage.setItem(BALLOON_SEEN_KEY, '1');
+    } catch {
+      // No storage means it just shows again next time.
+    }
+    if (seen) return;
+    const show = setTimeout(() => setOpen(true), 2500);
+    const hide = setTimeout(() => setOpen(false), 14_000);
+    return () => {
+      clearTimeout(show);
+      clearTimeout(hide);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener('pointerdown', handleDown);
+    return () => window.removeEventListener('pointerdown', handleDown);
+  }, [open]);
+
+  return (
+    <div className="tray-updates" ref={ref}>
+      <button
+        type="button"
+        className="plain tray-icon"
+        title="What's new"
+        aria-label="What's new"
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+      >
+        <img src="/icons/ui-changes.png" alt="" />
+      </button>
+      {open && (
+        <div className="balloon" role="status">
+          <button type="button" className="plain balloon-close" aria-label="Close" onClick={() => setOpen(false)}>×</button>
+          <p className="balloon-title"><img src="/icons/ui-changes.png" alt="" />Recently updated</p>
+          <ul>
+            {latest.map(tool => (
+              <li key={tool.name}>
+                <Link href={toolPath(tool.name)} onClick={() => setOpen(false)}>
+                  <img src={tool.icon} alt="" />
+                  <span><strong>{tool.name}</strong> {formatToolDate(TOOL_DATES[tool.name].updated)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Clock({ onOpen }: { onOpen: () => void }) {
   const now = useNow();
   const time = now.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }).toUpperCase();
@@ -259,6 +330,7 @@ export function Taskbar({
   onStartOpenChange,
   onShowDesktop,
   onOpenHome,
+  onOpenGithub,
   onShowCategory,
   onSearch,
   onSurprise,
@@ -275,6 +347,7 @@ export function Taskbar({
   onStartOpenChange: (open: boolean) => void;
   onShowDesktop: () => void;
   onOpenHome: () => void;
+  onOpenGithub: () => void;
   onShowCategory: (category: Category) => void;
   onSearch: () => void;
   onSurprise: () => void;
@@ -307,6 +380,7 @@ export function Taskbar({
           recent={recent}
           onClose={() => onStartOpenChange(false)}
           onOpenHome={onOpenHome}
+          onOpenGithub={onOpenGithub}
           onShowCategory={onShowCategory}
           onSearch={onSearch}
           onSurprise={onSurprise}
@@ -334,9 +408,9 @@ export function Taskbar({
           <button type="button" className="plain quick-launch-button" title="Mikerosoft" aria-label="Mikerosoft" onClick={onOpenHome}>
             <img src="/logo.png" alt="" />
           </button>
-          <a className="quick-launch-button" title="GitHub" aria-label="GitHub" href={REPO_URL} target="_blank" rel="noopener">
+          <button type="button" className="plain quick-launch-button" title="GitHub" aria-label="GitHub" onClick={onOpenGithub}>
             <img src="/xp/github.png" alt="" />
-          </a>
+          </button>
         </div>
         <div className="task-buttons">
           {items.map(item => (
@@ -361,8 +435,7 @@ export function Taskbar({
           ))}
         </div>
         <div className="tray">
-          <img src="/xp/ie.png" alt="" title="Connected to the internet" />
-          <img src="/icons/ui-changes.png" alt="" title={`${tools.length} tools installed`} />
+          <TrayUpdates />
           <Clock onOpen={onOpenClock} />
         </div>
       </footer>

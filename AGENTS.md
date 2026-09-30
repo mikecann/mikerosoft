@@ -604,6 +604,15 @@ The mikerosoft.app site in `website/` deploys from `main` through
   taskbar has Quick Launch with Show Desktop, a clock that opens Date and
   Time, and a Start menu with recent tools, cascading All Programs, Run and
   Turn Off. Phones open icons with a single tap.
+- XP.css is imported into a CSS layer (`@import ... layer(xp)` at the top of
+  `website/src/xp.css`), so the site's own styles always beat it. Don't add
+  specificity hacks to fight XP.css button styles; give custom buttons the
+  `plain` class instead.
+- GitHub links open in a built-in Internet Explorer window
+  (`website/src/InternetExplorer.tsx`) that browses the repo through the
+  GitHub API, since github.com can't be framed. It's unauthenticated, so it
+  gets 60 requests an hour per visitor, and pages are cached for the visit.
+- Date and Time is an `app:` window: it's on the taskbar but has no URL.
 - Site icons (platforms, categories, calendar and so on) are `ui-*.png` in
   `website/public/icons`, drawn by the same icon generator.
 - The Bliss wallpaper and the small XP icons in `website/public/xp` come from

@@ -47,6 +47,7 @@ export function XpWindow({
   isSmallScreen,
   area,
   statusBar,
+  kind = 'document',
   children,
   onFocus,
   onMinimise,
@@ -62,6 +63,8 @@ export function XpWindow({
   isSmallScreen: boolean;
   area: { width: number; height: number };
   statusBar?: ReactNode;
+  /** Documents are white and resizable. Dialogs are grey, fixed size and can't maximise, like Date and Time. */
+  kind?: 'document' | 'dialog';
   children: ReactNode;
   onFocus: () => void;
   onMinimise: () => void;
@@ -74,6 +77,7 @@ export function XpWindow({
   const live = useRef<Geometry>(state);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const isFullScreen = state.maximised || isSmallScreen;
+  const isDialog = kind === 'dialog';
 
   function begin(edge: Drag['edge'], event: ReactPointerEvent<HTMLElement>) {
     if (isFullScreen || event.button !== 0) return;
@@ -117,6 +121,7 @@ export function XpWindow({
       data-minimised={state.minimised || undefined}
       data-full={isFullScreen || undefined}
       data-focused={isFocused || undefined}
+      data-kind={kind}
       aria-label={title}
       onPointerDownCapture={() => {
         if (!isFocused) onFocus();
@@ -128,7 +133,7 @@ export function XpWindow({
         onPointerDown={event => begin('move', event)}
         {...dragHandlers}
         onDoubleClick={event => {
-          if (!(event.target as Element).closest('button') && !isSmallScreen) onToggleMaximise();
+          if (!(event.target as Element).closest('button') && !isSmallScreen && !isDialog) onToggleMaximise();
         }}
         onContextMenu={event => {
           event.preventDefault();
@@ -141,7 +146,7 @@ export function XpWindow({
         </div>
         <div className="title-bar-controls">
           <button type="button" aria-label="Minimize" onClick={onMinimise} />
-          {!isSmallScreen && (
+          {!isSmallScreen && !isDialog && (
             <button type="button" aria-label={state.maximised ? 'Restore' : 'Maximize'} onClick={onToggleMaximise} />
           )}
           <button type="button" aria-label="Close" onClick={onClose} />
@@ -149,7 +154,7 @@ export function XpWindow({
       </div>
       <div className="xp-window-body">{children}</div>
       {statusBar && <div className="status-bar">{statusBar}</div>}
-      {!isFullScreen && EDGES.map(edge => (
+      {!isFullScreen && !isDialog && EDGES.map(edge => (
         <div
           key={edge}
           className="xp-resize"
@@ -167,7 +172,7 @@ export function XpWindow({
           items={[
             { label: 'Restore', onSelect: onToggleMaximise, disabled: !state.maximised },
             { label: 'Minimize', onSelect: onMinimise },
-            { label: 'Maximize', onSelect: onToggleMaximise, disabled: state.maximised || isSmallScreen },
+            { label: 'Maximize', onSelect: onToggleMaximise, disabled: state.maximised || isSmallScreen || isDialog },
             { kind: 'separator' },
             { label: 'Close', bold: true, onSelect: onClose },
           ]}

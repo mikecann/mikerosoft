@@ -1,8 +1,8 @@
-import 'xp.css/dist/XP.css';
 import './xp.css';
 import { useEffect, useState } from 'react';
 import { Desktop, type DesktopItem } from './Desktop';
 import { categoryId, HOME_SEARCH_ID, HomeContent, type PlatformFilter } from './HomeContent';
+import { InternetExplorer, type BrowseRequest } from './InternetExplorer';
 import { navigate, replacePath, useNavigation } from './router';
 import { Taskbar } from './Taskbar';
 import { ToolContent } from './ToolContent';
@@ -20,6 +20,7 @@ import {
 import {
   closeWindow,
   defaultGeometry,
+  dialogGeometry,
   focusedWindow,
   focusWindow,
   maximiseWindow,
@@ -36,7 +37,7 @@ import {
   type Desktop as DesktopState,
   type WindowId,
 } from './windowManager';
-import { DateTimeDialog, MessageDialog, PowerScreen, RunDialog, TurnOffDialog, type PowerChoice } from './XpDialogs';
+import { DateTimeContent, MessageDialog, PowerScreen, RunDialog, TurnOffDialog, type PowerChoice } from './XpDialogs';
 import { XpWindow } from './XpWindow';
 
 const REPO_URL = 'https://github.com/mikecann/mikerosoft';
@@ -48,7 +49,15 @@ const RECENT_COUNT = 6;
 // What the Start menu shows before you've opened anything.
 const DEFAULT_RECENT = ['tandem', 'record-it', 'voice-type', 'taskbar', 'task-stats', 'telemprompit'];
 
-type Dialog = 'help' | 'log-off' | 'turn-off' | 'not-found' | 'run' | 'clock' | null;
+type Dialog = 'help' | 'log-off' | 'turn-off' | 'not-found' | 'run' | null;
+
+const DATE_TIME: WindowId = 'app:datetime';
+const BROWSER: WindowId = 'app:ie';
+
+function geometryFor(id: WindowId, openCount: number) {
+  const area = desktopArea();
+  return id === DATE_TIME ? dialogGeometry(area, { width: 500, height: 470 }) : defaultGeometry(area, openCount);
+}
 
 function desktopArea() {
   return { width: window.innerWidth, height: window.innerHeight - TASKBAR_HEIGHT };
@@ -116,6 +125,20 @@ export default function App() {
   const [recent, setRecent] = useState<string[]>(readRecent);
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState<PlatformFilter>('all');
+  const [browseRequest, setBrowseRequest] = useState<BrowseRequest>({ path: '', id: 0 });
+  const [browserTitle, setBrowserTitle] = useState('mikecann/mikerosoft');
+
+  /** The title and icon each window shows in its title bar and on the taskbar. */
+  function windowInfo(id: WindowId): { title: string; taskTitle: string; icon: string } {
+    const tool = toolFor(id);
+    if (tool) return { title: `${tool.name} - Mikerosoft`, taskTitle: tool.name, icon: tool.icon };
+    if (id === DATE_TIME) return { title: 'Date and Time Properties', taskTitle: 'Date and Time Properties', icon: '/icons/ui-calendar.png' };
+    if (id === BROWSER) {
+      const title = `${browserTitle} - Mikerosoft Internet Explorer`;
+      return { title, taskTitle: title, icon: '/xp/ie.png' };
+    }
+    return { title: 'Mikerosoft', taskTitle: 'Mikerosoft', icon: '/logo.png' };
+  }
 
   const topWindow = focusedWindow(desktop);
   const focused = desktopActive ? undefined : topWindow;
@@ -132,7 +155,7 @@ export default function App() {
   }
 
   function open(id: WindowId) {
-    change(current => openWindow(current, id, defaultGeometry(desktopArea(), current.windows.length)));
+    change(current => openWindow(current, id, geometryFor(id, current.windows.length)));
     const tool = toolFor(id);
     if (!tool) return;
     setRecent(current => {
@@ -152,11 +175,17 @@ export default function App() {
     else setDialog('not-found');
   });
 
-  // The address bar always shows the window in front, so it can be shared.
+  // The address bar shows the page window in front, so it can be shared. App windows leave it alone.
+  const topPath = topWindow && pathForWindow(topWindow.id);
   useEffect(() => {
-    if (topWindow) replacePath(pathForWindow(topWindow.id));
+    if (topPath) replacePath(topPath);
     document.title = focusedTool ? `${focusedTool.name} - Mikerosoft` : 'Mikerosoft';
-  }, [topWindow, focusedTool]);
+  }, [topPath, focusedTool]);
+
+  function browse(path: string) {
+    setBrowseRequest(current => ({ path, id: current.id + 1 }));
+    open(BROWSER);
+  }
 
   // Ctrl+Esc opens the Start menu, as it always has.
   useEffect(() => {
@@ -200,7 +229,8 @@ export default function App() {
   }
 
   function openDesktopItem(item: DesktopItem, inNewTab?: boolean) {
-    if (item.external || inNewTab) window.open(item.href, '_blank', 'noopener');
+    if (inNewTab) window.open(item.href, '_blank', 'noopener');
+    else if (item.id === 'github') browse('');
     else navigate(item.href);
   }
 
@@ -252,26 +282,40 @@ export default function App() {
 
       {desktop.windows.map((state, index) => {
         const tool = toolFor(state.id);
+        const info = windowInfo(state.id);
+        const isPage = pathForWindow(state.id) !== undefined;
         return (
           <XpWindow
             key={state.id}
             window={state}
-            title={tool ? `${tool.name} - Mikerosoft` : 'Mikerosoft'}
-            icon={tool ? tool.icon : '/logo.png'}
+            title={info.title}
+            icon={info.icon}
+            kind={state.id === DATE_TIME ? 'dialog' : 'document'}
             zIndex={index + 1}
             isFocused={state.id === focused?.id}
             isSmallScreen={isSmallScreen}
             area={area}
-            statusBar={
+            statusBar={isPage && (
               <>
                 <p className="status-bar-field">{tool ? tool.desc : `${visibleTools.length} of ${tools.length} tools`}</p>
                 {tool && (
                   <p className="status-bar-field status-bar-link">
-                    <a href={tool.url} target="_blank" rel="noopener">tools/{tool.name}</a>
+                    <a
+                      href={tool.url}
+                      target="_blank"
+                      rel="noopener"
+                      onClick={event => {
+                        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                        event.preventDefault();
+                        browse(`tools/${tool.name}`);
+                      }}
+                    >
+                      tools/{tool.name}
+                    </a>
                   </p>
                 )}
               </>
-            }
+            )}
             onFocus={() => change(current => focusWindow(current, state.id))}
             onMinimise={() => windowActions.onMinimise(state.id)}
             onToggleMaximise={() => change(current => toggleMaximise(current, state.id))}
@@ -279,7 +323,11 @@ export default function App() {
             onGeometryChange={geometry => setDesktop(current => moveWindow(current, state.id, geometry))}
           >
             {tool ? (
-              <ToolContent tool={tool} />
+              <ToolContent tool={tool} onViewSource={browse} />
+            ) : state.id === DATE_TIME ? (
+              <DateTimeContent onClose={() => windowActions.onClose(DATE_TIME)} />
+            ) : state.id === BROWSER ? (
+              <InternetExplorer request={browseRequest} onTitleChange={setBrowserTitle} />
             ) : (
               <HomeContent
                 tools={visibleTools}
@@ -297,12 +345,12 @@ export default function App() {
 
       <Taskbar
         items={openOrder.map(id => {
-          const tool = toolFor(id);
+          const info = windowInfo(id);
           const state = desktop.windows.find(window => window.id === id);
           return {
             id,
-            title: tool ? tool.name : 'Mikerosoft',
-            icon: tool ? tool.icon : '/logo.png',
+            title: info.taskTitle,
+            icon: info.icon,
             isActive: id === focused?.id,
             isMinimised: Boolean(state?.minimised),
             isMaximised: Boolean(state?.maximised),
@@ -314,6 +362,7 @@ export default function App() {
         onStartOpenChange={setStartOpen}
         onShowDesktop={showDesktop}
         onOpenHome={() => navigate('/')}
+        onOpenGithub={() => browse('')}
         onShowCategory={showCategory}
         onSearch={search}
         onSurprise={surprise}
@@ -321,7 +370,7 @@ export default function App() {
         onHelp={() => setDialog('help')}
         onLogOff={() => setDialog('log-off')}
         onTurnOff={() => setDialog('turn-off')}
-        onOpenClock={() => setDialog('clock')}
+        onOpenClock={() => open(DATE_TIME)}
       />
 
       {dialog === 'help' && (
@@ -341,7 +390,6 @@ export default function App() {
         </MessageDialog>
       )}
       {dialog === 'turn-off' && <TurnOffDialog onChoose={choosePower} onClose={() => setDialog(null)} />}
-      {dialog === 'clock' && <DateTimeDialog onClose={() => setDialog(null)} />}
       {dialog === 'run' && (
         <RunDialog
           names={tools.map(tool => tool.name)}
