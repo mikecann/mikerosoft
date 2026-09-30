@@ -107,6 +107,8 @@ enum Theme {
         static let transportHeight: CGFloat = 46
         static let timelineToolbarHeight: CGFloat = 36
         static let rulerHeight: CGFloat = 24
+        /// The scroll bar under the tracks.
+        static let timelineScrollerHeight: CGFloat = 12
         static let statusBarHeight: CGFloat = 26
         static let trackHeaderWidth: CGFloat = 112
         static let trackGap: CGFloat = 3
