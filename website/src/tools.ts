@@ -170,7 +170,7 @@ export const tools: Tool[] = [
     desc: 'Upscale an image locally with a quality-first transformer backend; right-click any image file in Explorer, choose 2x, 4x, 8x, or 16x, and keep the original file format',
     icon: '/icons/img-upscale.png',
     header: asset('img-upscale', 'docs/header.webp'),
-    screenshots: [],
+    screenshots: [asset('img-upscale', 'docs/before-after.png')],
     url: repoUrl('img-upscale'),
     category: 'Images',
     platforms: ['windows', 'macos'],
