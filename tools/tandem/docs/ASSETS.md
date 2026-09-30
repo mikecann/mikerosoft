@@ -373,6 +373,12 @@ doesn't have the sound adds the transition silent and says so.
   project whose speech plays elsewhere, as the cards' do
   (`Resolved.levelled(for:)`), and at that level its clipped peak sits
   23 dB under full scale in the mix.
+- **Checked on an export.** A 12 s generated project (speech either side
+  of a pause, a 0.7 s push on B-roll at 6 s playing the swoosh), exported
+  at 1080p: the swoosh's loudest 10 ms at 5.999 s, its loudest 400 ms at
+  -29.0 LUFS, 15.4 LU under the speech's median, and the file at -14.0
+  LUFS with true peaks at -2.3 dBTP (the swoosh alone -17). The project
+  and `check.py` are in `~/dev/me/tandem-research/transitions/`.
 - **Other sounds** picked in Settings or the inspector are levelled the
   same way from the library's loudness measurement (15 LU under speech)
   and timed from its waveform (the middle of its loudest 50 ms on the

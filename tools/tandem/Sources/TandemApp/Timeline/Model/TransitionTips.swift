@@ -33,6 +33,18 @@ enum TransitionTips {
         return "\(name) · \(seconds(length))"
     }
 
+    /// On a clip that plays a transition's sound: "The push's sound: it
+    /// moves with the push and goes when it goes". Nil for other clips.
+    static func owner(ofSound clipID: String, in project: Project) -> String? {
+        for track in project.allTracks {
+            if let transition = track.transitions.first(where: { $0.soundClipID == clipID }) {
+                let name = transition.type.displayName.lowercased()
+                return "The \(name)'s sound: it moves with the \(name) and goes when it goes"
+            }
+        }
+        return nil
+    }
+
     /// Its type, length and sound.
     static func summary(_ transition: Transition, in project: Project) -> String {
         var text = "\(transition.type.displayName) · \(seconds(transition.duration))"

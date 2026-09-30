@@ -235,3 +235,76 @@ final class TransitionSoundSnapshots: XCTestCase {
         try render(TransitionSoundSettingsView().padding(22), size: CGSize(width: 520, height: 430), "settings-transition-sounds")
     }
 }
+
+/// The whole way in the app, with a scratch asset library (never Mike's):
+/// a push dropped on a cut brings the light swoosh into the project's
+/// assets/sfx through the library and goes in with it as one edit.
+@MainActor
+final class TransitionSoundActionsTests: XCTestCase {
+    func testADroppedPushBringsItsSwooshInAsOneEdit() async throws {
+        guard AssetLibraryHost.shared.library == nil else { throw XCTSkip("the asset library is already open in this run") }
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-transition-actions-\(UUID().uuidString)", isDirectory: true)
+        let root = temp.appendingPathComponent("assets", isDirectory: true)
+        let video = temp.appendingPathComponent("video", isDirectory: true)
+        try FileManager.default.createDirectory(at: video, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        setenv("TANDEM_ASSETS_ROOT", root.path, 1)
+        setenv("TANDEM_ASSETS_OFFLINE", "1", 1)
+        defer {
+            unsetenv("TANDEM_ASSETS_ROOT")
+            unsetenv("TANDEM_ASSETS_OFFLINE")
+        }
+
+        // The swoosh under its real ID, as a quiet second of sine.
+        let library = try AssetLibrary(root: root, previewFolder: root.appendingPathComponent("previews"), transport: OfflineTransport(), secrets: StaticSecretStore())
+        var asset = Asset(provider: "elevenlabs", providerID: "sfx_2ybnc2tu", kind: .sfx, name: "A quick light swoosh sweeping from left to right", duration: 1)
+        try Self.wav(at: library.folder(for: asset).appendingPathComponent("original.wav"), seconds: 1)
+        asset.state = .normalised
+        asset.files = AssetFiles(original: "original.wav")
+        try library.catalog.upsert(asset)
+
+        let session = try ProjectSession.create(at: video.appendingPathComponent("Drop.tandem"), name: "Drop", owner: .app)
+        let model = EditorModel(session: session)
+        defer {
+            model.tearDown()
+            _ = model.session.close()
+        }
+        let fixture = try AppFixture()
+        model.apply(EditBatch(label: "Media", commands: fixture.project.media.map { .addMedia(item: $0) }))
+        model.apply(EditBatch(label: "Take", commands: [.placeMedia(mediaIDs: ["med_camera", "med_screen"], at: .zero, duration: t(40))]))
+        let camera = try XCTUnwrap(model.project.track(named: "Camera"))
+        model.apply(EditBatch(label: "Cut", commands: [.blade(at: t(20), clipIDs: [camera.clips[0].id])]))
+        let revision = model.revision
+        let undoDepth = model.session.coordinator.history().count
+
+        TransitionSoundActions.add(.push, at: t(20.1), trackID: camera.id, in: model)
+        for _ in 0..<300 where model.revision == revision {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let transition = try XCTUnwrap(model.project.track(named: "Camera")?.transitions.first)
+        XCTAssertEqual(transition.type, .push)
+        let sound = try XCTUnwrap(transition.soundClipID.flatMap { model.project.clip($0) })
+        XCTAssertEqual(sound.start, t(19.61), "loudest on the cut")
+        XCTAssertEqual(sound.audio?.gainDB, -23.3, "15 LU under speech at -20")
+        let item = try XCTUnwrap(sound.mediaID.flatMap { model.project.media($0) })
+        XCTAssertTrue(item.path.hasPrefix("assets/sfx/"), item.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: video.appendingPathComponent(item.path).path), "copied into the project")
+        XCTAssertEqual(model.session.coordinator.history().count, undoDepth + 1, "one edit")
+        XCTAssertEqual(model.undoLabel, "Add push")
+        XCTAssertEqual(model.selectedTransitionID, transition.id, "picked, so the inspector shows it")
+        XCTAssertEqual(try library.search(.inProject(model.project.id, kinds: [.sfx])).map(\.id), [asset.id], "the use is recorded, for credits")
+    }
+
+    /// A 16-bit PCM WAV of a quiet sine.
+    static func wav(at url: URL, seconds: Double) throws {
+        let frames = Int(seconds * 48_000)
+        var data = Data("RIFF".utf8)
+        func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) } }
+        append(UInt32(36 + frames * 2)); data.append(Data("WAVEfmt ".utf8))
+        append(UInt32(16)); append(UInt16(1)); append(UInt16(1)); append(UInt32(48_000)); append(UInt32(96_000)); append(UInt16(2)); append(UInt16(16))
+        data.append(Data("data".utf8)); append(UInt32(frames * 2))
+        for index in 0..<frames { append(Int16(3000 * sin(Double(index) * 2 * .pi * 440 / 48_000))) }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url)
+    }
+}

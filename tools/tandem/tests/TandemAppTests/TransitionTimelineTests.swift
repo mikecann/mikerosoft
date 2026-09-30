@@ -221,6 +221,9 @@ final class TransitionTimelineTests: XCTestCase {
         XCTAssertEqual(body, "Push · 0.80 s · with A quick light swoosh sweeping from left\nDrag either edge to make it longer or shorter; both sides move together")
         XCTAssertTrue(try XCTUnwrap(TransitionTips.edge("tr_p", in: f.project)).hasSuffix("both sides move together, up to half of each clip"))
         XCTAssertEqual(TransitionTips.dragLabel("tr_p", length: t(1.2), in: f.project), "Push · 1.20 s")
+        let soundID = try XCTUnwrap(push(f).soundClipID)
+        XCTAssertEqual(TransitionTips.owner(ofSound: soundID, in: f.project), "The push's sound: it moves with the push and goes when it goes")
+        XCTAssertNil(TransitionTips.owner(ofSound: f.clip("Music").id, in: f.project))
         let silent = try fixture(sound: false)
         XCTAssertEqual(TransitionTips.body("tr_p", in: silent.project)?.components(separatedBy: "\n").first, "Push · 0.80 s")
     }

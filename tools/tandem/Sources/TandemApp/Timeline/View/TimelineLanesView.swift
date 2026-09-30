@@ -575,6 +575,7 @@ final class TimelineLanesView: TimelineChildView {
             lines.append("\(Timecode.string(clip.start, rate: rate)) to \(Timecode.string(clip.end, rate: rate)) (\(Timecode.string(clip.duration, rate: rate)))")
             if let badge = renderer.badgeText(for: clip) { lines.append(badge) }
             if clip.speed != 1 { lines.append("Speed \(Int((clip.speed * 100).rounded()))%") }
+            if let owner = TransitionTips.owner(ofSound: clip.id, in: model.project) { lines.append(owner) }
             switch part {
             case .head: lines.append("Drag to trim the start")
             case .tail: lines.append("Drag to trim the end")
