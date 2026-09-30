@@ -99,41 +99,51 @@ enum TransitionGeometry {
     }
 
     /// The part of `transition` under `point`, or nil when the press is
-    /// the clips': outside it, or near a clip edge inside it (the cut
-    /// between its clips, or the clip edge a head or tail transition sits
-    /// on), above and below the label, where trims and rolls still work.
-    /// The label's band across the box always selects it. Its edges drag
-    /// only when `editable` and the box is wide enough to grab them apart
-    /// from its middle; zoomed out, the inspector's slider does it.
+    /// the clips': outside it, near a clip edge (for trims and rolls), or
+    /// on a clip the box all but covers, which could otherwise only ever
+    /// be picked as the transition. The label always selects it, and so
+    /// does the label's band across the box, even over the cut in its
+    /// middle. Its edges drag only when `editable` and the box is wide
+    /// enough to grab them apart from the cut; zoomed out, the inspector's
+    /// slider does it.
     static func part(at point: CGPoint, of transition: Transition, on track: Track, lane: TimelineLane, scale: TimelineScale, grab: CGFloat, editable: Bool) -> Part? {
         guard point.y >= lane.y, point.y < lane.maxY, let box = boxRect(transition, on: track, lane: lane, scale: scale) else { return nil }
         let label = label(transition, on: track, lane: lane, scale: scale, nameWidth: 0)?.rect
         if let label, label.contains(point) { return .body }
-        if editable, box.width >= 3 * grab {
+        // Everything else it answers to is in its box or a grab from it.
+        guard point.x >= box.minX - grab, point.x <= box.maxX + grab else { return nil }
+        let inLabelBand = label.map { point.y >= $0.minY && point.y < $0.maxY } ?? false
+        for clip in track.clips {
+            let minX = scale.x(clip.start)
+            let maxX = scale.x(clip.end)
+            guard maxX >= box.minX - grab, minX <= box.maxX + grab else { continue }
+            let reach = TimelineHitTester.edgeReach(width: maxX - minX, grab: grab)
+            for x in [minX, maxX] where abs(point.x - x) <= reach {
+                let middle = x > box.minX + grab && x < box.maxX - grab
+                if !(middle && inLabelBand) { return nil }
+            }
+            if !inLabelBand, point.x >= minX, point.x < maxX, swallows(box, minX...maxX, grab: grab) { return nil }
+        }
+        if showsGrips(box, grab: grab, editable: editable) {
             for edge in TransitionLength.draggableEdges(transition) {
                 let x = edge == .start ? box.minX : box.maxX
                 if abs(point.x - x) <= grab { return .edge(edge) }
             }
         }
-        let inLabelBand = label.map { point.y >= $0.minY && point.y < $0.maxY } ?? false
-        if !inLabelBand {
-            for x in clipEdges(transition, on: track, scale: scale) where abs(point.x - x) <= grab {
-                return nil
-            }
-        }
         return box.contains(point) ? .body : nil
     }
 
-    /// Clip edges inside or at a transition's box, which stay the clips'.
-    static func clipEdges(_ transition: Transition, on track: Track, scale: TimelineScale) -> [CGFloat] {
-        let from = clip(transition.fromClipID, on: track)
-        let to = clip(transition.toClipID, on: track)
-        switch (from, to) {
-        case let (from?, _?): return [scale.x(from.end)]
-        case let (from?, nil): return [scale.x(from.end)]
-        case let (nil, to?): return [scale.x(to.start)]
-        case (nil, nil): return []
-        }
+    /// Whether the box covers all of a clip spanning `span` bar a sliver
+    /// narrower than three grabs.
+    static func swallows(_ box: CGRect, _ span: ClosedRange<CGFloat>, grab: CGFloat) -> Bool {
+        let covered = min(span.upperBound, box.maxX) - max(span.lowerBound, box.minX)
+        return covered > 0 && (span.upperBound - span.lowerBound) - covered < 3 * grab
+    }
+
+    /// Whether a selected transition shows grips on its edges: when a drag
+    /// there changes its length (`part(at:)`).
+    static func showsGrips(_ box: CGRect, grab: CGFloat, editable: Bool) -> Bool {
+        editable && box.width >= 4 * grab
     }
 
     static func clip(_ id: String?, on track: Track) -> Clip? {
@@ -165,19 +175,21 @@ enum TransitionLength {
     static func limits(_ transition: Transition, on track: Track, rate: FrameRate) -> ClosedRange<Time>? {
         let from = TransitionGeometry.clip(transition.fromClipID, on: track)
         let to = TransitionGeometry.clip(transition.toClipID, on: track)
-        let frame = rate.frameDuration
+        let frame = rate.flicksPerFrame
         switch (from, to) {
         case let (from?, to?):
             guard from.end == to.start else { return nil }
-            let lowest = Time(flicks: 2 * frames(Time(seconds: 0.05), rate) * frame.flicks)
-            // Half of each clip either side of the cut: as long as the
-            // shorter clip.
+            let lowest = Time(flicks: 2 * frames(Time(seconds: 0.05), rate) * frame)
+            // Half of each clip either side of the cut, in whole frames: as
+            // long as the shorter clip, a frame less when that's odd.
             let shorter = min(from.duration, to.duration)
-            let highest = max(shorter, min(transition.duration, Time(flicks: 2 * shorter.flicks)))
+            let whole = Time(flicks: 2 * (shorter.flicks / 2 / frame) * frame)
+            let highest = max(whole, min(transition.duration, Time(flicks: 2 * shorter.flicks)))
             return lowest...max(lowest, highest)
         case let (only?, nil), let (nil, only?):
-            let lowest = Time(flicks: frames(Time(seconds: 0.1), rate) * frame.flicks)
-            let highest = max(Time(flicks: only.duration.flicks / 2), min(transition.duration, only.duration))
+            let lowest = Time(flicks: frames(Time(seconds: 0.1), rate) * frame)
+            let half = Time(flicks: (only.duration.flicks / 2 / frame) * frame)
+            let highest = max(half, min(transition.duration, only.duration))
             return lowest...max(lowest, highest)
         case (nil, nil):
             return nil

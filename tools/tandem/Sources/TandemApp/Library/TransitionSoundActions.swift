@@ -83,13 +83,35 @@ enum TransitionSoundActions {
         return Prepared(sound: sound, resolved: await resolve(sound, in: model, library: library))
     }
 
-    /// Copies a sound into the model's project, once.
+    /// Copies a sound into the model's project, once. A copy already on
+    /// its way (a drag's, when the drop comes before it's done) is waited
+    /// for rather than made again, so the library records one use.
     static func resolve(_ sound: TransitionSoundDefaults.Sound, in model: EditorModel, library: AssetLibrary?) async -> TransitionSoundDefaults.Resolved? {
         if let ready = TransitionSoundCache.shared.sound(sound.assetID, for: model) { return ready }
         guard let library else { return nil }
-        guard let resolved = try? await TransitionSoundDefaults.use(sound, in: library, folder: model.folder, projectID: model.project.id, projectFile: model.fileURL) else { return nil }
-        TransitionSoundCache.shared.set(resolved, for: model)
+        let key = model.folder.root.path + "\n" + sound.assetID
+        if let running = copying[key] { return await running.value }
+        let copy = Task { @MainActor () -> TransitionSoundDefaults.Resolved? in
+            guard let resolved = try? await TransitionSoundDefaults.use(sound, in: library, folder: model.folder, projectID: model.project.id, projectFile: model.fileURL) else { return nil }
+            TransitionSoundCache.shared.set(resolved, for: model)
+            return resolved
+        }
+        copying[key] = copy
+        let resolved = await copy.value
+        copying[key] = nil
         return resolved
+    }
+
+    /// Copies under way, by project folder and asset.
+    private static var copying: [String: Task<TransitionSoundDefaults.Resolved?, Never>] = [:]
+
+    /// What each type plays, Mike's picks over Tandem's, as far as this
+    /// Mac's library knows them: for a drop on a transition, whose sound
+    /// follows its type.
+    static func soundFor() -> (TransitionType) -> TransitionSoundDefaults.Sound? {
+        let settings = settings
+        let library = AssetLibraryHost.shared.library
+        return { settings.sound(for: $0, library: library) }
     }
 
     /// A drag of a transition's tile has started: have its sound ready
@@ -104,16 +126,16 @@ enum TransitionSoundActions {
     }
 
     /// A transition of `type` on the cut nearest `time` (on `trackID`, or
-    /// any track when that has none in reach), with its sound, as one
-    /// undo step. A cut that has one already gets the new type.
-    static func add(_ type: TransitionType, at time: Time, trackID: String?, in model: EditorModel) {
+    /// with `anyTrack` on any track when that has none in reach, as a
+    /// double-click in Effects does), with its sound, as one undo step. A
+    /// cut that has one already gets the new type.
+    static func add(_ type: TransitionType, at time: Time, trackID: String?, anyTrack: Bool = false, in model: EditorModel) {
         Task {
             let prepared = await prepare(type, in: model)
-            let library = AssetLibraryHost.shared.library
-            let soundFor = { (other: TransitionType) in settings.sound(for: other, library: library) }
+            let soundFor = soundFor()
             let project = model.project
             guard let batch = LibraryDrops.transition(type, at: time, trackID: trackID, in: project, sound: prepared.resolved, soundFor: soundFor)
-                    ?? (trackID == nil ? nil : LibraryDrops.transition(type, at: time, trackID: nil, in: project, sound: prepared.resolved, soundFor: soundFor)) else {
+                    ?? (trackID == nil || !anyTrack ? nil : LibraryDrops.transition(type, at: time, trackID: nil, in: project, sound: prepared.resolved, soundFor: soundFor)) else {
                 model.show(.info, "Put the playhead on a cut between two clips.")
                 return
             }
@@ -156,10 +178,34 @@ enum TransitionSoundActions {
         }
     }
 
+    /// Picks made on each transition still bringing their sounds in, so
+    /// the next waits its turn: picks land in the order they were made,
+    /// whichever sound took longest to come.
+    private static var pending: [String: (turn: Int, task: Task<Void, Never>)] = [:]
+    private static var turns = 0
+
+    /// Runs `work` on `transitionID` after the picks before it.
+    private static func inTurn(_ transitionID: String, _ work: @escaping @MainActor () async -> Void) {
+        turns += 1
+        let turn = turns
+        let before = pending[transitionID]?.task
+        let task = Task { @MainActor in
+            await before?.value
+            await work()
+            if pending[transitionID]?.turn == turn { pending[transitionID] = nil }
+        }
+        pending[transitionID] = (turn, task)
+    }
+
+    /// Waits for every pick still bringing its sound in (for tests).
+    static func settle() async {
+        while let task = pending.values.first?.task { await task.value }
+    }
+
     /// A new type for a transition (its inspector, its menu): its sound
     /// follows the type when it had none or its old type's.
     static func changeType(_ transitionID: String, to type: TransitionType, in model: EditorModel) {
-        Task {
+        inTurn(transitionID) {
             let library = await SectionCardActions.library()
             let newSound = settings.sound(for: type, library: library)
             let resolved: TransitionSoundDefaults.Resolved?
@@ -184,15 +230,19 @@ enum TransitionSoundActions {
     }
 
     static func setSound(_ choice: Choice, of transitionID: String, in model: EditorModel) {
-        guard let location = model.project.location(ofTransition: transitionID) else { return }
-        let type = model.project[location.track].transitions[location.index].type
+        guard model.project.location(ofTransition: transitionID) != nil else { return }
         switch choice {
         case .none:
-            model.apply(EditBatch(label: "No transition sound", commands: [
-                .updateTransition(transitionID: transitionID, patch: .object(["sound": .null]))
-            ]))
+            let none: @MainActor () -> Void = {
+                apply(nil, to: transitionID, label: "No transition sound", in: model)
+            }
+            // At once, unless a pick before it is still on its way.
+            if pending[transitionID] == nil { none() } else { inTurn(transitionID) { none() } }
         case .typeDefault:
-            Task {
+            inTurn(transitionID) {
+                // Its type now, after any type change picked before.
+                guard let location = model.project.location(ofTransition: transitionID) else { return }
+                let type = model.project[location.track].transitions[location.index].type
                 let prepared = await prepare(type, in: model)
                 if prepared.missing {
                     model.show(.info, "The \(type.displayName.lowercased())'s sound isn't in this Mac's asset library.")
@@ -201,7 +251,7 @@ enum TransitionSoundActions {
                 apply(prepared.resolved, to: transitionID, label: "Transition sound", in: model)
             }
         case .asset(let asset):
-            Task {
+            inTurn(transitionID) {
                 guard let library = await SectionCardActions.library() else { return }
                 let sound = TransitionSoundDefaults.sound(for: asset, waveform: library.waveform(for: asset))
                 guard let resolved = await resolve(sound, in: model, library: library) else {
@@ -216,6 +266,8 @@ enum TransitionSoundActions {
     /// Gives a transition `resolved` as its sound (none when nil), with
     /// the file added first when the project hasn't got it.
     private static func apply(_ resolved: TransitionSoundDefaults.Resolved?, to transitionID: String, label: String, in model: EditorModel) {
+        // Deleted while its sound was on its way: nothing to do.
+        guard model.project.location(ofTransition: transitionID) != nil else { return }
         guard let resolved else {
             model.apply(EditBatch(label: label, commands: [.updateTransition(transitionID: transitionID, patch: .object(["sound": .null]))]))
             return

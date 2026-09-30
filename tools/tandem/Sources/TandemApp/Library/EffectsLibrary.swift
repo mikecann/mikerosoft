@@ -112,7 +112,7 @@ struct EffectsLibrary: View {
 
     private func addTransition(_ type: TransitionType) {
         let track = TimelineEdits.ordered(model.selection, in: model.project).first.flatMap { model.project.track(containingClip: $0)?.id }
-        TransitionSoundActions.add(type, at: model.playback.time, trackID: track, in: model)
+        TransitionSoundActions.add(type, at: model.playback.time, trackID: track, anyTrack: true, in: model)
     }
 
     private func addEffect(_ definition: EffectDefinition) {

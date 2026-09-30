@@ -77,6 +77,9 @@ extension Transition {
 ///   sound doesn't chop it.
 /// - A sound deleted or overwritten while its transition stayed put
 ///   leaves the transition silent.
+/// - A command that names the sound itself (a nudge, a trim, a delete,
+///   even a ripple delete that moves the cut) is done to the sound, and
+///   leaves it as it left it.
 ///
 /// Undo needs nothing of its own: it puts back the whole project.
 enum TransitionSounds {
@@ -111,10 +114,35 @@ enum TransitionSounds {
         return result
     }
 
+    /// The clips `command` names itself: what it sets out to change. Not
+    /// the clips linked to them, which it changes along the way; a
+    /// segment's clips are all linked, and a roll of its cut still moves
+    /// its sound.
+    static func clips(namedBy command: EditCommand) -> Set<String> {
+        let ids: [String]
+        switch command {
+        case .removeClips(let clipIDs, _, _), .moveClips(let clipIDs, _, _, _, _), .link(let clipIDs), .unlink(let clipIDs):
+            ids = clipIDs
+        case .blade(_, _, let clipIDs):
+            ids = clipIDs ?? []
+        case .trim(let clipID, _, _, _, _), .slip(let clipID, _, _), .slide(let clipID, _), .setSpeed(let clipID, _, _, _),
+             .updateClip(let clipID, _), .addEffect(let clipID, _, _), .updateEffect(let clipID, _, _), .removeEffect(let clipID, _),
+             .moveEffect(let clipID, _, _), .setKeyframes(let clipID, _, _), .zoomToRegion(let clipID, _, _, _):
+            ids = [clipID]
+        case .roll(let left, let right, _):
+            ids = [left, right]
+        default:
+            ids = []
+        }
+        return Set(ids)
+    }
+
     /// Brings every transition's sound back in step after a command, from
-    /// where things were before it (`anchors(in:)`). Works in timeline
-    /// order, so a replay of the journal makes the same tracks.
-    static func reconcile(_ p: inout Project, from before: [String: Anchor], _ context: inout EditContext) {
+    /// where things were before it (`anchors(in:)`). `named` are the clips
+    /// the command set out to change, and the command made the clips in
+    /// `context.createdIDs` from `createdFrom` on. Works in timeline order,
+    /// so a replay of the journal makes the same tracks.
+    static func reconcile(_ p: inout Project, from before: [String: Anchor], named: Set<String> = [], createdFrom: Int = 0, _ context: inout EditContext) {
         var after: [(transition: Transition, track: TrackLocation)] = []
         var claimed = Set<String>()
         for location in p.trackLocations {
@@ -125,10 +153,25 @@ enum TransitionSounds {
         }
         guard !before.isEmpty || !claimed.isEmpty else { return }
 
+        // Pieces a cut in this command made of a sound (the right-hand part
+        // of a split, with a new ID) go with the sound they came from.
+        let made = createdFrom < context.createdIDs.count ? Array(context.createdIDs[createdFrom...]) : []
+        let cutFrom = context.cutFrom
+        func removePieces(of sound: Clip) {
+            for id in made where id != sound.id {
+                var origin = cutFrom[id]
+                while let found = origin, found != sound.id { origin = cutFrom[found] }
+                guard origin == sound.id, let (location, index) = p.location(ofClip: id), !p[location].locked else { continue }
+                p[location].clips.remove(at: index)
+            }
+        }
+
         // Sounds whose transitions went.
         let remaining = Set(after.map(\.transition.id))
         for id in before.keys.sorted() where !remaining.contains(id) {
-            guard let sound = before[id]?.sound, !claimed.contains(sound.id), let (location, index) = p.location(ofClip: sound.id) else { continue }
+            guard let sound = before[id]?.sound, !claimed.contains(sound.id) else { continue }
+            removePieces(of: sound)
+            guard let (location, index) = p.location(ofClip: sound.id) else { continue }
             if p[location].locked {
                 context.warn("The sound of a removed transition stays on \"\(p[location].name)\": the track is locked.")
                 continue
@@ -139,6 +182,11 @@ enum TransitionSounds {
         for (transition, location) in after {
             guard let soundID = transition.soundClipID, !context.placedSounds.contains(soundID) else { continue }
             let present = p.location(ofClip: soundID)
+            if named.contains(soundID) {
+                // Done to the sound on purpose: as the command left it.
+                if present == nil { untie(transition.id, in: &p) }
+                continue
+            }
             let middle = transition.middle(on: p[location])
             guard let anchor = before[transition.id], let was = anchor.sound, was.id == soundID,
                   let old = anchor.middle, let middle, middle != old else {
@@ -151,6 +199,7 @@ enum TransitionSounds {
             var moved = was
             moved.start += middle - old
             if let present, p[present.track].clips[present.index] == moved { continue }
+            removePieces(of: was)
             if !place(moved, preferring: present.map { p[$0.track].id } ?? anchor.soundTrackID, in: &p, &context) {
                 untie(transition.id, in: &p)
             }
@@ -208,7 +257,11 @@ extension Editing {
         if let free = candidates.first(where: { !p.audioTracks[$0].locked && p.audioTracks[$0].isFree(range) }) { return free }
         var id = context.makeID("trk")
         while p.allIDs.contains(id) { id = context.makeID("trk") }
-        let name = candidates.isEmpty ? "SFX" : "SFX \(candidates.count + 1)"
+        // The next number no audio track has taken.
+        let taken = Set(p.audioTracks.map { $0.name.lowercased() })
+        var number = candidates.count + 1
+        while taken.contains("sfx \(number)") { number += 1 }
+        let name = candidates.isEmpty ? "SFX" : "SFX \(number)"
         p.audioTracks.append(Track(id: id, kind: .audio, name: name, rippleMode: .follow))
         context.createdIDs.append(id)
         return p.audioTracks.count - 1
@@ -254,12 +307,16 @@ extension Editing {
         return item
     }
 
-    /// A clip already on the timeline given as a new transition's sound
-    /// (`soundClipID` in `addTransition`): on an audio track, and not
-    /// another transition's.
+    /// A clip already on the timeline given as a transition's sound
+    /// (`soundClipID`): on an audio track, not another transition's sound,
+    /// and not in a crossfade of its own, which moving it with the
+    /// transition would pull apart.
     static func checkTieable(_ clipID: String, in p: Project) throws {
         guard let (location, _) = p.location(ofClip: clipID) else { throw EditError.notFound("clip \(clipID) for the transition's sound") }
         guard location.kind == .audio else { throw EditError.invalid("clip \(clipID) isn't on an audio track, so it can't be a transition's sound") }
+        if let fade = p[location].transitions.first(where: { $0.fromClipID == clipID || $0.toClipID == clipID }) {
+            throw EditError.invalid("clip \(clipID) is in transition \(fade.id) on its own track, so it can't be a transition's sound")
+        }
         for track in p.allTracks {
             if let other = track.transitions.first(where: { $0.soundClipID == clipID }) {
                 throw EditError.invalid("clip \(clipID) is already the sound of transition \(other.id)")

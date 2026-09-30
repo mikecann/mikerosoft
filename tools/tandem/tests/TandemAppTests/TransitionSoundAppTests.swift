@@ -65,6 +65,32 @@ final class TransitionSoundAppTests: XCTestCase {
         XCTAssertEqual(settings.sound(for: .zoom, library: library), Defaults.Sound(assetID: boom.id, gainDB: -15, offset: 0), "-35 LUFS wanted from -20; no waveform, so from its start")
     }
 
+    /// A drop on a transition asks the same picks as everything else, so
+    /// a swoosh on a push Mike made silent counts as his own and stays.
+    func testADropOnATransitionAsksMikesPicks() throws {
+        let suite = "tandem-transition-drop-picks-\(UUID().uuidString)"
+        let store = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let saved = TransitionSoundActions.settings
+        TransitionSoundActions.settings = TransitionSoundSettings(store: store)
+        defer {
+            TransitionSoundActions.settings = saved
+            store.removePersistentDomain(forName: suite)
+        }
+        XCTAssertEqual(TransitionSoundActions.soundFor()(.push), Defaults.lightSwoosh, "Tandem's")
+        TransitionSoundActions.settings.set("", for: .push)
+        XCTAssertNil(TransitionSoundActions.soundFor()(.push), "none, as Settings has it")
+
+        let f = try AppFixture()
+        try cut(f)
+        let camera = f.track("Camera")
+        try f.apply(EditBatch(label: "Push", commands: [
+            .addMedia(item: swoosh),
+            .addTransition(trackID: camera.id, transition: TandemCore.Transition(id: "tr_x", type: .push, duration: t(0.7), fromClipID: f.clip("Camera", 0).id, toClipID: f.clip("Camera", 1).id), sound: TransitionSound(mediaID: swoosh.id))
+        ]))
+        let dissolve = try XCTUnwrap(LibraryDrops.transition(.dissolve, at: t(20), trackID: camera.id, in: f.project, soundFor: TransitionSoundActions.soundFor()))
+        XCTAssertEqual(dissolve.commands, [.updateTransition(transitionID: "tr_x", patch: .object(["type": .string("dissolve")]))], "the swoosh stays")
+    }
+
     // MARK: - Adding
 
     func cut(_ f: AppFixture) throws {
@@ -277,6 +303,8 @@ final class TransitionSoundActionsTests: XCTestCase {
         let revision = model.revision
         let undoDepth = model.session.coordinator.history().count
 
+        // The drag's early copy, then the drop.
+        TransitionSoundActions.prepareForDrop(.push, in: model)
         TransitionSoundActions.add(.push, at: t(20.1), trackID: camera.id, in: model)
         for _ in 0..<300 where model.revision == revision {
             try await Task.sleep(nanoseconds: 10_000_000)
@@ -293,6 +321,19 @@ final class TransitionSoundActionsTests: XCTestCase {
         XCTAssertEqual(model.undoLabel, "Add push")
         XCTAssertEqual(model.selectedTransitionID, transition.id, "picked, so the inspector shows it")
         XCTAssertEqual(try library.search(.inProject(model.project.id, kinds: [.sfx])).map(\.id), [asset.id], "the use is recorded, for credits")
+        XCTAssertEqual(try library.catalog.usage(forAsset: asset.id).count, 1, "once: the drop waited for the drag's copy")
+
+        // Picks land in the order they were made, however long each one's
+        // sound takes to come.
+        TransitionSoundActions.setSound(.typeDefault, of: transition.id, in: model)
+        TransitionSoundActions.setSound(.none, of: transition.id, in: model)
+        await TransitionSoundActions.settle()
+        XCTAssertNil(model.project.track(named: "Camera")?.transitions.first?.soundClipID, "None, picked last")
+        TransitionSoundActions.changeType(transition.id, to: .slide, in: model)
+        TransitionSoundActions.changeType(transition.id, to: .dissolve, in: model)
+        await TransitionSoundActions.settle()
+        XCTAssertEqual(model.project.track(named: "Camera")?.transitions.first?.type, .dissolve, "picked last")
+        XCTAssertNil(model.project.track(named: "Camera")?.transitions.first?.soundClipID, "the slide's swoosh went with it")
     }
 
     /// A 16-bit PCM WAV of a quiet sine.

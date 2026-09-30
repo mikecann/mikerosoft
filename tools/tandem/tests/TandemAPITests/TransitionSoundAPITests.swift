@@ -118,9 +118,40 @@ final class TransitionSoundAPITests: XCTestCase {
         XCTAssertEqual(sound.start, t(29.61))
         let text = TimelineDump.render(project)
         XCTAssertTrue(text.contains("~ push 0.700s into clip_cam2  tr_push  sound \(sound.id)"), text)
+        XCTAssertTrue(text.contains("\(sound.id)  00:29.610-00:30.610"), text)
+        XCTAssertTrue(text.contains("sound of tr_push"), "and the sound says whose it is")
 
         try h.apply(.updateTransition(transitionID: "tr_push", patch: .object(["sound": .null])))
         XCTAssertTrue(h.service.coordinator.project.track("trk_sfx")?.clips.isEmpty ?? false)
+    }
+
+    /// A segment saved with a transition and its sound keeps them tied,
+    /// and goes in tied.
+    func testASavedSegmentKeepsATransitionsSound() throws {
+        let folder = TempFolder("segment-sound")
+        try AssetFixtures.wav(at: folder.file("sfx/swoosh.wav"), seconds: 1)
+        var project = Project.standard(name: "Sound")
+        project.media = [MediaItem(id: "med_swoosh", path: "sfx/swoosh.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)]
+        let text = try XCTUnwrap(project.location(ofTrack: try XCTUnwrap(project.track(named: "Text")).id))
+        project[text].clips = [
+            Clip(id: "clip_a", content: .text(TextContent(text: "A")), start: t(0), duration: t(2)),
+            Clip(id: "clip_b", content: .text(TextContent(text: "B")), start: t(2), duration: t(2))
+        ]
+        project[text].transitions = [Transition(id: "tr_ab", type: .push, duration: t(0.7), fromClipID: "clip_a", toClipID: "clip_b", soundClipID: "clip_s")]
+        let sfx = try XCTUnwrap(project.location(ofTrack: try XCTUnwrap(project.track(named: "SFX")).id))
+        project[sfx].clips = [Clip(id: "clip_s", content: .media(mediaID: "med_swoosh"), start: t(1.61), duration: t(1), audio: AudioProperties(gainDB: -23.3))]
+        XCTAssertEqual(ProjectValidator.validate(project).filter { $0.severity == .error }.map(\.message), [])
+
+        let draft = try SegmentMaker.draft(name: "Push", clipIDs: ["clip_a", "clip_b", "clip_s"], in: project, folder: ProjectFolder(root: folder.url))
+        let soundIndex = try XCTUnwrap(draft.segment.template.clips.firstIndex { $0.track == "SFX" })
+        XCTAssertEqual(draft.segment.template.transitions.first?.sound, soundIndex)
+
+        let coordinator = ProjectCoordinator(project: Project.standard(name: "Other"))
+        try coordinator.apply(StoredSegment(id: "Push", folder: folder.url, segment: draft.segment).insertBatch(at: t(10)))
+        let push = try XCTUnwrap(coordinator.project.track(named: "Text")?.transitions.first)
+        let sound = try XCTUnwrap(push.soundClipID.flatMap { coordinator.project.clip($0) })
+        XCTAssertEqual(sound.start, t(11.61))
+        XCTAssertEqual(sound.audio?.gainDB, -23.3)
     }
 
     func testTheSchemaTakesTheSoundAndSaysWhatsWrong() throws {
@@ -130,5 +161,6 @@ final class TransitionSoundAPITests: XCTestCase {
         XCTAssertEqual(try problems(#"{"updateTransition": {"transitionID": "t", "patch": {"sound": {"volume": 3}}}}"#).count, 1)
         XCTAssertTrue(try problems(#"{"updateTransition": {"transitionID": "t", "patch": {"sound": {"volume": 3}}}}"#)[0].contains("unknown field \"volume\""))
         XCTAssertEqual(try problems(#"{"addTransition": {"trackID": "t", "transition": {"type": "push"}, "sound": {"gainDB": -3}}}"#), [#"commands[0].addTransition.sound: missing "mediaID""#])
+        XCTAssertEqual(try problems(#"{"updateTransition": {"transitionID": "t", "patch": {"soundClipID": "clip_a", "duration": 0.8}}}"#), [])
     }
 }

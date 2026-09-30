@@ -127,10 +127,11 @@ enum DragKind: Equatable {
         case .slip(let id, _): return [id]
         case .slide(let id): return Set(project.linkedClipIDs(of: id))
         case .transitionLength(let id, _):
-            // Its own clips' edges (the cut above all) aren't targets.
+            // Its own clips' edges (the cut above all) and its sound's
+            // aren't targets.
             guard let location = project.location(ofTransition: id) else { return [] }
             let transition = project[location.track].transitions[location.index]
-            return Set([transition.fromClipID, transition.toClipID].compactMap { $0 })
+            return Set([transition.fromClipID, transition.toClipID, transition.soundClipID].compactMap { $0 })
         }
     }
 }

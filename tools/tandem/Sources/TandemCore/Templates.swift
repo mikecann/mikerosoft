@@ -60,13 +60,17 @@ public struct TemplateTransition: Codable, Equatable, Sendable {
     public var type: TransitionType
     public var direction: Direction?
     public var duration: Time
+    /// The index of the clip (on an audio track) that plays its sound,
+    /// tied to it once the template goes in (`Transition.soundClipID`).
+    public var sound: Int?
 
-    public init(from: Int?, to: Int?, type: TransitionType, direction: Direction? = nil, duration: Time) {
+    public init(from: Int?, to: Int?, type: TransitionType, direction: Direction? = nil, duration: Time, sound: Int? = nil) {
         self.from = from
         self.to = to
         self.type = type
         self.direction = direction
         self.duration = duration
+        self.sound = sound
     }
 
     public init(from decoder: Decoder) throws {
@@ -76,6 +80,7 @@ public struct TemplateTransition: Codable, Equatable, Sendable {
         type = try c.decode(TransitionType.self, forKey: .type)
         direction = try c.decodeIfPresent(Direction.self, forKey: .direction)
         duration = try c.decode(.duration, or: type.defaultDuration)
+        sound = try c.decodeIfPresent(Int.self, forKey: .sound)
     }
 }
 
@@ -246,7 +251,13 @@ extension Editing {
             if let from, let to, from.0 != to.0 {
                 throw EditError.invalid("template \(template.id) has a transition between clips on different tracks")
             }
-            let transition = Transition(id: context.makeID("tr"), type: item.type, direction: item.direction, duration: item.duration, fromClipID: from?.1.id, toClipID: to?.1.id)
+            var transition = Transition(id: context.makeID("tr"), type: item.type, direction: item.direction, duration: item.duration, fromClipID: from?.1.id, toClipID: to?.1.id)
+            if let sound = try clip(at: item.sound) {
+                guard sound.0.kind == .audio else {
+                    throw EditError.invalid("template \(template.id) gives a transition a sound that isn't on an audio track")
+                }
+                transition.soundClipID = sound.1.id
+            }
             try addTransition(&p, trackID: p[location].id, transition, &context)
         }
     }

@@ -554,7 +554,8 @@ final class TimelineLanesView: TimelineChildView {
             CursorKind.pointer.set()
             return
         }
-        let hit = tester.hit(point)
+        // The blade cuts clips, through any transition over them.
+        let hit = tester.hit(point, transitions: model.tool != .blade)
         updateToolTip(hit, model: model)
         // The selection only decides which clips a move takes, not the kind
         // of drag, so it's left out here; the pointer moves a lot.
@@ -627,7 +628,7 @@ final class TimelineLanesView: TimelineChildView {
         guard let model, let tester = tester(for: model.project) else { return }
         window?.makeFirstResponder(self)
         let point = lanePoint(event)
-        let hit = tester.hit(point)
+        let hit = tester.hit(point, transitions: model.tool != .blade)
         let mods = modifiers(event)
         pressPoint = point
         pressSeconds = model.timeline.scale.seconds(atX: point.x)
@@ -1309,7 +1310,10 @@ final class TimelineLanesView: TimelineChildView {
         case .transition(let type):
             // Previewed with its sound once that's in the project; the drop
             // itself waits for it (`TransitionSoundActions.add`).
-            batch = LibraryDrops.transition(type, at: time, trackID: lane?.trackID, in: model.project, sound: TransitionSoundActions.cached(type, in: model))
+            batch = LibraryDrops.transition(
+                type, at: time, trackID: lane?.trackID, in: model.project,
+                sound: TransitionSoundActions.cached(type, in: model), soundFor: TransitionSoundActions.soundFor()
+            )
             label = batch?.label ?? "Drop on a cut"
             transitionDrop = batch == nil ? nil : (type, time, lane?.trackID)
         case .effect(let type):

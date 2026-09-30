@@ -180,15 +180,23 @@ extension TimelineDamage {
             let x1 = scale.x(clip.end)
             return CGRect(x: x0, y: lane.y - offsetY, width: max(1, x1 - x0), height: lane.height).insetBy(dx: -keyframeReach, dy: -1)
         }
-        func keyframe(_ state: PreviewState, _ id: String) -> Time? {
-            state.keyframeClipID == id ? state.keyframeTime : nil
-        }
         var soundChanged = false
         // Clips outlined in one preview and not the other, and the clips of
         // a dragged keyframe.
         var highlighted = old.previewed.symmetricDifference(new.previewed)
         if old.keyframeTime != new.keyframeTime || old.keyframeClipID != new.keyframeClipID {
             highlighted.formUnion([old.keyframeClipID, new.keyframeClipID].compactMap { $0 })
+        }
+        // A picked transition's sound is drawn dashed, so a transition that
+        // changed sound repaints both clips, wherever they are.
+        for (id, after) in newTracks {
+            guard let before = oldTracks[id], before.transitions != after.transitions else { continue }
+            var was: [String: String] = [:]
+            for transition in before.transitions { was[transition.id] = transition.soundClipID ?? "" }
+            for transition in after.transitions {
+                guard let sound = was[transition.id], sound != transition.soundClipID ?? "" else { continue }
+                highlighted.formUnion([sound, transition.soundClipID ?? ""].filter { !$0.isEmpty })
+            }
         }
         for lane in layout.lanes {
             guard let id = lane.trackID, let before = oldTracks[id], let after = newTracks[id] else { continue }
@@ -219,8 +227,7 @@ extension TimelineDamage {
                 let was = beforeClips[clipID]
                 let isNow = afterClips[clipID]
                 if was != isNow { moved.insert(clipID) }
-                guard was != isNow || old.previewed.contains(clipID) != new.previewed.contains(clipID)
-                    || keyframe(old, clipID) != keyframe(new, clipID) else { continue }
+                guard was != isNow || highlighted.contains(clipID) else { continue }
                 if let was { rects.append(clipRect(was, in: lane)) }
                 if let isNow { rects.append(clipRect(isNow, in: lane)) }
             }

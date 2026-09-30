@@ -519,7 +519,9 @@ public enum SegmentMaker {
                     halfSaved += 1
                     continue
                 }
-                transitions.append(TemplateTransition(from: from, to: to, type: transition.type, direction: transition.direction, duration: transition.duration))
+                // Its sound comes tied to it when that's saved too.
+                let sound = transition.soundClipID.flatMap { places[$0] }
+                transitions.append(TemplateTransition(from: from, to: to, type: transition.type, direction: transition.direction, duration: transition.duration, sound: sound))
             }
         }
         if halfSaved > 0 {

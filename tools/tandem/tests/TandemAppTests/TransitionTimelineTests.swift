@@ -110,6 +110,50 @@ final class TransitionTimelineTests: XCTestCase {
         XCTAssertEqual(locked.hit(CGPoint(x: 2962, y: top)), .transition(transitionID: "tr_p", trackID: camera.id))
     }
 
+    /// Clip edges beat a transition's edges, so a fade as long as its clip
+    /// leaves the next cut to trim and roll; and a clip a box all but
+    /// covers can still be picked above and below the label.
+    func testClipEdgesAndCoveredClipsStayTheClips() throws {
+        let f = try AppFixture()
+        try f.blade(at: [29, 30])
+        let camera = f.track("Camera")
+        let short = f.clip("Camera", 1).id
+        try f.apply(EditBatch(label: "Fade", commands: [.addTransition(trackID: camera.id, transition: Transition(id: "tr_in", type: .fadeFromBlack, duration: t(1), fromClipID: nil, toClipID: short))]))
+        let layout = TimelineLayout.make(project: f.project, showTranscript: true)
+        let lane = layout.lane(forTrack: camera.id)!
+        let scale = TimelineScale(pixelsPerSecond: 100)
+        let tester = TimelineHitTester(project: f.project, layout: layout, scale: scale)
+        let fade = f.track("Camera").transitions[0]
+        let label = try XCTUnwrap(TransitionGeometry.label(fade, on: f.track("Camera"), lane: lane, scale: scale, nameWidth: 0)?.rect)
+        let top = lane.y + 4
+        let band = label.midY
+        // The fade covers the whole 1 s clip: 2900 to 3000.
+        XCTAssertEqual(tester.hit(CGPoint(x: 2998, y: top)), .clip(clipID: short, trackID: camera.id, part: .tail), "the next cut, not the fade's edge")
+        XCTAssertEqual(tester.hit(CGPoint(x: 2998, y: band)), .clip(clipID: short, trackID: camera.id, part: .tail), "across the label's band too")
+        XCTAssertEqual(tester.hit(CGPoint(x: 3003, y: top)), .clip(clipID: f.clip("Camera", 2).id, trackID: camera.id, part: .head), "just outside it")
+        XCTAssertEqual(tester.hit(CGPoint(x: 2903, y: top)), .clip(clipID: short, trackID: camera.id, part: .head))
+        XCTAssertEqual(tester.hit(CGPoint(x: 2930, y: top)), .clip(clipID: short, trackID: camera.id, part: .body), "the clip under it can still be picked")
+        XCTAssertEqual(tester.hit(CGPoint(x: 2930, y: band)), .transition(transitionID: "tr_in", trackID: camera.id), "the label's band picks the fade")
+        XCTAssertEqual(tester.hit(CGPoint(x: label.midX, y: band)), .transition(transitionID: "tr_in", trackID: camera.id))
+
+        // A 20 point push leaves the cut its whole roll zone and has no
+        // edges to grab.
+        let g = try fixture()
+        try g.apply(EditBatch(label: "Short", commands: [.updateTransition(transitionID: "tr_p", patch: .object(["duration": .number(0.2)]))]))
+        let small = TimelineHitTester(project: g.project, layout: TimelineLayout.make(project: g.project, showTranscript: true), scale: scale)
+        let pushLane = self.lane(g)
+        let gCamera = g.track("Camera").id
+        XCTAssertEqual(small.hit(CGPoint(x: 3005, y: pushLane.y + 4)), .clip(clipID: g.clip("Camera", 1).id, trackID: gCamera, part: .head))
+        XCTAssertEqual(small.hit(CGPoint(x: 2994, y: pushLane.y + 4)), .clip(clipID: g.clip("Camera", 0).id, trackID: gCamera, part: .tail))
+        XCTAssertEqual(small.hit(CGPoint(x: 3009, y: pushLane.y + 4)), .transition(transitionID: "tr_p", trackID: gCamera))
+
+        // Grips show only where a drag changes the length.
+        let wide = CGRect(x: 0, y: 0, width: 80, height: 40)
+        XCTAssertTrue(TransitionGeometry.showsGrips(wide, grab: 6, editable: true))
+        XCTAssertFalse(TransitionGeometry.showsGrips(wide, grab: 6, editable: false), "a locked track's")
+        XCTAssertFalse(TransitionGeometry.showsGrips(CGRect(x: 0, y: 0, width: 20, height: 40), grab: 6, editable: true))
+    }
+
     // MARK: - The length drag
 
     func testDraggingAnEdgeMovesBothSidesAWholeFrameAtATime() throws {
@@ -157,6 +201,23 @@ final class TransitionTimelineTests: XCTestCase {
             .addTransition(trackID: f.track("Camera").id, transition: Transition(id: "tr_p", type: .push, duration: t(1.5), fromClipID: f.clip("Camera", 1).id, toClipID: f.clip("Camera", 2).id))
         ]))
         XCTAssertEqual(TransitionLength.limits(push(f), on: f.track("Camera"), rate: .fps30)?.upperBound, t(1.5), "the 1 s clip allows 1 s; it keeps its 1.5")
+    }
+
+    /// At its longest each side is still a whole number of frames: a
+    /// 45 frame clip allows 22 either side, not 22 and a half.
+    func testTheLimitsKeepEachSideOnWholeFrames() throws {
+        let f = try AppFixture()
+        try f.blade(at: [28.5, 30])
+        let camera = f.track("Camera").id
+        try f.coordinator.apply(EditBatch(label: "Push and fade", commands: [
+            .addTransition(trackID: camera, transition: Transition(id: "tr_p", type: .push, duration: t(0.8), fromClipID: f.clip("Camera", 1).id, toClipID: f.clip("Camera", 2).id)),
+            .addTransition(trackID: camera, transition: Transition(id: "tr_in", type: .fadeFromBlack, duration: t(0.5), fromClipID: nil, toClipID: f.clip("Camera", 1).id))
+        ]))
+        let track = f.track("Camera")
+        let fade = track.transitions.first { $0.id == "tr_in" }!
+        XCTAssertEqual(TransitionLength.limits(push(f), on: track, rate: .fps30)?.upperBound, Time.frames(44, at: .fps30))
+        XCTAssertEqual(TransitionLength.length(push(f), on: track, edge: .end, at: t(40), rate: .fps30), Time.frames(44, at: .fps30))
+        XCTAssertEqual(TransitionLength.limits(fade, on: track, rate: .fps30)?.upperBound, Time.frames(22, at: .fps30), "half its 45 frames")
     }
 
     func context(_ f: AppFixture, playhead: Time = t(45)) -> DragContext {
@@ -212,7 +273,7 @@ final class TransitionTimelineTests: XCTestCase {
         XCTAssertNil(press(.blade))
         XCTAssertEqual(CursorKind.timeline(hit: edge, tool: .select, overKeyframe: false, press: press(.select), project: f.project), .trim)
         XCTAssertEqual(CursorKind.dragging(.transitionLength(transitionID: "tr_p", edge: .start)), .trim)
-        XCTAssertEqual(DragKind.transitionLength(transitionID: "tr_p", edge: .end).movingClipIDs(in: f.project), [f.clip("Camera", 0).id, f.clip("Camera", 1).id], "its cut isn't a snap target")
+        XCTAssertEqual(DragKind.transitionLength(transitionID: "tr_p", edge: .end).movingClipIDs(in: f.project), [f.clip("Camera", 0).id, f.clip("Camera", 1).id, try XCTUnwrap(push(f).soundClipID)], "its cut and its sound aren't snap targets")
     }
 
     func testItsTipAndDragLabelSayWhatItIsAndDoes() throws {
@@ -269,6 +330,28 @@ final class TransitionTimelineTests: XCTestCase {
         XCTAssertLessThanOrEqual(covered.minX, 2900 - 2, "the new box")
         XCTAssertGreaterThanOrEqual(covered.maxX, 3100 + 2)
         XCTAssertLessThan(covered.width, 220)
+    }
+
+    /// Untying or tying a sound (`soundClipID`) changes nothing on SFX
+    /// but the dashed edge a picked transition's sound has, so its clip
+    /// repaints.
+    func testTyingASoundRepaintsItsClip() throws {
+        let f = try fixture()
+        let soundID = try XCTUnwrap(push(f).soundClipID)
+        let tied = f.project
+        try f.apply(EditBatch(label: "Untie", commands: [.updateTransition(transitionID: "tr_p", patch: .object(["soundClipID": .null]))]))
+        XCTAssertEqual(f.project.clip(soundID), tied.clip(soundID), "the clip stays as it was")
+        let layout = TimelineLayout.make(project: tied, showTranscript: true)
+        let sfx = layout.lane(forTrack: f.track("SFX").id)!
+        func repaintsTheSwoosh(_ from: Project, _ to: Project) throws -> Bool {
+            let rects = try XCTUnwrap(TimelineDamage.previewRects(
+                from: PreviewState(project: from, previewed: []), to: PreviewState(project: to, previewed: []),
+                layout: layout, scale: TimelineScale(pixelsPerSecond: 100), offsetY: 0, width: 5_000
+            ))
+            return rects.contains { $0.midY > sfx.y && $0.midY < sfx.maxY && abs($0.minX + TimelineDamage.keyframeReach - 2961) < 1 }
+        }
+        XCTAssertTrue(try repaintsTheSwoosh(tied, f.project), "untied")
+        XCTAssertTrue(try repaintsTheSwoosh(f.project, tied), "tied")
     }
 
     /// Rolling the cut moves the box with it, and the sound on SFX.
@@ -365,6 +448,24 @@ final class TransitionDragWindowTests: XCTestCase {
         case .leftMouseDragged: view.mouseDragged(with: event)
         default: view.mouseUp(with: event)
         }
+    }
+
+    /// The blade cuts the clip under a transition's box, where a press
+    /// would otherwise pick the transition.
+    func testTheBladeCutsThroughTheBox() throws {
+        try showTimeline()
+        let timeline = try XCTUnwrap(window.contentView as? TimelineContainerView)
+        let lane = try XCTUnwrap(timeline.layoutCache.lane(forTrack: model.project.track(named: "Camera")!.id))
+        model.tool = .blade
+        // 29.8 s: inside the push (460 to 540 points), above its label.
+        let press = CGPoint(x: 480, y: lane.y + 5 - timeline.contentOrigin.y)
+        mouse(.leftMouseDown, at: press, in: timeline.lanes)
+        mouse(.leftMouseUp, at: press, in: timeline.lanes)
+        settle()
+        let clips = try XCTUnwrap(model.project.track(named: "Camera")?.clips)
+        XCTAssertEqual(clips.count, 3)
+        XCTAssertEqual(clips.first?.end, t(29.8))
+        XCTAssertNil(model.selectedTransitionID)
     }
 
     func testDraggingTheEdgeLengthensItInOneEdit() throws {

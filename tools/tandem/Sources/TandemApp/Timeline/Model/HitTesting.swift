@@ -76,8 +76,7 @@ struct TimelineHitTester {
             if maxX < x - edgeGrab { continue }
             if minX > x + edgeGrab { break }
             if x >= minX && x < maxX { body = clip }
-            // A third of the clip at most, so a short clip keeps a body to grab.
-            let grab = min(edgeGrab, max(2, (maxX - minX) / 3))
+            let grab = Self.edgeReach(width: maxX - minX, grab: edgeGrab)
             let headDistance = abs(x - minX)
             let tailDistance = abs(x - maxX)
             if headDistance <= grab, nearestEdge == nil || headDistance < nearestEdge!.distance || (headDistance == nearestEdge!.distance && x >= minX) {
@@ -90,6 +89,12 @@ struct TimelineHitTester {
         if let edge = nearestEdge { return (edge.clip, edge.part) }
         if let body { return (body, .body) }
         return nil
+    }
+
+    /// How near its edges a clip `width` points wide trims: `grab`, but a
+    /// third of the clip at most, so a short clip keeps a body to grab.
+    static func edgeReach(width: CGFloat, grab: CGFloat) -> CGFloat {
+        min(grab, max(2, width / 3))
     }
 
     /// The rectangle a clip occupies, in lane coordinates.

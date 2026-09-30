@@ -341,11 +341,12 @@ Media
 
 Each track line has the track's ID for commands that need one. Transitions
 (`~`) sit between the clips they join, ending `sound clip_...` when one
-plays a sound (that's its clip on SFX), and gaps in the take are listed as
-`gap`. When most of a track's clips share settings (a PiP camera track's
-`layout pipRight, scale 0.5 at 0.87,0.77, cutout, fx dropShadow`), the
-track line says them once as `(most clips: ...)`, each clip lists only
-what's different, and `not: ...` marks a clip that lacks one of them.
+plays a sound (that's its clip on SFX, whose own line says `sound of
+tr_...`), and gaps in the take are listed as `gap`. When most of a track's
+clips share settings (a PiP camera track's `layout pipRight, scale 0.5 at
+0.87,0.77, cutout, fx dropShadow`), the track line says them once as
+`(most clips: ...)`, each clip lists only what's different, and `not: ...`
+marks a clip that lacks one of them.
 
 A real edit runs to hundreds of clips, so start with `--summary` (one line
 per track with its clip count, span and gaps, plus the markers), then read a
@@ -885,7 +886,12 @@ object with any of `mediaID` (another file in its place), `gainDB` and
 `null` removes it. What you leave out stays as the sound has it, so a new
 length or type keeps the sound where it is against the middle. The sound
 clip is an ordinary clip too: `updateClip` and `moveClips` on its ID work,
-and it stays tied.
+and it stays tied. `soundClipID` ties a clip that's already on an audio
+track instead, like a whoosh someone placed by hand beside the transition
+(its old sound, if it had one, stays as a plain clip), and `null` unties
+it, leaving it where it is; `addTransition` takes one in its transition
+too. The clip can't be another transition's sound, or be in a crossfade
+of its own, which moving it with the transition would pull apart.
 
 ```json
 {"updateTransition": {"transitionID": "tr_x", "patch": {"duration": 0.8}}}
@@ -897,6 +903,10 @@ and it stays tied.
 
 ```json
 {"updateTransition": {"transitionID": "tr_x", "patch": {"sound": null}}}
+```
+
+```json
+{"updateTransition": {"transitionID": "tr_x", "patch": {"soundClipID": "clip_whoosh"}}}
 ```
 
 #### removeTransition
@@ -1406,7 +1416,10 @@ for speech at Tandem's -20 LUFS: its loudest 400 ms then sits 15 LU under
 the voice, as the section card whooshes do. In a project whose speech
 plays elsewhere (`tandem loudness` says where), move the gain by the
 difference: -32 for speech at -28.7. For another sound, `offset` is minus
-the moment it's loudest, and the gain puts that 15 LU under the speech.
+the moment it's loudest, and the gain puts that 15 LU under the speech. A
+push that already has a whoosh placed by hand beside it can keep that one:
+tie it with `{"soundClipID": "clip_..."}` in the patch, and it moves and
+goes with the push from then on.
 
 ### Credits for the description
 

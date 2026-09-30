@@ -36,6 +36,11 @@ final class TransitionSoundTests: XCTestCase {
         transition(c, id)?.soundClipID.flatMap { c.project.clip($0) }
     }
 
+    /// Every clip playing the swoosh.
+    func swooshes(_ c: ProjectCoordinator) -> [Clip] {
+        c.project.audioTracks.flatMap(\.clips).filter { $0.mediaID == "med_swoosh" }
+    }
+
     // MARK: - Where it goes
 
     func testTheSoundGoesOnSFXPeakingOnTheCut() throws {
@@ -83,6 +88,19 @@ final class TransitionSoundTests: XCTestCase {
         try push(c, left, right)
         XCTAssertEqual(c.project.track(containingClip: try XCTUnwrap(sound(c)).id)?.name, "SFX 2")
         XCTAssertEqual(c.project.track(named: "SFX 2")?.rippleMode, .follow)
+        assertValid(c.project)
+    }
+
+    /// The new SFX track takes the next number no track has, so a gap
+    /// in the numbers (SFX 2 removed) doesn't give two tracks one name.
+    func testANewSFXTrackTakesAFreeName() throws {
+        let (_, c, left, right) = try cutTake()
+        let sfx = c.project.track(named: "SFX")!.id
+        try c.run("SFX 3", .addTrack(kind: .audio, name: "SFX 3", id: "trk_sfx3"))
+        try c.run("Hits", .placeMedia(mediaIDs: ["med_whoosh"], at: t(29.5), audioTrackID: sfx), .placeMedia(mediaIDs: ["med_whoosh"], at: t(29.5), audioTrackID: "trk_sfx3"))
+        try push(c, left, right)
+        XCTAssertEqual(c.project.track(containingClip: try XCTUnwrap(sound(c)).id)?.name, "SFX 4")
+        XCTAssertEqual(c.project.audioTracks.filter { $0.name == "SFX 3" }.count, 1)
         assertValid(c.project)
     }
 
@@ -211,6 +229,39 @@ final class TransitionSoundTests: XCTestCase {
         XCTAssertEqual(clip.id, soundID)
         XCTAssertEqual(clip.start, t(29.11), "0.39 s before the new cut")
         XCTAssertEqual(clip.duration, t(1))
+        assertValid(c.project)
+    }
+
+    /// Extract in to out cuts every track, the swoosh's too: the push
+    /// still has its clips meeting, so its sound goes with it whole, and
+    /// the piece the cut made of it goes rather than doubling it.
+    func testAnExtractThroughTheSoundLeavesOneSwoosh() throws {
+        let (_, c, left, right) = try cutTake()
+        try push(c, left, right)
+        let soundID = try XCTUnwrap(sound(c)).id
+        let everything = c.project.allTracks.map(\.id)
+        try c.run("Extract", .rippleDeleteRange(range: TimeRange(start: t(29.8), end: t(30.2)), trackIDs: everything))
+        XCTAssertEqual(swooshes(c).map(\.id), [soundID])
+        XCTAssertEqual(sound(c)?.start, t(29.41))
+        XCTAssertEqual(sound(c)?.duration, t(1))
+        try c.run("Room", .insertTime(at: t(29.5), duration: t(1), trackIDs: everything))
+        XCTAssertEqual(swooshes(c).map(\.id), [soundID], "time opened inside it doesn't split it either")
+        XCTAssertEqual(sound(c)?.start, t(30.41))
+        assertValid(c.project)
+    }
+
+    /// A command that names the sound (Mike deleting it, even with a
+    /// ripple that moves the cut) is done to the sound: it isn't put back.
+    func testDeletingTheSoundOnPurposeKeepsItDeleted() throws {
+        let (_, c, left, right) = try cutTake()
+        try push(c, left, right)
+        let sfx = c.project.track(named: "SFX")!.id
+        try c.run("Mode", .updateTrack(trackID: sfx, patch: .object(["rippleMode": .string("cut")])))
+        let soundID = try XCTUnwrap(sound(c)).id
+        try c.run("Ripple delete", .removeClips(clipIDs: [soundID], ripple: true))
+        XCTAssertTrue(swooshes(c).isEmpty)
+        XCTAssertNotNil(transition(c))
+        XCTAssertNil(transition(c)?.soundClipID)
         assertValid(c.project)
     }
 
@@ -356,13 +407,30 @@ final class TransitionSoundTests: XCTestCase {
         XCTAssertEqual(sound(c)?.audio?.gainDB, -23.3)
     }
 
-    func testTheSoundIsChangedWithSoundNotItsClipID() throws {
+    /// soundClipID ties a clip that's on SFX already, or unties the one
+    /// there (which stays, silent to the transition); an agent echoing the
+    /// transition back changes nothing.
+    func testSoundClipIDTiesAndUnties() throws {
         let (_, c, left, right) = try cutTake()
         try push(c, left, right)
         let soundID = try XCTUnwrap(sound(c)).id
-        XCTAssertThrowsError(try c.run("Point", .updateTransition(transitionID: "tr_p", patch: .object(["soundClipID": .string("clip_other")]))))
-        // Sending back what it has, as an agent echoing the transition does, is fine.
         XCTAssertNoThrow(try c.run("Echo", .updateTransition(transitionID: "tr_p", patch: .object(["soundClipID": .string(soundID), "duration": .number(0.8)]))))
+        XCTAssertThrowsError(try c.run("Missing", .updateTransition(transitionID: "tr_p", patch: .object(["soundClipID": .string("clip_other")]))))
+        XCTAssertThrowsError(try c.run("Both", .updateTransition(transitionID: "tr_p", patch: .object(["soundClipID": .null, "sound": .object(["gainDB": .number(-3)])]))))
+
+        try c.run("Untie", .updateTransition(transitionID: "tr_p", patch: .object(["soundClipID": .null])))
+        XCTAssertNil(transition(c)?.soundClipID)
+        XCTAssertNotNil(c.project.clip(soundID), "left where it is")
+        try c.run("Roll", .roll(leftClipID: left, rightClipID: right, delta: t(1)))
+        XCTAssertEqual(c.project.clip(soundID)?.start, t(29.61), "no longer follows")
+
+        // The swoosh an editor put by hand beside a push, tied to it.
+        try c.run("Tie", .updateTransition(transitionID: "tr_p", patch: .object(["soundClipID": .string(soundID)])))
+        try c.run("Roll back", .roll(leftClipID: left, rightClipID: right, delta: t(-1)))
+        XCTAssertEqual(c.project.clip(soundID)?.start, t(28.61), "follows from where it was")
+        try c.run("Remove", .removeTransition(transitionID: "tr_p"))
+        XCTAssertNil(c.project.clip(soundID))
+        assertValid(c.project)
     }
 
     /// A sound already on the timeline can be given to a new transition.
@@ -384,6 +452,51 @@ final class TransitionSoundTests: XCTestCase {
             trackID: c.project.track(named: "Camera")!.id,
             transition: Transition(type: .fadeToBlack, duration: t(1), fromClipID: right, toClipID: nil, soundClipID: left)
         )), "a picture isn't a sound")
+    }
+
+    /// A clip in a crossfade of its own can't be a transition's sound:
+    /// carrying it along with the transition would pull the crossfade
+    /// apart.
+    func testACrossfadedClipCantBeTied() throws {
+        let (_, c, left, right) = try cutTake()
+        try push(c, left, right, sound: nil)
+        let sfx = c.project.track(named: "SFX")!.id
+        try c.run("Whooshes",
+                  .insertClip(trackID: sfx, clip: Clip(id: "clip_a", content: .media(mediaID: "med_whoosh"), start: t(40), duration: t(1.5))),
+                  .insertClip(trackID: sfx, clip: Clip(id: "clip_b", content: .media(mediaID: "med_whoosh"), start: t(41.5), duration: t(1.5))))
+        try c.run("Crossfade", .addTransition(trackID: sfx, transition: Transition(id: "tr_x", type: .dissolve, duration: t(0.5), fromClipID: "clip_a", toClipID: "clip_b")))
+        XCTAssertThrowsError(try c.run("Tie", .updateTransition(transitionID: "tr_p", patch: .object(["soundClipID": .string("clip_b")])))) { error in
+            XCTAssertTrue("\(error)".contains("tr_x"), "\(error)")
+        }
+        XCTAssertNil(transition(c)?.soundClipID)
+    }
+
+    // MARK: - Templates
+
+    /// A template (a saved segment) can carry a transition's sound by its
+    /// clip's place, and it goes in tied.
+    func testATemplateTransitionCarriesItsSound() throws {
+        let (_, c) = try Fixture.edited()
+        let solid = { (r: Double) in ClipContent.solid(color: RGBA(r: r, g: 0, b: 0)) }
+        var template = Template(id: "segment:Push", name: "Push", duration: t(4), clips: [
+            TemplateClip(track: "Graphics", clip: Clip(content: solid(1), start: .zero, duration: t(2))),
+            TemplateClip(track: "Graphics", offset: t(2), clip: Clip(content: solid(0.5), start: .zero, duration: t(2))),
+            TemplateClip(track: "SFX", trackKind: .audio, offset: t(1.61), clip: Clip(content: .media(mediaID: "med_music"), start: .zero, duration: t(1)), mediaPath: "music/bed.m4a")
+        ], transitions: [TemplateTransition(from: 0, to: 1, type: .push, duration: t(0.7), sound: 2)])
+        XCTAssertEqual(try JSONDecoder().decode(Template.self, from: try JSONEncoder().encode(template)), template, "round trips")
+        try c.run("Push", .insertTemplate(template: template, at: t(40), mode: .overwrite))
+        let graphics = try XCTUnwrap(c.project.track(named: "Graphics"))
+        let push = try XCTUnwrap(graphics.transitions.first)
+        let tied = try XCTUnwrap(push.soundClipID.flatMap { c.project.clip($0) })
+        XCTAssertEqual(tied.start, t(41.61))
+        XCTAssertEqual(c.project.track(containingClip: tied.id)?.name, "SFX")
+        let pieces = graphics.clips.sorted { $0.start < $1.start }
+        try c.run("Roll", .roll(leftClipID: pieces[0].id, rightClipID: pieces[1].id, delta: t(0.5)))
+        XCTAssertEqual(c.project.clip(tied.id)?.start, t(42.11), "it follows from the first edit on")
+        assertValid(c.project)
+
+        template.transitions = [TemplateTransition(from: 0, to: 1, type: .push, duration: t(0.7), sound: 1)]
+        XCTAssertThrowsError(try c.run("Picture", .insertTemplate(template: template, at: t(50), mode: .overwrite)), "a picture can't be its sound")
     }
 
     // MARK: - The file

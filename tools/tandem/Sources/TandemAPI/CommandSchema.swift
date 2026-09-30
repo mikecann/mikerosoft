@@ -377,7 +377,7 @@ extension CommandSchema {
         "duration": S.time("Defaults to the type's usual length."),
         "fromClipID": S.string("Outgoing clip; leave out for a head transition."),
         "toClipID": S.string("Incoming clip; leave out for a tail transition."),
-        "soundClipID": S.string("The clip on an audio track that plays its sound, kept in step with it by every edit. To give it a sound use sound on addTransition or updateTransition; naming a clip that's already on an audio track here ties that one.")
+        "soundClipID": S.string("The clip on an audio track that plays its sound, kept in step with it by every edit. sound (on addTransition and updateTransition) makes one from a media item; naming a clip that's already on an audio track here ties that one instead (not another transition's sound, nor a clip in a crossfade), and null in a patch unties it, leaving the clip where it is.")
     ]
 
     static let transition = S.object(transitionFields, required: ["type"])
@@ -417,7 +417,8 @@ extension CommandSchema {
             "to": S.integer("The incoming clip's index; leave out for one at the tail of from."),
             "type": S.enumeration(TransitionType.allCases.map(\.rawValue)),
             "direction": S.enumeration(["up", "down", "left", "right"]),
-            "duration": S.time()
+            "duration": S.time(),
+            "sound": S.integer("The index in clips of the clip, on an audio track, that plays its sound: tied to it once the template goes in.")
         ], required: ["type"]), "Transitions between its clips (on one track), or at a clip's head or tail.")
     ], required: ["id", "duration", "clips"])
 
@@ -727,8 +728,8 @@ extension CommandSchema {
         ),
         Entry(
             command: .updateTransition,
-            summary: "Changes a transition's type, direction or duration, and its sound: sound as an object changes the file (mediaID), gainDB or offset, or adds one; null removes it. A new length keeps the sound's distance from the transition's middle.",
-            arguments: S.object(["transitionID": S.string(), "patch": S.patch(of: "TransitionPatch", "Fields: type, direction, duration, sound.")], required: ["transitionID", "patch"]),
+            summary: "Changes a transition's type, direction or duration, and its sound: sound as an object changes the file (mediaID), gainDB or offset, or adds one; null removes it. soundClipID ties a clip already on an audio track (null unties it). A new length keeps the sound's distance from the transition's middle.",
+            arguments: S.object(["transitionID": S.string(), "patch": S.patch(of: "TransitionPatch", "Fields: type, direction, duration, sound, soundClipID.")], required: ["transitionID", "patch"]),
             example: #"{"updateTransition": {"transitionID": "tr_x", "patch": {"duration": 0.8, "sound": {"gainDB": -20}}}}"#
         ),
         Entry(

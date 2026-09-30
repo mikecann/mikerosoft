@@ -568,7 +568,7 @@ struct ClipRenderer {
             context.setLineWidth(2)
             context.strokePath()
             // Grips where a drag changes its length.
-            if box.width >= 3 * Theme.Metrics.edgeGrab {
+            if TransitionGeometry.showsGrips(box, grab: Theme.Metrics.edgeGrab, editable: !track.locked) {
                 context.setFillColor(Theme.amber.cg)
                 let height = (box.height * 0.45).rounded()
                 for edge in TransitionLength.draggableEdges(transition) {

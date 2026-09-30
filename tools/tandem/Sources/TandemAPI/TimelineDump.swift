@@ -148,6 +148,8 @@ public enum TimelineDump {
         let speechTrackIDs = Set(TranscriptTools.speechTracks(project).map(\.id))
         var usedMedia: [String] = []
         var untranscribed: [String] = []
+        // Which transition each sound clip plays for.
+        let soundOf = Dictionary(project.allTracks.flatMap(\.transitions).compactMap { t in t.soundClipID.map { ($0, t.id) } }, uniquingKeysWith: { a, _ in a })
 
         for (label, track, clips) in shown {
             out.append("")
@@ -159,7 +161,7 @@ public enum TimelineDump {
             if !track.targeted { flags.append("untargeted") }
             // Settings most of the track's clips share are said once, in
             // the header, and each clip lists only what's different.
-            let settings = clips.map { clipSettings($0, links: linkNumbers, names: names) }
+            let settings = clips.map { clipSettings($0, links: linkNumbers, names: names, sounds: soundOf) }
             let usual = usualSettings(settings)
             var header = "\(label) \(track.name)  \(track.id)  \(flags.joined(separator: " "))"
             if !usual.isEmpty { header += "  (most clips: \(usual.joined(separator: ", ")))" }
@@ -332,8 +334,9 @@ public enum TimelineDump {
         }
     }
 
-    static func clipSettings(_ clip: Clip, links: [String: Int], names: [String: String] = [:]) -> [String] {
+    static func clipSettings(_ clip: Clip, links: [String: Int], names: [String: String] = [:], sounds: [String: String] = [:]) -> [String] {
         var parts: [String] = []
+        if let transitionID = sounds[clip.id] { parts.append("sound of \(transitionID)") }
         if let name = clip.name, !name.isEmpty {
             // Clips placed from a file are named after it; only show names someone chose.
             let fileName = clip.mediaID.flatMap { names[$0] }.map { ($0 as NSString).deletingPathExtension }

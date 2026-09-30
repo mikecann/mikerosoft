@@ -10,6 +10,8 @@ public enum Editing {
         // Transitions' sounds are kept in step with them after whatever
         // this command does (`TransitionSounds`).
         let sounds = TransitionSounds.anchors(in: project)
+        let named = sounds.isEmpty ? [] : TransitionSounds.clips(namedBy: command)
+        let created = context.createdIDs.count
         context.placedSounds = []
         switch command {
         case .updateProject(let patch):
@@ -108,7 +110,7 @@ public enum Editing {
         case .removeMarker(let markerID):
             try removeMarker(&project, markerID)
         }
-        TransitionSounds.reconcile(&project, from: sounds, &context)
+        TransitionSounds.reconcile(&project, from: sounds, named: named, createdFrom: created, &context)
         context.placedSounds = []
         project.normalizeLinkGroups()
     }
@@ -1200,17 +1202,29 @@ public enum Editing {
         try requireObject(patch, forbidden: ["id"], what: "transition")
         guard case .object(var fields) = patch else { return }
         let current = p[location].transitions[index]
-        // The sound is changed with `sound`, not by pointing at another
-        // clip; sending back the one it has already changes nothing.
-        if let clipID = fields.removeValue(forKey: "soundClipID"), clipID != (current.soundClipID.map(JSONValue.string) ?? .null) {
-            throw EditError.invalid("change a transition's sound with \"sound\" ({\"mediaID\": ...}, or null for none), not soundClipID")
-        }
+        // `sound` changes the sound itself; `soundClipID` ties a clip that's
+        // on an audio track already (null unties it, leaving it where it
+        // is), and sending back the one it has changes nothing.
+        var tie = fields.removeValue(forKey: "soundClipID")
+        if tie == (current.soundClipID.map(JSONValue.string) ?? .null) { tie = nil }
         let sound = fields.removeValue(forKey: "sound")
+        if tie != nil, sound != nil { throw EditError.invalid("give a transition's sound or its soundClipID, not both") }
         let middle = current.middle(on: p[location])
         let updated = try JSONValue.applyMergePatch(.object(fields), to: current)
         try validateTransition(updated, on: p[location], in: p, ignoring: transitionID)
         for note in heldFrames(updated, on: p[location], in: p) { context.warn(note) }
         p[location].transitions[index] = updated
+        switch tie {
+        case nil:
+            break
+        case .null?:
+            p[location].transitions[index].soundClipID = nil
+        case .string(let clipID)?:
+            try checkTieable(clipID, in: p)
+            p[location].transitions[index].soundClipID = clipID
+        default:
+            throw EditError.invalid("a transition's soundClipID is a clip's ID, or null")
+        }
         if let sound { try patchTransitionSound(&p, transitionID, sound, middleBefore: middle, &context) }
     }
 

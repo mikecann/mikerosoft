@@ -212,15 +212,22 @@ window), runs the command, then
   transition's middle moved (a roll, a ripple, both clips moved, a
   one-sided transition's length), so a ripple through the sound doesn't
   chop it, and a swoosh stays on the cut when a centred transition's
-  length changes;
+  length changes; pieces a cut in the command made of it go (the edit
+  context records which clip each cut piece came from), so an extract
+  through it never leaves two;
 - clears the tie when the sound itself was deleted or overwritten while
   its transition stayed put.
 
 Sounds a command put somewhere on purpose (`addTransition`'s `sound`, a
-`sound` patch) are left there. The work goes in timeline order, so a
-journal replay makes the same tracks. Undo restores the whole project, so
-it needs nothing extra. The validator refuses a tie to a clip that isn't
-on an audio track or is shared by two transitions.
+`sound` patch) are left there, and so are sounds a command names itself
+(a nudge, a trim, a delete, even a ripple delete that moves the cut):
+what it did to them was meant. Clips it only reaches through a link
+don't count, so a roll inside a saved segment, whose clips are all
+linked, still carries the segment's sound. The work goes in timeline
+order, so a journal replay makes the same tracks. Undo restores the whole
+project, so it needs nothing extra. The validator refuses a tie to a clip
+that isn't on an audio track or is shared by two transitions, and tying
+refuses a clip in a crossfade of its own.
 
 ## Transform contract
 
