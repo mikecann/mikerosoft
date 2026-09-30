@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ChangelogEntry } from './changelog';
 import { formatToolDate } from './toolDates';
 import { TOOL_DATES } from './toolDates.generated';
@@ -43,16 +43,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Opens the source in the Internet Explorer window, unless they asked for a new tab. */
-function sourceClick(onViewSource: (path: string) => void, path: string) {
-  return (event: MouseEvent) => {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-    event.preventDefault();
-    onViewSource(path);
-  };
-}
-
-function GetIt({ tool, onViewSource }: { tool: Tool; onViewSource: (path: string) => void }) {
+function GetIt({ tool }: { tool: Tool }) {
   const prompt = makeItYoursPrompt(tool);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [status, setStatus] = useState('');
@@ -90,7 +81,7 @@ function GetIt({ tool, onViewSource }: { tool: Tool; onViewSource: (path: string
         </button>
         <p className="copy-status" role="status">{status}</p>
         <textarea ref={promptRef} readOnly value={prompt} rows={5} aria-label="The prompt" />
-        <a className="task-link" href={tool.url} target="_blank" rel="noopener" onClick={sourceClick(onViewSource, `tools/${tool.name}`)}>
+        <a className="task-link" href={tool.url} target="_blank" rel="noopener">
           <img src="/xp/github.png" alt="" />
           View the source on GitHub
         </a>
@@ -230,7 +221,7 @@ function Changes({ tool }: { tool: Tool }) {
 }
 
 /** A tool's window: what it is and how to get it up top, then media, then its history. */
-export function ToolContent({ tool, onViewSource }: { tool: Tool; onViewSource: (path: string) => void }) {
+export function ToolContent({ tool }: { tool: Tool }) {
   const details = toolDetails[tool.name];
   const dates = TOOL_DATES[tool.name];
 
@@ -254,7 +245,7 @@ export function ToolContent({ tool, onViewSource }: { tool: Tool; onViewSource: 
           <p className="lead">{details.tagline}</p>
           {details.intro.map((paragraph, i) => <p key={i}><RichText text={paragraph} /></p>)}
         </div>
-        <GetIt tool={tool} onViewSource={onViewSource} />
+        <GetIt tool={tool} />
       </div>
       <Media tool={tool} />
       <Changes tool={tool} />

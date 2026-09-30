@@ -2,7 +2,6 @@ import './xp.css';
 import { useEffect, useState } from 'react';
 import { Desktop, type DesktopItem } from './Desktop';
 import { categoryId, HOME_SEARCH_ID, HomeContent, type PlatformFilter } from './HomeContent';
-import { InternetExplorer, type BrowseRequest } from './InternetExplorer';
 import { navigate, replacePath, useNavigation } from './router';
 import { Taskbar } from './Taskbar';
 import { ToolContent } from './ToolContent';
@@ -52,7 +51,6 @@ const DEFAULT_RECENT = ['tandem', 'record-it', 'voice-type', 'taskbar', 'task-st
 type Dialog = 'help' | 'log-off' | 'turn-off' | 'not-found' | 'run' | null;
 
 const DATE_TIME: WindowId = 'app:datetime';
-const BROWSER: WindowId = 'app:ie';
 
 function geometryFor(id: WindowId, openCount: number) {
   const area = desktopArea();
@@ -125,18 +123,12 @@ export default function App() {
   const [recent, setRecent] = useState<string[]>(readRecent);
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState<PlatformFilter>('all');
-  const [browseRequest, setBrowseRequest] = useState<BrowseRequest>({ path: '', id: 0 });
-  const [browserTitle, setBrowserTitle] = useState('mikecann/mikerosoft');
 
   /** The title and icon each window shows in its title bar and on the taskbar. */
   function windowInfo(id: WindowId): { title: string; taskTitle: string; icon: string } {
     const tool = toolFor(id);
     if (tool) return { title: `${tool.name} - Mikerosoft`, taskTitle: tool.name, icon: tool.icon };
     if (id === DATE_TIME) return { title: 'Date and Time Properties', taskTitle: 'Date and Time Properties', icon: '/icons/ui-calendar.png' };
-    if (id === BROWSER) {
-      const title = `${browserTitle} - Mikerosoft Internet Explorer`;
-      return { title, taskTitle: title, icon: '/xp/ie.png' };
-    }
     return { title: 'Mikerosoft', taskTitle: 'Mikerosoft', icon: '/logo.png' };
   }
 
@@ -182,9 +174,8 @@ export default function App() {
     document.title = focusedTool ? `${focusedTool.name} - Mikerosoft` : 'Mikerosoft';
   }, [topPath, focusedTool]);
 
-  function browse(path: string) {
-    setBrowseRequest(current => ({ path, id: current.id + 1 }));
-    open(BROWSER);
+  function openGithub() {
+    window.open(REPO_URL, '_blank', 'noopener');
   }
 
   // Ctrl+Esc opens the Start menu, as it always has.
@@ -229,8 +220,7 @@ export default function App() {
   }
 
   function openDesktopItem(item: DesktopItem, inNewTab?: boolean) {
-    if (inNewTab) window.open(item.href, '_blank', 'noopener');
-    else if (item.id === 'github') browse('');
+    if (item.external || inNewTab) window.open(item.href, '_blank', 'noopener');
     else navigate(item.href);
   }
 
@@ -300,18 +290,7 @@ export default function App() {
                 <p className="status-bar-field">{tool ? tool.desc : `${visibleTools.length} of ${tools.length} tools`}</p>
                 {tool && (
                   <p className="status-bar-field status-bar-link">
-                    <a
-                      href={tool.url}
-                      target="_blank"
-                      rel="noopener"
-                      onClick={event => {
-                        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
-                        event.preventDefault();
-                        browse(`tools/${tool.name}`);
-                      }}
-                    >
-                      tools/{tool.name}
-                    </a>
+                    <a href={tool.url} target="_blank" rel="noopener">tools/{tool.name}</a>
                   </p>
                 )}
               </>
@@ -323,11 +302,9 @@ export default function App() {
             onGeometryChange={geometry => setDesktop(current => moveWindow(current, state.id, geometry))}
           >
             {tool ? (
-              <ToolContent tool={tool} onViewSource={browse} />
+              <ToolContent tool={tool} />
             ) : state.id === DATE_TIME ? (
               <DateTimeContent onClose={() => windowActions.onClose(DATE_TIME)} />
-            ) : state.id === BROWSER ? (
-              <InternetExplorer request={browseRequest} onTitleChange={setBrowserTitle} />
             ) : (
               <HomeContent
                 tools={visibleTools}
@@ -362,7 +339,7 @@ export default function App() {
         onStartOpenChange={setStartOpen}
         onShowDesktop={showDesktop}
         onOpenHome={() => navigate('/')}
-        onOpenGithub={() => browse('')}
+        onOpenGithub={openGithub}
         onShowCategory={showCategory}
         onSearch={search}
         onSurprise={surprise}

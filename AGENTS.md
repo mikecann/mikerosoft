@@ -608,10 +608,8 @@ The mikerosoft.app site in `website/` deploys from `main` through
   `website/src/xp.css`), so the site's own styles always beat it. Don't add
   specificity hacks to fight XP.css button styles; give custom buttons the
   `plain` class instead.
-- GitHub links open in a built-in Internet Explorer window
-  (`website/src/InternetExplorer.tsx`) that browses the repo through the
-  GitHub API, since github.com can't be framed. It's unauthenticated, so it
-  gets 60 requests an hour per visitor, and pages are cached for the visit.
+- GitHub links open in a new browser tab. github.com sends
+  `X-Frame-Options: deny`, so it can't be shown in a window on the desktop.
 - Date and Time is an `app:` window: it's on the taskbar but has no URL.
 - Site icons (platforms, categories, calendar and so on) are `ui-*.png` in
   `website/public/icons`, drawn by the same icon generator.
