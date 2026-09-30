@@ -3,13 +3,9 @@ import { Badge, Button, Card, Group, Image, Text } from '@mantine/core';
 import { PLATFORM_COLOR, PLATFORM_LABEL, sortPlatforms, type Tool } from './tools';
 import type { ToolDates } from './gitHistory';
 import { formatToolDate } from './toolDates';
-
-const CDN_ASSET_REF = import.meta.env.VITE_GITHUB_SHA || 'main';
-
-function versionedAsset(url: string): string {
-  if (!url.includes('cdn.jsdelivr.net/gh/mikecann/mikerosoft@main/')) return url;
-  return url.replace('@main/', `@${CDN_ASSET_REF}/`);
-}
+import { toolPath } from './toolPages';
+import { Link } from './router';
+import { versionedAsset } from './versionedAsset';
 
 function ScreenshotSection({ screenshots, name }: { screenshots: string[]; name: string }) {
   const [idx, setIdx] = useState(0);
@@ -60,7 +56,7 @@ export function ToolCard({
   const hasScreenshot = tool.screenshots.length > 0;
 
   return (
-    <Card shadow="sm" padding="lg" radius="md" withBorder style={{ display: 'flex', flexDirection: 'column' }}>
+    <Card shadow="sm" padding="lg" radius="md" withBorder className="tool-card" style={{ display: 'flex', flexDirection: 'column' }}>
       {tool.header ? (
         <Card.Section>
           <Image
@@ -84,7 +80,9 @@ export function ToolCard({
         justify="space-between"
       >
         <Text fw={700} size="md" style={{ minWidth: 0, flex: '1 1 auto' }}>
-          {tool.name}
+          <Link href={toolPath(tool.name)} className="tool-card-link">
+            {tool.name}
+          </Link>
         </Text>
         <Group gap={6} wrap="wrap" justify="flex-end" style={{ flex: '0 0 auto' }}>
           {sortPlatforms(tool.platforms).map(id => (
@@ -107,20 +105,31 @@ export function ToolCard({
         </Text>
       )}
 
-      <Button
-        component="a"
-        href={tool.url}
-        target="_blank"
-        rel="noopener"
-        variant="light"
-        color="blue"
-        fullWidth
-        mt="md"
-        radius="md"
-        size="sm"
-      >
-        View source
-      </Button>
+      <Group gap="xs" mt="md" wrap="nowrap" className="tool-card-actions">
+        <Button
+          component={Link}
+          href={toolPath(tool.name)}
+          variant="light"
+          color="blue"
+          radius="md"
+          size="sm"
+          style={{ flex: 1 }}
+        >
+          Take a look
+        </Button>
+        <Button
+          component="a"
+          href={tool.url}
+          target="_blank"
+          rel="noopener"
+          variant="subtle"
+          color="gray"
+          radius="md"
+          size="sm"
+        >
+          Source
+        </Button>
+      </Group>
     </Card>
   );
 }

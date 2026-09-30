@@ -23,6 +23,8 @@ export interface Tool {
   icon: string;
   header?: string;
   screenshots: string[];
+  /** A short demo clip, played on the tool's page. */
+  video?: string;
   url: string;
   platforms: readonly PlatformId[];
 }
@@ -158,6 +160,7 @@ export const tools: Tool[] = [
     icon: `${base}/task-stats/icons/chart_bar.png`,
     header: `${base}/task-stats/docs/header.webp`,
     screenshots: [`${base}/task-stats/docs/ss1.png`],
+    video: `${base}/task-stats/screenshots/vid1.mp4`,
     url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/task-stats',
     platforms: ['windows'],
   },
@@ -377,7 +380,7 @@ export const tools: Tool[] = [
   },
   {
     name: 'mac-screenshot',
-    desc: 'Global macOS screenshot hotkey daemon. Press F12 to capture a selection, save it with a timestamp, copy it to the clipboard, and open it in Preview for annotation',
+    desc: 'Global macOS screenshot hotkey daemon. Press F11 to capture a selection, save it with a timestamp, copy it to the clipboard, and open it in Preview for annotation',
     icon: `${base}/mac-screenshot/icons/mac-screenshot.png`,
     header: `${base}/mac-screenshot/docs/header.webp`,
     screenshots: [],

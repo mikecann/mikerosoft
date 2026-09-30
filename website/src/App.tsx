@@ -17,6 +17,8 @@ import {
   Title,
 } from '@mantine/core';
 import { ToolCard } from './ToolCard';
+import { ToolPage } from './ToolPage';
+import { Link, useRoute } from './router';
 import { TOOL_DATES } from './toolDates.generated';
 import { SORT_OPTIONS, sortTools, type SortDirection, type SortField } from './toolDates';
 import {
@@ -74,10 +76,59 @@ function GithubCorner() {
   );
 }
 
+interface HomeState {
+  activePlatforms: PlatformId[];
+  sortField: SortField;
+  sortDirection: SortDirection;
+}
+
 export default function App() {
-  const [activePlatforms, setActivePlatforms] = useState<PlatformId[]>([...PLATFORM_ORDER]);
-  const [sortField, setSortField] = useState<SortField>('default');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('newest');
+  const route = useRoute();
+  const [home, setHome] = useState<HomeState>({
+    activePlatforms: [...PLATFORM_ORDER],
+    sortField: 'default',
+    sortDirection: 'newest',
+  });
+  const tool = route.kind === 'tool' ? tools.find(candidate => candidate.name === route.name) : undefined;
+
+  return (
+    <MantineProvider theme={theme} defaultColorScheme="dark">
+      <Box
+        style={{
+          minHeight: '100vh',
+          background: 'var(--mantine-color-dark-8)',
+        }}
+      >
+        <GithubCorner />
+        {tool ? (
+          <ToolPage key={tool.name} tool={tool} />
+        ) : route.kind === 'not-found' ? (
+          <NotFound />
+        ) : (
+          <HomePage state={home} onChange={setHome} />
+        )}
+      </Box>
+    </MantineProvider>
+  );
+}
+
+function NotFound() {
+  return (
+    <Stack align="center" py={120} px="md" gap="md">
+      <Title order={1}>Hmm, nothing here</Title>
+      <Text c="dimmed" ta="center">I couldn't find that page. Maybe the tool got renamed?</Text>
+      <Button component={Link} href="/" radius="md" variant="light">See all the tools</Button>
+    </Stack>
+  );
+}
+
+function HomePage({ state, onChange }: { state: HomeState; onChange: (state: HomeState) => void }) {
+  const { activePlatforms, sortField, sortDirection } = state;
+  const setActivePlatforms = (update: (current: PlatformId[]) => PlatformId[]) =>
+    onChange({ ...state, activePlatforms: update(activePlatforms) });
+  const setSortField = (value: SortField) => onChange({ ...state, sortField: value });
+  const setSortDirection = (update: (current: SortDirection) => SortDirection) =>
+    onChange({ ...state, sortDirection: update(sortDirection) });
   const visibleTools = sortTools(
     filterToolsByPlatforms(tools, activePlatforms),
     TOOL_DATES,
@@ -94,108 +145,98 @@ export default function App() {
   }
 
   return (
-    <MantineProvider theme={theme} defaultColorScheme="dark">
-      <Box
-        style={{
-          minHeight: '100vh',
-          background: 'var(--mantine-color-dark-8)',
-        }}
-      >
-        <GithubCorner />
-        <Container size={1800} py="xl" px="xl">
-          <Stack align="center" mb="xl" gap="md">
-            <Image
-              src="/logo.png"
-              alt="Mikerosoft logo"
-              maw={300}
-              w="100%"
-            />
-            <Title order={1} c="blue" mt="xs">Mikerosoft</Title>
-            <Text c="dimmed" ta="center" maw={600} lh={1.6}>
-              A collection of personalised desktop tools for{' '}
-              <Anchor href="https://mikecann.blog" target="_blank" rel="noopener">
-                Mike Cann
-              </Anchor>.
-              <br />
-              <Text span size="sm" c="gray.6">
-                (and is in no way affiliated with Microsoft... please don't sue me!)
-              </Text>
-            </Text>
-            <Group gap="lg" justify="center" wrap="wrap">
-              <Group
-                gap="xs"
-                justify="center"
-                wrap="wrap"
-                role="group"
-                aria-label="Filter tools by platform"
-              >
-                {PLATFORM_ORDER.map(id => {
-                  const isActive = activePlatforms.includes(id);
-                  return (
-                    <Button
-                      key={id}
-                      type="button"
-                      size="compact-sm"
-                      radius="xl"
-                      variant={isActive ? 'light' : 'outline'}
-                      color={isActive ? PLATFORM_COLOR[id] : 'gray'}
-                      aria-pressed={isActive}
-                      onClick={() => togglePlatform(id)}
-                      className="platform-filter"
-                    >
-                      {PLATFORM_LABEL[id]}
-                    </Button>
-                  );
-                })}
-              </Group>
-              <Group gap="xs" justify="center" wrap="wrap">
-                <SegmentedControl
-                  size="xs"
+    <Container size={1800} py="xl" px="xl">
+      <Stack align="center" mb="xl" gap="md">
+        <Image
+          src="/logo.png"
+          alt="Mikerosoft logo"
+          maw={300}
+          w="100%"
+        />
+        <Title order={1} c="blue" mt="xs">Mikerosoft</Title>
+        <Text c="dimmed" ta="center" maw={600} lh={1.6}>
+          A collection of personalised desktop tools for{' '}
+          <Anchor href="https://mikecann.blog" target="_blank" rel="noopener">
+            Mike Cann
+          </Anchor>.
+          <br />
+          <Text span size="sm" c="gray.6">
+            (and is in no way affiliated with Microsoft... please don't sue me!)
+          </Text>
+        </Text>
+        <Group gap="lg" justify="center" wrap="wrap">
+          <Group
+            gap="xs"
+            justify="center"
+            wrap="wrap"
+            role="group"
+            aria-label="Filter tools by platform"
+          >
+            {PLATFORM_ORDER.map(id => {
+              const isActive = activePlatforms.includes(id);
+              return (
+                <Button
+                  key={id}
+                  type="button"
+                  size="compact-sm"
                   radius="xl"
-                  value={sortField}
-                  onChange={value => setSortField(value as SortField)}
-                  data={[...SORT_OPTIONS]}
-                  aria-label="Sort tools"
-                />
-                {sortField !== 'default' && (
-                  <Button
-                    type="button"
-                    size="compact-sm"
-                    radius="xl"
-                    variant="subtle"
-                    color="gray"
-                    onClick={() => setSortDirection(current => (current === 'newest' ? 'oldest' : 'newest'))}
-                    aria-label={`Showing ${sortDirection} first. Click to reverse.`}
-                  >
-                    {sortDirection === 'newest' ? 'Newest first ↓' : 'Oldest first ↑'}
-                  </Button>
-                )}
-              </Group>
-            </Group>
-          </Stack>
+                  variant={isActive ? 'light' : 'outline'}
+                  color={isActive ? PLATFORM_COLOR[id] : 'gray'}
+                  aria-pressed={isActive}
+                  onClick={() => togglePlatform(id)}
+                  className="platform-filter"
+                >
+                  {PLATFORM_LABEL[id]}
+                </Button>
+              );
+            })}
+          </Group>
+          <Group gap="xs" justify="center" wrap="wrap">
+            <SegmentedControl
+              size="xs"
+              radius="xl"
+              value={sortField}
+              onChange={value => setSortField(value as SortField)}
+              data={[...SORT_OPTIONS]}
+              aria-label="Sort tools"
+            />
+            {sortField !== 'default' && (
+              <Button
+                type="button"
+                size="compact-sm"
+                radius="xl"
+                variant="subtle"
+                color="gray"
+                onClick={() => setSortDirection(current => (current === 'newest' ? 'oldest' : 'newest'))}
+                aria-label={`Showing ${sortDirection} first. Click to reverse.`}
+              >
+                {sortDirection === 'newest' ? 'Newest first ↓' : 'Oldest first ↑'}
+              </Button>
+            )}
+          </Group>
+        </Group>
+      </Stack>
 
-          {visibleTools.length > 0 ? (
-            <SimpleGrid
-              id="tool-grid"
-              cols={{ base: 1, sm: 2, md: 3, lg: 4 }}
-              spacing="lg"
-            >
-              {visibleTools.map(tool => (
-                <ToolCard
-                  key={tool.name}
-                  tool={tool}
-                  dates={TOOL_DATES[tool.name]}
-                  highlight={sortField === 'default' ? undefined : sortField}
-                />
-              ))}
-            </SimpleGrid>
-          ) : (
-            <Text ta="center" c="dimmed" py="xl" role="status">
-              Select Windows or macOS to show available tools.
-            </Text>
-          )}
-        </Container>
-      </Box>
-    </MantineProvider>
+      {visibleTools.length > 0 ? (
+        <SimpleGrid
+          id="tool-grid"
+          cols={{ base: 1, sm: 2, md: 3, lg: 4 }}
+          spacing="lg"
+        >
+          {visibleTools.map(tool => (
+            <ToolCard
+              key={tool.name}
+              tool={tool}
+              dates={TOOL_DATES[tool.name]}
+              highlight={sortField === 'default' ? undefined : sortField}
+            />
+          ))}
+        </SimpleGrid>
+      ) : (
+        <Text ta="center" c="dimmed" py="xl" role="status">
+          Select Windows or macOS to show available tools.
+        </Text>
+      )}
+    </Container>
   );
 }

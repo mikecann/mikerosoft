@@ -598,7 +598,16 @@ The mikerosoft.app site in `website/` deploys from `main` through
   rather than change it.
 - CI checks out with `fetch-depth: 0`. The generator refuses a shallow clone
   because every tool would get the same date.
-- `npm test` in `website/` runs the tool list, sorting and git-history tests.
+- Every tool has its own page at `/tools/<name>` (`website/src/ToolPage.tsx`).
+  Its friendly copy (tagline, intro, how-to-use steps, requirements and an
+  optional note on anything tied to Mike's setup) lives in
+  `website/src/toolDetails.ts`, written in Mike's voice with no em dashes.
+  A new tool needs an entry there or `npm test` fails. Add `video` in
+  `tools.ts` to show a demo clip on the page.
+- `npm run build` also writes `dist/tools/<name>.html` with that tool's title,
+  description and share image, so links shared on social previews properly.
+- `npm test` in `website/` runs the tool list, sorting, git-history and tool
+  page tests.
 
 ---
 

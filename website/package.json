@@ -9,7 +9,7 @@
     "dev": "vite",
     "test": "tsx --test src/*.test.ts",
     "prebuild": "npm run dates",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && tsx scripts/generate-tool-pages.ts",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy"
   },
