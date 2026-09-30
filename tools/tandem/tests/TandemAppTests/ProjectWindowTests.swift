@@ -97,3 +97,36 @@ final class ProjectWindowFrameTests: XCTestCase {
         close(second)
     }
 }
+
+/// A project's timeline comes back where it was: the playhead, the zoom
+/// and the scroll, so a restart to install a build doesn't lose the place.
+final class TimelinePlacementTests: XCTestCase {
+    private func store() -> UserDefaults {
+        let name = "tandem-timeline-\(UUID().uuidString)"
+        let store = UserDefaults(suiteName: name)!
+        addTeardownBlock { store.removePersistentDomain(forName: name) }
+        return store
+    }
+
+    func testEachProjectKeepsItsPlace() {
+        let defaults = store()
+        let talk = URL(fileURLWithPath: "/videos/talk/Talk.tandem")
+        let short = URL(fileURLWithPath: "/videos/short/Short.tandem")
+        let place = TimelinePlacement.Saved(playhead: 312.4, pixelsPerSecond: 48, scrollSeconds: 290, verticalOffset: 36)
+        TimelinePlacement.save(place, for: talk, to: defaults)
+        TimelinePlacement.save(TimelinePlacement.Saved(playhead: 5, pixelsPerSecond: 200, scrollSeconds: 0, verticalOffset: 0), for: short, to: defaults)
+        XCTAssertEqual(TimelinePlacement.saved(for: talk, in: defaults), place)
+        XCTAssertEqual(TimelinePlacement.saved(for: short, in: defaults)?.playhead, 5)
+        XCTAssertEqual(TimelinePlacement.saved(for: URL(fileURLWithPath: "/videos/talk/../talk/Talk.tandem"), in: defaults), place, "the same file however it's spelled")
+        XCTAssertNil(TimelinePlacement.saved(for: URL(fileURLWithPath: "/videos/new/New.tandem"), in: defaults), "a new project fits")
+    }
+
+    func testNonsenseIsIgnored() {
+        let defaults = store()
+        let talk = URL(fileURLWithPath: "/videos/talk/Talk.tandem")
+        TimelinePlacement.save(TimelinePlacement.Saved(playhead: 10, pixelsPerSecond: 0, scrollSeconds: 0, verticalOffset: 0), for: talk, to: defaults)
+        XCTAssertNil(TimelinePlacement.saved(for: talk, in: defaults), "no zoom")
+        TimelinePlacement.save(TimelinePlacement.Saved(playhead: -4, pixelsPerSecond: 20, scrollSeconds: -1, verticalOffset: .nan), for: talk, to: defaults)
+        XCTAssertEqual(TimelinePlacement.saved(for: talk, in: defaults), TimelinePlacement.Saved(playhead: 0, pixelsPerSecond: 20, scrollSeconds: 0, verticalOffset: 0))
+    }
+}

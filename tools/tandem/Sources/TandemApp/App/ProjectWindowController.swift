@@ -48,6 +48,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
         window.delegate = self
         actions.controller = self
+        restoreTimeline()
         let root = EditorRootView(model: model, actions: actions)
         let hosting = NSHostingView(rootView: root)
         hosting.sizingOptions = []
@@ -188,6 +189,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     func windowWillClose(_ notification: Notification) {
+        saveTimeline()
         // An archive stops between chunks; running it again carries on.
         archiveSheet?.model.stop()
         router.uninstall()
@@ -206,6 +208,27 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func windowDidMove(_ notification: Notification) {
         saveFrame()
+    }
+
+    /// The playhead, zoom and scroll, for the next time this project opens.
+    private func saveTimeline() {
+        let scale = model.timeline.scale
+        TimelinePlacement.save(TimelinePlacement.Saved(
+            playhead: model.playback.time.seconds,
+            pixelsPerSecond: scale.pixelsPerSecond,
+            scrollSeconds: scale.scrollSeconds,
+            verticalOffset: Double(model.timeline.verticalOffset)
+        ), for: model.fileURL)
+    }
+
+    /// Carries on where the project's timeline was, instead of fitting it
+    /// with the playhead at the start.
+    private func restoreTimeline() {
+        guard let saved = TimelinePlacement.saved(for: model.fileURL) else { return }
+        model.timeline.fitPending = false
+        model.timeline.scale = TimelineScale(pixelsPerSecond: saved.pixelsPerSecond, scrollSeconds: saved.scrollSeconds)
+        model.timeline.verticalOffset = CGFloat(saved.verticalOffset)
+        model.playback.seek(to: Time(seconds: saved.playhead).roundedToFrame(model.frameRate))
     }
 
     /// Remembers where the window is for the next one to open, but not a
