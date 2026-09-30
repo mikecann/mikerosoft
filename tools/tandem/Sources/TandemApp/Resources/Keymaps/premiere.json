@@ -79,6 +79,10 @@
     "cmd+'": "toggleSafeMargins",
     "cmd+shift+p": "toggleProxy",
 
+    "[": "previousAgentChange",
+    "]": "nextAgentChange",
+    "option+]": "markAgentChangesReviewed",
+
     "cmd+z": "undo",
     "cmd+shift+z": "redo",
     "cmd+s": "save",

@@ -9,7 +9,7 @@ struct ActivityEntry: Identifiable, Equatable {
     let author: String
     let date: Date
 
-    var isAgent: Bool { !ActivityLog.isPerson(author) && author != ActivityLog.systemAuthor }
+    var isAgent: Bool { EditAuthor.isAgent(author) }
 }
 
 /// The edits made in this session, mirrored from the coordinator's change
@@ -17,7 +17,7 @@ struct ActivityEntry: Identifiable, Equatable {
 /// and redo stacks exactly: an undone edit moves to `undone` and comes back
 /// on redo, a new edit clears the redo side.
 struct ActivityLog: Equatable {
-    static let systemAuthor = "system"
+    static let systemAuthor = EditAuthor.system
 
     /// Oldest first, in undo stack order.
     private(set) var done: [ActivityEntry] = []
@@ -25,7 +25,7 @@ struct ActivityLog: Equatable {
     private(set) var undone: [ActivityEntry] = []
 
     static func isPerson(_ author: String) -> Bool {
-        author == "user" || author.isEmpty
+        EditAuthor.isPerson(author)
     }
 
     /// Who a batch came from, as the feed shows it.

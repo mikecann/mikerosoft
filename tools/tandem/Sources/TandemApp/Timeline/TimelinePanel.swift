@@ -51,6 +51,7 @@ struct TimelineToolbar: View {
                     .foregroundStyle(Theme.amber.color)
             }
             Spacer(minLength: 8)
+            ReviewChip(model: model, actions: actions)
             Button {
                 showTighten = true
             } label: {

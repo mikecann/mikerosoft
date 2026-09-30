@@ -494,7 +494,7 @@ enum MCPTools {
     static let all: [Tool] = [
         Tool(
             name: "status", title: "Project status",
-            description: "The project's name, revision, length, unsaved changes, who has it open, undo and redo, and background jobs.",
+            description: "The project's name, revision, length, unsaved changes, who has it open, undo and redo, background jobs, and agent edits still waiting for Mike's review (reviewPending).",
             operation: .status, properties: [:], readOnly: true, idempotent: true
         ),
         Tool(

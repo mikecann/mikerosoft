@@ -62,6 +62,7 @@ until the project is archived (see Archiving).
     backups/               the previous 20 saves
     <name>.journal.jsonl   committed edits since the last save (crash recovery)
     <name>.undo.json       undo history for edits made headless, and idempotency keys
+    <name>.review.json     agent edits Mike hasn't reviewed yet (see Review)
     <name>.lock            pid and owner (app or cli), plus the API port and token
     cache/                 analysis results keyed by content hash
 ```
@@ -161,6 +162,33 @@ IDs) and is announced to observers.
 
 `expectedRevision` lets an agent refuse to edit a timeline that changed under
 it. `idempotencyKey` makes retries safe.
+
+### Review
+
+Mike reviews what agents changed instead of watching the whole video
+again. Every `ProjectSession` (the app, `tandem serve` and each headless
+command) has a `ReviewRecorder` that hears the coordinator's change events,
+which carry the project before and after. A committed batch whose author
+isn't Mike (`user`) or Tandem (`system`) is compared clip by clip
+(`ReviewDiff`) and recorded in the review log by ID: clips added, clips
+changed, transitions added or changed, and removals, which are marks at the
+join pinned to the clip after it. The take (the `cut` tracks) is the
+reference: its surviving media maps old times to new ones, so a clip that
+moved exactly as the take around it rode along with a ripple, the right
+half of a cut clip is the same clip, and only the join of a ripple delete
+is news. The log is saved to `.tandem/<name>.review.json` after each
+change, so it survives restarts, and because headless commands keep it too
+the app finds their edits when it opens the project (agent batches a crash
+left in the journal are caught up then). Later edits by anyone carry the
+highlights along (both halves of a cut clip stay highlighted), an undo or
+headless undo drops what it put back, and Mark reviewed in the app clears
+the log. `status` reports it as `reviewPending`; agents can't clear it.
+
+The app shows it from `TimelineDrawState.review`: a violet band on the
+ruler with a wedge at each stop, marks over the lanes in a view of their
+own (placed again only when the changes, the clips or the zoom move, and
+scrolled with the lanes, so the tiles never repaint for them), a toolbar
+chip, and Previous and Next agent change, which step the playhead.
 
 ### Ripple modes
 
@@ -457,9 +485,9 @@ Two modes:
   with relative paths. The original folder is left as it was. Left out:
   proxies, mattes, thumbnails and isolated voice, which Tandem makes again
   for what the edit uses (`--with-cache` keeps them); `node_modules`; lock
-  files, cache temporaries, and the archived projects' journals and headless
-  undo history (they describe the old paths); links to things outside the
-  folder. Transcripts, waveforms and loudness always go, and so do the
+  files, cache temporaries, and the archived projects' journals, headless
+  undo history (they describe the old paths) and review logs; links to
+  things outside the folder. Transcripts, waveforms and loudness always go, and so do the
   converted copies of video macOS can't decode (small, and making them
   again needs ffmpeg). Their cache keys
   come from the media fingerprints, which survive because copies keep

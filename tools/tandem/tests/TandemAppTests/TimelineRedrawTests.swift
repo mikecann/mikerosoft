@@ -108,6 +108,21 @@ final class TimelineDamageTests: XCTestCase {
         XCTAssertEqual(damage.laneRects[0].midY, lane.midY, accuracy: 0.01)
     }
 
+    /// Agent changes arriving, or marked reviewed, redraw the ruler's band
+    /// and place the marks over the lanes. The lanes don't repaint for them.
+    func testAReviewChangeRedrawsTheRulerAndMarksNotTheLanes() throws {
+        let f = try AppFixture()
+        let before = f.project
+        let revision = try f.coordinator.apply(EditBatch(label: "Whoosh", author: "claude", commands: [.placeMedia(mediaIDs: ["med_broll"], at: t(40), duration: t(2))])).revision
+        var log = ReviewLog()
+        log.record(label: "Whoosh", author: "claude", revision: revision, before: before, after: f.project)
+        var waiting = state(f)
+        waiting.review = TimelineReview.make(log: log, project: f.project)
+        XCTAssertFalse(waiting.review.isEmpty)
+        XCTAssertEqual(TimelineDamage.between(state(f), waiting, layout: layout(f), layoutChanged: false), TimelineDamage(ruler: true, review: true))
+        XCTAssertEqual(TimelineDamage.between(waiting, state(f), layout: layout(f), layoutChanged: false), TimelineDamage(ruler: true, review: true), "marked reviewed")
+    }
+
     func testSelectingATransitionRedrawsItsBand() throws {
         let f = try AppFixture()
         try f.blade(at: [10])
@@ -286,6 +301,102 @@ final class TimelineRedrawTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(TimelineLanesView.reshapeRest + 0.05))
         settle()
         XCTAssertGreaterThanOrEqual(draws("lanes"), 3, "the tiles in view")
+    }
+
+    // MARK: - Agent changes waiting for review
+
+    /// An agent's edit through the API, and the review log catching up.
+    private func agentPlacesAShot(at seconds: Double) throws {
+        try model.session.coordinator.apply(EditBatch(label: "Whoosh", author: "claude", commands: [.placeMedia(mediaIDs: ["med_broll"], at: t(seconds), duration: t(2))]))
+        for _ in 0..<50 {
+            let log = model.session.review.log
+            settle()
+            if model.reviewLog == log && !log.isEmpty { return }
+        }
+    }
+
+    /// The edit repaints the shot it added, like any edit; the review adds
+    /// the ruler's band and one placing of the marks, not lane paints.
+    func testAnAgentsEditRedrawsTheRulerAndPlacesItsMarksOnce() throws {
+        try showTimeline()
+        try agentPlacesAShot(at: 40)
+        XCTAssertEqual(model.review.editCount, 1)
+        XCTAssertGreaterThan(draws("ruler"), 0)
+        XCTAssertLessThan(paintedArea(), 0.1, "the 2 s shot, not the lanes")
+        XCTAssertEqual(DrawTiming.samples("review marks").count, 1)
+        let marks = try XCTUnwrap(timeline?.reviewOverlay.shownFrames)
+        XCTAssertEqual(marks.boxes.count, 1)
+        // The shot runs 40 to 42 s: 400 to 420 points, the mark just inside.
+        XCTAssertEqual(marks.boxes[0].minX, 403, accuracy: 1)
+        XCTAssertEqual(marks.boxes[0].maxX, 417, accuracy: 1)
+    }
+
+    /// Scrolling moves the marks with the lanes without placing them again.
+    func testScrollingMovesTheMarksWithoutPlacingThemAgain() throws {
+        try showTimeline()
+        try agentPlacesAShot(at: 40)
+        let before = try XCTUnwrap(timeline?.reviewOverlay.shownFrames.boxes.first)
+        DrawTiming.reset()
+        model.timeline.scale.scrollSeconds = 12
+        settle()
+        XCTAssertEqual(DrawTiming.samples("review marks").count, 0)
+        XCTAssertEqual(draws("headers"), 0)
+        XCTAssertEqual(draws("ruler"), 1)
+        XCTAssertLessThan(paintedArea(), 0.5)
+        let after = try XCTUnwrap(timeline?.reviewOverlay.shownFrames.boxes.first)
+        XCTAssertEqual(after.minX, before.minX - 120, accuracy: 0.5)
+    }
+
+    /// Mark reviewed redraws the ruler and hides the marks; the lanes and
+    /// headers don't draw.
+    func testMarkingReviewedRedrawsOnlyTheRuler() throws {
+        try showTimeline()
+        try agentPlacesAShot(at: 40)
+        DrawTiming.reset()
+        XCTAssertTrue(model.markAgentChangesReviewed())
+        settle()
+        XCTAssertEqual(draws("ruler"), 1)
+        XCTAssertEqual(draws("lanes"), 0)
+        XCTAssertEqual(draws("headers"), 0)
+        XCTAssertEqual(timeline?.reviewOverlay.isHidden, true)
+    }
+
+    /// Stepping to a change that's in view moves the playhead, a layer,
+    /// and draws nothing.
+    func testSteppingToAChangeInViewMovesOnlyThePlayhead() throws {
+        try showTimeline()
+        try agentPlacesAShot(at: 40)
+        DrawTiming.reset()
+        XCTAssertTrue(model.goToAgentChange(forward: true))
+        settle()
+        XCTAssertEqual(model.playhead, t(40))
+        XCTAssertEqual(draws("lanes"), 0)
+        XCTAssertEqual(draws("ruler"), 0)
+        XCTAssertEqual(draws("headers"), 0)
+        XCTAssertEqual(DrawTiming.samples("review marks").count, 0)
+    }
+
+    /// Resting on the ruler's band says who changed what there, in the
+    /// ruler's tooltip; off the band there's none.
+    func testHoveringTheReviewBandSaysWhoChangedWhat() throws {
+        try showTimeline()
+        try agentPlacesAShot(at: 40)
+        let ruler = try XCTUnwrap(timeline?.ruler)
+        // 40.5 s at 10 points a second.
+        hover(at: CGPoint(x: 405, y: 5), in: ruler)
+        let tip = try XCTUnwrap(ruler.toolTip)
+        XCTAssertTrue(tip.hasPrefix("Claude · Whoosh · "), tip)
+        hover(at: CGPoint(x: 100, y: 5), in: ruler)
+        XCTAssertNil(ruler.toolTip)
+    }
+
+    /// Sends a mouse move to `view` at `point` in its coordinates.
+    private func hover(at point: CGPoint, in view: NSView) {
+        guard let event = NSEvent.mouseEvent(
+            with: .mouseMoved, location: view.convert(point, to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0
+        ) else { return }
+        view.mouseMoved(with: event)
     }
 
     private var timeline: TimelineContainerView? { window?.contentView as? TimelineContainerView }

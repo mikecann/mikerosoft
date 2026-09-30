@@ -138,6 +138,6 @@ final class KeyboardRouter {
     static let repeatable: Set<EditorCommand> = [
         .stepBack, .stepForward, .stepBackFive, .stepForwardFive, .nudgeLeft, .nudgeRight,
         .nudgeLeftFive, .nudgeRightFive, .zoomIn, .zoomOut, .previousEdit, .nextEdit, .undo, .redo,
-        .previousKeyframe, .nextKeyframe
+        .previousKeyframe, .nextKeyframe, .previousAgentChange, .nextAgentChange
     ]
 }

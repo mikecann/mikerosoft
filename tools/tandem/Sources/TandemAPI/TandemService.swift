@@ -188,7 +188,8 @@ public final class TandemService: @unchecked Sendable {
             exports: running,
             recoveredEdits: session.recoveredEdits,
             apiVersion: TandemAPI.version,
-            warnings: fonts
+            warnings: fonts,
+            reviewPending: session.review.log.entries.map(PendingReview.init)
         )
     }
 
@@ -528,6 +529,7 @@ public final class TandemService: @unchecked Sendable {
             history.didUndo(at: revision, replaced: current, newRevision: newRevision)
         } else {
             history.didRedo(at: revision, replaced: current, newRevision: newRevision)
+            session.review.redid(label: entry.label, author: entry.author, revision: newRevision, before: current, after: entry.project)
         }
         return UndoResult(action: action, revision: newRevision, label: entry.label, author: entry.author)
     }

@@ -30,6 +30,11 @@ public final class ProjectCoordinator: @unchecked Sendable {
         public var revision: Int
         public var label: String
         public var author: String
+        /// The project either side of the change. Observers run inside the
+        /// coordinator and can't read it back, so the review log works out
+        /// what an agent's batch did from these.
+        public var before: Project?
+        public var after: Project?
     }
 
     private struct UndoEntry {
@@ -104,7 +109,7 @@ public final class ProjectCoordinator: @unchecked Sendable {
             )
             if let key = batch.idempotencyKey { idempotencyResults[key] = result }
             journal?.append(batch: batch, revision: _revision, seed: context.seed)
-            notify(ChangeEvent(kind: .edit, revision: _revision, label: batch.label, author: batch.author))
+            notify(ChangeEvent(kind: .edit, revision: _revision, label: batch.label, author: batch.author, before: before, after: working))
             return result
         }
     }
@@ -114,11 +119,12 @@ public final class ProjectCoordinator: @unchecked Sendable {
     public func undo() -> CommitResult? {
         queue.sync {
             guard let entry = undoStack.popLast() else { return nil }
+            let replaced = _project
             _project = entry.before
             _revision += 1
             redoStack.append(entry)
             journal?.appendSnapshot(project: _project, revision: _revision, reason: "undo \(entry.label)")
-            notify(ChangeEvent(kind: .undo, revision: _revision, label: entry.label, author: entry.author))
+            notify(ChangeEvent(kind: .undo, revision: _revision, label: entry.label, author: entry.author, before: replaced, after: _project))
             return CommitResult(revision: _revision, label: "Undo \(entry.label)", author: entry.author, createdIDs: [], warnings: [])
         }
     }
@@ -127,11 +133,12 @@ public final class ProjectCoordinator: @unchecked Sendable {
     public func redo() -> CommitResult? {
         queue.sync {
             guard let entry = redoStack.popLast() else { return nil }
+            let replaced = _project
             _project = entry.after
             _revision += 1
             undoStack.append(entry)
             journal?.appendSnapshot(project: _project, revision: _revision, reason: "redo \(entry.label)")
-            notify(ChangeEvent(kind: .redo, revision: _revision, label: entry.label, author: entry.author))
+            notify(ChangeEvent(kind: .redo, revision: _revision, label: entry.label, author: entry.author, before: replaced, after: _project))
             return CommitResult(revision: _revision, label: "Redo \(entry.label)", author: entry.author, createdIDs: [], warnings: [])
         }
     }
@@ -140,6 +147,7 @@ public final class ProjectCoordinator: @unchecked Sendable {
     /// disk while the app was closed. Clears undo history.
     public func reload(_ project: Project) {
         queue.sync {
+            let replaced = _project
             _project = project
             _revision += 1
             undoStack.removeAll()
@@ -147,7 +155,7 @@ public final class ProjectCoordinator: @unchecked Sendable {
             // Journaled like an undo: edits after this are relative to the
             // new project, so a replay after a crash has to start from it.
             journal?.appendSnapshot(project: project, revision: _revision, reason: "reload")
-            notify(ChangeEvent(kind: .reload, revision: _revision, label: "Reload", author: "system"))
+            notify(ChangeEvent(kind: .reload, revision: _revision, label: "Reload", author: "system", before: replaced, after: project))
         }
     }
 

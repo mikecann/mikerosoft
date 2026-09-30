@@ -58,14 +58,21 @@ public enum ProjectFile {
         supportFolder(for: projectURL).appendingPathComponent("\(projectURL.deletingPathExtension().lastPathComponent).undo.json")
     }
 
-    /// Clears the journal and undo history an earlier file of this name
-    /// left behind, for a file that takes its place (a new project, a
-    /// version saved over another, a fresh import). Both describe the old
-    /// file's timeline: replayed or undone onto the new one, they'd bring
-    /// the old one back.
+    /// `.tandem/<name>.review.json`: agent edits Mike hasn't reviewed yet
+    /// (see `ReviewLog`).
+    public static func reviewURL(for projectURL: URL) -> URL {
+        supportFolder(for: projectURL).appendingPathComponent("\(projectURL.deletingPathExtension().lastPathComponent).review.json")
+    }
+
+    /// Clears the journal, undo history and review log an earlier file of
+    /// this name left behind, for a file that takes its place (a new
+    /// project, a version saved over another, a fresh import). They
+    /// describe the old file's timeline: replayed or undone onto the new
+    /// one, they'd bring the old one back.
     public static func forgetHistory(of projectURL: URL) {
         ProjectJournal.forProject(at: projectURL).truncate()
         try? FileManager.default.removeItem(at: undoHistoryURL(for: projectURL))
+        try? FileManager.default.removeItem(at: reviewURL(for: projectURL))
     }
 
     private static func backup(_ url: URL, keep: Int?, now: Date = Date()) throws {
@@ -257,8 +264,13 @@ public final class ProjectJournal: @unchecked Sendable {
 
     /// Replays journal entries newer than `revision` on top of `project`.
     /// Returns the recovered project and revision, or nil if there was
-    /// nothing to recover.
-    public func recover(project: Project, revision: Int) -> (project: Project, revision: Int)? {
+    /// nothing to recover. `replayed` hears each entry that took, with the
+    /// project before and after it, so an agent's edits that never reached
+    /// a save still reach the review log.
+    public func recover(
+        project: Project, revision: Int,
+        replayed: ((_ entry: Entry, _ before: Project, _ after: Project) -> Void)? = nil
+    ) -> (project: Project, revision: Int)? {
         let pending = entries(after: revision)
         guard !pending.isEmpty else { return nil }
         var current = project
@@ -266,7 +278,9 @@ public final class ProjectJournal: @unchecked Sendable {
         for entry in pending {
             if let snapshot = entry.snapshot {
                 // A snapshot carries its own schema version.
+                let before = current
                 current = (try? ProjectFile.migrate(snapshot)) ?? snapshot
+                replayed?(entry, before, current)
             } else if let batch = entry.batch {
                 var context = EditContext(seed: entry.seed ?? 0)
                 var working = current
@@ -278,6 +292,7 @@ public final class ProjectJournal: @unchecked Sendable {
                     // "the preset's". Every edit before this one was that
                     // older Tandem's too, so the whole project reads its way.
                     if (entry.schemaVersion ?? 1) < 2 { LegacyTextStyles.upgrade(&working) }
+                    replayed?(entry, current, working)
                     current = working
                 } catch {
                     // A batch that no longer applies is skipped rather than

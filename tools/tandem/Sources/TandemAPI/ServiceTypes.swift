@@ -36,6 +36,30 @@ public struct OwnerInfo: Codable, Equatable, Sendable {
     }
 }
 
+/// An agent edit Mike hasn't reviewed in the app yet. The app highlights
+/// it on the timeline until he marks the agent edits reviewed.
+public struct PendingReview: Codable, Equatable, Sendable {
+    public var label: String
+    public var author: String
+    public var date: Date
+    /// Clips it added or changed that are still on the timeline.
+    public var clipIDs: [String]
+    /// How many places it took something out.
+    public var removals: Int
+
+    public init(label: String, author: String, date: Date, clipIDs: [String], removals: Int) {
+        self.label = label
+        self.author = author
+        self.date = date
+        self.clipIDs = clipIDs
+        self.removals = removals
+    }
+
+    init(_ entry: ReviewEntry) {
+        self.init(label: entry.label, author: entry.author, date: entry.date, clipIDs: entry.clipIDs, removals: entry.removals.count)
+    }
+}
+
 public struct StatusResult: Codable, Sendable {
     public var name: String
     public var path: String
@@ -66,6 +90,9 @@ public struct StatusResult: Codable, Sendable {
     /// What won't look right, with the fix: titles in a font that isn't
     /// installed. Optional so an older app's answer still reads.
     public var warnings: [String]?
+    /// Agent edits waiting for Mike's review, oldest first. Read-only:
+    /// only Mark reviewed in the app clears them. Nil from an older app.
+    public var reviewPending: [PendingReview]?
 }
 
 // MARK: - media

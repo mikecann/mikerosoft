@@ -574,12 +574,13 @@ public final class ProjectArchiver: @unchecked Sendable {
     static let rebuildableCache = Set([AnalysisKind.proxy, .matte, .thumbnails, .isolatedVoice].map(\.rawValue))
 
     private func walkFolder(_ plan: Plan) {
-        // Written by the run itself, with the new paths.
+        // Written by the run itself, with the new paths. A review log waits
+        // on this Mac's edits; the archive starts without one.
         var written: Set<String> = [ArchiveManifest.fileName]
         for entry in plan.projects {
             let name = entry.url.lastPathComponent
             let stem = entry.url.deletingPathExtension().lastPathComponent
-            written.formUnion([name, ".tandem/\(stem).journal.jsonl", ".tandem/\(stem).undo.json"])
+            written.formUnion([name, ".tandem/\(stem).journal.jsonl", ".tandem/\(stem).undo.json", ".tandem/\(stem).review.json"])
         }
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey]
         var folders: [(URL, String)] = [(plan.source.root, "")]

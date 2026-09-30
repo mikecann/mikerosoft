@@ -51,6 +51,9 @@ enum Theme {
     /// Text and icons drawn on amber.
     static let onAmber = Swatch(0x0C0D0F)
     static let green = Swatch(0x5CC98F)
+    /// Agent edits waiting for review: a soft violet, clear of the amber
+    /// that selection and markers use.
+    static let agent = Swatch(0xA78BFA)
     static let red = Swatch(0xE5484D)
     static let sliderTrack = Swatch(0x2A2E33)
     static let sliderFill = Swatch(0xAEB3B9)
