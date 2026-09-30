@@ -69,7 +69,6 @@ struct EditorRootView: View {
                 }
             }
         }
-        .tipLayer()
         .background(Theme.window.color)
         .ignoresSafeArea()
         .preferredColorScheme(.dark)

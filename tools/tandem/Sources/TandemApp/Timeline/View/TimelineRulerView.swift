@@ -2,17 +2,15 @@ import AppKit
 import QuartzCore
 import TandemCore
 
-/// Time labels, ticks, markers and the in and out range. Click or drag to
-/// move the playhead; drag a marker to move it; double-click one to rename.
+/// Time labels, ticks, markers, the in and out range and the band over
+/// agent changes waiting for review. Click or drag to move the playhead;
+/// drag a marker to move it; double-click one to rename.
 @MainActor
 final class TimelineRulerView: TimelineChildView {
     private var model: EditorModel? { container?.model }
     private var draggingMarker: (id: String, offset: Double)?
     private var markerPreview: Time?
     private var trackingArea: NSTrackingArea?
-    /// The review band's tip showing, and the owner it shows under, so
-    /// moving on to another stretch swaps the words.
-    private var reviewTip: (text: String, owner: UUID)?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -20,7 +18,7 @@ final class TimelineRulerView: TimelineChildView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect, .cursorUpdate], owner: self)
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect, .cursorUpdate], owner: self)
         addTrackingArea(area)
         trackingArea = area
     }
@@ -33,38 +31,21 @@ final class TimelineRulerView: TimelineChildView {
         updateCursor(event)
     }
 
-    override func mouseExited(with event: NSEvent) {
-        endReviewTip()
-    }
-
     private func updateCursor(_ event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         (marker(at: point) != nil ? CursorKind.grab : .arrow).set()
-        updateReviewTip(at: point, event: event)
+        updateReviewToolTip(at: point)
     }
 
-    /// Over the review band, who changed what there and when, as a tip
-    /// like the rest of the app's.
-    private func updateReviewTip(at point: CGPoint, event: NSEvent) {
-        guard let container, let root = window?.contentView else { return }
+    /// Over the review band, who changed what there and when: the ruler's
+    /// tooltip, as the lanes' clips have theirs.
+    private func updateReviewToolTip(at point: CGPoint) {
+        guard let container else { return }
         let scale = container.drawScale
         let slop = scale.duration(forPixels: ReviewBand.minimumWidth / 2 + 1)
         let edits = container.drawState.review.edits(at: Time(seconds: scale.seconds(atX: point.x)), slop: slop)
-        guard !edits.isEmpty else { return endReviewTip() }
-        let text = TimelineReview.tooltip(for: edits)
-        if reviewTip?.text != text {
-            endReviewTip()
-            reviewTip = (text, UUID())
-        }
-        // Tips are placed in the window's top-left points.
-        var at = root.convert(event.locationInWindow, from: nil)
-        if !root.isFlipped { at.y = root.bounds.height - at.y }
-        if let owner = reviewTip?.owner { TipCenter.shared.hover(text, owner: owner, at: at) }
-    }
-
-    private func endReviewTip() {
-        if let owner = reviewTip?.owner { TipCenter.shared.leave(owner: owner) }
-        reviewTip = nil
+        let tip = edits.isEmpty ? nil : TimelineReview.tooltip(for: edits)
+        if toolTip != tip { toolTip = tip }
     }
 
     override func draw(_ dirtyRect: NSRect) {

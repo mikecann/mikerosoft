@@ -376,21 +376,18 @@ final class TimelineRedrawTests: XCTestCase {
         XCTAssertEqual(DrawTiming.samples("review marks").count, 0)
     }
 
-    /// Resting on the ruler's band says who changed what there, as a tip
-    /// like the rest of the app's; moving off it puts the tip away.
+    /// Resting on the ruler's band says who changed what there, in the
+    /// ruler's tooltip; off the band there's none.
     func testHoveringTheReviewBandSaysWhoChangedWhat() throws {
         try showTimeline()
         try agentPlacesAShot(at: 40)
         let ruler = try XCTUnwrap(timeline?.ruler)
-        TipCenter.shared.hide()
-        defer { TipCenter.shared.hide() }
         // 40.5 s at 10 points a second.
         hover(at: CGPoint(x: 405, y: 5), in: ruler)
-        RunLoop.main.run(until: Date().addingTimeInterval(TipCenter.delay + 0.2))
-        let shown = try XCTUnwrap(TipCenter.shared.shown)
-        XCTAssertTrue(shown.text.hasPrefix("Claude · Whoosh · "), shown.text)
+        let tip = try XCTUnwrap(ruler.toolTip)
+        XCTAssertTrue(tip.hasPrefix("Claude · Whoosh · "), tip)
         hover(at: CGPoint(x: 100, y: 5), in: ruler)
-        XCTAssertNil(TipCenter.shared.shown)
+        XCTAssertNil(ruler.toolTip)
     }
 
     /// Sends a mouse move to `view` at `point` in its coordinates.
