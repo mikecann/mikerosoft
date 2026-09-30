@@ -226,6 +226,7 @@ struct SubTab: View {
     let selected: Bool
     var size: CGFloat = 13
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -237,10 +238,11 @@ struct SubTab: View {
                 Text(title)
                     .font(.ui(size, selected ? .bold : .regular))
             }
-            .foregroundStyle(selected ? Theme.text.color : Theme.textFaint.color)
+            .foregroundStyle(selected ? Theme.text.color : (hovering ? Theme.textMuted.color : Theme.textFaint.color))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .pointerHover { hovering = $0 }
     }
 }
 
@@ -280,7 +282,7 @@ struct LibraryTile<Preview: View>: View {
         }
         .frame(width: width, alignment: .leading)
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
+        .pointerHover { hovering = $0 }
         .onTapGesture(count: 2, perform: add)
         .onTapGesture(count: 1, perform: select)
         .onDrag {

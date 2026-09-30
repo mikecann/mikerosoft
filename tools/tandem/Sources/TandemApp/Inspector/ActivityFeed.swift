@@ -105,6 +105,6 @@ private struct ActivityRow: View {
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(entry.isAgent && latest ? Theme.field.color : .clear))
-        .onHover { hovering = $0 }
+        .pointerHover { hovering = $0 }
     }
 }

@@ -328,11 +328,8 @@ private struct TransitionPreview: View {
                 draw(in: &context, size: size, progress: hoverProgress ?? restingProgress)
             }
             .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let point): hoverProgress = min(max(point.x / max(geometry.size.width, 1), 0), 1)
-                case .ended: hoverProgress = nil
-                }
+            .pointerMoves { point in
+                hoverProgress = point.map { min(max($0.x / max(geometry.size.width, 1), 0), 1) }
             }
         }
     }

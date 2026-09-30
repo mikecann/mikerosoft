@@ -134,7 +134,7 @@ private struct PanelDivider: View {
                         .frame(width: vertical ? Self.grab : nil, height: vertical ? nil : Self.grab)
                         .contentShape(Rectangle())
                         .pointerStyle(vertical ? .columnResize : .rowResize)
-                        .onHover { hovering = $0 }
+                        .pointerHover { hovering = $0 }
                         .onTapGesture(count: 2, perform: onReset)
                         .gesture(
                             DragGesture(minimumDistance: 1, coordinateSpace: .global)
@@ -180,18 +180,7 @@ struct TopBar: View {
                 .allowsHitTesting(false)
             Spacer(minLength: 12)
             AgentChip(model: model)
-            Button {
-                model.showExportSheet = true
-            } label: {
-                Text("Export")
-                    .font(.ui(12.5, .bold))
-                    .foregroundStyle(Theme.onAmber.color)
-                    .padding(.horizontal, 14)
-                    .frame(height: 28)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Theme.amber.color))
-            }
-            .buttonStyle(.plain)
-            .tip(Shortcuts.help("Export the video", .export))
+            ExportButton { model.showExportSheet = true }
         }
         .padding(.leading, 16)
         .padding(.trailing, 14)
@@ -205,6 +194,27 @@ struct TopBar: View {
             }
         }
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border.color).frame(height: 1).allowsHitTesting(false) }
+    }
+}
+
+/// The amber Export button, a shade lighter under the pointer.
+private struct ExportButton: View {
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("Export")
+                .font(.ui(12.5, .bold))
+                .foregroundStyle(Theme.onAmber.color)
+                .padding(.horizontal, 14)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Theme.amber.color))
+                .brightness(hovering ? 0.08 : 0)
+        }
+        .buttonStyle(.plain)
+        .pointerHover { hovering = $0 }
+        .tip(Shortcuts.help("Export the video", .export))
     }
 }
 
@@ -266,6 +276,7 @@ private struct LibraryTabButton: View {
             }
             .padding(.vertical, showsLabel ? 5 : 7)
             .frame(maxWidth: .infinity)
+            .hoverBackground(Theme.tabSelected.color.opacity(0.55), cornerRadius: 7, when: !selected)
             .background(RoundedRectangle(cornerRadius: 7).fill(selected ? Theme.tabSelected.color : .clear))
             .contentShape(Rectangle())
         }

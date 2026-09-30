@@ -93,14 +93,20 @@ struct ToggleText: View {
     let on: Bool
     var help: String = ""
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             Text(title)
                 .font(.ui(11.5))
-                .foregroundStyle(on ? Theme.text.color : Theme.textMuted.color)
+                .foregroundStyle(on || hovering ? Theme.text.color : Theme.textMuted.color)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .hoverBackground(Theme.tabSelected.color.opacity(0.6), cornerRadius: 4)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .pointerHover { hovering = $0 }
         .tip(help)
     }
 }
@@ -115,6 +121,7 @@ private struct ToolButton: View {
             ToolIcon(tool: tool, color: selected ? Theme.text.color : Theme.textMuted.color)
                 .frame(width: 13, height: 12)
                 .frame(width: 28, height: 24)
+                .hoverBackground(Theme.tabSelected.color.opacity(0.6), cornerRadius: 5, when: !selected)
                 .background(RoundedRectangle(cornerRadius: 5).fill(selected ? Theme.tabSelected.color : .clear))
                 .contentShape(Rectangle())
         }

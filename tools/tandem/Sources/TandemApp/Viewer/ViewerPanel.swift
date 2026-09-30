@@ -129,7 +129,8 @@ private struct TransportIcon: View {
             Image(systemName: name)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textMuted.color)
-                .frame(width: 20, height: 20)
+                .frame(width: 26, height: 24)
+                .hoverBackground(Theme.tabSelected.color, cornerRadius: 5)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

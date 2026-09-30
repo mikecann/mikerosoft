@@ -85,6 +85,7 @@ private struct InspectorTabButton: View {
     let available: Bool
     let showsTitle: Bool
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -97,7 +98,7 @@ private struct InspectorTabButton: View {
                         .lineLimit(1)
                 }
             }
-            .foregroundStyle(selected ? Theme.text.color : Theme.textFaint.color)
+            .foregroundStyle(selected ? Theme.text.color : (hovering && available ? Theme.textMuted.color : Theme.textFaint.color))
             .opacity(available ? 1 : 0.4)
             .padding(.bottom, 2)
             .overlay(alignment: .bottom) {
@@ -107,6 +108,7 @@ private struct InspectorTabButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!available)
+        .pointerHover { hovering = $0 }
         .tip(help)
     }
 

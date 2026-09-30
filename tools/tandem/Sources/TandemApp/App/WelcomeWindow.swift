@@ -196,7 +196,7 @@ private struct RecentRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .pointerHover { hovering = $0 }
     }
 }
 

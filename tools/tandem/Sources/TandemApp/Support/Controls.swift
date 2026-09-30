@@ -160,7 +160,7 @@ struct ScrubbableNumber: View {
                     .padding(.vertical, 1)
                     .background(RoundedRectangle(cornerRadius: 4).fill(hovering || scrubbed != nil ? Theme.field.color : .clear))
                     .contentShape(Rectangle())
-                    .onHover { hovering = $0 }
+                    .pointerHover { hovering = $0 }
                     .pointerStyle(.columnResize)
                     .gesture(scrub)
                     .tip(ifAny: help)
@@ -237,6 +237,7 @@ struct IconButton: View {
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(enabled ? Theme.textMuted.color : Theme.textFainter.color.opacity(0.6))
                 .frame(width: 18, height: 18)
+                .hoverBackground(Theme.tabSelected.color, cornerRadius: 4, when: enabled)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -459,6 +460,7 @@ struct OutlineButton: View {
                 .foregroundStyle(Theme.text.color)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
+                .hoverBackground(Theme.tabSelected.color, cornerRadius: 5)
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.buttonBorder.color, lineWidth: 1))
                 .contentShape(Rectangle())
         }

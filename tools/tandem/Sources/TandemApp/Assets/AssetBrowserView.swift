@@ -462,7 +462,7 @@ private struct AssetActions: ViewModifier {
     func body(content: Content) -> some View {
         let host = AssetLibraryHost.shared
         content
-            .onHover { inside in
+            .pointerHover { inside in
                 if inside {
                     host.hovered = asset
                 } else if host.hovered?.id == asset.id {
@@ -561,12 +561,11 @@ private struct AssetTile: View {
                 if SharedChip.shows(asset) { SharedChip().padding(4) }
             }
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(hovering ? Theme.textFaint.color : .clear, lineWidth: 1))
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let point):
+            .pointerMoves { point in
+                if let point {
                     hovering = true
                     scrub(to: point.x / 82)
-                case .ended:
+                } else {
                     hovering = false
                     frame = nil
                 }
@@ -660,13 +659,12 @@ struct AssetAudioRow: View {
             GeometryReader { geometry in
                 WaveformStripView(asset: asset, peaks: peaks, hoverFraction: hoverFraction)
                     .contentShape(Rectangle())
-                    .onContinuousHover { phase in
-                        switch phase {
-                        case .active(let point):
+                    .pointerMoves { point in
+                        if let point {
                             let fraction = min(max(point.x / max(geometry.size.width, 1), 0), 1)
                             hoverFraction = fraction
                             audition(from: fraction)
-                        case .ended:
+                        } else {
                             hoverFraction = nil
                             lastAudition = nil
                             if host.media.auditioning == asset.id { host.media.stopAudition() }
@@ -680,7 +678,7 @@ struct AssetAudioRow: View {
         .padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 7).fill(hovering ? Theme.rowSelected.color : Theme.raised.color))
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
+        .pointerHover { hovering = $0 }
         .modifier(AssetActions(model: model, asset: asset))
         .task(id: asset.id + asset.state.rawValue) {
             peaks = await host.media.waveform(for: asset, allowDownload: false)
@@ -734,7 +732,7 @@ private struct AssetFontRow: View {
         .padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 7).fill(hovering ? Theme.rowSelected.color : Theme.raised.color))
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
+        .pointerHover { hovering = $0 }
         .modifier(AssetActions(model: model, asset: asset))
         .task(id: asset.id + asset.state.rawValue) { face = await host.fontFace(for: asset) }
     }
