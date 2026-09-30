@@ -199,6 +199,21 @@ final class TransitionSoundTests: XCTestCase {
         assertValid(c.project)
     }
 
+    /// A ripple that takes all of the sound but leaves the transition (the
+    /// clips still meet, at the new cut) brings the sound back with it.
+    func testARippleThatSwallowsTheSoundBringsItBack() throws {
+        let (_, c, left, right) = try cutTake()
+        try push(c, left, right)
+        let soundID = try XCTUnwrap(sound(c)).id
+        try c.run("Tighten", .rippleDeleteRange(range: TimeRange(start: t(29.5), end: t(30.7))))
+        XCTAssertNotNil(transition(c), "the clips meet at 29.5 now")
+        let clip = try XCTUnwrap(sound(c))
+        XCTAssertEqual(clip.id, soundID)
+        XCTAssertEqual(clip.start, t(29.11), "0.39 s before the new cut")
+        XCTAssertEqual(clip.duration, t(1))
+        assertValid(c.project)
+    }
+
     func testMovingBothClipsCarriesTheSound() throws {
         let (_, c, left, right) = try cutTake()
         try push(c, left, right)
@@ -330,6 +345,15 @@ final class TransitionSoundTests: XCTestCase {
 
         XCTAssertThrowsError(try update(.object(["mediaID": .string("med_swoosh"), "volume": .number(3)])))
         XCTAssertThrowsError(try update(.string("swoosh")))
+    }
+
+    func testALockedSoundCantBeChanged() throws {
+        let (_, c, left, right) = try cutTake()
+        try push(c, left, right)
+        try c.run("Lock", .updateTrack(trackID: c.project.track(named: "SFX")!.id, patch: .object(["locked": .bool(true)])))
+        XCTAssertThrowsError(try c.run("Gain", .updateTransition(transitionID: "tr_p", patch: .object(["sound": .object(["gainDB": .number(-10)])]))))
+        XCTAssertThrowsError(try c.run("None", .updateTransition(transitionID: "tr_p", patch: .object(["sound": .null]))))
+        XCTAssertEqual(sound(c)?.audio?.gainDB, -23.3)
     }
 
     func testTheSoundIsChangedWithSoundNotItsClipID() throws {

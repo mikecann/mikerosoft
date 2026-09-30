@@ -1071,6 +1071,14 @@ final class TimelineLanesView: TimelineChildView {
                 }
             }
         }
+        menu.addSubmenu("Sound", icon: "speaker.wave.2") { sub in
+            sub.add("None", checked: transition.soundClipID == nil) {
+                TransitionSoundActions.setSound(.none, of: transitionID, in: model)
+            }
+            sub.add(TransitionSoundText.defaultItem(transition.type, choices: [])) {
+                TransitionSoundActions.setSound(.typeDefault, of: transitionID, in: model)
+            }
+        }
         menu.addItem(.separator())
         menu.add("Delete transition", icon: "trash") {
             model.apply(EditBatch(label: "Remove transition", commands: [.removeTransition(transitionID: transitionID)]))
