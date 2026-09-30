@@ -31,7 +31,19 @@ final class TimelineRulerView: TimelineChildView {
     }
 
     private func updateCursor(_ event: NSEvent) {
-        (marker(at: convert(event.locationInWindow, from: nil)) != nil ? CursorKind.grab : .arrow).set()
+        let point = convert(event.locationInWindow, from: nil)
+        (marker(at: point) != nil ? CursorKind.grab : .arrow).set()
+        updateReviewToolTip(at: point)
+    }
+
+    /// Over the review band, who changed what there and when.
+    private func updateReviewToolTip(at point: CGPoint) {
+        guard let container else { return }
+        let scale = container.drawScale
+        let slop = scale.duration(forPixels: ReviewBand.minimumWidth / 2 + 1)
+        let edits = container.drawState.review.edits(at: Time(seconds: scale.seconds(atX: point.x)), slop: slop)
+        let tip = edits.isEmpty ? nil : TimelineReview.tooltip(for: edits)
+        if toolTip != tip { toolTip = tip }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -45,6 +57,7 @@ final class TimelineRulerView: TimelineChildView {
         let rate = state.frameRate
         context.setFillColor(Theme.window.cg)
         context.fill(bounds)
+        ReviewBand.draw(state.review, scale: scale, in: bounds, context: context)
 
         // In to out.
         if state.inPoint != nil || state.outPoint != nil {

@@ -80,6 +80,10 @@ enum MainMenu {
             add(timeline, command, keymap)
         }
         timeline.addItem(.separator())
+        for command: EditorCommand in [.previousAgentChange, .nextAgentChange, .markAgentChangesReviewed] {
+            add(timeline, command, keymap)
+        }
+        timeline.addItem(.separator())
         for command: EditorCommand in [.toggleKeyframe, .previousKeyframe, .nextKeyframe] {
             add(timeline, command, keymap)
         }

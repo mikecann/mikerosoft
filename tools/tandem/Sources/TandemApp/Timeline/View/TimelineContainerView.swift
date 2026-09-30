@@ -14,6 +14,8 @@ final class TimelineContainerView: NSView {
     let lanes = TimelineLanesView()
     let corner = TimelineCornerView()
     let scroller = TimelineScrollerView()
+    /// Agent changes waiting for review, marked over the lanes.
+    let reviewOverlay = ReviewOverlayView()
     private let playheadView = PlayheadView()
     private(set) var artwork: MediaArtwork
     private var loops: [ObservationLoop] = []
@@ -47,6 +49,8 @@ final class TimelineContainerView: NSView {
             view.container = self
             addSubview(view)
         }
+        reviewOverlay.container = self
+        addSubview(reviewOverlay)
         addSubview(playheadView)
         model.timeline.playheadX = { [weak self] in
             guard let self else { return nil }
@@ -99,6 +103,7 @@ final class TimelineContainerView: NSView {
             previewPending = false
             if relayoutLanes() { headers.needsDisplay = true }
             lanes.previewDidChange()
+            reviewOverlay.update()
         }
     }
 
@@ -126,6 +131,7 @@ final class TimelineContainerView: NSView {
             scroller.needsDisplay = true
         }
         positionPlayhead()
+        reviewOverlay.update()
         // A new track opens its name for typing.
         if model.timeline.renamingTrackID != nil { headers.syncRename() }
     }
@@ -183,6 +189,7 @@ final class TimelineContainerView: NSView {
         headers.frame = CGRect(x: 0, y: rulerHeight, width: header, height: tracksHeight)
         lanes.frame = CGRect(x: header, y: rulerHeight, width: max(0, bounds.width - header), height: tracksHeight)
         scroller.frame = CGRect(x: header, y: rulerHeight + tracksHeight, width: max(0, bounds.width - header), height: barHeight)
+        reviewOverlay.frame = lanes.frame
         let width = lanes.bounds.width
         if abs(model.timeline.lanesWidth - width) > 0.5 { model.timeline.lanesWidth = width }
         if model.timeline.fitPending && width > 200 {

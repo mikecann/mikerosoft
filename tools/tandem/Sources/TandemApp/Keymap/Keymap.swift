@@ -27,6 +27,8 @@ enum EditorCommand: String, CaseIterable, Codable {
     case toolSelect, toolBlade, toolRippleTrim, toolRoll, toolSlip, toolSlide
     // Viewer
     case toggleSafeMargins, toggleProxy
+    // Review
+    case previousAgentChange, nextAgentChange, markAgentChangesReviewed
     // Project
     case undo, redo, save, saveVersion, export, newProject, openProject
 
@@ -95,6 +97,9 @@ enum EditorCommand: String, CaseIterable, Codable {
         case .toolSlide: return "Slide tool"
         case .toggleSafeMargins: return "Safe margins"
         case .toggleProxy: return "Use proxies"
+        case .previousAgentChange: return "Previous agent change"
+        case .nextAgentChange: return "Next agent change"
+        case .markAgentChangesReviewed: return "Mark agent edits reviewed"
         case .undo: return "Undo"
         case .redo: return "Redo"
         case .save: return "Save"

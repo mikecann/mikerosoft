@@ -37,7 +37,7 @@ result. Errors go to standard error with exit code 1 (2 for usage
 mistakes); with `--json` the error is printed as `{"error": {...}}`.
 
 ```
-tandem status                      revision, length, who has it open, jobs, missing fonts
+tandem status                      revision, length, who has it open, jobs, missing fonts, edits waiting for review
 tandem timeline [--summary] [--from T] [--to T] [--words] [--json]
 tandem media [--refresh]           files, clip counts, analysis status
 tandem transcript [<clip or media id>] [--from T] [--to T]
@@ -1539,6 +1539,16 @@ still when it's beside it. It's one undo step.
 - `tandem watch --once` (MCP `watch`) waits until the project changes, for
   example after asking Mike to fix something in the app. `tandem watch`
   prints every change as it happens.
+- Mike reviews your edits in the app rather than watching the whole video
+  again: every batch that changes the timeline and isn't his is
+  highlighted there (the clips it added or changed, a mark where it took
+  something out) until he marks them reviewed, and he steps from one to
+  the next. Label batches with what they do (`"B-roll over the config
+  file"`), since that's what he reads when he hovers one.
+- `tandem status` lists your edits still waiting for him as `waiting for
+  Mike's review` (`reviewPending` in JSON: each edit's label, author, date
+  and the clip IDs it added or changed). It's read-only; only Mike clears
+  it, from the app.
 
 ## Operations
 

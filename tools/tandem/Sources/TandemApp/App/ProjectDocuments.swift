@@ -189,6 +189,9 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
             // bring back its old edits.
             ProjectFile.forgetHistory(of: target)
             try ProjectFile.save(moved, revision: revision, to: target)
+            // Agent edits waiting for review go with Mike to the version he
+            // carries on in; its clips keep their IDs.
+            try? model.session.review.log.save(to: ProjectFile.reviewURL(for: target))
         } catch {
             alert("Couldn't save the version", EditorModel.describe(error))
             return nil

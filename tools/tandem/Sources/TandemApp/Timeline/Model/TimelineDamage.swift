@@ -22,6 +22,9 @@ struct TimelineDrawState {
     var outPoint: Time?
     var renamingTrackID: String?
     var artworkRevision: Int
+    /// Agent changes waiting for review: the ruler's band and the marks
+    /// over the lanes.
+    var review: TimelineReview = .empty
 
     var frameRate: FrameRate { project.settings.frameRate }
 }
@@ -35,7 +38,7 @@ extension TimelineDrawState {
             showTranscript: model.showTranscript, selection: model.selection,
             selectedTransitionID: model.selectedTransitionID, selectedKeyframe: model.selectedKeyframe,
             inPoint: model.inPoint, outPoint: model.outPoint, renamingTrackID: model.timeline.renamingTrackID,
-            artworkRevision: model.artworkRevision
+            artworkRevision: model.artworkRevision, review: model.review
         )
     }
 }
@@ -57,8 +60,11 @@ struct TimelineDamage: Equatable {
     var lanesEdited = false
     /// Parts of the lanes, in their view coordinates.
     var laneRects: [CGRect] = []
+    /// The agent changes waiting for review changed: the marks over the
+    /// lanes (a layer of their own) and the ruler's band, not the lanes.
+    var review = false
 
-    var isEmpty: Bool { !ruler && !headers && !allLanes && !lanesMoved && !lanesReshaped && !lanesEdited && laneRects.isEmpty }
+    var isEmpty: Bool { !ruler && !headers && !allLanes && !lanesMoved && !lanesReshaped && !lanesEdited && laneRects.isEmpty && !review }
 
     /// What changed from `old` to `new`. `layoutChanged` says whether the
     /// lanes moved (heights, tracks added, the transcript lane shown).
@@ -94,6 +100,10 @@ struct TimelineDamage: Equatable {
         }
         if old.renamingTrackID != new.renamingTrackID { damage.headers = true }
         if old.artworkRevision != new.artworkRevision { damage.allLanes = true }
+        if old.review != new.review {
+            damage.ruler = true
+            damage.review = true
+        }
         if !damage.allLanes {
             damage.laneRects = selectionRects(from: old, to: new, layout: layout)
         }

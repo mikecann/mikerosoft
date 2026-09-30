@@ -142,6 +142,13 @@ final class EditorModel {
     @ObservationIgnored private var apiHost: TandemAPIHost?
     @ObservationIgnored private var apiStopped = false
 
+    // Review
+    /// Agent edits Mike hasn't reviewed yet, from the session's review log.
+    private(set) var reviewLog = ReviewLog()
+    /// The same, placed on the timeline as it is now.
+    private(set) var review = TimelineReview.empty
+    @ObservationIgnored private var reviewToken: UUID?
+
     @ObservationIgnored private var lastScan: Date = .distantPast
     @ObservationIgnored private var scanning = false
     @ObservationIgnored private var observerToken: UUID?
@@ -169,6 +176,13 @@ final class EditorModel {
                 MainActor.assumeIsolated { self?.jobsChanged(jobs) }
             }
         }
+        // Listening first, so a change landing between the two isn't missed.
+        reviewToken = session.review.observe { [weak self] log in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.reviewChanged(log) }
+            }
+        }
+        reviewChanged(session.review.log)
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -206,6 +220,7 @@ final class EditorModel {
         stopAPI()
         if let observerToken { session.coordinator.removeObserver(observerToken) }
         if let jobToken { session.analysis.removeObserver(jobToken) }
+        if let reviewToken { session.review.removeObserver(reviewToken) }
         dirtyTimer?.invalidate()
         playback.invalidate()
         exports.cancelAll()
@@ -375,8 +390,26 @@ final class EditorModel {
             selectedKeyframe = still.isEmpty ? nil : KeyframeRef(clipID: keyframe.clipID, time: keyframe.time, parameters: still)
         }
         if let id = selectedTransitionID, project.location(ofTransition: id) == nil { selectedTransitionID = nil }
+        placeReview()
         playback.projectChanged(duration: project.duration, frameRate: project.settings.frameRate)
         checkFonts()
+    }
+
+    // MARK: - Review
+
+    /// The review log changed: an agent's edit arrived, an undo put one
+    /// back, or Mike marked them reviewed.
+    func reviewChanged(_ log: ReviewLog) {
+        guard log != reviewLog else { return }
+        reviewLog = log
+        placeReview()
+    }
+
+    /// Places the log's changes on the timeline as it is now, so the
+    /// highlights follow their clips.
+    private func placeReview() {
+        let placed = TimelineReview.make(log: reviewLog, project: project)
+        if placed != review { review = placed }
     }
 
     // MARK: - Fonts
