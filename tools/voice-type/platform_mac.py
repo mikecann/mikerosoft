@@ -346,6 +346,11 @@ def get_foreground_monitor_work_area() -> tuple[int, int, int, int]:
 # handle Cmd+V, and restoring the old clipboard before it reads would paste
 # the wrong thing, or nothing. If the target never reads it, the paste didn't
 # land, so the text is left on the clipboard for a manual Cmd+V.
+#
+# A read alone doesn't prove the paste landed. Chromium apps (Claude, ChatGPT,
+# Slack) read the clipboard on Cmd+V even when nothing editable has focus, so
+# once the text is read, Accessibility is asked what has focus. If it isn't
+# a text box, the text is left on the clipboard too.
 # ---------------------------------------------------------------------------
 
 # macOS virtual keycodes
@@ -356,6 +361,11 @@ _VK_BACKSPACE = 51   # Delete / Backspace
 _TEXT_TYPE = "public.utf8-plain-text"  # NSPasteboardTypeString
 _PASTE_READ_TIMEOUT = 2.0
 _PASTE_FAILED_SOUND = "/System/Library/Sounds/Funk.aiff"
+
+_EDITABLE_ROLES = frozenset({"AXTextArea", "AXTextField", "AXComboBox"})
+_AX_TIMEOUT = 0.25     # per Accessibility call, so a busy app can't stall pasting
+_TEXT_BOX_WAIT = 0.5   # for an app to move a stray paste into its text box
+_FOCUS_POLL = 0.025
 
 
 def _post_events(vk_sequence: list[tuple[int, bool, int]]) -> None:
@@ -452,19 +462,30 @@ def _lazy_text_item(text: str, on_read: Callable[[], None]):
     return item
 
 
+def _leave_on_clipboard(pasteboard, text: str, offered: int) -> None:
+    # Leave anything copied since the paste alone.
+    if pasteboard.changeCount() == offered:
+        # A plain string, so a manual Cmd+V (or a late read) still gets the text.
+        pasteboard.clearContents()
+        pasteboard.setString_forType_(text, _TEXT_TYPE)
+
+
 def _paste_via_pasteboard(
     pasteboard,
     text: str,
     post_paste: Callable[[], None],
     *,
+    landed: Callable[[], bool] | None = None,
     make_item=None,
     item_class=None,
     timeout: float = _PASTE_READ_TIMEOUT,
-) -> float | None:
+) -> tuple[float | None, bool]:
     """Paste `text` and restore the old clipboard once the target has read it.
 
-    Returns the seconds the target took to read the text, or None if it never
-    did, in which case the text is left on the clipboard.
+    `landed` is asked, once the target has read the text, whether it went into
+    a text box. Returns the seconds the target took to read the text (None if
+    it never did) and whether the paste landed. If it didn't, the text is left
+    on the clipboard.
     """
     import time
     if make_item is None:
@@ -480,18 +501,91 @@ def _paste_via_pasteboard(
     started = time.perf_counter()
     post_paste()
     if not read.wait(timeout):
-        # A plain string, so a manual Cmd+V (or a late read) still gets the text.
-        pasteboard.clearContents()
-        pasteboard.setString_forType_(text, _TEXT_TYPE)
-        return None
+        _leave_on_clipboard(pasteboard, text, offered)
+        return None, False
     latency = time.perf_counter() - started
 
     # The provider hands the data over when its callback returns.
     time.sleep(0.05)
+    if landed is not None and not landed():
+        _leave_on_clipboard(pasteboard, text, offered)
+        return latency, False
     # Leave anything copied since the paste alone.
     if pasteboard.changeCount() == offered:
         _restore_pasteboard(pasteboard, snapshot, item_class)
-    return latency
+    return latency, True
+
+
+def _classify_focus(role: str | None, value_settable: bool) -> str:
+    """Sort a focused element into "editable", "not-editable" or "unknown"."""
+    if not role:
+        return "unknown"
+    if role in _EDITABLE_ROLES or value_settable:
+        return "editable"
+    return "not-editable"
+
+
+def _focused_element(pid: int | None) -> tuple[str, str | None]:
+    """Classify the element with keyboard focus in app `pid`, and give its role."""
+    if pid is None:
+        return "unknown", None
+    try:
+        from ApplicationServices import (
+            AXUIElementCopyAttributeValue,
+            AXUIElementCreateApplication,
+            AXUIElementIsAttributeSettable,
+            AXUIElementSetMessagingTimeout,
+        )
+
+        app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, _AX_TIMEOUT)
+        err, element = AXUIElementCopyAttributeValue(app, "AXFocusedUIElement", None)
+        # A Chromium app that isn't frontmost, or has only just started, may
+        # report no focus at all. That can't be told apart from a real miss.
+        if err or element is None:
+            return "unknown", None
+        AXUIElementSetMessagingTimeout(element, _AX_TIMEOUT)
+        err, role = AXUIElementCopyAttributeValue(element, "AXRole", None)
+        if err:
+            return "unknown", None
+        err, settable = AXUIElementIsAttributeSettable(element, "AXValue", None)
+        return _classify_focus(role, not err and bool(settable)), role
+    except Exception:
+        return "unknown", None
+
+
+def _wait_for_text_box(
+    pid: int | None,
+    *,
+    read_focus: Callable[[int | None], tuple[str, str | None]] | None = None,
+    wait: float = _TEXT_BOX_WAIT,
+    poll: float = _FOCUS_POLL,
+) -> tuple[bool, str | None]:
+    """Report whether a text box has focus now the target has read the paste.
+
+    Some apps move a paste made outside their text box into it, so focus on
+    something that isn't editable gets `wait` seconds to move into one. When
+    Accessibility can't tell, the paste is trusted. Returns that verdict and
+    the focused element's role.
+    """
+    import time
+    if read_focus is None:
+        read_focus = _focused_element
+
+    deadline = time.monotonic() + wait
+    while True:
+        kind, role = read_focus(pid)
+        if kind != "not-editable" or time.monotonic() >= deadline:
+            return kind != "not-editable", role
+        time.sleep(poll)
+
+
+def _frontmost_pid() -> int | None:
+    try:
+        from AppKit import NSWorkspace
+        return int(NSWorkspace.sharedWorkspace().frontmostApplication().processIdentifier())
+    except Exception:
+        return None
 
 
 def inject_text(text: str, log: Callable[[str], None] | None = None) -> bool:
@@ -502,22 +596,35 @@ def inject_text(text: str, log: Callable[[str], None] | None = None) -> bool:
     # The overlay appearing may have moved focus away.
     restore_target_app_focus()
     time.sleep(0.15)  # wait for the app to actually come to front
+    focused_role = None
 
-    latency = _paste_via_pasteboard(
-        NSPasteboard.generalPasteboard(), text, _post_cmd_v,
+    def landed() -> bool:
+        nonlocal focused_role
+        has_text_box, focused_role = _wait_for_text_box(_frontmost_pid())
+        return has_text_box
+
+    latency, pasted = _paste_via_pasteboard(
+        NSPasteboard.generalPasteboard(), text, _post_cmd_v, landed=landed,
     )
-    if latency is None:
+    if not pasted:
         subprocess.Popen(["afplay", _PASTE_FAILED_SOUND])
-        if log:
+        if log and latency is None:
             log(
                 f"Paste not confirmed: target never read the clipboard within "
                 f"{_PASTE_READ_TIMEOUT:.1f}s. Text left on the clipboard "
                 f"({len(text)} chars)."
             )
+        elif log:
+            log(
+                f"Paste went nowhere: the target read the clipboard but no text "
+                f"box had focus ({focused_role}). Text left on the clipboard "
+                f"({len(text)} chars)."
+            )
         return False
     if log:
         log(f"NSPasteboard+Cmd+V: {len(text)} chars injected "
-            f"(target read clipboard after {latency * 1000:.0f}ms)")
+            f"(target read clipboard after {latency * 1000:.0f}ms, "
+            f"focus {focused_role or 'unknown'})")
     return True
 
 
