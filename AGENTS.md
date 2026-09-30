@@ -646,6 +646,11 @@ The mikerosoft.app site in `website/` deploys from `main` through
   write commit bodies that say why something changed.
 - `npm run build` also writes `dist/tools/<name>.html` with that tool's title,
   description and share image, so links shared on social previews properly.
+- Link previews are 1200x630 screenshots in `website/public/share`: the
+  desktop for the home page and each tool's window for its page. They're
+  committed, not built. After adding a tool or changing how the site looks,
+  run `npm run dev` and then `npm run share-images` in `website/`, check a few,
+  and commit them. A tool without one falls back to its header art.
 - `npm test` in `website/` runs the tool list, sorting, git-history and tool
   page tests.
 

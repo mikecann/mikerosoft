@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { makeItYoursPrompt, parseRoute, readmeUrl, toolPath, withToolMeta } from './toolPages.ts';
+import { makeItYoursPrompt, parseRoute, readmeUrl, shareImageFor, toolPath, withToolMeta } from './toolPages.ts';
 import { toolDetails } from './toolDetails.ts';
 import { tools, type Tool } from './tools.ts';
 
@@ -73,12 +73,19 @@ test('tool pages get their own title, description and share image', () => {
     '</head></html>',
   ].join('\n');
 
-  const page = withToolMeta(html, fixture, 'Records your "screen" & camera');
+  const page = withToolMeta(html, fixture, 'Records your "screen" & camera', 'https://example.com/share.jpg');
 
   assert.match(page, /<title>record-it · Mikerosoft<\/title>/);
   assert.match(page, /<meta name="description" content="Records your &quot;screen&quot; &amp; camera" \/>/);
-  assert.match(page, /<meta property="og:image" content="https:\/\/example.com\/header.webp" \/>/);
+  assert.match(page, /<meta property="og:image" content="https:\/\/example.com\/share.jpg" \/>/);
+  assert.match(page, /<meta name="twitter:image" content="https:\/\/example.com\/share.jpg" \/>/);
   assert.match(page, /<meta property="og:url" content="https:\/\/mikerosoft.app\/tools\/record-it" \/>/);
   assert.match(page, /<link rel="canonical" href="https:\/\/mikerosoft.app\/tools\/record-it" \/>/);
   assert.doesNotMatch(page, /content="home"/);
+});
+
+test('share images use the screenshot of the tool window, or its header art until there is one', () => {
+  assert.equal(shareImageFor(fixture, true), 'https://mikerosoft.app/share/record-it.jpg');
+  assert.equal(shareImageFor(fixture, false), 'https://example.com/header.webp');
+  assert.equal(shareImageFor({ ...fixture, header: undefined }, false), 'https://mikerosoft.app/share/home.jpg');
 });
