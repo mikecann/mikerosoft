@@ -26,8 +26,8 @@ final class TipTests: XCTestCase {
         let center = TipCenter.shared
         let first = UUID()
         let second = UUID()
-        center.enter("Blade tool (C)", owner: first)
-        center.enter("Select tool (V)", owner: second)
+        center.hover("Blade tool (C)", owner: first, at: CGPoint(x: 10, y: 10))
+        center.hover("Select tool (V)", owner: second, at: CGPoint(x: 40, y: 10))
         center.leave(owner: first)
         center.hide()
         XCTAssertNil(center.shown)
