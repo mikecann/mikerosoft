@@ -9,55 +9,68 @@ final class TimelineScrollerTests: XCTestCase {
         TimelineScroller(scrollSeconds: scroll, visibleSeconds: visible, duration: duration, width: 400)
     }
 
+    /// The bar is the video: a minute of ten is a tenth of it.
     func testTheThumbShowsWhatsOnScreen() {
         let start = scroller()
-        // Scrollable to where the end sits mid-screen: 570 s, so the bar
-        // stands for 630 s and a minute is 38 pt of it.
-        XCTAssertEqual(start.maxScrollSeconds, 570, accuracy: 1e-9)
-        XCTAssertEqual(start.thumbWidth, 400 * 60 / 630, accuracy: 1e-6)
-        XCTAssertEqual(start.thumbX, 0, accuracy: 1e-9)
-        let end = scroller(scroll: 570)
-        XCTAssertEqual(end.thumbX + end.thumbWidth, 400, accuracy: 1e-6, "all the way right")
-        let middle = scroller(scroll: 285)
-        XCTAssertEqual(middle.thumbX, (400 - middle.thumbWidth) / 2, accuracy: 1e-6)
+        XCTAssertEqual(start.thumbX, 0)
+        XCTAssertEqual(start.thumbWidth, 40, accuracy: 1e-9)
+        let middle = scroller(scroll: 270)
+        XCTAssertEqual(middle.thumbX, 180, accuracy: 1e-9)
+        let end = scroller(scroll: 540)
+        XCTAssertEqual(end.thumbX + end.thumbWidth, 400, accuracy: 1e-9, "the last minute ends the bar")
+    }
+
+    /// Scrolled past the end (the timeline allows half a screen), the thumb
+    /// shrinks against the end of the bar rather than leaving it.
+    func testPastTheEndTheThumbShrinksAgainstTheEnd() {
+        let past = scroller(scroll: 570)
+        XCTAssertEqual(past.maxScrollSeconds, 570, accuracy: 1e-9)
+        XCTAssertEqual(past.thumbX + past.thumbWidth, 400, accuracy: 1e-9)
+        XCTAssertEqual(past.thumbWidth, TimelineScroller.minimumThumb)
     }
 
     func testAThumbStaysBigEnoughToGrab() {
-        let long = scroller(visible: 2, duration: 3_600)
+        let long = scroller(scroll: 1_800, visible: 2, duration: 3_600)
         XCTAssertEqual(long.thumbWidth, TimelineScroller.minimumThumb)
-        XCTAssertEqual(scroller(scroll: 3_599, visible: 2, duration: 3_600).thumbX + TimelineScroller.minimumThumb, 400, accuracy: 1e-6)
+        XCTAssertEqual(long.thumbX + long.thumbWidth / 2, 200, accuracy: 0.5, "centred on what's shown")
+        XCTAssertEqual(scroller(scroll: 0, visible: 2, duration: 3_600).thumbX, 0, "kept on the bar")
     }
 
-    func testWithEverythingOnScreenThereIsNothingToScroll() {
-        let fitted = scroller(visible: 1_300)
-        XCTAssertFalse(fitted.canScroll)
+    /// With the whole video on screen the thumb fills the bar, whether or
+    /// not the half screen past the end still scrolls.
+    func testAllOnScreenFillsTheBar() {
+        let fitted = scroller(visible: 630)
+        XCTAssertTrue(fitted.canScroll)
+        XCTAssertEqual(fitted.thumbX, 0)
         XCTAssertEqual(fitted.thumbWidth, 400)
-        XCTAssertEqual(fitted.scrollSeconds(draggedFrom: 0, by: 100), 0)
+        let wide = scroller(visible: 1_300)
+        XCTAssertFalse(wide.canScroll)
+        XCTAssertEqual(wide.thumbWidth, 400)
+        XCTAssertEqual(wide.scrollSeconds(draggedFrom: 0, by: 100), 0)
     }
 
     func testDraggingTheThumbScrolls() {
         let bar = scroller()
-        let travel = 400 - bar.thumbWidth
-        XCTAssertEqual(bar.scrollSeconds(draggedFrom: 0, by: travel / 2), 285, accuracy: 1e-6)
-        XCTAssertEqual(bar.scrollSeconds(draggedFrom: 0, by: 10_000), 570, "stops at the end")
+        XCTAssertEqual(bar.scrollSeconds(draggedFrom: 0, by: 200), 300, accuracy: 1e-9, "half the bar is half the video")
+        XCTAssertEqual(bar.scrollSeconds(draggedFrom: 0, by: 10_000), 570, "stops where the end is mid-screen")
         XCTAssertEqual(bar.scrollSeconds(draggedFrom: 100, by: -10_000), 0, "and at the start")
     }
 
-    func testClickingTheBarCentresTheThumbThere() {
+    func testClickingTheBarCentresThatTime() {
         let bar = scroller()
-        let scroll = bar.scrollSeconds(centredOn: 200)
-        let moved = scroller(scroll: scroll)
-        XCTAssertEqual(moved.thumbX + moved.thumbWidth / 2, 200, accuracy: 1e-6)
+        let moved = scroller(scroll: bar.scrollSeconds(centredOn: 200))
+        XCTAssertEqual(moved.scrollSeconds, 270, accuracy: 1e-9)
+        XCTAssertEqual(moved.thumbX + moved.thumbWidth / 2, 200, accuracy: 1e-9)
     }
 
     func testTheEndsZoomAndTheMiddleScrolls() {
-        let bar = scroller(scroll: 285)
+        let bar = scroller(scroll: 270)
         XCTAssertEqual(bar.part(at: bar.thumbX + 2), .leadingEdge)
         XCTAssertEqual(bar.part(at: bar.thumbX + bar.thumbWidth - 2), .trailingEdge)
         XCTAssertEqual(bar.part(at: bar.thumbX + bar.thumbWidth / 2), .thumb)
         XCTAssertEqual(bar.part(at: 5), .track)
         // A small thumb keeps a middle to drag.
-        let small = scroller(scroll: 285, visible: 2, duration: 3_600)
+        let small = scroller(scroll: 1_800, visible: 2, duration: 3_600)
         XCTAssertEqual(small.part(at: small.thumbX + small.thumbWidth / 2), .thumb)
     }
 
@@ -65,21 +78,26 @@ final class TimelineScrollerTests: XCTestCase {
     /// time where it was, like Premiere's zoom scroll bar.
     func testDraggingAnEndZooms() {
         let bar = scroller(scroll: 120)
-        // The trailing end dragged right by the bar's worth of 60 s.
-        let wider = bar.range(draggingTrailingEdgeBy: CGFloat(60 / bar.span) * 400, minimumSeconds: 0.5)
-        XCTAssertEqual(wider.start, 120, accuracy: 1e-6, "the start stays")
-        XCTAssertEqual(wider.end, 240, accuracy: 1e-6)
-        let narrower = bar.range(draggingLeadingEdgeBy: CGFloat(30 / bar.span) * 400, minimumSeconds: 0.5)
-        XCTAssertEqual(narrower.start, 150, accuracy: 1e-6)
-        XCTAssertEqual(narrower.end, 180, accuracy: 1e-6, "the end stays")
-        // An end can't cross the other or go past the start of the video.
-        XCTAssertEqual(bar.range(draggingLeadingEdgeBy: 10_000, minimumSeconds: 0.5).start, 179.5, accuracy: 1e-6)
+        // 40 pt is a minute of the video.
+        let wider = bar.range(draggingTrailingEdgeBy: 40, minimumSeconds: 0.5)
+        XCTAssertEqual(wider.start, 120, accuracy: 1e-9, "the start stays")
+        XCTAssertEqual(wider.end, 240, accuracy: 1e-9)
+        let narrower = bar.range(draggingLeadingEdgeBy: 20, minimumSeconds: 0.5)
+        XCTAssertEqual(narrower.start, 150, accuracy: 1e-9)
+        XCTAssertEqual(narrower.end, 180, accuracy: 1e-9, "the end stays")
+        // An end can't cross the other or go before the start of the video.
+        XCTAssertEqual(bar.range(draggingLeadingEdgeBy: 10_000, minimumSeconds: 0.5).start, 179.5, accuracy: 1e-9)
         XCTAssertEqual(bar.range(draggingLeadingEdgeBy: -10_000, minimumSeconds: 0.5).start, 0)
+        // Past the end, the trailing end moves from the end of the video,
+        // where the thumb shows it.
+        let past = scroller(scroll: 570)
+        XCTAssertEqual(past.range(draggingTrailingEdgeBy: -40, minimumSeconds: 0.5).end, 570.5, accuracy: 1e-9)
     }
 
     func testThePlayheadTickFollowsTheBar() {
         let bar = scroller()
         XCTAssertEqual(bar.x(forSeconds: 0), 0)
-        XCTAssertEqual(bar.x(forSeconds: bar.span / 2), 200, accuracy: 1e-6)
+        XCTAssertEqual(bar.x(forSeconds: 300), 200, accuracy: 1e-9)
+        XCTAssertEqual(bar.x(forSeconds: 900), 400, "clamped to the bar")
     }
 }
