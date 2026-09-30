@@ -28,7 +28,7 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         window.delegate = self
         state.documents = documents
-        let hosting = NSHostingView(rootView: WelcomeView(state: state).tipLayer().ignoresSafeArea())
+        let hosting = NSHostingView(rootView: WelcomeView(state: state).ignoresSafeArea())
         // The window sets the size; the view fills it.
         hosting.sizingOptions = []
         window.contentView = hosting
