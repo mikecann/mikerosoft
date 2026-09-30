@@ -1,9 +1,11 @@
 import { Link } from './router';
 import { toolDetails } from './toolDetails';
 import { toolPath } from './toolPages';
-import { groupToolsByCategory, type Tool } from './tools';
+import { CATEGORY_ICON, groupToolsByCategory, type Tool } from './tools';
 
 export type PlatformFilter = 'all' | 'windows' | 'macos';
+
+export const HOME_SEARCH_ID = 'home-search';
 
 export function categoryId(category: string): string {
   return `category-${category.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
@@ -34,6 +36,7 @@ export function HomeContent({
           <img src="/xp/search.png" alt="" />
           <span className="sr-only">Find a tool</span>
           <input
+            id={HOME_SEARCH_ID}
             type="search"
             placeholder={`Search ${totalCount} tools`}
             value={query}
@@ -77,8 +80,9 @@ export function HomeContent({
         {groupToolsByCategory(tools).map(group => (
           <section key={group.category} className="directory" id={categoryId(group.category)} aria-label={group.category}>
             <h2 className="task-pane-head">
+              <img src={CATEGORY_ICON[group.category]} alt="" />
               {group.category}
-              <span>{group.tools.length}</span>
+              <span className="count">{group.tools.length} tools</span>
             </h2>
             <div className="directory-grid">
               {group.tools.map(tool => (

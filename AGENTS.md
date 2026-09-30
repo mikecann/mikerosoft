@@ -597,6 +597,15 @@ The mikerosoft.app site in `website/` deploys from `main` through
   homepage layout: the write-up on the left, a Get it card with the Copy
   prompt button on the right, then media, then What's changed. On phones
   windows fill the screen and the desktop is a grid of icons.
+- It should behave like XP: desktop icons select on a click and open on a
+  double click, can be box-selected and dragged (the layout is saved in
+  localStorage, logic in `website/src/desktopLayout.ts`), and the desktop,
+  icons, title bars and taskbar buttons all have right-click menus. The
+  taskbar has Quick Launch with Show Desktop, a clock that opens Date and
+  Time, and a Start menu with recent tools, cascading All Programs, Run and
+  Turn Off. Phones open icons with a single tap.
+- Site icons (platforms, categories, calendar and so on) are `ui-*.png` in
+  `website/public/icons`, drawn by the same icon generator.
 - The Bliss wallpaper and the small XP icons in `website/public/xp` come from
   Convex OS, which borrowed them from github.com/ShizukuIchi/winXP.
 - Tools come from `website/src/tools.ts`. Each one needs a `category` and its

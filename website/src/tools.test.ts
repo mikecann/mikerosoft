@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { existsSync } from 'node:fs';
 import {
+  CATEGORY_ICON,
   CATEGORY_ORDER,
   filterToolsByPlatforms,
   groupToolsByCategory,
+  PLATFORM_ICON,
   searchTools,
   tools,
   type PlatformId,
@@ -133,4 +135,11 @@ test('every tool has its own unique Mikerosoft 95 icon', () => {
     assert.equal(tool.icon, `/icons/${tool.name}.png`);
     assert.ok(existsSync(new URL(`../public/icons/${tool.name}.png`, import.meta.url)), `${tool.name} icon is missing`);
   }
+});
+
+test('every category and platform has an icon', () => {
+  for (const icon of [...Object.values(CATEGORY_ICON), ...Object.values(PLATFORM_ICON)]) {
+    assert.ok(existsSync(new URL(`../public${icon}`, import.meta.url)), `${icon} is missing`);
+  }
+  assert.deepEqual(Object.keys(CATEGORY_ICON).sort(), [...CATEGORY_ORDER].sort());
 });

@@ -1,8 +1,9 @@
 import 'xp.css/dist/XP.css';
 import './xp.css';
 import { useEffect, useState } from 'react';
-import { categoryId, HomeContent, type PlatformFilter } from './HomeContent';
-import { Link, navigate, replacePath, useNavigation } from './router';
+import { Desktop, type DesktopItem } from './Desktop';
+import { categoryId, HOME_SEARCH_ID, HomeContent, type PlatformFilter } from './HomeContent';
+import { navigate, replacePath, useNavigation } from './router';
 import { Taskbar } from './Taskbar';
 import { ToolContent } from './ToolContent';
 import { toolPath } from './toolPages';
@@ -21,25 +22,33 @@ import {
   defaultGeometry,
   focusedWindow,
   focusWindow,
+  maximiseWindow,
+  minimiseAll,
   minimiseWindow,
   moveWindow,
   openWindow,
   pathForWindow,
+  restoreWindow,
+  restoreWindows,
   SMALL_SCREEN,
   toggleMaximise,
   windowForPath,
-  type Desktop,
+  type Desktop as DesktopState,
   type WindowId,
 } from './windowManager';
-import { MessageDialog } from './XpDialogs';
+import { DateTimeDialog, MessageDialog, PowerScreen, RunDialog, TurnOffDialog, type PowerChoice } from './XpDialogs';
 import { XpWindow } from './XpWindow';
 
 const REPO_URL = 'https://github.com/mikecann/mikerosoft';
-const TASKBAR_HEIGHT = 34;
-// Tools listed down the left edge of the desktop. The rest go down the right.
+const TASKBAR_HEIGHT = 36;
+// Tools down the left edge of the desktop. The rest go down the right.
 const LEFT_CATEGORIES: readonly Category[] = ['Video & recording', 'Images'];
+const RECENT_KEY = 'mikerosoft:recent-tools';
+const RECENT_COUNT = 6;
+// What the Start menu shows before you've opened anything.
+const DEFAULT_RECENT = ['tandem', 'record-it', 'voice-type', 'taskbar', 'task-stats', 'telemprompit'];
 
-type Dialog = 'help' | 'log-off' | 'turn-off' | 'not-found' | null;
+type Dialog = 'help' | 'log-off' | 'turn-off' | 'not-found' | 'run' | 'clock' | null;
 
 function desktopArea() {
   return { width: window.innerWidth, height: window.innerHeight - TASKBAR_HEIGHT };
@@ -50,12 +59,22 @@ function toolFor(id: WindowId): Tool | undefined {
 }
 
 /** Opens the Mikerosoft window, plus the tool in the address bar on top of it. */
-function initialDesktop(): { desktop: Desktop; dialog: Dialog } {
+function initialDesktop(): { desktop: DesktopState; dialog: Dialog } {
   const area = desktopArea();
   let desktop = openWindow({ windows: [] }, 'home', defaultGeometry(area, 0));
   const id = windowForPath(window.location.pathname);
   if (id && id !== 'home') desktop = openWindow(desktop, id, defaultGeometry(area, 1));
   return { desktop, dialog: id ? null : 'not-found' };
+}
+
+function readRecent(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as string[];
+    const known = saved.filter(name => tools.some(tool => tool.name === name));
+    return [...known, ...DEFAULT_RECENT.filter(name => !known.includes(name))].slice(0, RECENT_COUNT);
+  } catch {
+    return DEFAULT_RECENT;
+  }
 }
 
 function useArea() {
@@ -68,38 +87,63 @@ function useArea() {
   return area;
 }
 
-function DesktopIcon({ href, icon, label, external }: { href: string; icon: string; label: string; external?: boolean }) {
-  const content = (
-    <>
-      <img src={icon} alt="" />
-      <span>{label}</span>
-    </>
-  );
-  return external ? (
-    <a className="desktop-icon" href={href} target="_blank" rel="noopener">{content}</a>
-  ) : (
-    <Link className="desktop-icon" href={href}>{content}</Link>
-  );
-}
+const grouped = groupToolsByCategory(tools);
+const desktopItems: DesktopItem[] = [
+  { id: 'home', label: 'Mikerosoft', icon: '/logo.png', href: '/' },
+  { id: 'github', label: 'GitHub', icon: '/xp/github.png', href: REPO_URL, external: true },
+  ...grouped.flatMap(group => group.tools).map(tool => ({
+    id: tool.name,
+    label: tool.name,
+    icon: tool.icon,
+    href: toolPath(tool.name),
+    sourceUrl: tool.url,
+  })),
+];
+const leftIds = ['home', 'github', ...grouped.filter(g => LEFT_CATEGORIES.includes(g.category)).flatMap(g => g.tools.map(t => t.name))];
+const rightIds = grouped.filter(g => !LEFT_CATEGORIES.includes(g.category)).flatMap(g => g.tools.map(t => t.name));
 
 export default function App() {
   const area = useArea();
   const isSmallScreen = area.width < SMALL_SCREEN;
   const [{ desktop: initial, dialog: initialDialog }] = useState(initialDesktop);
-  const [desktop, setDesktop] = useState<Desktop>(initial);
+  const [desktop, setDesktop] = useState<DesktopState>(initial);
   const [dialog, setDialog] = useState<Dialog>(initialDialog);
+  const [power, setPower] = useState<PowerChoice | null>(null);
+  const [startOpen, setStartOpen] = useState(false);
+  // Clicking the desktop greys out every title bar, like XP.
+  const [desktopActive, setDesktopActive] = useState(false);
+  const [hiddenByShowDesktop, setHiddenByShowDesktop] = useState<WindowId[]>([]);
+  const [recent, setRecent] = useState<string[]>(readRecent);
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState<PlatformFilter>('all');
 
-  const focused = focusedWindow(desktop);
-  const focusedTool = focused && toolFor(focused.id);
+  const topWindow = focusedWindow(desktop);
+  const focused = desktopActive ? undefined : topWindow;
+  const focusedTool = topWindow && toolFor(topWindow.id);
   const visibleTools = searchTools(
     filterToolsByPlatforms(tools, platform === 'all' ? PLATFORM_ORDER : [platform]),
     query,
   );
 
+  function change(update: (current: DesktopState) => DesktopState) {
+    setDesktopActive(false);
+    setHiddenByShowDesktop([]);
+    setDesktop(update);
+  }
+
   function open(id: WindowId) {
-    setDesktop(current => openWindow(current, id, defaultGeometry(desktopArea(), current.windows.length)));
+    change(current => openWindow(current, id, defaultGeometry(desktopArea(), current.windows.length)));
+    const tool = toolFor(id);
+    if (!tool) return;
+    setRecent(current => {
+      const next = [tool.name, ...current.filter(name => name !== tool.name)].slice(0, RECENT_COUNT);
+      try {
+        localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+      } catch {
+        // Storage can be off. The Start menu just forgets.
+      }
+      return next;
+    });
   }
 
   useNavigation(pathname => {
@@ -110,9 +154,21 @@ export default function App() {
 
   // The address bar always shows the window in front, so it can be shared.
   useEffect(() => {
-    if (focused) replacePath(pathForWindow(focused.id));
+    if (topWindow) replacePath(pathForWindow(topWindow.id));
     document.title = focusedTool ? `${focusedTool.name} - Mikerosoft` : 'Mikerosoft';
-  }, [focused, focusedTool]);
+  }, [topWindow, focusedTool]);
+
+  // Ctrl+Esc opens the Start menu, as it always has.
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key === 'Escape') {
+        event.preventDefault();
+        setStartOpen(open => !open);
+      }
+    };
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  }, []);
 
   function surprise() {
     const others = tools.filter(tool => tool !== focusedTool);
@@ -126,14 +182,54 @@ export default function App() {
     setTimeout(() => document.getElementById(categoryId(category))?.scrollIntoView({ behavior: 'smooth' }), 50);
   }
 
-  function taskbarClick(id: string) {
-    const windowId = id as WindowId;
-    setDesktop(current => (focusedWindow(current)?.id === windowId ? minimiseWindow(current, windowId) : focusWindow(current, windowId)));
+  function search() {
+    open('home');
+    setTimeout(() => document.getElementById(HOME_SEARCH_ID)?.focus(), 50);
   }
 
-  const grouped = groupToolsByCategory(tools);
-  const leftTools = grouped.filter(group => LEFT_CATEGORIES.includes(group.category)).flatMap(group => group.tools);
-  const rightTools = grouped.filter(group => !LEFT_CATEGORIES.includes(group.category)).flatMap(group => group.tools);
+  function showDesktop() {
+    if (hiddenByShowDesktop.length > 0) {
+      const ids = hiddenByShowDesktop;
+      setDesktop(current => restoreWindows(current, ids));
+      setHiddenByShowDesktop([]);
+      return;
+    }
+    const { desktop: hidden, hiddenIds } = minimiseAll(desktop);
+    setDesktop(hidden);
+    setHiddenByShowDesktop(hiddenIds);
+  }
+
+  function openDesktopItem(item: DesktopItem, inNewTab?: boolean) {
+    if (item.external || inNewTab) window.open(item.href, '_blank', 'noopener');
+    else navigate(item.href);
+  }
+
+  function choosePower(choice: PowerChoice) {
+    setDialog(null);
+    setPower(choice);
+  }
+
+  function wake() {
+    if (power === 'restart') {
+      // A fresh boot: just the Mikerosoft window, like when you first arrive.
+      setDesktop(openWindow({ windows: [] }, 'home', defaultGeometry(desktopArea(), 0)));
+      replacePath('/');
+    }
+    setPower(null);
+  }
+
+  const windowActions = {
+    onActivate: (id: string) => {
+      const windowId = id as WindowId;
+      const isFront = focused?.id === windowId;
+      change(current => (isFront ? minimiseWindow(current, windowId) : focusWindow(current, windowId)));
+    },
+    onRestore: (id: string) => change(current => restoreWindow(current, id as WindowId)),
+    onMinimise: (id: string) => change(current => minimiseWindow(current, id as WindowId)),
+    onMaximise: (id: string) => change(current => maximiseWindow(current, id as WindowId)),
+    onClose: (id: string) => change(current => closeWindow(current, id as WindowId)),
+  };
+
   // Taskbar buttons stay in the order the windows were opened, like XP.
   const [openOrder, setOpenOrder] = useState<WindowId[]>(() => initial.windows.map(window => window.id));
   useEffect(() => {
@@ -143,16 +239,16 @@ export default function App() {
 
   return (
     <div className="xp-desktop">
-      <nav className="desktop-icons-wrap" aria-label="Desktop">
-        <div className="desktop-icons desktop-icons-left">
-          <DesktopIcon href="/" icon="/logo.png" label="Mikerosoft" />
-          <DesktopIcon href={REPO_URL} icon="/xp/github.png" label="GitHub" external />
-          {leftTools.map(tool => <DesktopIcon key={tool.name} href={toolPath(tool.name)} icon={tool.icon} label={tool.name} />)}
-        </div>
-        <div className="desktop-icons desktop-icons-right">
-          {rightTools.map(tool => <DesktopIcon key={tool.name} href={toolPath(tool.name)} icon={tool.icon} label={tool.name} />)}
-        </div>
-      </nav>
+      <Desktop
+        items={desktopItems}
+        leftIds={leftIds}
+        rightIds={rightIds}
+        area={area}
+        isSmallScreen={isSmallScreen}
+        onOpen={openDesktopItem}
+        onActivate={() => setDesktopActive(true)}
+        onProperties={() => setDialog('help')}
+      />
 
       {desktop.windows.map((state, index) => {
         const tool = toolFor(state.id);
@@ -169,13 +265,17 @@ export default function App() {
             statusBar={
               <>
                 <p className="status-bar-field">{tool ? tool.desc : `${visibleTools.length} of ${tools.length} tools`}</p>
-                {tool && <p className="status-bar-field status-bar-link"><a href={tool.url} target="_blank" rel="noopener">tools/{tool.name}</a></p>}
+                {tool && (
+                  <p className="status-bar-field status-bar-link">
+                    <a href={tool.url} target="_blank" rel="noopener">tools/{tool.name}</a>
+                  </p>
+                )}
               </>
             }
-            onFocus={() => setDesktop(current => focusWindow(current, state.id))}
-            onMinimise={() => setDesktop(current => minimiseWindow(current, state.id))}
-            onToggleMaximise={() => setDesktop(current => toggleMaximise(current, state.id))}
-            onClose={() => setDesktop(current => closeWindow(current, state.id))}
+            onFocus={() => change(current => focusWindow(current, state.id))}
+            onMinimise={() => windowActions.onMinimise(state.id)}
+            onToggleMaximise={() => change(current => toggleMaximise(current, state.id))}
+            onClose={() => windowActions.onClose(state.id)}
             onGeometryChange={geometry => setDesktop(current => moveWindow(current, state.id, geometry))}
           >
             {tool ? (
@@ -198,25 +298,40 @@ export default function App() {
       <Taskbar
         items={openOrder.map(id => {
           const tool = toolFor(id);
-          return { id, title: tool ? tool.name : 'Mikerosoft', icon: tool ? tool.icon : '/logo.png', isActive: id === focused?.id };
+          const state = desktop.windows.find(window => window.id === id);
+          return {
+            id,
+            title: tool ? tool.name : 'Mikerosoft',
+            icon: tool ? tool.icon : '/logo.png',
+            isActive: id === focused?.id,
+            isMinimised: Boolean(state?.minimised),
+            isMaximised: Boolean(state?.maximised),
+          };
         })}
-        onItemClick={taskbarClick}
+        actions={windowActions}
+        recent={recent.map(name => tools.find(tool => tool.name === name)).filter(tool => tool !== undefined)}
+        startOpen={startOpen}
+        onStartOpenChange={setStartOpen}
+        onShowDesktop={showDesktop}
         onOpenHome={() => navigate('/')}
         onShowCategory={showCategory}
+        onSearch={search}
         onSurprise={surprise}
+        onRun={() => setDialog('run')}
         onHelp={() => setDialog('help')}
         onLogOff={() => setDialog('log-off')}
         onTurnOff={() => setDialog('turn-off')}
+        onOpenClock={() => setDialog('clock')}
       />
 
       {dialog === 'help' && (
         <MessageDialog title="Help and Support" onClose={() => setDialog(null)}>
           <p><strong>Mikerosoft</strong>, {tools.length} tools installed.</p>
           <p>
-            These are the little desktop tools I (Mike Cann) have built for myself on Windows and macOS. Open one,
-            hit Copy prompt, and let your AI agent do the setup.
+            These are the little desktop tools I (Mike Cann) have built for myself on Windows and macOS. Double-click
+            one to open it, hit Copy prompt, and let your AI agent do the setup.
           </p>
-          <p>There are {CATEGORY_ORDER.length} folders of them in the Start menu, or just click the icons on the desktop.</p>
+          <p>They're also sorted into {CATEGORY_ORDER.length} folders in Start, All Programs.</p>
           <p className="muted">Not affiliated with Microsoft in any way. Please don't sue me!</p>
         </MessageDialog>
       )}
@@ -225,11 +340,22 @@ export default function App() {
           <p>You can't log off, there's nobody logged on. It's just a website.</p>
         </MessageDialog>
       )}
-      {dialog === 'turn-off' && (
-        <MessageDialog title="Turn off computer" icon="/xp/shutdown.png" onClose={() => setDialog(null)}>
-          <p>It is now safe to close this tab.</p>
-          <p>Or stay a while, there are {tools.length} tools to poke at.</p>
-        </MessageDialog>
+      {dialog === 'turn-off' && <TurnOffDialog onChoose={choosePower} onClose={() => setDialog(null)} />}
+      {dialog === 'clock' && <DateTimeDialog onClose={() => setDialog(null)} />}
+      {dialog === 'run' && (
+        <RunDialog
+          names={tools.map(tool => tool.name)}
+          onClose={() => setDialog(null)}
+          onRun={name => {
+            if (name === 'mikerosoft' || name === 'explorer') {
+              navigate('/');
+              return true;
+            }
+            const tool = tools.find(candidate => candidate.name === name);
+            if (tool) navigate(toolPath(tool.name));
+            return Boolean(tool);
+          }}
+        />
       )}
       {dialog === 'not-found' && (
         <MessageDialog title="Mikerosoft" icon="/xp/help.png" onClose={() => { setDialog(null); navigate('/'); }}>
@@ -237,6 +363,7 @@ export default function App() {
           <p>Every tool is on the desktop, or in Start, All Programs.</p>
         </MessageDialog>
       )}
+      {power && <PowerScreen choice={power} onWake={wake} />}
     </div>
   );
 }

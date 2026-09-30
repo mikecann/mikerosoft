@@ -4,7 +4,7 @@ import { formatToolDate } from './toolDates';
 import { TOOL_DATES } from './toolDates.generated';
 import { toolDetails } from './toolDetails';
 import { makeItYoursPrompt } from './toolPages';
-import { PLATFORM_LABEL, sortPlatforms, type Tool } from './tools';
+import { CATEGORY_ICON, PLATFORM_ICON, PLATFORM_LABEL, sortPlatforms, type Tool } from './tools';
 import { versionedAsset } from './versionedAsset';
 import { ImageViewer } from './XpDialogs';
 
@@ -66,7 +66,10 @@ function GetIt({ tool }: { tool: Tool }) {
 
   return (
     <aside className="task-pane get-it" aria-labelledby={`get-${tool.name}`}>
-      <h2 className="task-pane-head" id={`get-${tool.name}`}>Get it</h2>
+      <h2 className="task-pane-head" id={`get-${tool.name}`}>
+        <img src="/icons/ui-get.png" alt="" />
+        Get it
+      </h2>
       <div className="task-pane-body">
         <p>
           Paste this into your AI coding agent. It'll copy the code over and set it up for your machine. Anything
@@ -101,6 +104,7 @@ function Media({ tool }: { tool: Tool }) {
   if (items.length === 0) {
     return (
       <section className="media" aria-label="Artwork">
+        <h2 className="section-head"><img src={CATEGORY_ICON.Images} alt="" />Screenshots</h2>
         {tool.header && (
           <div className="media-stage" data-art>
             <img src={versionedAsset(tool.header)} alt={`Artwork for ${tool.name}`} />
@@ -115,6 +119,10 @@ function Media({ tool }: { tool: Tool }) {
 
   return (
     <section className="media" aria-label={tool.video ? 'Video and screenshots' : 'Screenshots'}>
+      <h2 className="section-head">
+        <img src={tool.video ? CATEGORY_ICON['Video & recording'] : CATEGORY_ICON.Images} alt="" />
+        {tool.video ? 'See it in action' : 'Screenshots'}
+      </h2>
       <div className="media-stage">
         {current.kind === 'video' ? (
           <video key={current.src} src={current.src} controls autoPlay muted loop playsInline />
@@ -195,8 +203,10 @@ function Changes({ tool }: { tool: Tool }) {
 
   return (
     <section className="changes" aria-labelledby={`changes-${tool.name}`}>
-      <h2 id={`changes-${tool.name}`}>
-        What's changed <span>{entries.length === 1 ? '1 change' : `${entries.length} changes`}</span>
+      <h2 className="section-head" id={`changes-${tool.name}`}>
+        <img src="/icons/ui-changes.png" alt="" />
+        What's changed
+        <span className="count">{entries.length === 1 ? '1 change' : `${entries.length} changes`}</span>
       </h2>
       <ol>
         {shown.map(entry => <Change key={entry.hash} entry={entry} />)}
@@ -224,9 +234,11 @@ export function ToolContent({ tool }: { tool: Tool }) {
             <div>
               <h1>{tool.name}</h1>
               <p className="chips">
-                {sortPlatforms(tool.platforms).map(id => <span key={id}>{PLATFORM_LABEL[id]}</span>)}
-                <span>{tool.category}</span>
-                {dates && <span>Updated {formatToolDate(dates.updated)}</span>}
+                {sortPlatforms(tool.platforms).map(id => (
+                  <span key={id}><img src={PLATFORM_ICON[id]} alt="" />{PLATFORM_LABEL[id]}</span>
+                ))}
+                <span><img src={CATEGORY_ICON[tool.category]} alt="" />{tool.category}</span>
+                {dates && <span><img src="/icons/ui-calendar.png" alt="" />Updated {formatToolDate(dates.updated)}</span>}
               </p>
             </div>
           </header>

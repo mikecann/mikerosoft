@@ -1,4 +1,5 @@
-import { useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { ContextMenu } from './ContextMenu';
 import type { Geometry, WindowState } from './windowManager';
 
 const MIN_WIDTH = 360;
@@ -6,9 +7,37 @@ const MIN_HEIGHT = 240;
 // Always leave this much of a window on screen so it can be dragged back.
 const KEEP_VISIBLE = 80;
 
-type Drag = { kind: 'move' | 'resize'; startX: number; startY: number; start: Geometry };
+type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+const EDGES: Edge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 
-/** A Windows XP window that can be dragged by its title bar and resized from its corner. */
+type Drag = { edge: Edge | 'move'; startX: number; startY: number; start: Geometry };
+
+/** Works out a window's new box while it's moved or resized from an edge. */
+function dragGeometry(drag: Drag, dx: number, dy: number, area: { width: number; height: number }): Geometry {
+  const { start, edge } = drag;
+  if (edge === 'move') {
+    return {
+      ...start,
+      x: Math.min(area.width - KEEP_VISIBLE, Math.max(KEEP_VISIBLE - start.width, start.x + dx)),
+      y: Math.min(area.height - 30, Math.max(0, start.y + dy)),
+    };
+  }
+  let { x, y, width, height } = start;
+  if (edge.includes('e')) width = Math.max(MIN_WIDTH, start.width + dx);
+  if (edge.includes('s')) height = Math.max(MIN_HEIGHT, start.height + dy);
+  if (edge.includes('w')) {
+    width = Math.max(MIN_WIDTH, start.width - dx);
+    x = start.x + start.width - width;
+  }
+  if (edge.includes('n')) {
+    height = Math.max(MIN_HEIGHT, start.height - dy);
+    y = Math.max(0, start.y + start.height - height);
+    height = start.y + start.height - y;
+  }
+  return { x, y, width, height };
+}
+
+/** A Windows XP window that moves by its title bar and resizes from any edge. */
 export function XpWindow({
   window: state,
   title,
@@ -43,14 +72,15 @@ export function XpWindow({
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   const live = useRef<Geometry>(state);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const isFullScreen = state.maximised || isSmallScreen;
 
-  function begin(kind: Drag['kind'], event: ReactPointerEvent<HTMLElement>) {
+  function begin(edge: Drag['edge'], event: ReactPointerEvent<HTMLElement>) {
     if (isFullScreen || event.button !== 0) return;
     if ((event.target as Element).closest('button')) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { kind, startX: event.clientX, startY: event.clientY, start: { ...state } };
+    drag.current = { edge, startX: event.clientX, startY: event.clientY, start: { ...state } };
     live.current = { ...state };
     ref.current?.setAttribute('data-dragging', '');
   }
@@ -59,24 +89,8 @@ export function XpWindow({
     const current = drag.current;
     const element = ref.current;
     if (!current || !element) return;
-    const dx = event.clientX - current.startX;
-    const dy = event.clientY - current.startY;
-    const { start } = current;
-
+    live.current = dragGeometry(current, event.clientX - current.startX, event.clientY - current.startY, area);
     // Style the element directly while dragging, so React only re-renders once at the end.
-    if (current.kind === 'move') {
-      live.current = {
-        ...start,
-        x: Math.min(area.width - KEEP_VISIBLE, Math.max(KEEP_VISIBLE - start.width, start.x + dx)),
-        y: Math.min(area.height - 30, Math.max(0, start.y + dy)),
-      };
-    } else {
-      live.current = {
-        ...start,
-        width: Math.max(MIN_WIDTH, start.width + dx),
-        height: Math.max(MIN_HEIGHT, start.height + dy),
-      };
-    }
     element.style.left = `${live.current.x}px`;
     element.style.top = `${live.current.y}px`;
     element.style.width = `${live.current.width}px`;
@@ -90,6 +104,7 @@ export function XpWindow({
     onGeometryChange(live.current);
   }
 
+  const dragHandlers = { onPointerMove: track, onPointerUp: end, onPointerCancel: end };
   const style = isFullScreen
     ? { left: 0, top: 0, width: area.width, height: area.height, zIndex }
     : { left: state.x, top: state.y, width: state.width, height: state.height, zIndex };
@@ -101,6 +116,7 @@ export function XpWindow({
       style={style}
       data-minimised={state.minimised || undefined}
       data-full={isFullScreen || undefined}
+      data-focused={isFocused || undefined}
       aria-label={title}
       onPointerDownCapture={() => {
         if (!isFocused) onFocus();
@@ -110,11 +126,13 @@ export function XpWindow({
         className="title-bar"
         data-inactive={!isFocused || undefined}
         onPointerDown={event => begin('move', event)}
-        onPointerMove={track}
-        onPointerUp={end}
-        onPointerCancel={end}
+        {...dragHandlers}
         onDoubleClick={event => {
           if (!(event.target as Element).closest('button') && !isSmallScreen) onToggleMaximise();
+        }}
+        onContextMenu={event => {
+          event.preventDefault();
+          setMenu({ x: event.clientX, y: event.clientY });
         }}
       >
         <div className="title-bar-text">
@@ -131,14 +149,28 @@ export function XpWindow({
       </div>
       <div className="xp-window-body">{children}</div>
       {statusBar && <div className="status-bar">{statusBar}</div>}
-      {!isFullScreen && (
+      {!isFullScreen && EDGES.map(edge => (
         <div
+          key={edge}
           className="xp-resize"
+          data-edge={edge}
           aria-hidden="true"
-          onPointerDown={event => begin('resize', event)}
-          onPointerMove={track}
-          onPointerUp={end}
-          onPointerCancel={end}
+          onPointerDown={event => begin(edge, event)}
+          {...dragHandlers}
+        />
+      ))}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: 'Restore', onSelect: onToggleMaximise, disabled: !state.maximised },
+            { label: 'Minimize', onSelect: onMinimise },
+            { label: 'Maximize', onSelect: onToggleMaximise, disabled: state.maximised || isSmallScreen },
+            { kind: 'separator' },
+            { label: 'Close', bold: true, onSelect: onClose },
+          ]}
         />
       )}
     </section>

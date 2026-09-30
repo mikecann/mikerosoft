@@ -3,7 +3,7 @@
 Each sheet draws 9 of SUBJECTS against the famfamfam-style reference in
 style-ref.png, on flat magenta so slice.py can cut them out. Drawing 9 at once
 keeps the family consistent. For a new tool, add it to SUBJECTS and draw just
-its sheet. Needs OPENROUTER_API_KEY in the repo root .env. Sheets are ignored
+its sheet. Needs OPENROUTER_API_KEY in the environment or the repo root .env. Sheets are ignored
 by git; only the cut-out icons in website/public/icons are kept.
 
 usage: python3 generate.py <sheet-index...>
@@ -12,7 +12,11 @@ import base64, json, os, sys, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-KEY = next(l.split('=', 1)[1].strip().strip('"\'') for l in open(os.path.join(HERE, '..', '..', '..', '.env')) if l.startswith('OPENROUTER_API_KEY='))
+KEY = os.environ.get('OPENROUTER_API_KEY') or next(
+    l.split('=', 1)[1].strip().strip('"\'')
+    for l in open(os.path.join(HERE, '..', '..', '..', '.env'))
+    if l.startswith('OPENROUTER_API_KEY=')
+)
 MODEL = 'google/gemini-3-pro-image-preview'
 
 SUBJECTS = [
@@ -56,6 +60,16 @@ SUBJECTS = [
     ('worktrees', 'a small green tree whose branches are git branch lines with round commit dots'),
     ('ghopen', 'a yellow folder with a blue globe and a green arrow popping out of it'),
     ('copypath', 'a brown clipboard holding a sheet with a folder path written on it'),
+    # sheet 4: icons for the site itself, saved as ui-<name>.png
+    ('ui-windows', 'a beige desktop PC tower with a monitor showing a blue sky desktop, no logos'),
+    ('ui-macos', 'a thin silver laptop, lid open, screen showing a soft purple wallpaper, no logos'),
+    ('ui-video', 'a black video camera on a small tripod with a red record light'),
+    ('ui-images', 'a stack of two framed photos, the front one a green hill under a blue sky'),
+    ('ui-desktop', 'a computer monitor showing a small blue window with a title bar'),
+    ('ui-developer', 'a dark code editor window with coloured angle brackets and lines of code'),
+    ('ui-calendar', 'a desk calendar page with a red top binding and a date number'),
+    ('ui-changes', 'a notepad page with lines of text and a small blue clock in the corner'),
+    ('ui-get', 'an open brown cardboard box with a big green arrow pointing down into it'),
 ]
 
 PROMPT = """Make a 3x3 grid of 9 separate desktop application icons for a Windows 98 styled website.

@@ -60,6 +60,26 @@ export function toggleMaximise(desktop: Desktop, id: WindowId): Desktop {
   return window ? update(desktop, id, { maximised: !window.maximised }) : desktop;
 }
 
+/** Back to its normal size, in front. */
+export function restoreWindow(desktop: Desktop, id: WindowId): Desktop {
+  return update(focusWindow(desktop, id), id, { maximised: false });
+}
+
+export function maximiseWindow(desktop: Desktop, id: WindowId): Desktop {
+  return update(focusWindow(desktop, id), id, { maximised: true });
+}
+
+/** Show Desktop: hides every window that's showing, and says which ones, so they can come back. */
+export function minimiseAll(desktop: Desktop): { desktop: Desktop; hiddenIds: WindowId[] } {
+  const hiddenIds = desktop.windows.filter(window => !window.minimised).map(window => window.id);
+  return { desktop: { windows: desktop.windows.map(window => ({ ...window, minimised: true })) }, hiddenIds };
+}
+
+/** Brings windows back in their old stacking order. */
+export function restoreWindows(desktop: Desktop, ids: readonly WindowId[]): Desktop {
+  return ids.reduce((current, id) => focusWindow(current, id), desktop);
+}
+
 export function moveWindow(desktop: Desktop, id: WindowId, geometry: Geometry): Desktop {
   return update(desktop, id, geometry);
 }

@@ -5,10 +5,14 @@ import {
   defaultGeometry,
   focusedWindow,
   focusWindow,
+  maximiseWindow,
+  minimiseAll,
   minimiseWindow,
   moveWindow,
   openWindow,
   pathForWindow,
+  restoreWindow,
+  restoreWindows,
   toggleMaximise,
   windowForPath,
   type Desktop,
@@ -87,4 +91,37 @@ test('new windows open centred between the desktop icons and cascade', () => {
 
 test('on a small screen windows fill it', () => {
   assert.deepEqual(defaultGeometry({ width: 390, height: 800 }, 3), { x: 0, y: 0, width: 390, height: 800 });
+});
+
+test('restore brings a window back to normal size and to the front', () => {
+  let desktop = openWindow(openWindow(empty, 'home', box), 'tool:tandem', box);
+  desktop = toggleMaximise(desktop, 'home');
+  desktop = minimiseWindow(desktop, 'home');
+  desktop = restoreWindow(desktop, 'home');
+
+  const home = desktop.windows.find(window => window.id === 'home');
+  assert.equal(focusedWindow(desktop)?.id, 'home');
+  assert.equal(home?.maximised, false);
+  assert.equal(home?.minimised, false);
+});
+
+test('maximise from the taskbar also brings the window forward', () => {
+  let desktop = openWindow(openWindow(empty, 'home', box), 'tool:tandem', box);
+  desktop = maximiseWindow(minimiseWindow(desktop, 'home'), 'home');
+
+  assert.equal(focusedWindow(desktop)?.id, 'home');
+  assert.equal(focusedWindow(desktop)?.maximised, true);
+});
+
+test('Show Desktop minimises everything, and a second press puts it all back', () => {
+  let desktop = openWindow(openWindow(openWindow(empty, 'home', box), 'tool:a', box), 'tool:b', box);
+  desktop = minimiseWindow(desktop, 'tool:a');
+
+  const { desktop: hidden, hiddenIds } = minimiseAll(desktop);
+  assert.equal(focusedWindow(hidden), undefined);
+  assert.deepEqual(hiddenIds, ['home', 'tool:b'], 'only windows that were showing');
+
+  const back = restoreWindows(hidden, hiddenIds);
+  assert.equal(focusedWindow(back)?.id, 'tool:b');
+  assert.equal(back.windows.find(window => window.id === 'tool:a')?.minimised, true);
 });

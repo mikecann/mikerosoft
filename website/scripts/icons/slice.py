@@ -7,10 +7,10 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', '..', 'public', 'icons')
 names = re.findall(r"^\s+\('([a-z0-9-]+)', ", open(os.path.join(HERE, 'generate.py')).read(), re.M)
-assert len(names) == 36, len(names)
+assert len(names) % 9 == 0, len(names)
 K = np.array([255, 0, 255], float)
 SIZE, PAD = 256, 0.06
-for sheet in range(4):
+for sheet in range(len(names) // 9):
     im = np.asarray(Image.open(os.path.join(HERE, f'sheet-{sheet}.png')).convert('RGB'), float)
     h, w, _ = im.shape
     for i in range(9):
@@ -33,7 +33,7 @@ for sheet in range(4):
         canvas.resize((SIZE, SIZE), Image.LANCZOS).save(f'{OUT}/{name}.png', optimize=True)
 # contact sheet on grey and white to check edges
 tiles = [Image.open(f'{OUT}/{n}.png') for n in names]
-sheet = Image.new('RGBA', (9 * 136, 8 * 136), (192, 192, 192, 255))
+sheet = Image.new('RGBA', (9 * 136, len(names) // 9 * 2 * 136), (192, 192, 192, 255))
 for i, t in enumerate(tiles):
     bg = (192, 192, 192, 255) if (i // 9) % 2 == 0 else (0, 128, 128, 255)
     x, y = (i % 9) * 136, (i // 9) * 2 * 136

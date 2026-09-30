@@ -13,6 +13,11 @@ export const PLATFORM_COLOR: Record<PlatformId, string> = {
   macos: 'teal',
 };
 
+export const PLATFORM_ICON: Record<PlatformId, string> = {
+  windows: '/icons/ui-windows.png',
+  macos: '/icons/ui-macos.png',
+};
+
 export function sortPlatforms(platforms: readonly PlatformId[]): PlatformId[] {
   return [...platforms].sort((a, b) => PLATFORM_ORDER.indexOf(a) - PLATFORM_ORDER.indexOf(b));
 }
@@ -20,6 +25,13 @@ export function sortPlatforms(platforms: readonly PlatformId[]): PlatformId[] {
 export const CATEGORY_ORDER = ['Video & recording', 'Images', 'Desktop', 'Developer'] as const;
 
 export type Category = (typeof CATEGORY_ORDER)[number];
+
+export const CATEGORY_ICON: Record<Category, string> = {
+  'Video & recording': '/icons/ui-video.png',
+  Images: '/icons/ui-images.png',
+  Desktop: '/icons/ui-desktop.png',
+  Developer: '/icons/ui-developer.png',
+};
 
 export interface Tool {
   name: string;
