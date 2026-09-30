@@ -120,7 +120,7 @@ export const tools: Tool[] = [
     screenshots: [asset('transcribe', 'docs/ss1.png')],
     url: repoUrl('transcribe'),
     category: 'Video & recording',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'youtube-to-markdown',
@@ -133,7 +133,7 @@ export const tools: Tool[] = [
     ],
     url: repoUrl('youtube-to-markdown'),
     category: 'Video & recording',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'cutout',
@@ -143,7 +143,7 @@ export const tools: Tool[] = [
     screenshots: [asset('cutout', 'docs/ss1.png')],
     url: repoUrl('cutout'),
     category: 'Images',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'video-cutout',
@@ -173,7 +173,7 @@ export const tools: Tool[] = [
     screenshots: [],
     url: repoUrl('img-upscale'),
     category: 'Images',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'ghopen',
@@ -393,7 +393,7 @@ export const tools: Tool[] = [
     screenshots: [asset('video-titles', 'docs/ss1.png')],
     url: repoUrl('video-titles'),
     category: 'Video & recording',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'img-remix',
@@ -403,7 +403,7 @@ export const tools: Tool[] = [
     screenshots: [asset('img-remix', 'docs/ss1.png')],
     url: repoUrl('img-remix'),
     category: 'Images',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'svg-to-png',
@@ -413,7 +413,7 @@ export const tools: Tool[] = [
     screenshots: [asset('svg-to-png', 'docs/ss1.png')],
     url: repoUrl('svg-to-png'),
     category: 'Images',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'img-to-svg',
@@ -423,7 +423,7 @@ export const tools: Tool[] = [
     screenshots: [],
     url: repoUrl('img-to-svg'),
     category: 'Images',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'video-description',
@@ -433,7 +433,7 @@ export const tools: Tool[] = [
     screenshots: [asset('video-description', 'docs/ss1.png')],
     url: repoUrl('video-description'),
     category: 'Video & recording',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'copypath',
@@ -443,7 +443,7 @@ export const tools: Tool[] = [
     screenshots: [asset('copypath', 'docs/ss1.png')],
     url: repoUrl('copypath'),
     category: 'Developer',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'worktree-tidy',
@@ -463,7 +463,7 @@ export const tools: Tool[] = [
     screenshots: [],
     url: repoUrl('img-gen'),
     category: 'Images',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'video-gen',
@@ -473,7 +473,7 @@ export const tools: Tool[] = [
     screenshots: [],
     url: repoUrl('video-gen'),
     category: 'Video & recording',
-    platforms: ['windows'],
+    platforms: ['windows', 'macos'],
   },
   {
     name: 'face-swap',
