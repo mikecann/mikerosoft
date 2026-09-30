@@ -79,7 +79,7 @@ enum EditorCommand: String, CaseIterable, Codable {
         case .layoutSplit: return "Layout: split"
         case .selectAll: return "Select all"
         case .deselectAll: return "Deselect all"
-        case .selectForward: return "Select forward"
+        case .selectForward: return "Select everything after the playhead"
         case .zoomIn: return "Zoom in"
         case .zoomOut: return "Zoom out"
         case .zoomToFit: return "Zoom to fit"
