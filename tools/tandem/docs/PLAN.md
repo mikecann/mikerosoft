@@ -102,6 +102,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Word-by-word captions from the transcripts (`tandem captions`, MCP `captions`) [integration]
 - [x] Colour tab like other editors': whole take or this clip, then Light, Colour, colour wheels (the new `colorWheels` effect), a Lightroom-style colour mixer, vignette, sharpen and LUT; sliders with gradient tracks, reset, scrubbing and typing [app, render]
 - [x] Portrait short from the same edit: `setFormatLayout`, `tandem short`, portrait frames and the short export preset [integration]
+- [x] Transitions drawn as boxes as long as they play, like Filmora's, whose edges drag their length (both sides together); a transition can carry a sound, a clip on SFX tied to it that moves and goes with it, with the light swoosh on push, slide, cut slide and wipe by default and each type's sound picked in Settings [core, api, app]
 - [x] Export presets set quality, not shape: a resolution class on the frame's short side, the default preset follows the canvas, `--preset short` renders a 9:16 canvas, and the Export dialog shows each preset's size (`ExportPreset.plan(for:)`) [render, api, app]
 - [ ] Segment render cache for fast re-exports
 - [ ] Remotion graphics clips with props, rendered in the background

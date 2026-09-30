@@ -131,7 +131,7 @@ final class EditorActions {
         case .addSectionCards:
             SectionCardActions.addAtMarkers(in: model)
         case .addTransition:
-            return apply(TimelineEdits.addDefaultTransition(project, playhead: playhead, selection: model.selection), otherwise: "Put the playhead on a cut between two clips.")
+            return TransitionSoundActions.addDefault(in: model)
         case .toggleKeyframe: return model.toggleKeyframes()
         case .addVideoTrack, .addAudioTrack:
             let kind: TrackKind = command == .addVideoTrack ? .video : .audio

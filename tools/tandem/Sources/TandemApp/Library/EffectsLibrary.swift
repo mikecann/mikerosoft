@@ -67,8 +67,11 @@ struct EffectsLibrary: View {
                                     selected = type.rawValue
                                 } add: {
                                     addTransition(type)
+                                } dragStarted: {
+                                    // Its sound comes in from the library as the drag starts.
+                                    TransitionSoundActions.prepareForDrop(type, in: model)
                                 }
-                                .tip("\(type.displayName), \(String(format: "%.2f s", type.defaultDuration.seconds)). Double-click for the cut nearest the playhead, or drag onto a cut.")
+                                .tip(TransitionSoundText.tileTip(type))
                             }
                         } else {
                             ForEach(effects, id: \.type) { definition in
@@ -109,12 +112,7 @@ struct EffectsLibrary: View {
 
     private func addTransition(_ type: TransitionType) {
         let track = TimelineEdits.ordered(model.selection, in: model.project).first.flatMap { model.project.track(containingClip: $0)?.id }
-        guard let batch = LibraryDrops.transition(type, at: model.playback.time, trackID: track, in: model.project)
-                ?? LibraryDrops.transition(type, at: model.playback.time, trackID: nil, in: model.project) else {
-            model.show(.info, "Put the playhead on a cut between two clips.")
-            return
-        }
-        model.apply(batch)
+        TransitionSoundActions.add(type, at: model.playback.time, trackID: track, in: model)
     }
 
     private func addEffect(_ definition: EffectDefinition) {

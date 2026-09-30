@@ -526,38 +526,81 @@ struct ClipRenderer {
 
     // MARK: - Transitions
 
+    /// The name on a transition's label.
+    static let transitionNameFont = Theme.Fonts.ui(10, .semibold)
+    /// Room after the name for the mark that says it plays a sound.
+    static let soundMarkWidth: CGFloat = 11
+
+    /// How wide a transition's label needs its name (and its sound mark).
+    func transitionNameWidth(_ transition: Transition) -> CGFloat {
+        TextMetrics.width(of: transition.type.displayName, font: Self.transitionNameFont).rounded(.up)
+            + (transition.soundClipID == nil ? 0 : Self.soundMarkWidth)
+    }
+
+    /// A transition the way Filmora draws one: a see-through box over the
+    /// time it plays, with a label in the middle holding its icon and, when
+    /// it fits, its name and a mark for its sound. Selected, it's outlined
+    /// in amber with grips on the edges a drag moves. A fade at a clip's
+    /// head or tail shows its ramp.
     func drawTransition(_ transition: Transition, on track: Track, lane: TimelineLane, selected: Bool, in context: CGContext) {
-        guard let band = TransitionGeometry.bandRect(transition, on: track, lane: lane, scale: scale),
-              band.maxX >= visible.lowerBound, band.minX <= visible.upperBound else { return }
-        let inset = band.insetBy(dx: 0, dy: 1)
-        if transition.fromClipID == nil || transition.toClipID == nil {
-            // A fade at a clip's head or tail: a ramp across its length.
+        guard let area = TransitionGeometry.paintRect(transition, on: track, lane: lane, scale: scale),
+              area.maxX >= visible.lowerBound, area.minX <= visible.upperBound,
+              let box = TransitionGeometry.boxRect(transition, on: track, lane: lane, scale: scale) else { return }
+        context.saveGState()
+        let radius = min(3, box.width / 2)
+        context.addPath(CGPath(roundedRect: box, cornerWidth: radius, cornerHeight: radius, transform: nil))
+        context.setFillColor((selected ? Theme.amber.opacity(0.22) : Theme.transitionBox).cg)
+        context.fillPath()
+        if transition.fromClipID == nil || transition.toClipID == nil, box.width >= 6 {
+            // Rising out of black into its clip, or falling to it.
             let rising = transition.fromClipID == nil
-            let ramp = CGMutablePath()
-            ramp.move(to: CGPoint(x: inset.minX, y: rising ? inset.maxY : inset.minY))
-            ramp.addLine(to: CGPoint(x: inset.maxX, y: rising ? inset.minY : inset.maxY))
-            ramp.addLine(to: CGPoint(x: rising ? inset.maxX : inset.minX, y: inset.maxY))
-            ramp.closeSubpath()
-            context.addPath(ramp)
-            context.setFillColor((selected ? Theme.amber.opacity(0.35) : Theme.text.opacity(0.14)).cg)
-            context.fillPath()
-            context.move(to: CGPoint(x: inset.minX, y: rising ? inset.maxY : inset.minY))
-            context.addLine(to: CGPoint(x: inset.maxX, y: rising ? inset.minY : inset.maxY))
-            context.setStrokeColor((selected ? Theme.amber : Theme.text.opacity(0.55)).cg)
+            let inner = box.insetBy(dx: 1.5, dy: 2.5)
+            context.move(to: CGPoint(x: inner.minX, y: rising ? inner.maxY : inner.minY))
+            context.addLine(to: CGPoint(x: inner.maxX, y: rising ? inner.minY : inner.maxY))
+            context.setStrokeColor((selected ? Theme.amber : Theme.text).opacity(0.5).cg)
             context.setLineWidth(1)
             context.strokePath()
-            return
         }
-        context.setFillColor(Theme.text.opacity(0.1).cg)
-        context.fill(inset)
-        guard let chip = TransitionGeometry.chipRect(transition, on: track, lane: lane, scale: scale) else { return }
-        let radius = min(5, chip.width / 4)
-        context.addPath(CGPath(roundedRect: chip, cornerWidth: radius, cornerHeight: radius, transform: nil))
+        if selected {
+            let inset = box.insetBy(dx: 1, dy: 1)
+            context.addPath(CGPath(roundedRect: inset, cornerWidth: max(radius - 1, 0), cornerHeight: max(radius - 1, 0), transform: nil))
+            context.setStrokeColor(Theme.amber.cg)
+            context.setLineWidth(2)
+            context.strokePath()
+            // Grips where a drag changes its length.
+            if box.width >= 3 * Theme.Metrics.edgeGrab {
+                context.setFillColor(Theme.amber.cg)
+                let height = (box.height * 0.45).rounded()
+                for edge in TransitionLength.draggableEdges(transition) {
+                    let x = edge == .start ? box.minX + 3 : box.maxX - 6
+                    context.addPath(CGPath(roundedRect: CGRect(x: x, y: (box.midY - height / 2).rounded(), width: 3, height: height), cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
+                    context.fillPath()
+                }
+            }
+        } else if box.width >= 4 {
+            context.addPath(CGPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), cornerWidth: radius, cornerHeight: radius, transform: nil))
+            context.setStrokeColor(Theme.transitionOutline.cg)
+            context.setLineWidth(1)
+            context.strokePath()
+        }
+        context.restoreGState()
+
+        guard let label = TransitionGeometry.label(transition, on: track, lane: lane, scale: scale, nameWidth: transitionNameWidth(transition)) else { return }
+        context.addPath(CGPath(roundedRect: label.rect, cornerWidth: 4, cornerHeight: 4, transform: nil))
         context.setFillColor((selected ? Theme.amber : Theme.transitionChip).cg)
         context.fillPath()
-        guard chip.width >= 14 else { return }
-        // The bowtie from the design's transition icon.
-        let icon = chip.insetBy(dx: chip.width * 0.22, dy: chip.height * 0.28)
+        drawBowtie(in: label.icon, context: context)
+        guard let nameX = label.nameX else { return }
+        let nameMaxX = label.rect.maxX - TransitionGeometry.labelPadding + 2 - (transition.soundClipID == nil ? 0 : Self.soundMarkWidth)
+        drawText(transition.type.displayName, at: CGPoint(x: nameX, y: label.rect.midY - 7), maxX: nameMaxX, font: Self.transitionNameFont, color: Theme.onAmber)
+        if transition.soundClipID != nil {
+            drawSoundMark(at: CGPoint(x: nameMaxX + 1, y: label.rect.midY), context: context)
+        }
+    }
+
+    /// The bowtie from the design's transition icon.
+    private func drawBowtie(in chip: CGRect, context: CGContext) {
+        let icon = chip.insetBy(dx: chip.width * 0.24, dy: chip.height * 0.3)
         let path = CGMutablePath()
         path.move(to: CGPoint(x: icon.minX, y: icon.minY))
         path.addLine(to: CGPoint(x: icon.midX, y: icon.midY))
@@ -570,6 +613,28 @@ struct ClipRenderer {
         context.addPath(path)
         context.setFillColor(Theme.onAmber.cg)
         context.fillPath()
+    }
+
+    /// A small speaker with one wave, on the label of a transition that
+    /// plays a sound.
+    private func drawSoundMark(at origin: CGPoint, context: CGContext) {
+        let x = origin.x
+        let y = origin.y
+        let cone = CGMutablePath()
+        cone.move(to: CGPoint(x: x, y: y - 1.5))
+        cone.addLine(to: CGPoint(x: x + 2, y: y - 1.5))
+        cone.addLine(to: CGPoint(x: x + 4.5, y: y - 4))
+        cone.addLine(to: CGPoint(x: x + 4.5, y: y + 4))
+        cone.addLine(to: CGPoint(x: x + 2, y: y + 1.5))
+        cone.addLine(to: CGPoint(x: x, y: y + 1.5))
+        cone.closeSubpath()
+        context.addPath(cone)
+        context.setFillColor(Theme.onAmber.cg)
+        context.fillPath()
+        context.addArc(center: CGPoint(x: x + 4.5, y: y), radius: 3.5, startAngle: -.pi / 3.2, endAngle: .pi / 3.2, clockwise: false)
+        context.setStrokeColor(Theme.onAmber.cg)
+        context.setLineWidth(1.2)
+        context.strokePath()
     }
 }
 

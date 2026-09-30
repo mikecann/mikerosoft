@@ -301,7 +301,8 @@ rolling the cut, rippling the take or moving both clips takes it along,
 whole, and a fade at a clip's head carries it as it grows. It goes when
 the transition goes, whether that's a `removeTransition`, a clip it joins
 deleted, the clips moved apart, or an undo. Deleting the sound clip
-leaves the transition silent.
+leaves the transition silent. In the app, push, slide, cut slide and wipe
+come with a light swoosh unless Mike picks otherwise (Tandem > Settings).
 
 ## Reading the project
 
@@ -1379,7 +1380,8 @@ the picture directly, so you can look at the result of an edit.
 ### Put a swoosh on every push
 
 A swoosh belongs to its transition: give a push a `sound` and it goes
-where the push goes, and away with it. The light swoosh Mike likes is
+where the push goes, and away with it. The light swoosh Mike likes (the
+app's default for push, slide, cut slide and wipe) is
 `elevenlabs:sfx_2ybnc2tu` in his asset library. Copy it into the project
 once, find the pushes that have no sound yet, and give them all one in one
 batch:

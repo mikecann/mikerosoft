@@ -103,7 +103,8 @@ struct TimelineDamage: Equatable {
     /// Where the lanes look different because the selection changed: the
     /// clips that became or stopped being selected, the clips linked to
     /// them (drawn with a dashed edge), clips whose chosen keyframe
-    /// changed, and the transitions selected before and after.
+    /// changed, and the transitions selected before and after, with their
+    /// sounds (dashed too).
     static func selectionRects(from old: TimelineDrawState, to new: TimelineDrawState, layout: TimelineLayout) -> [CGRect] {
         guard old.selection != new.selection || old.selectedKeyframe != new.selectedKeyframe
             || old.selectedTransitionID != new.selectedTransitionID else { return [] }
@@ -113,6 +114,10 @@ struct TimelineDamage: Equatable {
         }
         let oldGroups = linkGroups(old.selection)
         let newGroups = linkGroups(new.selection)
+        func sound(_ transitionID: String?) -> String? {
+            transitionID.flatMap { id in project.location(ofTransition: id).flatMap { project[$0.track].transitions[$0.index].soundClipID } }
+        }
+        let sounds = old.selectedTransitionID == new.selectedTransitionID ? [] : Set([sound(old.selectedTransitionID), sound(new.selectedTransitionID)].compactMap { $0 })
         let scale = new.scale
         var rects: [CGRect] = []
         for lane in layout.lanes {
@@ -125,7 +130,7 @@ struct TimelineDamage: Equatable {
                 let isLinked = !isSelected && clip.linkGroup.map(newGroups.contains) == true
                 let oldKeyframe = old.selectedKeyframe?.clipID == clip.id ? old.selectedKeyframe?.time : nil
                 let newKeyframe = new.selectedKeyframe?.clipID == clip.id ? new.selectedKeyframe?.time : nil
-                guard wasSelected != isSelected || wasLinked != isLinked || oldKeyframe != newKeyframe else { continue }
+                guard wasSelected != isSelected || wasLinked != isLinked || oldKeyframe != newKeyframe || sounds.contains(clip.id) else { continue }
                 let x0 = scale.x(clip.start)
                 let x1 = scale.x(clip.end)
                 // Keyframe diamonds reach a few points past the clip's ends.
@@ -134,13 +139,7 @@ struct TimelineDamage: Equatable {
             guard old.selectedTransitionID != new.selectedTransitionID else { continue }
             let shifted = TimelineLane(trackID: lane.trackID, kind: lane.kind, style: lane.style, y: y, height: lane.height)
             for transition in track.transitions where transition.id == old.selectedTransitionID || transition.id == new.selectedTransitionID {
-                let parts = [
-                    TransitionGeometry.bandRect(transition, on: track, lane: shifted, scale: scale),
-                    TransitionGeometry.chipRect(transition, on: track, lane: shifted, scale: scale)
-                ].compactMap { $0 }
-                if let first = parts.first {
-                    rects.append(parts.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -2, dy: -1))
-                }
+                if let rect = TransitionGeometry.paintRect(transition, on: track, lane: shifted, scale: scale) { rects.append(rect) }
             }
         }
         return rects
@@ -215,21 +214,26 @@ extension TimelineDamage {
             for clip in before.clips { beforeClips[clip.id] = clip }
             var afterClips: [String: Clip] = [:]
             for clip in after.clips { afterClips[clip.id] = clip }
+            var moved = Set<String>()
             for clipID in Set(beforeClips.keys).union(afterClips.keys) {
                 let was = beforeClips[clipID]
                 let isNow = afterClips[clipID]
+                if was != isNow { moved.insert(clipID) }
                 guard was != isNow || old.previewed.contains(clipID) != new.previewed.contains(clipID)
                     || keyframe(old, clipID) != keyframe(new, clipID) else { continue }
                 if let was { rects.append(clipRect(was, in: lane)) }
                 if let isNow { rects.append(clipRect(isNow, in: lane)) }
             }
-            if before.transitions != after.transitions {
+            // A transition that changed, or whose clips did (a roll moves
+            // its box), where it was and where it is: its box can reach
+            // past its clips' rectangles when zoomed out.
+            if before.transitions != after.transitions || !moved.isEmpty {
                 let shifted = TimelineLane(trackID: lane.trackID, kind: lane.kind, style: lane.style, y: lane.y - offsetY, height: lane.height)
                 let unchanged = Set(before.transitions.filter { after.transitions.contains($0) }.map(\.id))
-                for (track, transition) in before.transitions.map({ (before, $0) }) + after.transitions.map({ (after, $0) }) where !unchanged.contains(transition.id) {
-                    if let band = TransitionGeometry.bandRect(transition, on: track, lane: shifted, scale: scale) {
-                        rects.append(band.union(TransitionGeometry.chipRect(transition, on: track, lane: shifted, scale: scale) ?? band).insetBy(dx: -2, dy: -1))
-                    }
+                for (track, transition) in before.transitions.map({ (before, $0) }) + after.transitions.map({ (after, $0) }) {
+                    let clipsMoved = [transition.fromClipID, transition.toClipID].contains { $0.map(moved.contains) ?? false }
+                    guard !unchanged.contains(transition.id) || clipsMoved else { continue }
+                    if let rect = TransitionGeometry.paintRect(transition, on: track, lane: shifted, scale: scale) { rects.append(rect) }
                 }
             }
         }

@@ -1,4 +1,5 @@
 import Foundation
+import TandemAPI
 import TandemCore
 
 /// Builds the edit batches behind timeline actions: keys, menu items and the
@@ -243,8 +244,9 @@ enum TimelineEdits {
     }
 
     /// Cmd-D: a dissolve on the cut nearest the playhead, on the selected
-    /// clip's track or else the first track (top down) with a cut in reach.
-    static func addDefaultTransition(_ project: Project, playhead: Time, selection: Set<String>, type: TransitionType = .dissolve, id: String = IDs.make("tr")) -> EditBatch? {
+    /// clip's track or else the first track (top down) with a cut in reach,
+    /// playing `sound` (its type's, copied into the project) if it has one.
+    static func addDefaultTransition(_ project: Project, playhead: Time, selection: Set<String>, type: TransitionType = .dissolve, id: String = IDs.make("tr"), sound: TransitionSoundDefaults.Resolved? = nil) -> EditBatch? {
         let reach = Time(seconds: 1)
         var tracks: [Track] = ordered(selection, in: project).compactMap { project.track(containingClip: $0) }
         tracks += project.videoTracks.reversed() + project.audioTracks
@@ -252,7 +254,10 @@ enum TimelineEdits {
             guard let (left, right) = nearestCut(on: track, to: playhead, reach: reach) else { continue }
             if track.transitions.contains(where: { $0.fromClipID == left.id || $0.toClipID == right.id }) { continue }
             let transition = Transition(id: id, type: type, duration: type.defaultDuration, fromClipID: left.id, toClipID: right.id)
-            return EditBatch(label: "Add \(type.displayName.lowercased())", commands: [.addTransition(trackID: track.id, transition: transition)])
+            let prepared = sound?.prepared(for: project)
+            return EditBatch(label: "Add \(type.displayName.lowercased())", commands: (prepared?.addMedia ?? []) + [
+                .addTransition(trackID: track.id, transition: transition, sound: prepared?.sound)
+            ])
         }
         return nil
     }

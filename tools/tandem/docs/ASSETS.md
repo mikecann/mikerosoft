@@ -343,6 +343,41 @@ assets, so their licence and every use are recorded.
   or copy the two `elevenlabs/` asset folders across and rebuild the
   catalogue from disk (`AssetLibrary.rebuildCatalogFromDisk()`).
 
+## Transition sounds
+
+Push, slide, cut slide and wipe come with a sound effect in the app; the
+rest are silent. Mike picks others per type in Tandem > Settings (kept in
+the app's preferences as asset IDs), and `TransitionSoundDefaults` in
+TandemAPI says what each type plays. Dropping a transition, double-clicking
+one in the Effects tab, Cmd-D and changing a transition's type all copy the
+type's sound into `assets/sfx/` with `use` first, so it's recorded like any
+asset and goes in with the transition as one undo step. A Mac whose library
+doesn't have the sound adds the transition silent and says so.
+
+- **The light swoosh**, `elevenlabs:sfx_2ybnc2tu` ("A quick light swoosh
+  sweeping from left to right as a stripe of colour slides off the
+  screen...", 1.0 s, made on 2026-09-29): the one on a push in Mike's
+  ESLint video, which he asked for on every push. It was the section
+  card's first whoosh out, dropped there for its hard peak (its loudest
+  50 ms 6.9 dB over its loudest 300 ms, 114 clipped samples; see above).
+  It swells from the left, is loudest at 0.39 s as it crosses to the right,
+  and tails off by 0.65 s.
+- **When.** It starts 0.39 s before the transition's middle, so its
+  loudest moment lands on the cut, where a push, slide or wipe moves
+  fastest (their motion eases in and out). A longer transition is slower
+  around the same moment, so the sound stays there.
+- **Level.** Its loudest 400 ms is -11.7 LUFS, so -23.3 dB puts it at -35
+  LUFS, 15 LU under speech at -20, where the section card whooshes sit
+  (it was -19 dB on the old cards, 11 LU under). On the ESLint video's
+  push it plays at -24.4 dB, about 16 LU under. The gain moves with a
+  project whose speech plays elsewhere, as the cards' do
+  (`Resolved.levelled(for:)`), and at that level its clipped peak sits
+  23 dB under full scale in the mix.
+- **Other sounds** picked in Settings or the inspector are levelled the
+  same way from the library's loudness measurement (15 LU under speech)
+  and timed from its waveform (the middle of its loudest 50 ms on the
+  transition's middle).
+
 ## Implementation (TandemAssets)
 
 Built on the `tandem-assets` branch as the `TandemAssets` library (depends

@@ -151,7 +151,7 @@ extension CursorKind {
         }
         if overKeyframe { return .pointer }
         switch press {
-        case .trim?: return .trim
+        case .trim?, .transitionLength?: return .trim
         case .roll?: return .roll
         case .slip?, .slide?: return .grab
         // Clips move with the arrow, as in other editors.
@@ -162,7 +162,7 @@ extension CursorKind {
     /// While a timeline drag runs.
     static func dragging(_ kind: DragKind) -> CursorKind {
         switch kind {
-        case .trim: return .trim
+        case .trim, .transitionLength: return .trim
         case .roll: return .roll
         case .slip, .slide: return .grabbing
         case .move: return .arrow

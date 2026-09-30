@@ -601,11 +601,12 @@ struct TransitionInspector: View {
                     .frame(width: 86, alignment: .leading)
                 Menu(transition.type.displayName) {
                     ForEach(TransitionType.allCases, id: \.self) { type in
-                        Button(type.displayName) { update(["type": .string(type.rawValue)], "Change transition") }
+                        Button(type.displayName) { TransitionSoundActions.changeType(transition.id, to: type, in: model) }
                     }
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                .tip("The kind of move. A new type brings its own sound when this one plays its old type's, or none")
                 Spacer()
             }
             if [.push, .slide, .wipe, .cutSlide].contains(transition.type) {
@@ -620,9 +621,10 @@ struct TransitionInspector: View {
                 }
             }
             SliderRow(label: "Duration", value: transition.duration.seconds, range: 0.1...3, format: { String(format: "%.2f s", $0) },
-                      defaultValue: transition.type.defaultDuration.seconds, help: "How long the transition takes.") { value in
+                      defaultValue: transition.type.defaultDuration.seconds, help: "How long the transition takes. Dragging its box's edges on the timeline does it too.") { value in
                 update(["duration": .number((value * 100).rounded() / 100)], "Transition length")
             }
+            TransitionSoundRows(model: model, transition: transition)
             Button {
                 model.apply(EditBatch(label: "Remove transition", commands: [.removeTransition(transitionID: transition.id)]))
             } label: {

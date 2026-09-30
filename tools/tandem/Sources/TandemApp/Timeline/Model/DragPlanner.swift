@@ -62,10 +62,13 @@ enum DragKind: Equatable {
     case roll(leftClipID: String, rightClipID: String)
     case slip(clipID: String, includeLinked: Bool)
     case slide(clipID: String)
+    /// An edge of a transition's box: its length (`TransitionLength`).
+    case transitionLength(transitionID: String, edge: ClipEdge)
 
     /// Picks the drag for a press at `hit` with `tool`. Edges trim with the
     /// select tool (ripple when `rippleByDefault` or Cmd is down); Option
-    /// trims one side of a linked group only.
+    /// trims one side of a linked group only. A transition's edge changes
+    /// its length with any tool but the blade.
     static func forPress(
         on hit: TimelineHit,
         tool: TimelineTool,
@@ -75,6 +78,10 @@ enum DragKind: Equatable {
         command: Bool,
         option: Bool
     ) -> DragKind? {
+        if case .transitionEdge(let transitionID, let trackID, let edge) = hit {
+            guard tool != .blade, project.track(trackID)?.locked == false else { return nil }
+            return .transitionLength(transitionID: transitionID, edge: edge)
+        }
         guard case .clip(let clipID, let trackID, let part) = hit, let track = project.track(trackID), !track.locked else { return nil }
         let includeLinked = !option
         switch tool {
@@ -119,6 +126,11 @@ enum DragKind: Equatable {
         case .roll(let left, let right): return [left, right]
         case .slip(let id, _): return [id]
         case .slide(let id): return Set(project.linkedClipIDs(of: id))
+        case .transitionLength(let id, _):
+            // Its own clips' edges (the cut above all) aren't targets.
+            guard let location = project.location(ofTransition: id) else { return [] }
+            let transition = project[location.track].transitions[location.index]
+            return Set([transition.fromClipID, transition.toClipID].compactMap { $0 })
         }
     }
 }
@@ -155,6 +167,9 @@ struct DragPlan: Equatable {
     var delta: Time
     /// The track a move lands on, when it changes track.
     var destinationTrackID: String?
+    /// A transition's length as the drag leaves it, shown by the pointer
+    /// instead of the delta.
+    var length: Time?
 }
 
 /// Turns a drag into an edit batch, with snapping and limits. The timeline
@@ -233,6 +248,31 @@ enum DragPlanner {
             let limits = slipLimits(project, clip: clip, includeLinked: includeLinked)
             let delta = min(max(raw, limits.lowerBound), limits.upperBound)
             return DragPlan(batch: TimelineEdits.slip(project, clipID: id, timelineDelta: delta, includeLinked: includeLinked), snappedTo: nil, delta: delta)
+
+        case .transitionLength(let id, let edge):
+            guard let location = project.location(ofTransition: id) else { return DragPlan(batch: nil, snappedTo: nil, delta: .zero) }
+            let track = project[location.track]
+            let transition = track.transitions[location.index]
+            guard let window = transition.window(on: track) else { return DragPlan(batch: nil, snappedTo: nil, delta: .zero) }
+            let original = edge == .start ? window.start : window.end
+            var target = original + raw
+            var snapped: Time?
+            if let hit = targets.nearest(to: target, within: tolerance) {
+                target = hit
+                snapped = hit
+            }
+            guard let length = TransitionLength.length(transition, on: track, edge: edge, at: target, rate: rate) else {
+                return DragPlan(batch: nil, snappedTo: nil, delta: .zero)
+            }
+            // Where the edge ends up: a snap the length couldn't reach (a
+            // limit) isn't drawn.
+            var resized = transition
+            resized.duration = length
+            if let end = resized.window(on: track).map({ edge == .start ? $0.start : $0.end }), end != snapped { snapped = nil }
+            let batch = length == transition.duration ? nil : EditBatch(label: "Transition length", commands: [
+                .updateTransition(transitionID: id, patch: .object(["duration": .number(length.seconds)]))
+            ])
+            return DragPlan(batch: batch, snappedTo: snapped, delta: length - transition.duration, length: length)
 
         case .slide(let id):
             guard let clip = project.clip(id) else { return DragPlan(batch: nil, snappedTo: nil, delta: .zero) }

@@ -8,8 +8,15 @@ import TandemRender
 enum LibraryDrops {
     /// A transition dropped near a cut: on the nearest cut on the track
     /// under the pointer (with no track, the top-most one with a cut in
-    /// reach). A cut that already has one gets the new type instead.
-    static func transition(_ type: TransitionType, at time: Time, trackID: String?, in project: Project, reach: Time = Time(seconds: 1), id: String = IDs.make("tr")) -> EditBatch? {
+    /// reach), playing `sound` (its type's, copied into the project). A cut
+    /// that already has one gets the new type instead, and its sound
+    /// follows the type (`TransitionSoundEdits`); `soundFor` says what
+    /// each type plays.
+    static func transition(
+        _ type: TransitionType, at time: Time, trackID: String?, in project: Project, reach: Time = Time(seconds: 1), id: String = IDs.make("tr"),
+        sound: TransitionSoundDefaults.Resolved? = nil,
+        soundFor: (TransitionType) -> TransitionSoundDefaults.Sound? = TransitionSoundDefaults.builtIn
+    ) -> EditBatch? {
         let tracks: [Track]
         if let trackID, let track = project.track(trackID) {
             tracks = [track]
@@ -20,12 +27,15 @@ enum LibraryDrops {
             guard let (left, right) = TimelineEdits.nearestCut(on: track, to: time, reach: reach) else { continue }
             if let existing = track.transitions.first(where: { $0.fromClipID == left.id && $0.toClipID == right.id }) {
                 guard existing.type != type else { return nil }
-                return EditBatch(label: "Change to \(type.displayName.lowercased())", commands: [
-                    .updateTransition(transitionID: existing.id, patch: .object(["type": .string(type.rawValue)]))
-                ])
+                return EditBatch(label: "Change to \(type.displayName.lowercased())", commands: TransitionSoundEdits.typeChange(
+                    existing, to: type, in: project, oldSound: soundFor(existing.type), newSound: soundFor(type), resolved: sound
+                ))
             }
             let transition = Transition(id: id, type: type, duration: type.defaultDuration, fromClipID: left.id, toClipID: right.id)
-            return EditBatch(label: "Add \(type.displayName.lowercased())", commands: [.addTransition(trackID: track.id, transition: transition)])
+            let prepared = sound?.prepared(for: project)
+            return EditBatch(label: "Add \(type.displayName.lowercased())", commands: (prepared?.addMedia ?? []) + [
+                .addTransition(trackID: track.id, transition: transition, sound: prepared?.sound)
+            ])
         }
         return nil
     }

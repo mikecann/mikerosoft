@@ -160,7 +160,9 @@ Directions are the direction of motion; the default is `left`.
 | wipe | A soft edge sweeps in the direction of motion |
 | zoom | Cross zoom: into the outgoing shot, out of the incoming one, with a light zoom blur |
 
-On audio tracks every transition is an equal-power crossfade.
+On audio tracks every transition is an equal-power crossfade. A
+transition's sound (ARCHITECTURE.md) is an ordinary clip on SFX, mixed like
+any sound effect.
 
 ## Titles
 

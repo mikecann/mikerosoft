@@ -92,6 +92,10 @@ enum Theme {
     /// Small labels drawn over thumbnails ("PiP right · cutout").
     static let badge = Swatch(0x0C0D0F, alpha: 0.75)
     static let transitionChip = Swatch(0xE8EAED)
+    /// A transition's box over its clips, and its edge: see-through, so
+    /// the clips' ends show under it, as in Filmora.
+    static let transitionBox = Swatch(0xE8EAED, alpha: 0.2)
+    static let transitionOutline = Swatch(0xE8EAED, alpha: 0.65)
     static let linkHighlight = Swatch(0xFFB224, alpha: 0.45)
     static let marqueeFill = Swatch(0xFFB224, alpha: 0.08)
     static let inOutFill = Swatch(0xFFB224, alpha: 0.07)

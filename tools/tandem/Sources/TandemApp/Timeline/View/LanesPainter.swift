@@ -58,6 +58,9 @@ struct LanesPainter {
         renderer.backingScale = backingScale
         let selected = state.selection
         let linkedGroups = Set(selected.compactMap { project.clip($0)?.linkGroup })
+        // The sound of the transition picked on the timeline shows it's
+        // tied, the way linked clips do.
+        let tiedSound = state.selectedTransitionID.flatMap { id in project.location(ofTransition: id).flatMap { project[$0.track].transitions[$0.index].soundClipID } }
         for lane in layout.lanes {
             let rect = CGRect(x: dirty.minX, y: lane.y, width: dirty.width, height: lane.height)
             guard rect.intersects(dirty) else { continue }
@@ -78,7 +81,7 @@ struct LanesPainter {
                 let clipRect = CGRect(x: x0, y: lane.y, width: max(1, x1 - x0), height: lane.height)
                 var drawState = ClipDrawState()
                 drawState.selected = selected.contains(clip.id)
-                drawState.linked = !drawState.selected && clip.linkGroup.map(linkedGroups.contains) == true
+                drawState.linked = !drawState.selected && (clip.linkGroup.map(linkedGroups.contains) == true || clip.id == tiedSound)
                 drawState.previewed = previewed.contains(clip.id) && !drawState.selected
                 if let keyframe = state.selectedKeyframe, keyframe.clipID == clip.id {
                     drawState.selectedKeyframe = keyframeDrag?.clipID == clip.id ? keyframeDrag?.time : keyframe.time

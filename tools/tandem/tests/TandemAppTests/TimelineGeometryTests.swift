@@ -213,25 +213,20 @@ final class HitTestingTests: XCTestCase {
         XCTAssertEqual(tester.hit(CGPoint(x: 100, y: 9_999)), .nothing)
     }
 
-    func testTransitionChipsShrinkWithTheirClipsAndFadesUseTheirBand() throws {
+    /// A fade at a clip's head is hit in its box, away from the clip's
+    /// own edge, which still trims.
+    func testAFadeIsHitInItsBoxAndItsClipEdgeStillTrims() throws {
         let f = try AppFixture()
         try f.blade(at: [10])
         let camera = f.track("Camera")
-        try f.coordinator.apply(EditBatch(label: "Transitions", commands: [
-            .addTransition(trackID: camera.id, transition: Transition(id: "tr_cut", type: .dissolve, duration: t(0.5), fromClipID: f.clip("Camera", 0).id, toClipID: f.clip("Camera", 1).id)),
+        try f.coordinator.apply(EditBatch(label: "Fade", commands: [
             .addTransition(trackID: camera.id, transition: Transition(id: "tr_in", type: .fadeFromBlack, duration: t(2), fromClipID: nil, toClipID: f.clip("Camera", 0).id))
         ]))
-        let layout = TimelineLayout.make(project: f.project, showTranscript: true)
-        let lane = layout.lane(forTrack: camera.id)!
-        let track = f.track("Camera")
-        let cut = track.transitions.first { $0.id == "tr_cut" }!
-        let fade = track.transitions.first { $0.id == "tr_in" }!
-        XCTAssertEqual(TransitionGeometry.chipRect(cut, on: track, lane: lane, scale: TimelineScale(pixelsPerSecond: 10))?.width, 24)
-        XCTAssertEqual(TransitionGeometry.chipRect(cut, on: track, lane: lane, scale: TimelineScale(pixelsPerSecond: 2))?.width, 12, "10 s of clip is 20 px, so a 12 px chip")
-        XCTAssertNil(TransitionGeometry.chipRect(cut, on: track, lane: lane, scale: TimelineScale(pixelsPerSecond: 1)), "too small to draw")
-        XCTAssertNil(TransitionGeometry.chipRect(fade, on: track, lane: lane, scale: TimelineScale(pixelsPerSecond: 10)), "fades draw as a ramp")
-        let tester = TimelineHitTester(project: f.project, layout: layout, scale: TimelineScale(pixelsPerSecond: 10))
+        let tester = makeTester(f)
+        let lane = tester.layout.lane(forTrack: camera.id)!
+        // 0 to 2 s: 0 to 20 px, the label 2 to 18 px.
         XCTAssertEqual(tester.hit(CGPoint(x: 10, y: lane.midY)), .transition(transitionID: "tr_in", trackID: camera.id))
+        XCTAssertEqual(tester.hit(CGPoint(x: 1, y: lane.y + 3)), .clip(clipID: f.clip("Camera", 0).id, trackID: camera.id, part: .head), "the take's first edge, above the label")
     }
 
     func testMarqueeFindsIntersectingClips() throws {
