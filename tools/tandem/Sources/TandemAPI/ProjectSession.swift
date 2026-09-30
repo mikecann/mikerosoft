@@ -36,6 +36,9 @@ public final class ProjectSession: @unchecked Sendable {
     private let fileName: String
     public let coordinator: ProjectCoordinator
     public let analysis: MediaAnalysis
+    /// Agent edits Mike hasn't reviewed yet, kept as edits commit here
+    /// whoever has the project open, so the app finds the CLI's too.
+    public let review: ReviewRecorder
     public let owner: Owner
     public private(set) var savedRevision: Int
     /// Set when the journal had edits the last save didn't include.
@@ -63,6 +66,7 @@ public final class ProjectSession: @unchecked Sendable {
         self.journal = journal
         self.lockHandle = lock
         self.coordinator = ProjectCoordinator(project: project, revision: revision, journal: journal)
+        self.review = ReviewRecorder(coordinator: coordinator, url: ProjectFile.reviewURL(for: fileURL))
         self.analysis = MediaAnalysis(folder: folder)
         self.owner = owner
         self.savedRevision = recovered ? -1 : revision
@@ -84,11 +88,14 @@ public final class ProjectSession: @unchecked Sendable {
             let journal = ProjectJournal.forProject(at: url)
             var recovered = false
             var start = (project, revision)
-            if let replayed = journal.recover(project: project, revision: revision) {
+            var replays: [(entry: ProjectJournal.Entry, before: Project, after: Project)] = []
+            if let replayed = journal.recover(project: project, revision: revision, replayed: { replays.append(($0, $1, $2)) }) {
                 start = replayed
                 recovered = true
             }
             let session = ProjectSession(fileURL: url, project: start.0, revision: start.1, owner: owner, recovered: recovered, journal: journal, lock: lock)
+            // An agent's edits a crash left in the journal still want review.
+            session.review.catchUp(replays)
             session.startAutosave()
             if recovered { try session.save() }
             return session
@@ -176,6 +183,7 @@ public final class ProjectSession: @unchecked Sendable {
         } catch {
             failure = error
         }
+        review.close()
         analysis.cancelAll()
         lockHandle.release()
         return failure

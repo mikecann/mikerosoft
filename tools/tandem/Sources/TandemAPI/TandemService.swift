@@ -188,7 +188,8 @@ public final class TandemService: @unchecked Sendable {
             exports: running,
             recoveredEdits: session.recoveredEdits,
             apiVersion: TandemAPI.version,
-            warnings: fonts
+            warnings: fonts,
+            reviewPending: session.review.log.entries.map(PendingReview.init)
         )
     }
 
