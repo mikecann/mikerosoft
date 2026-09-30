@@ -91,7 +91,7 @@ struct TitleLibrary: View {
                                 // Its whooshes, copied in before the drop.
                                 if isCard { SectionCardActions.prepareForDrop(in: model) }
                             }
-                            .help(isCard ? "Section card: Convex's bands wipe in, the card holds the number, title, subtitle and progress, and they wipe out, with a whoosh on each sweep. Edit the words in the inspector, or add one at every section marker from the Timeline menu." : template.name)
+                            .tip(isCard ? "Section card: Convex's bands wipe in, the card holds the number, title, subtitle and progress, and they wipe out, with a whoosh on each sweep. Edit the words in the inspector, or add one at every section marker from the Timeline menu." : template.name)
                         }
                     } else {
                         ForEach(TitlePresets.builtIn, id: \.id) { preset in
@@ -102,7 +102,7 @@ struct TitleLibrary: View {
                             } add: {
                                 addTitle(preset)
                             }
-                            .help(preset.summary)
+                            .tip(preset.summary)
                         }
                     }
                 }

@@ -364,7 +364,7 @@ private struct BigWaveform: View {
                         .background(Circle().fill(Theme.amber.color))
                 }
                 .buttonStyle(.plain)
-                .help(playing ? "Stop" : "Play from the start")
+                .tip(playing ? "Stop" : "Play from the start")
             }
             GeometryReader { geometry in
                 TimelineView(.animation(minimumInterval: 1.0 / 30)) { _ in

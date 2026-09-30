@@ -70,7 +70,7 @@ struct LevelSection: View {
             GraphiteSwitch(isOn: isOn, action: action)
         }
         .contentShape(Rectangle())
-        .help(help)
+        .tip(help)
     }
 }
 
@@ -104,11 +104,11 @@ struct SpeechLevelSection: View {
                     .font(.ui(11.5))
                     .foregroundStyle(Theme.textMuted.color)
                     .fixedSize(horizontal: false, vertical: true)
-                    .help("Speech clips are the camera's sound, voice files, and anything on a take track like Voice.")
+                    .tip("Speech clips are the camera's sound, voice files, and anything on a take track like Voice.")
                 OutlineButton(title: "Normalise speech clips") {
                     model.apply(EditBatch(label: "Normalise speech clips", commands: [.normalizeSpeech]))
                 }
-                .help("Sets every speech clip to \(AudioLevelText.lufs(level)) with no gain, as one undo step. Music and sound effects keep their gains.")
+                .tip("Sets every speech clip to \(AudioLevelText.lufs(level)) with no gain, as one undo step. Music and sound effects keep their gains.")
             }
         }
     }

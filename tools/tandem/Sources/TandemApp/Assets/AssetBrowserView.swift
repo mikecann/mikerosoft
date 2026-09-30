@@ -91,7 +91,7 @@ struct AssetBrowser: View {
                 .buttonStyle(.plain)
                 .font(.ui(11.5))
                 .foregroundStyle(Theme.amber.color)
-                .help("What this project's assets need in the video description")
+                .tip("What this project's assets need in the video description")
                 .popover(isPresented: $showCredits, arrowEdge: .bottom) {
                     CreditsView(model: model)
                 }
@@ -261,7 +261,7 @@ private struct SourceChips: View {
                     selected = selected == provider.id ? nil : provider.id
                 }
                 .opacity(provider.status.isUsable ? 1 : 0.45)
-                .help(help(for: provider))
+                .tip(help(for: provider))
             }
             Menu {
                 Button("Folder without a licence note…") { addFolder(nil) }
@@ -281,7 +281,7 @@ private struct SourceChips: View {
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Watch a folder of downloads, with the licence they came under")
+            .tip("Watch a folder of downloads, with the licence they came under")
         }
     }
 
@@ -340,7 +340,7 @@ private struct FilterMenu: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Filter by licence, length and more")
+        .tip("Filter by licence, length and more")
     }
 }
 
@@ -495,7 +495,7 @@ private struct AssetActions: ViewModifier {
                     Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)]) }
                 }
             }
-            .help(tooltip)
+            .tip(tooltip)
     }
 
     private var tooltip: String {
@@ -792,7 +792,7 @@ struct FavouriteStar: View {
                 .background(Circle().fill(Theme.window.color.opacity(0.7)))
         }
         .buttonStyle(.plain)
-        .help(on ? "Remove from favourites" : "Add to favourites")
+        .tip(on ? "Remove from favourites" : "Add to favourites")
     }
 }
 

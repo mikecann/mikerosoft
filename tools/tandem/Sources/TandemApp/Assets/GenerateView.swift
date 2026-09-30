@@ -21,7 +21,7 @@ struct GenerateButton: View {
         .buttonStyle(.plain)
         .font(.ui(11.5))
         .foregroundStyle(Theme.amber.color)
-        .help(kind == .music ? "Make music from a description with ElevenLabs" : "Make a sound effect from a description with ElevenLabs")
+        .tip(kind == .music ? "Make music from a description with ElevenLabs" : "Make a sound effect from a description with ElevenLabs")
         .popover(isPresented: $showing, arrowEdge: .bottom) {
             GenerateView(model: model, kind: kind)
         }
@@ -125,7 +125,7 @@ struct GenerateView: View {
                 .buttonStyle(.plain)
                 .disabled(form.problem != nil || running || blocker?.canTry == false)
                 .opacity(form.problem != nil || running || blocker?.canTry == false ? 0.45 : 1)
-                .help(form.problem ?? "Send it to ElevenLabs")
+                .tip(form.problem ?? "Send it to ElevenLabs")
             }
             if running {
                 HStack(spacing: 8) {

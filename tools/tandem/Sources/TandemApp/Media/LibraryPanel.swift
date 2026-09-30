@@ -96,7 +96,7 @@ struct MediaBrowser: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Look for new files in the project folder")
+                    .tip("Look for new files in the project folder")
                 }
                 if filter == nil {
                     FlowLayout(spacing: 6) {
@@ -183,7 +183,7 @@ private struct MediaEntryInteractions: ViewModifier {
                     NSWorkspace.shared.activateFileViewerSelecting(urls)
                 }
             }
-            .help(entry.mediaIDs.compactMap { model.project.media($0)?.path }.joined(separator: "\n"))
+            .tip(entry.mediaIDs.compactMap { model.project.media($0)?.path }.joined(separator: "\n"))
     }
 
     private func place(insert: Bool) {
@@ -446,7 +446,7 @@ private struct TakeStatus: View {
             Image(systemName: "checkmark")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(Theme.green.color)
-                .help("Transcribed: search finds what's said in it")
+                .tip("Transcribed: search finds what's said in it")
         } else if jobs.contains(where: { $0.state == .queued }) {
             Text("Queued")
                 .font(.ui(10.5))

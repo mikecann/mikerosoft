@@ -109,7 +109,8 @@ struct ClipRenderer {
         case .video, .broll:
             drawPictureDetail(clip, rect: rect, style: style, in: context)
         case .voice, .music, .sfx, .audio:
-            if lane.style != .sfx { drawWaveform(clip, rect: rect, style: style, in: context) }
+            // Sound effects too: the shape shows where a whoosh peaks.
+            drawWaveform(clip, rect: rect, style: style, in: context)
             if lane.style == .music || clip.audio?.fadeIn ?? .zero > .zero || clip.audio?.fadeOut ?? .zero > .zero || clip.keyframes["audio.gainDB"] != nil {
                 drawVolumeLine(clip, rect: rect, in: context)
             }
@@ -447,9 +448,15 @@ struct ClipRenderer {
             let font = Theme.Fonts.ui(9.5)
             let text = name(of: clip)
             guard rect.width >= 20 else { return }
-            let width = TextMetrics.width(of: text, font: font)
-            let x = rect.width > width + 8 ? rect.midX - width / 2 : left + 4
-            drawText(text, at: CGPoint(x: x, y: rect.midY - 6), maxX: rect.maxX - 3, font: font, color: style.label)
+            if rect.height >= 28 {
+                // Tall enough for the waveform to read: the name sits at
+                // the top, like music's, off the middle where it peaks.
+                drawText(text, at: CGPoint(x: left + 6, y: rect.minY + 2), maxX: rect.maxX - 4, font: Theme.Fonts.ui(9.5, .medium), color: style.label)
+            } else {
+                let width = TextMetrics.width(of: text, font: font)
+                let x = rect.width > width + 8 ? rect.midX - width / 2 : left + 4
+                drawText(text, at: CGPoint(x: x, y: rect.midY - 6), maxX: rect.maxX - 3, font: font, color: style.label)
+            }
         case .voice, .audio:
             // Take sound reads from its track, like the design.
             let role = clip.mediaID.flatMap { project.media($0)?.role }

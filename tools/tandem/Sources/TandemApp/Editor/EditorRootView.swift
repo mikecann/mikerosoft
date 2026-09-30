@@ -69,6 +69,7 @@ struct EditorRootView: View {
                 }
             }
         }
+        .tipLayer()
         .background(Theme.window.color)
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
@@ -147,7 +148,7 @@ private struct PanelDivider: View {
                                     onEnd()
                                 }
                         )
-                        .help(help)
+                        .tip(help)
                 }
                 .animation(.easeOut(duration: 0.12), value: hovering || dragging)
             }
@@ -191,7 +192,7 @@ struct TopBar: View {
                     .background(RoundedRectangle(cornerRadius: 7).fill(Theme.amber.color))
             }
             .buttonStyle(.plain)
-            .help(Shortcuts.help("Export the video", .export))
+            .tip(Shortcuts.help("Export the video", .export))
         }
         .padding(.leading, 16)
         .padding(.trailing, 14)
@@ -270,7 +271,7 @@ private struct LibraryTabButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
+        .tip(help)
     }
 
     private var help: String {
@@ -368,7 +369,7 @@ private struct AgentChip: View {
                 .overlay(Capsule().stroke(Theme.controlBorder.color, lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .help(help)
+            .tip(help)
         }
     }
 
@@ -412,7 +413,7 @@ struct StatusBar: View {
                     .foregroundStyle(Theme.textFaint.color)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(model.playback.warnings.map { PreviewWarnings.short($0, media: model.project.media) }.joined(separator: "\n"))
+                    .tip(model.playback.warnings.map { PreviewWarnings.short($0, media: model.project.media) }.joined(separator: "\n"))
             }
             Spacer(minLength: 8)
             // Stays while saving fails, whatever else the bar says.
@@ -424,7 +425,7 @@ struct StatusBar: View {
                         .foregroundStyle(Theme.red.color)
                         .lineLimit(1)
                 }
-                .help(SaveProblem.message(file: model.fileName, reason: problem))
+                .tip(SaveProblem.message(file: model.fileName, reason: problem))
             }
             // The last agent edit stays here once its status message has
             // gone, so the bar never says the same thing twice.

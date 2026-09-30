@@ -568,3 +568,19 @@ final class ViewerZoomTests: XCTestCase {
         }
     }
 }
+
+/// Clicking a clip turns the inspector to a tab that has something for it.
+final class InspectorTabTests: XCTestCase {
+    func testSoundClipsOpenOnAudioAndPicturesWithoutSoundLeaveIt() throws {
+        let f = try AppFixture()
+        let music = try XCTUnwrap(f.clips("Music").first).id
+        XCTAssertEqual(InspectorTabs.fitting(.video, clip: music, in: f.project), .audio)
+        XCTAssertEqual(InspectorTabs.fitting(.colour, clip: music, in: f.project), .audio)
+        XCTAssertEqual(InspectorTabs.fitting(.info, clip: music, in: f.project), .info, "info fits anything")
+        let title = Clip(id: "clip_title", content: .text(TextContent(text: "Hello")), start: t(1), duration: t(2))
+        _ = try f.apply(EditBatch(label: "Title", commands: [.insertClip(trackID: f.track("Text").id, clip: title)]))
+        XCTAssertEqual(InspectorTabs.fitting(.audio, clip: "clip_title", in: f.project), .video, "a title has no sound")
+        let broll = try XCTUnwrap(f.clips("B-roll").first).id
+        XCTAssertEqual(InspectorTabs.fitting(.colour, clip: broll, in: f.project), .colour, "a picture stays where it is")
+    }
+}

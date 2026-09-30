@@ -150,7 +150,7 @@ struct ColourInspector: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Give the other \(many) the same grade, replacing theirs")
+            .tip("Give the other \(many) the same grade, replacing theirs")
         }
     }
 
@@ -425,13 +425,13 @@ struct ColourSectionBlock<Content: View>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(ColourSliderSpec.sectionHelp(section) + (expanded ? " Click to hide." : " Click to show."))
+                .tip(ColourSliderSpec.sectionHelp(section) + (expanded ? " Click to hide." : " Click to show."))
                 if hasEffect {
                     IconButton(symbol: Icons.reset, help: "Reset \(section.title.lowercased()): back to no change", action: reset)
                     GraphiteSwitch(isOn: isOn, action: toggle)
                         .disabled(!canToggle)
                         .opacity(canToggle ? 1 : 0.35)
-                        .help(canToggle
+                        .tip(canToggle
                             ? (isOn ? "Turn \(section.title.lowercased()) off to compare" : "Turn \(section.title.lowercased()) back on")
                             : "Nothing to turn off yet")
                 }
@@ -443,7 +443,7 @@ struct ColourSectionBlock<Content: View>: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(expanded ? "Hide \(section.title.lowercased())" : "Show \(section.title.lowercased())")
+                .tip(expanded ? "Hide \(section.title.lowercased())" : "Show \(section.title.lowercased())")
             }
             .frame(height: 18)
             if !expanded, !summary.isEmpty {

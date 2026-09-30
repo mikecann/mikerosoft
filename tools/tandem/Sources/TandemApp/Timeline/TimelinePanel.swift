@@ -59,7 +59,7 @@ struct TimelineToolbar: View {
                     .foregroundStyle(Theme.textMuted.color)
             }
             .buttonStyle(.plain)
-            .help("Tighten pauses: remove long silences from the take, found from its transcript")
+            .tip("Tighten pauses: remove long silences from the take, found from its transcript")
             .popover(isPresented: $showTighten, arrowEdge: .top) {
                 TightenPausesPopover(model: model) { showTighten = false }
             }
@@ -71,7 +71,7 @@ struct TimelineToolbar: View {
                 fill: Theme.textMuted
             )
             .frame(width: 84)
-            .help(zoomHelp)
+            .tip(zoomHelp)
         }
         .padding(.horizontal, 14)
         .frame(height: Theme.Metrics.timelineToolbarHeight)
@@ -100,7 +100,7 @@ struct ToggleText: View {
                 .foregroundStyle(on ? Theme.text.color : Theme.textMuted.color)
         }
         .buttonStyle(.plain)
-        .help(help)
+        .tip(help)
     }
 }
 
@@ -119,7 +119,7 @@ private struct ToolButton: View {
         }
         .buttonStyle(.plain)
         // "Blade tool (B): click a clip to cut it there"
-        .help(Shortcuts.help("\(tool.name) tool", tool.command) + ": " + tool.summary)
+        .tip(Shortcuts.help("\(tool.name) tool", tool.command) + ": " + tool.summary)
     }
 }
 

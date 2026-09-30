@@ -101,7 +101,7 @@ struct EffectRow: View {
                         .frame(width: 10, height: 10)
                 }
                 .buttonStyle(.plain)
-                .help(effect.enabled ? "Turn off" : "Turn on")
+                .tip(effect.enabled ? "Turn off" : "Turn on")
                 PanelIcon(name: Icons.effect(effect.type), color: effect.enabled ? Theme.textSecondary.color : Theme.textFaint.color)
                 Text(definition?.name ?? "\(effect.type) (unknown)")
                     .font(.ui(12))

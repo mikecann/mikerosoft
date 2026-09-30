@@ -31,6 +31,22 @@ enum LibraryTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// Which inspector tab a clicked clip opens on.
+enum InspectorTabs {
+    /// A sound clip (a whoosh on SFX, music, the voice) has nothing on the
+    /// Video or Colour tabs, so it turns to Audio; a picture with no sound
+    /// (a title, a graphic, a still) turns from Audio to Video. Otherwise
+    /// the tab stays: a camera clip is at home on any of them.
+    static func fitting(_ current: InspectorTab, clip clipID: String, in project: Project) -> InspectorTab {
+        guard let location = project.location(ofClip: clipID), let clip = project.clip(clipID) else { return current }
+        if location.track.kind == .audio {
+            return current == .video || current == .colour ? .audio : current
+        }
+        let hasSound = clip.mediaID.flatMap { project.media($0) }?.hasAudio ?? false
+        return current == .audio && !hasSound ? .video : current
+    }
+}
+
 /// Right panel tabs.
 enum InspectorTab: String, CaseIterable, Identifiable {
     case video, colour, audio, info, activity
@@ -99,8 +115,14 @@ final class EditorModel {
     var selectedKeyframe: KeyframeRef?
     var selectedTransitionID: String?
     /// The clip last clicked, which the inspector shows when a whole link
-    /// group is selected.
-    var focusedClipID: String?
+    /// group is selected. The inspector turns to a tab that fits it.
+    var focusedClipID: String? {
+        didSet {
+            guard focusedClipID != oldValue, let focusedClipID else { return }
+            let tab = InspectorTabs.fitting(inspectorTab, clip: focusedClipID, in: project)
+            if tab != inspectorTab { inspectorTab = tab }
+        }
+    }
 
     // Timeline settings
     var tool: TimelineTool = .select
