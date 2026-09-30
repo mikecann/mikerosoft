@@ -211,7 +211,8 @@ extension CommandSchema {
     static let patchModels: [String: JSONValue] = [
         "Project": projectHeader,
         "ProjectSettings": projectSettings,
-        "Track": track
+        "Track": track,
+        "TransitionPatch": transitionPatch
     ]
 
     static let point = S.object(["x": S.number(), "y": S.number()], required: ["x", "y"], "Canvas units: (0, 0) top left, (1, 1) bottom right.")
@@ -369,14 +370,23 @@ extension CommandSchema {
         "livePhotoVideo": S.string("Set by scanning on a Live Photo's still: its motion clip (the short .mov beside it), which isn't media of its own.")
     ], required: ["path"])
 
-    static let transition = S.object([
+    static let transitionFields: [String: JSONValue] = [
         "id": S.string("Optional."),
         "type": S.enumeration(TransitionType.allCases.map(\.rawValue)),
         "direction": S.enumeration(["up", "down", "left", "right"]),
         "duration": S.time("Defaults to the type's usual length."),
         "fromClipID": S.string("Outgoing clip; leave out for a head transition."),
-        "toClipID": S.string("Incoming clip; leave out for a tail transition.")
-    ], required: ["type"])
+        "toClipID": S.string("Incoming clip; leave out for a tail transition."),
+        "soundClipID": S.string("The clip on an audio track that plays its sound, kept in step with it by every edit. To give it a sound use sound on addTransition or updateTransition; naming a clip that's already on an audio track here ties that one.")
+    ]
+
+    static let transition = S.object(transitionFields, required: ["type"])
+
+    /// What `updateTransition`'s patch takes: the transition's fields, and
+    /// its sound.
+    static let transitionPatch = S.object(transitionFields.merging([
+        "sound": transitionSound("Changes the sound, or adds one (mediaID needed then); null removes it.", patch: true)
+    ]) { a, _ in a })
 
     static let marker = S.object([
         "id": S.string("Optional."),
@@ -443,6 +453,16 @@ extension CommandSchema {
 
 extension CommandSchema {
     static let insertMode = S.enumeration(["place", "overwrite", "insert"], "place (default) fails if the range is taken, overwrite replaces what's there, insert pushes later clips right.")
+
+    /// A transition's sound, as `addTransition` takes it or (`patch`, where
+    /// every field is optional) as `sound` in `updateTransition`'s patch.
+    static func transitionSound(_ description: String, patch: Bool) -> JSONValue {
+        S.object([
+            "mediaID": S.string(patch ? "Another sound from the project's media in its place." : "A sound already in the project's media (tandem assets use adds one)."),
+            "gainDB": S.number("Clip gain in dB. Default -15; the light swoosh sits 15 LU under speech at -23.3."),
+            "offset": S.time("When the sound starts, in seconds from the middle of the transition (the cut, for one between two clips): -0.39 puts the loudest moment of a sound 0.39 s in on the cut. Default: as the transition starts.")
+        ], required: patch ? [] : ["mediaID"], description)
+    }
 
     static func sectionCardSound(_ description: String) -> JSONValue {
         S.object([
@@ -697,19 +717,23 @@ extension CommandSchema {
         ),
         Entry(
             command: .addTransition,
-            summary: "Adds a transition between two touching clips (needs spare media on both sides) or at one clip's head or tail.",
-            arguments: S.object(["trackID": S.string(), "transition": S.ref("Transition")], required: ["trackID", "transition"]),
-            example: #"{"addTransition": {"trackID": "trk_camera", "transition": {"type": "dissolve", "duration": 0.5, "fromClipID": "clip_a", "toClipID": "clip_b"}}}"#
+            summary: "Adds a transition between two touching clips (centred on the cut; a clip with no frames past it holds its edge frame) or at one clip's head or tail. sound plays a sound effect with it, as its own clip on the first free SFX track, which follows the transition from then on and goes when it goes.",
+            arguments: S.object([
+                "trackID": S.string(),
+                "transition": S.ref("Transition"),
+                "sound": transitionSound("A sound effect to play with it, like the light swoosh push, slide, cut slide and wipe get in the app.", patch: false)
+            ], required: ["trackID", "transition"]),
+            example: #"{"addTransition": {"trackID": "trk_camera", "transition": {"type": "push", "duration": 0.7, "fromClipID": "clip_a", "toClipID": "clip_b"}, "sound": {"mediaID": "med_swoosh", "gainDB": -23.3, "offset": -0.39}}}"#
         ),
         Entry(
             command: .updateTransition,
-            summary: "Changes a transition's type, direction or duration.",
-            arguments: S.object(["transitionID": S.string(), "patch": S.patch(of: "Transition", "Fields: type, direction, duration.")], required: ["transitionID", "patch"]),
-            example: #"{"updateTransition": {"transitionID": "tr_x", "patch": {"duration": 0.8}}}"#
+            summary: "Changes a transition's type, direction or duration, and its sound: sound as an object changes the file (mediaID), gainDB or offset, or adds one; null removes it. A new length keeps the sound's distance from the transition's middle.",
+            arguments: S.object(["transitionID": S.string(), "patch": S.patch(of: "TransitionPatch", "Fields: type, direction, duration, sound.")], required: ["transitionID", "patch"]),
+            example: #"{"updateTransition": {"transitionID": "tr_x", "patch": {"duration": 0.8, "sound": {"gainDB": -20}}}}"#
         ),
         Entry(
             command: .removeTransition,
-            summary: "Removes a transition.",
+            summary: "Removes a transition and its sound.",
             arguments: S.object(["transitionID": S.string()], required: ["transitionID"]),
             example: #"{"removeTransition": {"transitionID": "tr_x"}}"#
         ),

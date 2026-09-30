@@ -151,8 +151,14 @@ public enum EditCommand: Codable, Equatable, Sendable {
 
     // MARK: Transitions
 
-    case addTransition(trackID: String, transition: Transition)
+    /// `sound` plays a sound effect with it, on the first free SFX track,
+    /// tied to it from then on (`TransitionSounds`).
+    case addTransition(trackID: String, transition: Transition, sound: TransitionSound? = nil)
+    /// Merge patch on `type`, `direction` and `duration`, plus `sound`: an
+    /// object with any of `mediaID`, `gainDB` and `offset` changes the
+    /// sound (or adds one), `null` removes it.
     case updateTransition(transitionID: String, patch: JSONValue)
+    /// Removes the transition and its sound.
     case removeTransition(transitionID: String)
 
     // MARK: Effects and animation

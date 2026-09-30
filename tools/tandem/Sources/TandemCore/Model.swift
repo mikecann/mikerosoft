@@ -712,9 +712,9 @@ public enum Direction: String, Codable, Sendable {
     case up, down, left, right
 }
 
-/// A transition on one track. Between two clips, both need enough media
-/// beyond the cut (handles) to cover half the duration each; commands
-/// reject transitions without handles instead of freezing frames.
+/// A transition on one track. Between two clips it's centred on the cut
+/// and plays half its length of each; a clip with no frames there holds
+/// its edge frame (see `Editing.heldFrames`).
 public struct Transition: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var type: TransitionType
@@ -724,6 +724,11 @@ public struct Transition: Codable, Equatable, Identifiable, Sendable {
     public var fromClipID: String?
     /// The incoming clip. Nil for a transition at the tail of `fromClipID`.
     public var toClipID: String?
+    /// The sound effect that plays with it: an ordinary clip on an audio
+    /// track, so it can be seen, nudged and trimmed, which every edit keeps
+    /// in step with the transition and removes with it
+    /// (`TransitionSounds`). Nil for a silent transition.
+    public var soundClipID: String?
 
     public init(
         id: String = IDs.make("tr"),
@@ -731,7 +736,8 @@ public struct Transition: Codable, Equatable, Identifiable, Sendable {
         direction: Direction? = nil,
         duration: Time,
         fromClipID: String?,
-        toClipID: String?
+        toClipID: String?,
+        soundClipID: String? = nil
     ) {
         self.id = id
         self.type = type
@@ -739,6 +745,7 @@ public struct Transition: Codable, Equatable, Identifiable, Sendable {
         self.duration = duration
         self.fromClipID = fromClipID
         self.toClipID = toClipID
+        self.soundClipID = soundClipID
     }
 }
 
@@ -1199,6 +1206,7 @@ extension Transition {
         duration = try c.decode(.duration, or: type.defaultDuration)
         fromClipID = try c.decodeIfPresent(String.self, forKey: .fromClipID)
         toClipID = try c.decodeIfPresent(String.self, forKey: .toClipID)
+        soundClipID = try c.decodeIfPresent(String.self, forKey: .soundClipID)
     }
 }
 

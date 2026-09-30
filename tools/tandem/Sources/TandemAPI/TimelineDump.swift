@@ -193,7 +193,7 @@ public enum TimelineDump {
                     out.append("    gap \(previousEnd)-\(clip.start) (\(TimeText.duration(clip.start - previousEnd)))")
                 }
                 if let transition = heads[clip.id] {
-                    out.append("    ~ \(transition.type.rawValue)\(direction(transition)) \(TimeText.duration(transition.duration)) in  \(transition.id)")
+                    out.append("    ~ \(transition.type.rawValue)\(direction(transition)) \(TimeText.duration(transition.duration)) in  \(transition.id)\(sound(transition))")
                 }
                 let id = clip.id.padding(toLength: idWidth, withPad: " ", startingAt: 0)
                 let length = String(repeating: " ", count: max(0, lengthWidth - TimeText.duration(clip.duration).count)) + TimeText.duration(clip.duration)
@@ -209,7 +209,7 @@ public enum TimelineDump {
                 if let mediaID = clip.mediaID, !usedMedia.contains(mediaID) { usedMedia.append(mediaID) }
                 if let transition = tails[clip.id] {
                     let target = transition.toClipID.map { " into \($0)" } ?? " out"
-                    out.append("    ~ \(transition.type.rawValue)\(direction(transition)) \(TimeText.duration(transition.duration))\(target)  \(transition.id)")
+                    out.append("    ~ \(transition.type.rawValue)\(direction(transition)) \(TimeText.duration(transition.duration))\(target)  \(transition.id)\(sound(transition))")
                 }
                 if options.transcripts != nil, speechTrackIDs.contains(track.id),
                    let mediaID = clip.mediaID, let item = project.media(mediaID), item.hasAudio {
@@ -396,6 +396,12 @@ public enum TimelineDump {
 
     static func direction(_ transition: Transition) -> String {
         transition.direction.map { " \($0.rawValue)" } ?? ""
+    }
+
+    /// The clip that plays a transition's sound, for agents to nudge or
+    /// turn down like any other.
+    static func sound(_ transition: Transition) -> String {
+        transition.soundClipID.map { "  sound \($0)" } ?? ""
     }
 
     /// Levels to a tenth of a dB, which is all anyone hears.

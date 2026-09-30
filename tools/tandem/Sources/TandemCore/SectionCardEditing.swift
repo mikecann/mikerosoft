@@ -285,20 +285,8 @@ extension Editing {
     /// there is cut.
     static func placeCardSound(_ p: inout Project, _ sound: SectionCardSound, at start: Time, group: String?, _ context: inout EditContext) throws {
         guard let item = p.media(sound.mediaID) else { throw EditError.notFound("media \(sound.mediaID)") }
-        let length = item.duration.flatMap { $0 > .zero ? $0 : nil } ?? Time(seconds: 1)
-        let range = TimeRange(start: start, duration: length)
-        func isSFX(_ name: String) -> Bool {
-            let lower = name.lowercased()
-            return lower == "sfx" || (lower.hasPrefix("sfx ") && Int(lower.dropFirst(4)) != nil)
-        }
-        let candidates = p.audioTracks.indices.filter { isSFX(p.audioTracks[$0].name) }
-        var index = candidates.first { !p.audioTracks[$0].locked && p.audioTracks[$0].isFree(range) }
-        if index == nil {
-            let name = candidates.isEmpty ? "SFX" : "SFX \(candidates.count + 1)"
-            try addTrack(&p, kind: .audio, name: name, index: nil, id: nil, &context)
-            index = p.audioTracks.count - 1
-            p.audioTracks[index!].rippleMode = .follow
-        }
+        let length = soundLength(item)
+        let index = freeSFXTrack(for: TimeRange(start: start, duration: length), in: &p, &context)
         let clip = Clip(
             id: context.makeID("clip"),
             content: .media(mediaID: item.id),
@@ -308,7 +296,7 @@ extension Editing {
             audio: AudioProperties(gainDB: sound.gainDB ?? SectionCard.soundGainDB)
         )
         try checkSource(clip, in: p)
-        p.audioTracks[index!].add(clip)
+        p.audioTracks[index].add(clip)
         context.createdIDs.append(clip.id)
     }
 }

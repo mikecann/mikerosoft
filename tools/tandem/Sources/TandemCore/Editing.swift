@@ -7,6 +7,10 @@ import Foundation
 /// succeeds and the result validates.
 public enum Editing {
     public static func apply(_ command: EditCommand, to project: inout Project, context: inout EditContext) throws {
+        // Transitions' sounds are kept in step with them after whatever
+        // this command does (`TransitionSounds`).
+        let sounds = TransitionSounds.anchors(in: project)
+        context.placedSounds = []
         switch command {
         case .updateProject(let patch):
             try updateProject(&project, patch)
@@ -79,8 +83,8 @@ public enum Editing {
             try addMotion(&project, clipIDs, style: style, amount: amount)
         case .setFormatLayout(let clipIDs, let format, let slot, let cutout):
             try setFormatLayout(&project, clipIDs, format: format, slot: slot, cutout: cutout)
-        case .addTransition(let trackID, let transition):
-            try addTransition(&project, trackID: trackID, transition, &context)
+        case .addTransition(let trackID, let transition, let sound):
+            try addTransition(&project, trackID: trackID, transition, sound: sound, &context)
         case .updateTransition(let transitionID, let patch):
             try updateTransition(&project, transitionID, patch, &context)
         case .removeTransition(let transitionID):
@@ -104,6 +108,8 @@ public enum Editing {
         case .removeMarker(let markerID):
             try removeMarker(&project, markerID)
         }
+        TransitionSounds.reconcile(&project, from: sounds, &context)
+        context.placedSounds = []
         project.normalizeLinkGroups()
     }
 
@@ -1170,14 +1176,20 @@ public enum Editing {
         }
     }
 
-    static func addTransition(_ p: inout Project, trackID: String, _ transition: Transition, _ context: inout EditContext) throws {
+    static func addTransition(_ p: inout Project, trackID: String, _ transition: Transition, sound: TransitionSound? = nil, _ context: inout EditContext) throws {
         let location = try requireTrack(p, trackID)
         try requireUnlocked(p[location])
         guard !p.allIDs.contains(transition.id) else { throw EditError.invalid("ID \(transition.id) is already in use") }
         try validateTransition(transition, on: p[location], in: p)
+        if let clipID = transition.soundClipID {
+            // A sound already on the timeline, tied to it from now on.
+            guard sound == nil else { throw EditError.invalid("give a transition sound or soundClipID, not both") }
+            try checkTieable(clipID, in: p)
+        }
         for note in heldFrames(transition, on: p[location], in: p) { context.warn(note) }
         p[location].transitions.append(transition)
         context.createdIDs.append(transition.id)
+        if let sound { try addTransitionSound(&p, sound, to: transition.id, &context) }
     }
 
     static func updateTransition(_ p: inout Project, _ transitionID: String, _ patch: JSONValue, _ context: inout EditContext) throws {
@@ -1186,10 +1198,20 @@ public enum Editing {
         }
         try requireUnlocked(p[location])
         try requireObject(patch, forbidden: ["id"], what: "transition")
-        let updated = try JSONValue.applyMergePatch(patch, to: p[location].transitions[index])
+        guard case .object(var fields) = patch else { return }
+        let current = p[location].transitions[index]
+        // The sound is changed with `sound`, not by pointing at another
+        // clip; sending back the one it has already changes nothing.
+        if let clipID = fields.removeValue(forKey: "soundClipID"), clipID != (current.soundClipID.map(JSONValue.string) ?? .null) {
+            throw EditError.invalid("change a transition's sound with \"sound\" ({\"mediaID\": ...}, or null for none), not soundClipID")
+        }
+        let sound = fields.removeValue(forKey: "sound")
+        let middle = current.middle(on: p[location])
+        let updated = try JSONValue.applyMergePatch(.object(fields), to: current)
         try validateTransition(updated, on: p[location], in: p, ignoring: transitionID)
         for note in heldFrames(updated, on: p[location], in: p) { context.warn(note) }
         p[location].transitions[index] = updated
+        if let sound { try patchTransitionSound(&p, transitionID, sound, middleBefore: middle, &context) }
     }
 
     /// A centred transition plays half its length past each side of the

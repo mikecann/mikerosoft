@@ -110,7 +110,7 @@ public enum CommandText {
         case .zoomToRegion(_, _, let at, _): return at.map { "Zoom at \($0)" } ?? "Zoom"
         case .setFormatLayout(let ids, let format, let slot, _): return "Place \(count(ids.count, "clip")) in the \(slot.rawValue) of \(format)"
         case .addMotion(let ids, let style, _): return "\(style.name) on \(count(ids.count, "clip"))"
-        case .addTransition(_, let transition): return "Add \(transition.type.rawValue)"
+        case .addTransition(_, let transition, let sound): return "Add \(transition.type.rawValue)" + (sound == nil ? "" : " with a sound")
         case .updateTransition: return "Update transition"
         case .removeTransition: return "Remove transition"
         case .addEffect(_, let effect, _): return "Add \(effect.type)"

@@ -292,6 +292,17 @@ for the rest, as in Premiere and Filmora, and the edit's warnings say how
 long; trim the clip for real motion instead. On audio tracks every
 transition is a crossfade, and sound past a file's ends is silence.
 
+A transition can carry a sound effect: an ordinary clip on SFX (the first
+free SFX track), so Mike sees it and can nudge, trim or turn it down, tied
+to the transition by its `soundClipID`. It keeps its distance from the
+transition's middle (the cut, for one between two clips, where a push or
+wipe moves fastest), so a swoosh stays on the cut whatever the length:
+rolling the cut, rippling the take or moving both clips takes it along,
+whole, and a fade at a clip's head carries it as it grows. It goes when
+the transition goes, whether that's a `removeTransition`, a clip it joins
+deleted, the clips moved apart, or an undo. Deleting the sound clip
+leaves the transition silent.
+
 ## Reading the project
 
 `tandem timeline` (MCP `timeline`) is the view to start from:
@@ -328,7 +339,8 @@ Media
 ```
 
 Each track line has the track's ID for commands that need one. Transitions
-(`~`) sit between the clips they join, and gaps in the take are listed as
+(`~`) sit between the clips they join, ending `sound clip_...` when one
+plays a sound (that's its clip on SFX), and gaps in the take are listed as
 `gap`. When most of a track's clips share settings (a PiP camera track's
 `layout pipRight, scale 0.5 at 0.87,0.77, cutout, fx dropShadow`), the
 track line says them once as `(most clips: ...)`, each clip lists only
@@ -851,17 +863,44 @@ Mike's usual length for the type.
 {"addTransition": {"trackID": "trk_camera", "transition": {"type": "dissolve", "duration": 0.5, "fromClipID": "clip_a", "toClipID": "clip_b"}}}
 ```
 
+`sound` plays a sound effect with it: a media item already in the project
+(`tandem assets use` adds one), its clip `gainDB` (default -15) and its
+`offset`, when it starts in seconds from the transition's middle (default:
+as the transition starts). The batch returns the transition's ID, then the
+sound clip's. The light swoosh Mike likes on pushes is loudest 0.39 s in, so
+`-0.39` peaks it on the cut, and `-23.3` puts it 15 LU under speech at
+-20 LUFS ([Put a swoosh on every push](#put-a-swoosh-on-every-push) has
+the rest).
+
+```json
+{"addTransition": {"trackID": "trk_camera", "transition": {"type": "push", "fromClipID": "clip_a", "toClipID": "clip_b"}, "sound": {"mediaID": "med_rgm8r7d7", "gainDB": -23.3, "offset": -0.39}}}
+```
+
 #### updateTransition
 
-Changes a transition's type, direction or duration.
+Changes a transition's type, direction or duration, and its `sound`: an
+object with any of `mediaID` (another file in its place), `gainDB` and
+`offset` changes it, or adds one when there's none (with `mediaID`), and
+`null` removes it. What you leave out stays as the sound has it, so a new
+length or type keeps the sound where it is against the middle. The sound
+clip is an ordinary clip too: `updateClip` and `moveClips` on its ID work,
+and it stays tied.
 
 ```json
 {"updateTransition": {"transitionID": "tr_x", "patch": {"duration": 0.8}}}
 ```
 
+```json
+{"updateTransition": {"transitionID": "tr_x", "patch": {"sound": {"gainDB": -20}}}}
+```
+
+```json
+{"updateTransition": {"transitionID": "tr_x", "patch": {"sound": null}}}
+```
+
 #### removeTransition
 
-Removes a transition.
+Removes a transition and its sound.
 
 ```json
 {"removeTransition": {"transitionID": "tr_x"}}
@@ -1337,36 +1376,35 @@ of a 4K project is 1920x1080 and of a 9:16 one 1080x1920.
 and `export` to `exports/<name> r<revision>.mp4`. In MCP, `frame` returns
 the picture directly, so you can look at the result of an edit.
 
-### Put a whoosh on every push transition
+### Put a swoosh on every push
 
-Find the cut each push transition sits on (the end of its outgoing clip,
-or the start of its incoming one), pick a whoosh, add it to the project
-once, then place it at every cut in one batch:
+A swoosh belongs to its transition: give a push a `sound` and it goes
+where the push goes, and away with it. The light swoosh Mike likes is
+`elevenlabs:sfx_2ybnc2tu` in his asset library. Copy it into the project
+once, find the pushes that have no sound yet, and give them all one in one
+batch:
 
 ```bash
-tandem timeline --json | jq -c '[.project.videoTracks[] | . as $t | .transitions[]
-  | select(.type == "push") | . as $x | $t.clips[]
-  | if $x.fromClipID then select(.id == $x.fromClipID) | .start + .duration
-    else select(.id == $x.toClipID) | .start end | . * 1000 | round / 1000] | unique'
-# [106.932,136.59,242.9,...]
-tandem assets search whoosh --kind sfx          # or --online, or generate one
-tandem assets use import:sfx-3fa2c1/Whoosh_03.wav   # adds it to the media, prints its media ID
+tandem assets use elevenlabs:sfx_2ybnc2tu     # adds it to the media: med_rgm8r7d7
+tandem timeline --json | jq -r '.project.videoTracks[].transitions[] | select(.type == "push" and .soundClipID == null) | .id'
+# tr_k3f9x2mq
+# tr_p8zq4w2m
 ```
 
-Start each whoosh about 0.3 s before its cut so it peaks on the cut:
-
 ```json
-{"label": "Whooshes on the pushes", "commands": [
-  {"placeMedia": {"mediaIDs": ["med_w4k2p8zq"], "at": 106.632}},
-  {"placeMedia": {"mediaIDs": ["med_w4k2p8zq"], "at": 136.29}},
-  {"placeMedia": {"mediaIDs": ["med_w4k2p8zq"], "at": 242.6}}
+{"label": "Swooshes on the pushes", "commands": [
+  {"updateTransition": {"transitionID": "tr_k3f9x2mq", "patch": {"sound": {"mediaID": "med_rgm8r7d7", "gainDB": -23.3, "offset": -0.39}}}},
+  {"updateTransition": {"transitionID": "tr_p8zq4w2m", "patch": {"sound": {"mediaID": "med_rgm8r7d7", "gainDB": -23.3, "offset": -0.39}}}}
 ]}
 ```
 
-`placeMedia` puts each one on SFX at the usual -15 dB. When another sound is
-already there, add `"mode": "overwrite"` or name a free audio track with
-`"audioTrackID"`. For a handful, `tandem assets use <id> --at <time>` once
-per cut does the same, one undo step each.
+Each goes on SFX (SFX 2 where SFX is taken) starting 0.39 s before the
+cut, so its loudest moment lands where the push moves fastest. -23.3 dB is
+for speech at Tandem's -20 LUFS: its loudest 400 ms then sits 15 LU under
+the voice, as the section card whooshes do. In a project whose speech
+plays elsewhere (`tandem loudness` says where), move the gain by the
+difference: -32 for speech at -28.7. For another sound, `offset` is minus
+the moment it's loudest, and the gain puts that 15 LU under the speech.
 
 ### Credits for the description
 

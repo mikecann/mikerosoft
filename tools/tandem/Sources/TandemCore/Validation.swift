@@ -114,6 +114,22 @@ public enum ProjectValidator {
             }
         }
 
+        // A transition's sound is a clip on an audio track, and only its.
+        let soundTies = p.allTracks.flatMap(\.transitions).filter { $0.soundClipID != nil }
+        if !soundTies.isEmpty {
+            let audioClips = Set(p.audioTracks.flatMap(\.clips).map(\.id))
+            var sounds = Set<String>()
+            for transition in soundTies {
+                guard let soundID = transition.soundClipID else { continue }
+                if !audioClips.contains(soundID) {
+                    error("Transition \(transition.id)'s sound \(soundID) isn't a clip on an audio track.", transition.id)
+                }
+                if !sounds.insert(soundID).inserted {
+                    error("Clip \(soundID) is the sound of two transitions.", transition.id)
+                }
+            }
+        }
+
         var groups: [String: [Clip]] = [:]
         for clip in p.allTracks.flatMap(\.clips) {
             if let group = clip.linkGroup { groups[group, default: []].append(clip) }

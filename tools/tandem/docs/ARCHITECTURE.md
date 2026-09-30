@@ -124,6 +124,10 @@ the app has copied them in from the asset library.
   and its next scan adds the movie as a video, as scans did before, so it
   didn't need a schema version either. It's a file the project uses like
   `path`: archiving copies it, relink and segments carry it.
+- `Transition.soundClipID` (the clip playing a transition's sound) didn't
+  need a schema version either: an older build that drops it leaves the
+  sound as a clip on SFX where it was, so the video sounds the same, and
+  only the tie that moves it with the transition is lost.
 - Keyframe times are relative to the clip start and move with the clip.
 - A text clip's `style` fields are all optional. One that's set wins over
   the clip's preset even when it's the default value (`"uppercase": false`
@@ -193,6 +197,30 @@ A transition belongs to a track and joins two touching clips (`fromClipID`,
 two-sided transition is centred on the cut and plays half its duration of
 each clip past the cut; a clip with no frames there holds its edge frame
 (the edit warns). On audio tracks every transition plays as a crossfade.
+`Transition.window(on:)` says when it plays, and the render, the timeline
+and its sound all use it.
+
+A transition can have a sound (`soundClipID`): an ordinary clip on an audio
+track, the first free SFX track when it's added, so it can be seen, nudged,
+trimmed and turned down like any sound. `Editing.apply` keeps the two in
+step after every command (`TransitionSounds`): it notes each transition
+with a sound and where its middle is (the cut, or the middle of a one-sided
+window), runs the command, then
+
+- removes the sound of a transition that went, whatever took it;
+- carries the sound, as it was before the command, by as much as the
+  transition's middle moved (a roll, a ripple, both clips moved, a
+  one-sided transition's length), so a ripple through the sound doesn't
+  chop it, and a swoosh stays on the cut when a centred transition's
+  length changes;
+- clears the tie when the sound itself was deleted or overwritten while
+  its transition stayed put.
+
+Sounds a command put somewhere on purpose (`addTransition`'s `sound`, a
+`sound` patch) are left there. The work goes in timeline order, so a
+journal replay makes the same tracks. Undo restores the whole project, so
+it needs nothing extra. The validator refuses a tie to a clip that isn't
+on an audio track or is shared by two transitions.
 
 ## Transform contract
 

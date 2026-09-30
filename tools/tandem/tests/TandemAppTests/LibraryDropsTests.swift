@@ -9,7 +9,7 @@ final class LibraryDropsTests: XCTestCase {
         try fixture.blade(at: [20])
         let camera = fixture.track("Camera")
         let batch = try XCTUnwrap(LibraryDrops.transition(.push, at: t(20.4), trackID: camera.id, in: fixture.project, id: "tr_drop"))
-        guard case .addTransition(let trackID, let transition) = batch.commands.first else { return XCTFail("expected addTransition") }
+        guard case .addTransition(let trackID, let transition, _) = batch.commands.first else { return XCTFail("expected addTransition") }
         XCTAssertEqual(trackID, camera.id)
         XCTAssertEqual(transition.type, .push)
         XCTAssertEqual(transition.fromClipID, fixture.clip("Camera", 0).id)

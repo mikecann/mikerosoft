@@ -71,7 +71,7 @@ final class SchemaTests: XCTestCase {
             .insertClip(trackID: "trk_a", clip: Clip(content: .adjustment, start: t(0), duration: t(1))),
             .insertClip(trackID: "trk_a", clip: Clip(content: .media(mediaID: "med_a"), start: t(0), duration: t(1))),
             .addMedia(item: media),
-            .addTransition(trackID: "trk_a", transition: Transition(id: "tr_a", type: .push, direction: .left, duration: t(0.7), fromClipID: "clip_a", toClipID: "clip_b")),
+            .addTransition(trackID: "trk_a", transition: Transition(id: "tr_a", type: .push, direction: .left, duration: t(0.7), fromClipID: "clip_a", toClipID: "clip_b", soundClipID: "clip_s"), sound: TransitionSound(mediaID: "med_s", gainDB: -23.3, offset: t(-0.39))),
             .addMarker(marker: Marker(id: "mk_a", time: t(3), duration: t(1), name: "A", kind: .todo, note: "fix")),
             .insertTemplate(template: template, at: t(5), values: ["title": "T"], mode: .overwrite),
             .placeMedia(mediaIDs: ["med_a"], at: t(1), sourceStart: t(2), duration: t(3), mode: .insert, videoTrackID: "trk_v", audioTrackID: "trk_a", includeAudio: false),
@@ -88,7 +88,9 @@ final class SchemaTests: XCTestCase {
             .updateTrack(trackID: "trk_a", patch: try JSONValue.from(Track(kind: .video, name: "V", clips: [clip], muted: true, solo: true, locked: true, hidden: true, targeted: false, rippleMode: .off))),
             .updateSettings(patch: try JSONValue.from(ProjectSettings(alternateFormats: [.portrait]))),
             .updateMarker(markerID: "mk_a", patch: try JSONValue.from(Marker(time: t(1), name: "B"))),
-            .updateTransition(transitionID: "tr_a", patch: try JSONValue.from(Transition(type: .wipe, direction: .up, duration: t(1), fromClipID: "a", toClipID: nil))),
+            .updateTransition(transitionID: "tr_a", patch: try JSONValue.from(Transition(type: .wipe, direction: .up, duration: t(1), fromClipID: "a", toClipID: nil, soundClipID: "clip_s"))),
+            .updateTransition(transitionID: "tr_a", patch: .object(["sound": try JSONValue.from(TransitionSound(mediaID: "med_s", gainDB: -20, offset: t(-0.3)))])),
+            .updateTransition(transitionID: "tr_a", patch: .object(["sound": .null])),
             .updateEffect(clipID: "clip_a", effectID: "fx_a", patch: try JSONValue.from(effect))
         ]
         for command in commands {

@@ -15,6 +15,10 @@ public struct EditContext: Sendable {
     /// When linked clips are split at the same time, their right-hand pieces
     /// join one new link group. Keyed by "<old group>@<flicks>".
     private var splitGroups: [String: String] = [:]
+    /// Transition sounds the command being applied put somewhere on
+    /// purpose (`addTransition`, a `sound` patch), which keeping sounds in
+    /// step with their transitions leaves where they were put.
+    var placedSounds: Set<String> = []
 
     public init(seed: UInt64 = UInt64.random(in: 0...UInt64.max)) {
         self.seed = seed
