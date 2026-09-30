@@ -29,9 +29,12 @@ struct SceneClip {
     var matteRecovery: TimeRange?
 
     /// Media time shown at a timeline time, following speed and freezes.
+    /// The file's time at a timeline time; before the file starts (a
+    /// transition into a clip used from its first frame) that's its first
+    /// frame, held.
     func mediaTime(at time: Time) -> CMTime {
         let t = clip.freezeFrame ? clip.sourceStart : clip.sourceStart + (time - clip.start).scaled(by: clip.speed)
-        return t.cmTime
+        return max(t, .zero).cmTime
     }
 }
 

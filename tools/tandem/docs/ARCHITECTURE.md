@@ -190,9 +190,9 @@ split at the same time, their right-hand parts form a new group together.
 
 A transition belongs to a track and joins two touching clips (`fromClipID`,
 `toClipID`) or sits at one clip's head or tail (the other side nil). A
-two-sided transition is centred on the cut and needs half its duration of
-spare media (handles) on both clips; the command fails with a clear message
-otherwise. On audio tracks every transition plays as a crossfade.
+two-sided transition is centred on the cut and plays half its duration of
+each clip past the cut; a clip with no frames there holds its edge frame
+(the edit warns). On audio tracks every transition plays as a crossfade.
 
 ## Transform contract
 

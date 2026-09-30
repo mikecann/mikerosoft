@@ -133,14 +133,13 @@ enum RenderPlanner {
                     break
                 }
 
-                var head = heads[clip.id] ?? .zero
+                // A transition plays the clip past its edges. Where the file
+                // runs out (before its first frame or after its last) the
+                // assembler holds the edge frame, as Premiere and Filmora do,
+                // so the clip is there for the whole transition.
+                let head = heads[clip.id] ?? .zero
                 let tail = tails[clip.id] ?? .zero
                 let isMovingVideo = item.map { $0.kind == .video } ?? false
-                if isMovingVideo && !clip.freezeFrame {
-                    // There's no picture before the start of the file.
-                    let available = Time(seconds: max(0, clip.sourceStart.seconds) / clip.speed)
-                    head = min(head, available)
-                }
                 let visible = TimeRange(start: clip.start - head, end: clip.end + tail)
                 planned[trackIndex].append(PlannedClip(clip: clip, trackIndex: trackIndex, visible: visible))
 

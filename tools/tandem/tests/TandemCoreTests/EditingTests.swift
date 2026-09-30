@@ -325,16 +325,23 @@ final class TransitionTests: XCTestCase {
         )))
     }
 
-    func testTransitionNeedsHandles() throws {
+    /// A transition goes on any cut, as in Filmora and Premiere. Where a
+    /// clip has no frames past the cut (a file used from its first frame,
+    /// or to its last), that edge frame holds while the transition plays,
+    /// and the edit says so.
+    func testTransitionWithoutHandlesHoldsTheEdgeFrames() throws {
         let (f, c) = try Fixture.edited()
         try c.run("B-roll 2", .placeMedia(mediaIDs: ["med_broll"], at: t(25), sourceStart: .zero, duration: t(5)))
         let (a, b) = (c.clips("B-roll")[0].id, c.clips("B-roll")[1].id)
-        XCTAssertThrowsError(try c.run("Push", .addTransition(
+        let result = try c.run("Push", .addTransition(
             trackID: f.track("B-roll").id,
-            transition: Transition(type: .push, direction: .down, duration: t(1), fromClipID: a, toClipID: b)
-        ))) { error in
-            XCTAssertTrue("\(error)".contains("more media before its start"), "\(error)")
-        }
+            transition: Transition(id: "tr_push", type: .push, direction: .down, duration: t(1), fromClipID: a, toClipID: b)
+        ))
+        XCTAssertEqual(result.createdIDs, ["tr_push"])
+        XCTAssertTrue(result.warnings.contains { $0.contains("first frame holds for 0.5 s") }, "\(result.warnings)")
+        assertValid(c.project)
+        // Still too long for a clip is still refused.
+        XCTAssertThrowsError(try c.run("Long", .updateTransition(transitionID: "tr_push", patch: .object(["duration": .number(60)]))))
     }
 
     func testTransitionIntoAStillNeedsNoHandles() throws {

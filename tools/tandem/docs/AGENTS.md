@@ -285,10 +285,12 @@ the groups as `linked #1`, `linked #2`.
 ### Transitions
 
 A transition joins two touching clips on one track, or sits at one clip's
-head or tail. A transition between two clips is centred on the cut, so both
-clips need half its length of spare media beyond the cut (handles). Without
-them the command fails and says how much is missing; trim first or use a
-shorter transition. On audio tracks every transition is a crossfade.
+head or tail. A transition between two clips is centred on the cut, so each
+clip plays half its length past the cut. Where a clip has no frames there
+(its file used to the last frame, or from the first) that edge frame holds
+for the rest, as in Premiere and Filmora, and the edit's warnings say how
+long; trim the clip for real motion instead. On audio tracks every
+transition is a crossfade, and sound past a file's ends is silence.
 
 ## Reading the project
 

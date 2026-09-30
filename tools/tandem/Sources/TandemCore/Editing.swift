@@ -82,7 +82,7 @@ public enum Editing {
         case .addTransition(let trackID, let transition):
             try addTransition(&project, trackID: trackID, transition, &context)
         case .updateTransition(let transitionID, let patch):
-            try updateTransition(&project, transitionID, patch)
+            try updateTransition(&project, transitionID, patch, &context)
         case .removeTransition(let transitionID):
             try removeTransition(&project, transitionID)
         case .addEffect(let clipID, let effect, let index):
@@ -1162,20 +1162,7 @@ public enum Editing {
             guard half <= from.duration, half <= to.duration else {
                 throw EditError.invalid("a \(t.duration) transition is longer than one of its clips")
             }
-            if let limit = p.sourceLimit(for: from) {
-                let needed = from.sourceEnd + half.scaled(by: from.speed)
-                if needed > limit && !from.freezeFrame {
-                    throw EditError.invalid("clip \(from.id) needs \(needed - limit) more media after its end for a \(t.duration) transition. Trim it shorter first or use a shorter transition.")
-                }
-            }
-            // Stills can show any amount of themselves, so only moving
-            // media needs frames before the cut.
-            if let mediaID = to.mediaID, p.media(mediaID)?.kind != .image, !to.freezeFrame {
-                let needed = to.sourceStart - half.scaled(by: to.speed)
-                if needed < .zero {
-                    throw EditError.invalid("clip \(to.id) needs \(-needed) more media before its start for a \(t.duration) transition. Trim its start later first or use a shorter transition.")
-                }
-            }
+
         case (let from?, nil):
             guard t.duration <= from.duration else { throw EditError.invalid("the transition is longer than clip \(from.id)") }
         case (nil, let to?):
@@ -1188,11 +1175,12 @@ public enum Editing {
         try requireUnlocked(p[location])
         guard !p.allIDs.contains(transition.id) else { throw EditError.invalid("ID \(transition.id) is already in use") }
         try validateTransition(transition, on: p[location], in: p)
+        for note in heldFrames(transition, on: p[location], in: p) { context.warn(note) }
         p[location].transitions.append(transition)
         context.createdIDs.append(transition.id)
     }
 
-    static func updateTransition(_ p: inout Project, _ transitionID: String, _ patch: JSONValue) throws {
+    static func updateTransition(_ p: inout Project, _ transitionID: String, _ patch: JSONValue, _ context: inout EditContext) throws {
         guard let (location, index) = p.location(ofTransition: transitionID) else {
             throw EditError.notFound("transition \(transitionID)")
         }
@@ -1200,7 +1188,47 @@ public enum Editing {
         try requireObject(patch, forbidden: ["id"], what: "transition")
         let updated = try JSONValue.applyMergePatch(patch, to: p[location].transitions[index])
         try validateTransition(updated, on: p[location], in: p, ignoring: transitionID)
+        for note in heldFrames(updated, on: p[location], in: p) { context.warn(note) }
         p[location].transitions[index] = updated
+    }
+
+    /// A centred transition plays half its length past each side of the
+    /// cut. A clip with no frames there (a file used to its last frame, or
+    /// from its first) holds that edge frame instead, as Premiere and
+    /// Filmora do, so any cut can take a transition. These say where.
+    static func heldFrames(_ t: Transition, on track: Track, in p: Project) -> [String] {
+        guard let fromID = t.fromClipID, let toID = t.toClipID,
+              let from = track.clips.first(where: { $0.id == fromID }),
+              let to = track.clips.first(where: { $0.id == toID }) else { return [] }
+        let half = Time(flicks: t.duration.flicks / 2)
+        var notes: [String] = []
+        if !from.freezeFrame, let limit = p.sourceLimit(for: from) {
+            let short = from.sourceEnd + half.scaled(by: from.speed) - limit
+            if short > .zero {
+                notes.append("\(name(of: from, in: p)) has no frames after its end, so its last frame holds for \(seconds(short.scaled(by: 1 / from.speed))) of the \(t.type.rawValue).")
+            }
+        }
+        // Stills can show any amount of themselves.
+        if !to.freezeFrame, let mediaID = to.mediaID, p.media(mediaID)?.kind != .image {
+            let short = half.scaled(by: to.speed) - to.sourceStart
+            if short > .zero {
+                notes.append("\(name(of: to, in: p)) has no frames before its start, so its first frame holds for \(seconds(short.scaled(by: 1 / to.speed))) of the \(t.type.rawValue).")
+            }
+        }
+        return notes
+    }
+
+    private static func name(of clip: Clip, in p: Project) -> String {
+        if let name = clip.name, !name.isEmpty { return name }
+        if let mediaID = clip.mediaID, let item = p.media(mediaID) {
+            return URL(fileURLWithPath: item.path).deletingPathExtension().lastPathComponent
+        }
+        return "Clip \(clip.id)"
+    }
+
+    private static func seconds(_ time: Time) -> String {
+        let value = (time.seconds * 100).rounded() / 100
+        return value == value.rounded() ? "\(Int(value)) s" : "\(value) s"
     }
 
     static func removeTransition(_ p: inout Project, _ transitionID: String) throws {

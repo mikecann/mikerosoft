@@ -47,11 +47,14 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
   time mapping. A tiny black movie underlies everything, so the video spans
   the whole timeline even with only titles or a trailing gap.
 - A two-sided transition is centred on the cut (the outgoing clip plays on
-  for half, the incoming one starts half early from its handle). A one-sided
+  for half, the incoming one starts half early from its handle, holding its
+  first frame where the file has none before, as the outgoing one holds its
+  last). A one-sided
   transition sits inside its clip. Short clips with overlapping transitions
   nest: `(A to B) to C`.
 - Speed uses `scaleTimeRange`; a freeze frame is one frame stretched; media
-  that runs out holds its last frame (video) or goes quiet (audio).
+  that runs out holds its edge frame (video, first or last; the direct
+  decode path clamps to the first frame too) or goes quiet (audio).
 - Instructions split at every visible clip edge and transition edge.
 - Graphic clips (`.graphic`) with a built-in template, the section card
   (`sectionCard`), are drawn by the compositor like titles. Other graphic

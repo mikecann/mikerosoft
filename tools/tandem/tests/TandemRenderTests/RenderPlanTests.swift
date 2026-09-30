@@ -188,14 +188,17 @@ final class RenderPlanTests: XCTestCase {
         XCTAssertEqual(z.timeline, TimeRange(start: t(1.5), end: t(5)))
     }
 
-    func testHandlesAreClampedAtTheStartOfTheFile() {
+    /// A clip used from near the start of its file still plays through the
+    /// whole transition: the frames before the file starts are its first
+    /// frame, held (the assembler holds it), so the plan asks for all of it.
+    func testTheFirstFrameHoldsBeforeTheStartOfTheFile() {
         let a = mediaClip("clip_a", "med_cam", start: 0, duration: 5, source: 10)
         let b = mediaClip("clip_b", "med_cam", start: 5, duration: 5, source: 0.2)
         let d = Transition(id: "tr_x", type: .dissolve, duration: t(1), fromClipID: "clip_a", toClipID: "clip_b")
         let plan = RenderPlanner.plan(project(video: [Track(kind: .video, name: "V1", clips: [a, b], transitions: [d])]), format: nil, assets: nil)
         let segB = plan.videoSegments.first { $0.clipID == "clip_b" }!
-        XCTAssertEqual(segB.sourceStart, .zero)
-        XCTAssertEqual(segB.timeline.start, t(4.8))
+        XCTAssertEqual(segB.sourceStart, t(-0.3), "0.3 s before the file: its first frame held")
+        XCTAssertEqual(segB.timeline.start, t(4.5), "the whole of the transition")
     }
 
     func testMatteSegmentsMirrorTheirClip() {

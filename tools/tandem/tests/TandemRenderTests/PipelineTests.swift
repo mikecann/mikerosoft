@@ -87,6 +87,29 @@ final class PipelineTests: XCTestCase {
         assertColor(try await grab(context, 2.8)[160, 90], [0, 255, 0], tolerance: 8)
     }
 
+    /// A transition on a cut where neither clip has frames past it: the
+    /// first clip is used to its last frame and the second from its first.
+    /// Each holds its edge frame, so the dissolve blends the two the whole
+    /// way through instead of fading from or to black.
+    func testATransitionHoldsTheEdgeFramesWhereTheFilesEnd() async throws {
+        let media = try TestMedia()
+        try await media.movie("red.mov", seconds: 2, draw: { TestMedia.fill($1, 1, 0, 0) })
+        try await media.movie("green.mov", seconds: 2, draw: { TestMedia.fill($1, 0, 1, 0) })
+        let a = Clip(id: "clip_a", content: .media(mediaID: "med_r"), start: .zero, duration: t(2))
+        let b = Clip(id: "clip_b", content: .media(mediaID: "med_g"), start: t(2), duration: t(1.5))
+        let dissolve = Transition(type: .dissolve, duration: t(1), fromClipID: "clip_a", toClipID: "clip_b")
+        let project = smallProject(
+            video: [Track(kind: .video, name: "V1", clips: [a, b], transitions: [dissolve])],
+            media: [media.item("med_r", "red.mov", seconds: 2), media.item("med_g", "green.mov", seconds: 2)]
+        )
+        let context = RenderContext(project: project, folder: media.projectFolder)
+        // A quarter in: the green clip's first frame, held, is a quarter of it.
+        assertColor(try await grab(context, 1.75)[160, 90], [191, 64, 0], tolerance: 10)
+        assertColor(try await grab(context, 2)[160, 90], [128, 128, 0], tolerance: 10)
+        // Three quarters in: the red clip's last frame, held.
+        assertColor(try await grab(context, 2.25)[160, 90], [64, 191, 0], tolerance: 10)
+    }
+
     func testCutoutWithAMatteFile() async throws {
         let media = try TestMedia()
         try await media.movie("red.mov", seconds: 2, draw: { TestMedia.fill($1, 1, 0, 0) })

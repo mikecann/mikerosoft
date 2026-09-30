@@ -339,7 +339,9 @@ enum CompositionAssembler {
     /// segment for a freeze frame), and the rest of the segment, starting
     /// on that keyframe, if any is left.
     static func undecodableStart(of segment: PlannedSegment, in map: LeadingFrameMap) -> (timeline: TimeRange, rest: PlannedSegment?)? {
-        guard let window = map.window(containing: segment.sourceStart) else { return nil }
+        // A segment that starts before the file holds its first frame,
+        // so the file's first frames are what it starts on.
+        guard let window = map.window(containing: max(segment.sourceStart, .zero)) else { return nil }
         if segment.freeze { return (segment.timeline, nil) }
         let speed = segment.speed > 0 ? segment.speed : 1
         let source = window.end - segment.sourceStart
@@ -357,7 +359,8 @@ enum CompositionAssembler {
 
     /// Places one segment on its composition track: speed through
     /// `scaleTimeRange`, freeze frames as one frame stretched, and media
-    /// that runs out holding its last frame (video) or going quiet (audio).
+    /// that runs out holding its first or last frame (video, for a
+    /// transition past the file's ends) or going quiet (audio).
     static func insert(
         _ segment: PlannedSegment,
         into track: AVMutableCompositionTrack,
@@ -390,12 +393,18 @@ enum CompositionAssembler {
         var sourceStart = segment.sourceStart
         var position = start
         if sourceStart < first {
-            // The file starts later than asked (an audio track starting a
-            // few samples in): leave that bit empty.
+            // Asked for time before the file starts: video holds its first
+            // frame (a transition into a clip used from its first frame);
+            // an audio track starting a few samples in leaves that bit empty.
             let skipped = first - sourceStart
             let skippedTimeline = speed == 1 ? skipped : skipped.scaled(by: 1 / speed)
             let gap = min(skippedTimeline, end - start)
-            track.insertEmptyTimeRange(TimeRange(start: position, duration: gap).cmTimeRange)
+            if holdLastFrame && last - frame >= first {
+                try track.insertTimeRange(TimeRange(start: first, duration: frame).cmTimeRange, of: source, at: position.cmTime)
+                track.scaleTimeRange(TimeRange(start: position, duration: frame).cmTimeRange, toDuration: gap.cmTime)
+            } else {
+                track.insertEmptyTimeRange(TimeRange(start: position, duration: gap).cmTimeRange)
+            }
             position += gap
             sourceStart = first
         }
