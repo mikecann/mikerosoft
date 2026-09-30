@@ -39,7 +39,7 @@ final class KeymapTests: XCTestCase {
             "space": .playPause, "j": .shuttleReverse, "k": .shuttleStop, "l": .shuttleForward,
             "i": .markIn, "o": .markOut, ";": .liftInOut, "'": .extractInOut,
             "cmd+b": .bladeAtPlayhead, "q": .rippleTrimStart, "w": .rippleTrimEnd,
-            "delete": .lift, "shift+delete": .rippleDelete, "a": .selectForward,
+            "delete": .lift, "shift+delete": .rippleDelete, "a": .selectForward, "cmd+shift+a": .selectForward,
             "up": .previousEdit, "down": .nextEdit, ",": .nudgeLeft, ".": .nudgeRight,
             "shift+,": .nudgeLeftFive, "shift+.": .nudgeRightFive, "shift+z": .zoomToFit,
             "cmd+=": .zoomIn, "cmd+-": .zoomOut, "s": .toggleSnapping, "cmd+l": .link, "m": .addMarker,
