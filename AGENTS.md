@@ -613,8 +613,11 @@ The mikerosoft.app site in `website/` deploys from `main` through
 - Date and Time is an `app:` window: it's on the taskbar but has no URL.
 - Site icons (platforms, categories, calendar and so on) are `ui-*.png` in
   `website/public/icons`, drawn by the same icon generator.
-- The Bliss wallpaper and the small XP icons in `website/public/xp` come from
-  Convex OS, which borrowed them from github.com/ShizukuIchi/winXP.
+- The desktop wallpaper (`website/public/wallpaper.webp`) is an original
+  Bliss-style image generated for this site (rolling green hill, blue sky,
+  a few clouds) - not Microsoft's copyrighted photo and not Convex OS's
+  logo-bearing copy of it. The small XP icons in `website/public/xp` come
+  from Convex OS, which borrowed them from github.com/ShizukuIchi/winXP.
 - Tools come from `website/src/tools.ts`. Each one needs a `category` and its
   own icon at `website/public/icons/<name>.png`. The icons are high-res
   famfamfam-style drawings made with `website/scripts/icons/generate.py` and

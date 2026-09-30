@@ -101,7 +101,7 @@ button.plain {
 .xp-desktop {
   position: fixed;
   inset: 0;
-  background: #3a6ea5 url('/bliss.webp') center / cover no-repeat;
+  background: #3a6ea5 url('/wallpaper.webp') center / cover no-repeat;
   font-family: var(--ui);
 }
 
