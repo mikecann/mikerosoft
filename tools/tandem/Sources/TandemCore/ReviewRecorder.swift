@@ -95,6 +95,17 @@ public final class ReviewRecorder: @unchecked Sendable {
         }
     }
 
+    /// A redo the coordinator saw only as a reload: the headless undo
+    /// history puts back a whole project. The batch is back, so if an
+    /// agent made it, it waits for review again.
+    public func redid(label: String, author: String, revision: Int, before: Project, after: Project) {
+        queue.async { [weak self] in
+            guard let self, !self.closed else { return }
+            var log = self._log
+            if log.record(label: label, author: author, revision: revision, before: before, after: after) { self.commit(log) }
+        }
+    }
+
     /// Finishes what it has heard and stops listening. The log is saved.
     public func close() {
         if let token { coordinator.removeObserver(token) }

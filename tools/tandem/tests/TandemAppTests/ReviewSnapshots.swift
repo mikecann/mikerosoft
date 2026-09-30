@@ -106,5 +106,11 @@ final class ReviewSnapshots: XCTestCase {
         XCTAssertTrue(model.goToAgentChange(forward: true))
         settle()
         try write(try XCTUnwrap(WindowSnapshot.image(of: window)), "timeline-review-stepped")
+
+        // Marked reviewed: the chip, the band and the marks go.
+        XCTAssertTrue(model.markAgentChangesReviewed())
+        settle()
+        try write(try XCTUnwrap(WindowSnapshot.image(of: window)), "timeline-review-marked")
     }
 }
+

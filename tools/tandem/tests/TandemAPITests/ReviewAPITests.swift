@@ -54,6 +54,10 @@ final class ReviewAPITests: XCTestCase {
         _ = try await client.call(UndoRequest())
         let undone = try await client.call(StatusRequest())
         XCTAssertEqual(undone.reviewPending, [])
+        // Redo puts the edit back, waiting again.
+        _ = try await client.call(RedoRequest())
+        let redone = try await client.call(StatusRequest())
+        XCTAssertEqual(redone.reviewPending?.map(\.label), ["Add push"])
     }
 
     /// An archive is a finished video: it starts with nothing to review.
