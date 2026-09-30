@@ -212,6 +212,12 @@ macOS does not currently use the Windows tray flow.
   clipboard only comes back once the target app has actually read the text.
   If it never reads it within 2 seconds, the paste didn't land: Voice Type
   plays a sound and leaves the text on the clipboard so `Cmd+V` pastes it.
+  Chromium apps (Claude, ChatGPT, Slack) read the clipboard even when no
+  text box has focus, so after the read Voice Type also asks Accessibility
+  what has focus. If it isn't something editable, and the app doesn't move
+  the paste into a text box within half a second, the same sound plays and
+  the text stays on the clipboard. When Accessibility can't tell, the paste
+  is trusted.
 - **Optional transcript cleanup** — for `final_only`, `hybrid`, and
   `precompute`, an optional local GGUF instruct model can lightly clean the
   final transcript before it is typed. Guardrails reject outputs that remove
