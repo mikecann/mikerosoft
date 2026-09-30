@@ -107,7 +107,7 @@ private struct InspectorTabButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!available)
-        .help(help)
+        .tip(help)
     }
 
     private var help: String {
@@ -732,7 +732,7 @@ private struct TextSection: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.amber.color)
-                    .help("Not installed, so it's drawn in SF Pro. Pick a font in the Fonts tab, or run: tandem assets use \(missing.assetID)")
+                    .tip("Not installed, so it's drawn in SF Pro. Pick a font in the Fonts tab, or run: tandem assets use \(missing.assetID)")
             }
             Spacer()
             resetButton(["font"], own.font != nil, base.font)

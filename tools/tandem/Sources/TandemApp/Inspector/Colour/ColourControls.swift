@@ -261,7 +261,7 @@ struct LUTPanel: View, Equatable {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                .help(path.isEmpty ? "No LUT chosen" : path)
+                .tip(path.isEmpty ? "No LUT chosen" : path)
                 Spacer(minLength: 4)
                 if !path.isEmpty {
                     IconButton(symbol: Icons.clearFile, help: "Stop using this LUT", size: 11) {
@@ -269,7 +269,7 @@ struct LUTPanel: View, Equatable {
                     }
                 }
                 OutlineButton(title: "Choose…") { choose() }
-                    .help("Choose a .cube LUT file")
+                    .tip("Choose a .cube LUT file")
             }
             ColourSliderRow(spec: ColourSliderSpec.specs(.lut)[0], section: .lut, value: values["intensity"]?.number ?? 1, diamond: diamond, editor: editor)
                 .equatable()

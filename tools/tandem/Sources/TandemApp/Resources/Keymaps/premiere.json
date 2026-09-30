@@ -54,7 +54,7 @@
     "4": "layoutSplit",
 
     "cmd+a": "selectAll",
-    "cmd+shift+a": "deselectAll",
+    "cmd+shift+a": "selectForward",
     "escape": "deselectAll",
     "a": "selectForward",
 

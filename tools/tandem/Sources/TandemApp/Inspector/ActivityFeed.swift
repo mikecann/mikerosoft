@@ -100,7 +100,7 @@ private struct ActivityRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             if latest || hovering {
                 OutlineButton(title: latest ? "Undo" : "Undo to here", action: undo)
-                    .help(latest ? "Undo this edit" : "Undo this edit and everything after it. Redo brings them back.")
+                    .tip(latest ? "Undo this edit" : "Undo this edit and everything after it. Redo brings them back.")
             }
         }
         .padding(8)

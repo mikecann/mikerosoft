@@ -228,7 +228,7 @@ struct SaveSegmentView: View {
                                         .padding(.horizontal, 8)
                                         .frame(width: 150, height: 24)
                                         .background(RoundedRectangle(cornerRadius: 6).fill(Theme.field.color))
-                                        .help("What agents call these words when they fill them in. The words now are what it starts with.")
+                                        .tip("What agents call these words when they fill them in. The words now are what it starts with.")
                                 }
                             }
                         }

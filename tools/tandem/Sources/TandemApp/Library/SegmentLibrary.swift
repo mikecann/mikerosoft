@@ -70,7 +70,7 @@ struct SegmentLibrary: View {
         } add: {
             host.insert(segment, at: model.playback.time, in: model)
         }
-        .help(SegmentLibraryText.help(segment))
+        .tip(SegmentLibraryText.help(segment))
         .contextMenu {
             Button("Add at the playhead", systemImage: "plus.rectangle.on.rectangle") { host.insert(segment, at: model.playback.time, in: model) }
             Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([segment.folder]) }
@@ -113,7 +113,7 @@ struct SegmentLibrary: View {
             .buttonStyle(.plain)
             .font(.ui(10.5, .semibold))
             .foregroundStyle(Theme.amber.color)
-            .help("Show the Segments folder in Finder")
+            .tip("Show the Segments folder in Finder")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

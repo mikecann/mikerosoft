@@ -26,12 +26,12 @@ struct SectionCardSection: View {
                 CardField(value: props.number, placeholder: "01", width: 44) {
                     commit(SectionCardEdits.set(clip, SectionCard.Key.number, text: $0, label: "Card number"))
                 }
-                .help("What the chip says, like 01. Leave it empty for no chip. As a whole number it's also this section's place in the progress bars.")
+                .tip("What the chip says, like 01. Leave it empty for no chip. As a whole number it's also this section's place in the progress bars.")
                 Text("of").font(.ui(12)).foregroundStyle(Theme.textMuted.color)
                 CardField(value: props.total > 0 ? String(props.total) : "", placeholder: "0", width: 36) {
                     commit(SectionCardEdits.total(clip, text: $0))
                 }
-                .help("How many sections there are, for the progress bars under the subtitle: a bar for each up to six, then one bar in proportion with a count like 3 / 14. 0 hides them.")
+                .tip("How many sections there are, for the progress bars under the subtitle: a bar for each up to six, then one bar in proportion with a count like 3 / 14. 0 hides them.")
                 Spacer(minLength: 0)
             }
             HStack(spacing: 8) {
@@ -54,7 +54,7 @@ struct SectionCardSection: View {
                     commit(SectionCardEdits.cursor(clip, on: !props.cursor))
                 }
             }
-            .help("A text cursor in the accent colour after the title's last letter. It comes in with the words and blinks like a terminal's until the wipe out.")
+            .tip("A text cursor in the accent colour after the title's last letter. It comes in with the words and blinks like a terminal's until the wipe out.")
             lengthRow
             ColoursRow(props: props) { key, colour, label in
                 commit(SectionCardEdits.colour(clip, key, colour, label: label))
@@ -80,7 +80,7 @@ struct SectionCardSection: View {
             .disabled(fits)
             .opacity(fits ? 0.45 : 1)
         }
-        .help(SectionCardEdits.fitHelp(props, length: clip.duration, frameRate: rate))
+        .tip(SectionCardEdits.fitHelp(props, length: clip.duration, frameRate: rate))
     }
 
     private func commit(_ batch: EditBatch?) {
@@ -118,7 +118,7 @@ private struct CardTextRow: View {
             RowLabel(title: label, icon: icon)
             CardField(value: value, placeholder: placeholder, width: nil, commit: commit)
         }
-        .help(help)
+        .tip(help)
     }
 }
 
@@ -188,7 +188,7 @@ private struct ColoursRow: View {
             }
         ), supportsOpacity: false)
         .labelsHidden()
-        .help(help)
+        .tip(help)
     }
 }
 

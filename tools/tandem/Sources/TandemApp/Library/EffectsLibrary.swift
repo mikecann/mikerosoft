@@ -68,7 +68,7 @@ struct EffectsLibrary: View {
                                 } add: {
                                     addTransition(type)
                                 }
-                                .help("\(type.displayName), \(String(format: "%.2f s", type.defaultDuration.seconds)). Double-click for the cut nearest the playhead, or drag onto a cut.")
+                                .tip("\(type.displayName), \(String(format: "%.2f s", type.defaultDuration.seconds)). Double-click for the cut nearest the playhead, or drag onto a cut.")
                             }
                         } else {
                             ForEach(effects, id: \.type) { definition in
@@ -79,7 +79,7 @@ struct EffectsLibrary: View {
                                 } add: {
                                     addEffect(definition)
                                 }
-                                .help("\(definition.summary)\nDouble-click for the selected clips, or drag onto a clip.")
+                                .tip("\(definition.summary)\nDouble-click for the selected clips, or drag onto a clip.")
                             }
                         }
                     }

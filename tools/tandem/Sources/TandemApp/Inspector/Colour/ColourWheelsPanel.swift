@@ -111,7 +111,7 @@ struct ColourWheelColumn: View, Equatable {
                     defaultValue: 0,
                     onEditingChanged: { editing in if !editing { finishBrightness() } }
                 )
-                .help("Brightness of \(role). Double-click the knob to reset.")
+                .tip("Brightness of \(role). Double-click the knob to reset.")
                 ScrubbableNumber(
                     value: brightnessDraft ?? brightness, range: -100...100, width: 30, fontSize: 11,
                     format: ColourWheelColumn.signed, parse: SliderRow.plainNumber,
@@ -207,7 +207,7 @@ struct ColourWheelView: View {
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .aspectRatio(1, contentMode: .fit)
-        .help(help)
+        .tip(help)
     }
 
     private func drag(reach: CGFloat) -> some Gesture {
@@ -334,7 +334,7 @@ struct KeyframeGroupButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(here ? "Remove the \(name.lowercased()) keyframe at the playhead" : (animated ? "Add a \(name.lowercased()) keyframe at the playhead" : "Animate the \(name.lowercased()): add a keyframe at the playhead"))
+        .tip(here ? "Remove the \(name.lowercased()) keyframe at the playhead" : (animated ? "Add a \(name.lowercased()) keyframe at the playhead" : "Animate the \(name.lowercased()): add a keyframe at the playhead"))
     }
 
     private func toggle(here: Bool, animated: Bool) {

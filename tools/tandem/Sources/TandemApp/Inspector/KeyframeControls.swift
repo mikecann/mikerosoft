@@ -40,7 +40,7 @@ struct KeyframeButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help(animated: animated, here: here))
+        .tip(help(animated: animated, here: here))
     }
 
     private func help(animated: Bool, here: Bool) -> String {
@@ -79,7 +79,7 @@ struct AnimationSection: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(here.isEmpty ? "Add a keyframe at the playhead (Option-K)" : "Remove the keyframe at the playhead (Option-K)")
+                    .tip(here.isEmpty ? "Add a keyframe at the playhead (Option-K)" : "Remove the keyframe at the playhead (Option-K)")
                     StepButton(symbol: "chevron.right", help: "Next keyframe (Shift-K)") { model.seekKeyframe(forward: true) }
                 }
             }) {
@@ -118,7 +118,7 @@ struct AnimationSection: View {
                         .buttonStyle(.plain)
                         .menuIndicator(.hidden)
                         .fixedSize()
-                        .help("How the values move on from the keyframe at the playhead")
+                        .tip("How the values move on from the keyframe at the playhead")
                         Spacer(minLength: 0)
                     }
                 }
@@ -141,6 +141,6 @@ private struct StepButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
+        .tip(help)
     }
 }

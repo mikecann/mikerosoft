@@ -69,6 +69,6 @@ struct MixerSwatch: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
+        .tip(help)
     }
 }
