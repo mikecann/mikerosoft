@@ -1,84 +1,81 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { toolDatesFromGitLog } from './gitHistory.ts';
+import { changesTool, isToolFile, LOG_FORMAT, parseGitLog, toolDatesFromCommits, type Commit } from './gitHistory.ts';
 
-function commit(time: string, ...changes: string[]): string {
-  return `\0${time}\n\n${changes.join('\n')}\n`;
+function logEntry(hash: string, date: string, subject: string, body: string, files: string[]): string {
+  return `\0${hash}\x1f${date}\x1f${subject}\x1f${body}\x1f\n${files.join('\n')}\n`;
 }
 
-test('dates a tool by its first and latest commits', () => {
-  const log = [
-    commit('2026-03-01T10:00:00+08:00', 'A\ttools/clock/main.swift'),
-    commit('2026-03-05T10:00:00+08:00', 'M\ttools/clock/main.swift', 'A\ttools/clock/README.md'),
-  ].join('');
+function commit(date: string, files: string[], subject = 'A change'): Commit {
+  return { hash: date, date, subject, body: '', files };
+}
 
-  assert.deepEqual(toolDatesFromGitLog(log, ['tools/clock/main.swift', 'tools/clock/README.md']), {
-    clock: {
-      added: '2026-03-01T02:00:00.000Z',
-      updated: '2026-03-05T02:00:00.000Z',
-    },
-  });
+test('the git format separates fields with unit separators', () => {
+  assert.equal(LOG_FORMAT, '%x00%H%x1f%cI%x1f%s%x1f%b%x1f');
 });
 
-test('keeps the original date when a tool moved into tools/ and was renamed', () => {
+test('parses a tool repo log into commits with repo-root paths', () => {
   const log = [
-    commit('2026-02-18T09:00:00+08:00', 'A\ttaskmon/App.cs'),
-    commit('2026-04-01T09:00:00+08:00', 'R100\ttaskmon/App.cs\ttools/taskmon/App.cs'),
-    commit('2026-05-01T09:00:00+08:00', 'R100\ttools/taskmon/App.cs\ttools/task-stats/App.cs'),
+    logEntry('bbb', '2026-09-02T10:00:00+10:00', 'Second', 'Why.\n', ['src/App.swift', 'docs/ss1.png']),
+    logEntry('aaa', '2026-09-01T10:00:00+10:00', 'First', '', ['README.md']),
   ].join('');
 
-  const dates = toolDatesFromGitLog(log, ['tools/task-stats/App.cs']);
-
-  assert.equal(dates['task-stats'].added, '2026-02-18T01:00:00.000Z');
-  assert.equal(dates['task-stats'].updated, '2026-05-01T01:00:00.000Z');
+  assert.deepEqual(parseGitLog(log), [
+    { hash: 'bbb', date: '2026-09-02T10:00:00+10:00', subject: 'Second', body: 'Why.\n', files: ['src/App.swift', 'docs/ss1.png'] },
+    { hash: 'aaa', date: '2026-09-01T10:00:00+10:00', subject: 'First', body: '', files: ['README.md'] },
+  ]);
 });
 
-test('ignores files that were deleted before today', () => {
-  const log = [
-    commit('2026-01-01T00:00:00Z', 'A\ttools/notes/old.txt'),
-    commit('2026-02-01T00:00:00Z', 'A\ttools/notes/new.txt'),
-    commit('2026-03-01T00:00:00Z', 'D\ttools/notes/old.txt'),
-  ].join('');
-
-  const dates = toolDatesFromGitLog(log, ['tools/notes/new.txt']);
-
-  assert.equal(dates.notes.added, '2026-02-01T00:00:00.000Z');
-  assert.equal(dates.notes.updated, '2026-03-01T00:00:00.000Z');
+test('docs, the README, agent notes, the licence and CI are not the tool', () => {
+  for (const path of ['docs/header.webp', 'docs/ss1.png', 'README.md', 'AGENTS.md', 'LICENSE', '.github/workflows/ci.yml']) {
+    assert.equal(isToolFile(path), false, path);
+  }
+  for (const path of ['main.py', 'src/App.swift', 'tests/README.md', 'install.ps1', 'icons/picture.png', '.gitignore']) {
+    assert.equal(isToolFile(path), true, path);
+  }
 });
 
-test('skips merge commits and changes outside tools/', () => {
-  const log = [
-    commit('2026-01-01T00:00:00Z', 'A\ttools/notes/a.txt', 'A\tREADME.md'),
-    commit('2026-06-01T00:00:00Z'),
-    commit('2026-07-01T00:00:00Z', 'M\tREADME.md'),
-  ].join('');
-
-  assert.deepEqual(toolDatesFromGitLog(log, ['tools/notes/a.txt', 'README.md']), {
-    notes: {
-      added: '2026-01-01T00:00:00.000Z',
-      updated: '2026-01-01T00:00:00.000Z',
-    },
-  });
+test('paths are relative to the tool repo, not the old tools/<name>/ folder', () => {
+  // A folder that happens to be called docs further down is still the tool.
+  assert.equal(isToolFile('src/docs/help.md'), true);
+  assert.equal(isToolFile('tools/record-it/docs/ss1.png'), true);
 });
 
-test('README and docs/ image changes do not count as tool updates', () => {
-  const log = [
-    commit('2026-01-01T00:00:00Z', 'A\ttools/notes/main.py', 'A\ttools/notes/README.md'),
-    commit('2026-02-01T00:00:00Z', 'A\ttools/notes/docs/header.png'),
-    commit(
-      '2026-03-01T00:00:00Z',
-      'D\ttools/notes/docs/header.png',
-      'A\ttools/notes/docs/header.webp',
-      'M\ttools/notes/README.md',
-    ),
-  ].join('');
+test('the commit that split a tool into its own repo does not count as a change', () => {
+  assert.equal(changesTool(commit('2026-09-30T00:00:00Z', ['install.ps1'], 'Standalone repo: cutout (was removebg)')), false);
+  assert.equal(changesTool(commit('2026-09-30T00:00:00Z', ['install.ps1'], 'Fix CI: reset the exit code')), true);
+});
 
-  const dates = toolDatesFromGitLog(log, [
-    'tools/notes/main.py',
-    'tools/notes/README.md',
-    'tools/notes/docs/header.webp',
+test('dates a tool by its first commit and its latest change', () => {
+  const dates = toolDatesFromCommits([
+    commit('2026-03-05T10:00:00+08:00', ['main.swift', 'README.md']),
+    commit('2026-03-01T10:00:00+08:00', ['main.swift']),
   ]);
 
-  assert.equal(dates.notes.added, '2026-01-01T00:00:00.000Z');
-  assert.equal(dates.notes.updated, '2026-01-01T00:00:00.000Z');
+  assert.deepEqual(dates, { added: '2026-03-01T02:00:00.000Z', updated: '2026-03-05T02:00:00.000Z' });
+});
+
+test('the first commit counts as added even if it only touched docs', () => {
+  const dates = toolDatesFromCommits([
+    commit('2026-02-01T00:00:00Z', ['main.py']),
+    commit('2026-01-01T00:00:00Z', ['README.md']),
+  ]);
+
+  assert.equal(dates?.added, '2026-01-01T00:00:00.000Z');
+  assert.equal(dates?.updated, '2026-02-01T00:00:00.000Z');
+});
+
+test('README, docs and the repo split do not move the updated date', () => {
+  const dates = toolDatesFromCommits([
+    commit('2026-09-30T00:00:00Z', ['install.ps1', 'LICENSE', '.github/workflows/ci.yml'], 'Standalone repo: prepare notes'),
+    commit('2026-03-01T00:00:00Z', ['docs/header.webp', 'README.md']),
+    commit('2026-01-01T00:00:00Z', ['main.py', 'README.md']),
+  ]);
+
+  assert.equal(dates?.added, '2026-01-01T00:00:00.000Z');
+  assert.equal(dates?.updated, '2026-01-01T00:00:00.000Z');
+});
+
+test('a repo with no history has no dates', () => {
+  assert.equal(toolDatesFromCommits([]), undefined);
 });

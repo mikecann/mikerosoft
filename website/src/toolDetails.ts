@@ -12,25 +12,28 @@ export const toolDetails: Record<string, ToolDetails> = {
       "It runs on the GPU with CUDA if it can and falls back to the CPU if that fails. There's also a speaker mode that labels lines as SPEAKER_00, SPEAKER_01 and so on, it doesn't know who anyone actually is though.",
     ],
   },
-  "video-to-markdown": {
+  "youtube-to-markdown": {
     tagline: "Turn a YouTube link into a clickable markdown thumbnail on your clipboard",
     intro: [
       "Give it a YouTube URL and it puts a markdown image link on your clipboard, so when you paste it into a README you get the video thumbnail linking back to the video.",
       "It uses the video-to-markdown.com API, which caches things on the server, so asking for the same video twice is pretty much instant.",
+      "It used to be called `video-to-markdown`.",
     ],
   },
-  removebg: {
+  cutout: {
     tagline: "Right-click a photo to get a copy with the background removed",
     intro: [
       "A small wrapper around rembg using the birefnet-portrait model, so it works best on photos of people. Right-click an image and you get a new copy with the background gone, saved next to the original.",
       "The first run downloads about 1 GB of model weights, so give it a minute that first time.",
+      "It used to be called `removebg`.",
     ],
   },
-  "remove-portrait": {
+  "video-cutout": {
     tagline: "Cut the background out of a talking-head video and get a transparent .mov",
     intro: [
       "This takes a video of me talking and removes the background, writing out a transparent ProRes 4444 .mov that I can drop over a screen recording in DaVinci Resolve.",
       "By default it uses RobustVideoMatting on the GPU, which is made for video of people. The output keeps the full frame size of the source, so it lines up nicely when you place it in Resolve.",
+      "It used to be called `remove-portrait`.",
     ],
   },
   unmultitrack: {
@@ -54,11 +57,12 @@ export const toolDetails: Record<string, ToolDetails> = {
       "It works in any repo, and it also links to the folder you're in rather than just the root.",
     ],
   },
-  ctxmenu: {
+  "right-click-tidy": {
     tagline: "Hide the clutter in your Explorer right-click menu, no admin needed",
     intro: [
       "Over time apps stuff all sorts of things into the Explorer right-click menu. This is a little window that lists them all and lets you tick them off or back on again.",
       "It only writes to your own user bit of the registry, so it doesn't need admin and everything can be undone. Some Windows 11 built-ins like Share or Cast to Device aren't in there because Explorer adds those itself.",
+      "It used to be called `ctxmenu`.",
     ],
   },
   "color-picker": {
@@ -187,11 +191,12 @@ export const toolDetails: Record<string, ToolDetails> = {
       "If there's no transcript yet it offers to run my transcribe tool for you first. Every exchange gets saved to a text file next to the video so the ideas don't get lost.",
     ],
   },
-  "generate-from-image": {
+  "img-remix": {
     tagline: "Right-click an image, describe a change, and get a new one back",
     intro: [
       "This one's a little terminal chat for editing images with AI. You point it at an image, type what you want, and Gemini 3 Pro makes a new image from your picture and your prompt.",
       "Each result is saved as a numbered file next to the original, so you can keep going and nothing gets overwritten. There's also a one-shot mode if you just want a single result without the chat.",
+      "It used to be called `generate-from-image`.",
     ],
   },
   "svg-to-png": {
@@ -222,11 +227,12 @@ export const toolDetails: Record<string, ToolDetails> = {
       "It copes with relative paths and even paths that don't exist yet.",
     ],
   },
-  worktrees: {
+  "worktree-tidy": {
     tagline: "Tidy up the pile of git worktrees your AI agents leave behind",
     intro: [
       "I use this when Cursor leaves a pile of linked checkouts under `.cursor/worktrees`. It lists every worktree in the repo you're in, marks which is the primary and which are linked, and lets you pick some (or all the linked ones) to delete.",
       "It never lets you remove the primary checkout, and it asks before deleting anything. If a worktree has uncommitted changes it shows you the files first, so you don't lose work by accident.",
+      "It used to be called `worktrees`.",
     ],
   },
   "img-gen": {
@@ -250,11 +256,12 @@ export const toolDetails: Record<string, ToolDetails> = {
       "While it runs you can watch the logs, so you know what's going on, and the result gets saved next to the original with `_face-swapped` on the end of the name.",
     ],
   },
-  "mac-screenshot": {
+  "snap-it": {
     tagline: "Press F11 to grab part of the screen and start marking it up",
     intro: [
       "A little background helper for macOS. You press F11, drag out the bit of the screen you want, and it saves it to `~/Desktop/Screenshots` with a timestamp name, copies it to the clipboard and opens it in Preview so you can scribble on it straight away.",
       "It starts on login, so once it's set up you can mostly forget about it.",
+      "It used to be called `mac-screenshot`.",
     ],
   },
 };

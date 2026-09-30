@@ -4,3 +4,4 @@ dist
 public/changelog
 scripts/icons/sheet-*.png
 scripts/icons/check.jpg
+.repo-cache

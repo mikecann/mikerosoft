@@ -5,10 +5,8 @@ import { TOOL_DATES } from './toolDates.generated';
 import { toolDetails } from './toolDetails';
 import { makeItYoursPrompt } from './toolPages';
 import { CATEGORY_ICON, PLATFORM_ICON, PLATFORM_LABEL, sortPlatforms, type Tool } from './tools';
-import { versionedAsset } from './versionedAsset';
 import { ImageViewer } from './XpDialogs';
 
-const REPO_URL = 'https://github.com/mikecann/mikerosoft';
 const CHANGES_SHOWN = 5;
 
 /** Turns `backticked` bits of copy into inline code. */
@@ -72,7 +70,7 @@ function GetIt({ tool }: { tool: Tool }) {
       </h2>
       <div className="task-pane-body">
         <p>
-          Paste this into your AI coding agent. It'll copy the code over and set it up for your machine. Anything
+          Paste this into your AI coding agent. It'll clone the code and set it up for your machine. Anything
           else, just ask it.
         </p>
         <button type="button" className="copy-button" onClick={copy}>
@@ -94,8 +92,8 @@ type MediaItem = { kind: 'video' | 'image'; src: string };
 
 function Media({ tool }: { tool: Tool }) {
   const items: MediaItem[] = [
-    ...(tool.video ? [{ kind: 'video' as const, src: versionedAsset(tool.video) }] : []),
-    ...tool.screenshots.map(shot => ({ kind: 'image' as const, src: versionedAsset(shot) })),
+    ...(tool.video ? [{ kind: 'video' as const, src: tool.video }] : []),
+    ...tool.screenshots.map(shot => ({ kind: 'image' as const, src: shot })),
   ];
   const images = items.filter(item => item.kind === 'image').map(item => item.src);
   const [active, setActive] = useState(0);
@@ -107,7 +105,7 @@ function Media({ tool }: { tool: Tool }) {
         <h2 className="section-head"><img src={CATEGORY_ICON.Images} alt="" />Screenshots</h2>
         {tool.header && (
           <div className="media-stage" data-art>
-            <img src={versionedAsset(tool.header)} alt={`Artwork for ${tool.name}`} />
+            <img src={tool.header} alt={`Artwork for ${tool.name}`} />
           </div>
         )}
         <p className="media-note">This is artwork I made for the tool, not a screenshot. Real ones are coming soon.</p>
@@ -155,7 +153,7 @@ function Media({ tool }: { tool: Tool }) {
   );
 }
 
-function Change({ entry }: { entry: ChangelogEntry }) {
+function Change({ entry, repoUrl }: { entry: ChangelogEntry; repoUrl: string }) {
   const [open, setOpen] = useState(false);
   const [why, ...more] = entry.paragraphs;
 
@@ -172,7 +170,7 @@ function Change({ entry }: { entry: ChangelogEntry }) {
               {open ? 'Less' : 'More detail'}
             </button>
           )}
-          <a href={`${REPO_URL}/commit/${entry.hash}`} target="_blank" rel="noopener">{entry.hash.slice(0, 7)}</a>
+          <a href={`${repoUrl}/commit/${entry.hash}`} target="_blank" rel="noopener">{entry.hash.slice(0, 7)}</a>
         </p>
       </div>
     </li>
@@ -209,7 +207,7 @@ function Changes({ tool }: { tool: Tool }) {
         <span className="count">{entries.length === 1 ? '1 change' : `${entries.length} changes`}</span>
       </h2>
       <ol>
-        {shown.map(entry => <Change key={entry.hash} entry={entry} />)}
+        {shown.map(entry => <Change key={entry.hash} entry={entry} repoUrl={tool.url} />)}
       </ol>
       {entries.length > CHANGES_SHOWN && (
         <button type="button" onClick={() => setShowAll(value => !value)}>

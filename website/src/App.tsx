@@ -11,6 +11,7 @@ import {
   filterToolsByPlatforms,
   groupToolsByCategory,
   PLATFORM_ORDER,
+  RENAMED_TOOLS,
   searchTools,
   tools,
   type Category,
@@ -77,7 +78,9 @@ function initialDesktop(): { desktop: DesktopState; dialog: Dialog } {
 function readRecent(): string[] {
   try {
     const saved = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as string[];
-    const known = saved.filter(name => tools.some(tool => tool.name === name));
+    const known = saved
+      .map(name => RENAMED_TOOLS[name] ?? name)
+      .filter(name => tools.some(tool => tool.name === name));
     return [...known, ...DEFAULT_RECENT.filter(name => !known.includes(name))].slice(0, RECENT_COUNT);
   } catch {
     return DEFAULT_RECENT;
@@ -163,8 +166,14 @@ export default function App() {
 
   useNavigation(pathname => {
     const id = windowForPath(pathname);
-    if (id) open(id);
-    else setDialog('not-found');
+    if (!id) {
+      setDialog('not-found');
+      return;
+    }
+    open(id);
+    // An old link to a renamed tool shows its new address.
+    const path = pathForWindow(id);
+    if (path) replacePath(path);
   });
 
   // The address bar shows the page window in front, so it can be shared. App windows leave it alone.

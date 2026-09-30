@@ -1,4 +1,4 @@
-import { tools, type Tool } from './tools';
+import { RENAMED_TOOLS, tools, type Tool } from './tools';
 
 export const SITE_URL = 'https://mikerosoft.app';
 
@@ -19,19 +19,22 @@ export function parseRoute(pathname: string): Route {
   if (path === '') return { kind: 'home' };
 
   const match = /^\/tools\/([^/]+)$/.exec(path);
-  const name = match && decodeURIComponent(match[1]);
+  const requested = match && decodeURIComponent(match[1]);
+  // Old links to a renamed tool open it under its new name.
+  const name = requested && (RENAMED_TOOLS[requested] ?? requested);
   if (name && tools.some(tool => tool.name === name)) return { kind: 'tool', name };
 
   return { kind: 'not-found' };
 }
 
 export function readmeUrl(tool: Tool): string {
-  return `${tool.url.replace('/tree/', '/blob/')}/README.md`;
+  return `${tool.url}/blob/main/README.md`;
 }
 
+/** The same prompt as the Get it section of each tool repo's README. */
 export function makeItYoursPrompt(tool: Tool): string {
-  return `Copy the source code for the "${tool.name}" tool from ${tool.url} into this project and make it my own. `
-    + `It's one of Mike Cann's personal tools, so read its README first, change anything specific to his setup to suit mine, `
+  return `Clone ${tool.url} and make it my own. `
+    + "It's one of Mike Cann's personal tools, so read the README first, change anything specific to his setup to suit mine, "
     + 'then help me get it running.';
 }
 
@@ -76,4 +79,15 @@ export function withToolMeta(html: string, tool: Tool, description: string, imag
   page = setMeta(page, 'name', 'twitter:description', description);
   page = setMeta(page, 'name', 'twitter:image', image);
   return page.replace(/<link rel="canonical" href="[^"]*" \/>/, `<link rel="canonical" href="${url}" />`);
+}
+
+/**
+ * The page for a renamed tool's old link: the new tool's preview, plus a
+ * refresh to its new address for anything that doesn't run the app.
+ */
+export function withRedirect(html: string, tool: Tool, description: string, image: string): string {
+  return withToolMeta(html, tool, description, image).replace(
+    '</head>',
+    `<meta http-equiv="refresh" content="0; url=${toolPath(tool.name)}" />\n</head>`,
+  );
 }

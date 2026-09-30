@@ -6,8 +6,12 @@ on:
       - main
     paths:
       - 'website/**'
-      # Any tool change moves its "updated" date on the site.
-      - 'tools/**'
+      - '.github/workflows/deploy-website.yml'
+  # Each tool lives in its own repo (github.com/mikecann/<tool>). The build
+  # clones them for the dates and changelogs, so a daily build picks up
+  # whatever was pushed to them. Run it by hand to publish a change sooner.
+  schedule:
+    - cron: '0 22 * * *' # 06:00 in Perth
   workflow_dispatch:
 
 jobs:
@@ -17,9 +21,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Tool dates come from git history, which a shallow clone lacks.
-          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -32,8 +33,6 @@ jobs:
 
       - name: Build
         working-directory: ./website
-        env:
-          VITE_GITHUB_SHA: ${{ github.sha }}
         run: npm run build
 
       - name: Deploy

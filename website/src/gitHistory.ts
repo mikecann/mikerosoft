@@ -1,78 +1,73 @@
 export interface ToolDates {
-  /** ISO 8601 time of the commit that first added the tool's oldest file. */
+  /** ISO 8601 time of the tool's first commit. */
   added: string;
   /** ISO 8601 time of the latest commit that changed the tool, not just its docs. */
   updated: string;
 }
 
-const TOOL_PATH = /^tools\/([^/]+)\//;
-// Header images, screenshots and the README describe a tool rather than change it.
-const DOC_FILES = /^tools\/[^/]+\/(docs\/|README\.md$)/;
-
-function toolOf(path: string): string | undefined {
-  return TOOL_PATH.exec(path)?.[1];
+/** One commit from a tool repo's history, as read by parseGitLog. */
+export interface Commit {
+  hash: string;
+  /** ISO 8601 commit time, as git wrote it. */
+  date: string;
+  subject: string;
+  body: string;
+  /** The files it touched, relative to the root of the tool's repo. */
+  files: string[];
 }
 
 /**
- * Works out when each tool folder was added and when it last changed.
- *
- * `log` is the output of
- * `git log --topo-order --reverse -M --name-status --format=%x00%cI`, and
- * `currentFiles` is `git ls-files tools`. A tool's added date is the earliest
- * origin of any file it contains today. Origins follow renames, so tools that
- * moved from the repo root into tools/, or were renamed, keep their real age.
+ * `git log --no-merges --no-renames --name-only --format=<LOG_FORMAT>` in a
+ * tool's repo feeds parseGitLog. `--no-renames` keeps git from diffing file
+ * contents, which a blob-less clone would have to download.
  */
-export function toolDatesFromGitLog(
-  log: string,
-  currentFiles: readonly string[],
-): Record<string, ToolDates> {
-  const origins = new Map<string, number>();
-  const updated = new Map<string, number>();
+export const LOG_FORMAT = '%x00%H%x1f%cI%x1f%s%x1f%b%x1f';
 
-  for (const commit of log.split('\0')) {
-    const [header = '', ...changes] = commit.split('\n');
-    const time = Date.parse(header.trim());
-    if (Number.isNaN(time)) continue;
+// The header, screenshots, README, agent notes, licence and CI describe or
+// check a tool rather than change it.
+const NOT_THE_TOOL = /^(docs\/|\.github\/|README\.md$|AGENTS\.md$|LICENSE$)/;
 
-    for (const change of changes) {
-      if (!change.trim()) continue;
+// Each tool's repo starts with a commit that split it out of the old
+// mikerosoft monorepo. It set the repo up rather than changing the tool.
+const SPLIT_COMMIT = /^Standalone repo:/;
 
-      const [status = '', ...paths] = change.split('\t');
-      const kind = status[0];
-      if (kind === 'R' && paths.length === 2) {
-        const [from, to] = paths;
-        origins.set(to, origins.get(from) ?? time);
-        origins.delete(from);
-      } else if (kind === 'D') {
-        origins.delete(paths[0]);
-      } else {
-        const path = paths[paths.length - 1];
-        const origin = origins.get(path);
-        origins.set(path, origin === undefined ? time : Math.min(origin, time));
-      }
-
-      for (const path of paths) {
-        const tool = DOC_FILES.test(path) ? undefined : toolOf(path);
-        if (tool) updated.set(tool, Math.max(updated.get(tool) ?? time, time));
-      }
-    }
+export function parseGitLog(log: string): Commit[] {
+  const commits: Commit[] = [];
+  for (const chunk of log.split('\0')) {
+    const [hash, date, subject, body, files] = chunk.split('\x1f');
+    if (!hash?.trim() || files === undefined) continue;
+    commits.push({
+      hash: hash.trim(),
+      date: date.trim(),
+      subject: subject.trim(),
+      body,
+      files: files.split('\n').map(file => file.trim()).filter(Boolean),
+    });
   }
+  return commits;
+}
 
-  const added = new Map<string, number>();
-  for (const file of currentFiles) {
-    const tool = toolOf(file);
-    const origin = origins.get(file);
-    if (!tool || origin === undefined) continue;
-    added.set(tool, Math.min(added.get(tool) ?? origin, origin));
-  }
+/** A file that's part of the tool itself, not its docs or repo housekeeping. */
+export function isToolFile(path: string): boolean {
+  return !NOT_THE_TOOL.test(path);
+}
 
-  const dates: Record<string, ToolDates> = {};
-  for (const [tool, addedTime] of added) {
-    const updatedTime = Math.max(updated.get(tool) ?? addedTime, addedTime);
-    dates[tool] = {
-      added: new Date(addedTime).toISOString(),
-      updated: new Date(updatedTime).toISOString(),
-    };
-  }
-  return dates;
+/** A commit that changed the tool: it touched a tool file and wasn't the split. */
+export function changesTool(commit: Commit): boolean {
+  return !SPLIT_COMMIT.test(commit.subject) && commit.files.some(isToolFile);
+}
+
+/**
+ * When a tool was added and last changed, from its own repo's history. The
+ * repos kept the monorepo history of their files, so the first commit is when
+ * the tool first appeared, even if it started out under another name.
+ */
+export function toolDatesFromCommits(commits: readonly Commit[]): ToolDates | undefined {
+  const times = commits.map(commit => Date.parse(commit.date)).filter(time => !Number.isNaN(time));
+  if (times.length === 0) return undefined;
+
+  const added = Math.min(...times);
+  const changes = commits.filter(changesTool).map(commit => Date.parse(commit.date));
+  const updated = Math.max(added, ...changes.filter(time => !Number.isNaN(time)));
+  return { added: new Date(added).toISOString(), updated: new Date(updated).toISOString() };
 }

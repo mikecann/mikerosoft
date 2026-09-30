@@ -1,3 +1,5 @@
+import { changesTool, parseGitLog } from './gitHistory';
+
 export interface ChangelogEntry {
   hash: string;
   /** ISO 8601 commit time. */
@@ -7,22 +9,19 @@ export interface ChangelogEntry {
   paragraphs: string[];
 }
 
-/** `git log --no-merges --name-only --format=<LOG_FORMAT>` feeds changelogsFromGitLog. */
-export const LOG_FORMAT = '%x00%H%x1f%cI%x1f%s%x1f%b%x1f';
-
-const TOOL_PATH = /^tools\/([^/]+)\//;
-// Header images, screenshots and the README describe a tool rather than change it.
-const DOC_FILES = /^tools\/[^/]+\/(docs\/|README\.md$)/;
 const TRAILER = /^(Co-Authored-By|Signed-off-by|Change-Id):/i;
 
 function squash(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/** "Tandem app: a quieter UI" reads as "A quieter UI" on Tandem's own page. */
-export function cleanTitle(subject: string, tool: string): string {
+/**
+ * "Tandem app: a quieter UI" reads as "A quieter UI" on Tandem's own page.
+ * Pass every name the tool has had, so older commits lose their prefix too.
+ */
+export function cleanTitle(subject: string, ...names: string[]): string {
   const match = /^([^:]{1,30}):\s+(.+)$/.exec(subject);
-  if (!match || !squash(match[1]).startsWith(squash(tool))) return subject;
+  if (!match || !names.some(name => squash(match[1]).startsWith(squash(name)))) return subject;
   return match[2][0].toUpperCase() + match[2].slice(1);
 }
 
@@ -50,32 +49,19 @@ function paragraphsOf(body: string): string[] {
     .filter(Boolean);
 }
 
-/** Newest-first changes per tool, skipping commits that only touched its docs. */
-export function changelogsFromGitLog(log: string): Record<string, ChangelogEntry[]> {
-  const changelogs: Record<string, ChangelogEntry[]> = {};
-
-  for (const commit of log.split('\0')) {
-    const [hash, date, subject, body, files] = commit.split('\x1f');
-    if (!hash || files === undefined) continue;
-
-    const tools = new Set<string>();
-    for (const file of files.split('\n')) {
-      const tool = TOOL_PATH.exec(file.trim())?.[1];
-      if (tool && !DOC_FILES.test(file.trim())) tools.add(tool);
-    }
-
-    for (const tool of tools) {
-      (changelogs[tool] ??= []).push({
-        hash: hash.trim(),
-        date: new Date(date).toISOString(),
-        title: cleanTitle(subject.trim(), tool),
-        paragraphs: paragraphsOf(body),
-      });
-    }
-  }
-
-  for (const entries of Object.values(changelogs)) {
-    entries.sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
-  }
-  return changelogs;
+/**
+ * Newest-first changes to one tool, from the `git log` of its own repo (see
+ * LOG_FORMAT). Skips commits that only touched its docs, and the commit that
+ * split it into its own repo. `names` is the tool's name, then any old ones.
+ */
+export function changelogFromGitLog(log: string, ...names: string[]): ChangelogEntry[] {
+  return parseGitLog(log)
+    .filter(changesTool)
+    .map(commit => ({
+      hash: commit.hash,
+      date: new Date(commit.date).toISOString(),
+      title: cleanTitle(commit.subject, ...names),
+      paragraphs: paragraphsOf(commit.body),
+    }))
+    .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
 }

@@ -7,6 +7,7 @@ import {
   filterToolsByPlatforms,
   groupToolsByCategory,
   PLATFORM_ICON,
+  formerNames,
   searchTools,
   tools,
   type PlatformId,
@@ -69,8 +70,8 @@ test('publishes Last Window Quits as a documented macOS tool', () => {
 
   assert.ok(tool);
   assert.deepEqual(tool.platforms, ['macos']);
-  assert.match(tool.header ?? '', /last-window-quits\/docs\/header\.webp$/);
-  assert.match(tool.url, /tools\/last-window-quits$/);
+  assert.equal(tool.header, 'https://cdn.jsdelivr.net/gh/mikecann/last-window-quits@main/docs/header.webp');
+  assert.equal(tool.url, 'https://github.com/mikecann/last-window-quits');
 });
 
 test('publishes Token Stats as a documented macOS tool', () => {
@@ -78,8 +79,8 @@ test('publishes Token Stats as a documented macOS tool', () => {
 
   assert.ok(tool);
   assert.deepEqual(tool.platforms, ['macos']);
-  assert.match(tool.header ?? '', /token-stats\/docs\/header\.png$/);
-  assert.match(tool.url, /tools\/token-stats$/);
+  assert.equal(tool.header, 'https://cdn.jsdelivr.net/gh/mikecann/token-stats@main/docs/header.png');
+  assert.equal(tool.url, 'https://github.com/mikecann/token-stats');
 });
 
 test('publishes Mikey Mouse as a macOS tool', () => {
@@ -87,8 +88,8 @@ test('publishes Mikey Mouse as a macOS tool', () => {
 
   assert.ok(tool);
   assert.deepEqual(tool.platforms, ['macos']);
-  assert.match(tool.header ?? '', /mikey-mouse\/docs\/header\.webp$/);
-  assert.match(tool.url, /tools\/mikey-mouse$/);
+  assert.equal(tool.header, 'https://cdn.jsdelivr.net/gh/mikecann/mikey-mouse@main/docs/header.webp');
+  assert.equal(tool.url, 'https://github.com/mikecann/mikey-mouse');
 });
 
 test('publishes Tandem as a documented macOS tool', () => {
@@ -96,8 +97,8 @@ test('publishes Tandem as a documented macOS tool', () => {
 
   assert.ok(tool);
   assert.deepEqual(tool.platforms, ['macos']);
-  assert.match(tool.header ?? '', /tandem\/docs\/header\.jpg$/);
-  assert.match(tool.url, /tools\/tandem$/);
+  assert.equal(tool.header, 'https://cdn.jsdelivr.net/gh/mikecann/tandem@main/docs/header.jpg');
+  assert.equal(tool.url, 'https://github.com/mikecann/tandem');
 });
 
 test('every tool sits in a category, and every category has tools', () => {
@@ -122,7 +123,7 @@ test('groups tools by category in category order, keeping their order within eac
 test('search matches every word against names, descriptions and categories, names first', () => {
   assert.deepEqual(searchTools(tools, 'RECORD-IT').map(tool => tool.name), ['record-it', 'tandem']);
   assert.ok(searchTools(tools, 'elgato prompter').some(tool => tool.name === 'telemprompit'));
-  assert.ok(searchTools(tools, 'developer').some(tool => tool.name === 'worktrees'));
+  assert.ok(searchTools(tools, 'developer').some(tool => tool.name === 'worktree-tidy'));
   assert.equal(searchTools(tools, '  ').length, tools.length);
   assert.equal(searchTools(tools, 'zzzznothing').length, 0);
 });
@@ -142,4 +143,25 @@ test('every category and platform has an icon', () => {
     assert.ok(existsSync(new URL(`../public${icon}`, import.meta.url)), `${icon} is missing`);
   }
   assert.deepEqual(Object.keys(CATEGORY_ICON).sort(), [...CATEGORY_ORDER].sort());
+});
+
+test('every tool lives in its own repo, named after the tool', () => {
+  for (const tool of tools) {
+    assert.equal(tool.url, `https://github.com/mikecann/${tool.name}`);
+  }
+});
+
+test('media comes from the tool\'s own repo through jsDelivr, not the old monorepo', () => {
+  for (const tool of tools) {
+    const own = `https://cdn.jsdelivr.net/gh/mikecann/${tool.name}@main/`;
+    for (const url of [tool.header, tool.video, ...tool.screenshots].filter(Boolean)) {
+      assert.ok(url!.startsWith(own), `${tool.name}: ${url}`);
+      assert.doesNotMatch(url!, /mikerosoft|\/tools\//);
+    }
+  }
+});
+
+test('renamed tools remember their old names', () => {
+  assert.deepEqual(formerNames('cutout'), ['removebg']);
+  assert.deepEqual(formerNames('record-it'), []);
 });

@@ -585,7 +585,35 @@ tail -f ~/Library/Logs/mikey-mouse.log
 ## website specifics
 
 The mikerosoft.app site in `website/` deploys from `main` through
-`.github/workflows/deploy-website.yml` whenever `website/` or `tools/` changes.
+`.github/workflows/deploy-website.yml` whenever `website/` changes, once a day
+(22:00 UTC, 06:00 in Perth), and on a manual run (Actions > Deploy Website >
+Run workflow, or `gh workflow run deploy-website.yml`).
+
+Every tool now lives in its own public repo, `github.com/mikecann/<name>`,
+named after the tool. The site reads from those repos, not from this repo's
+`tools/` folder: its source link, media, dates and changelog all come from the
+tool's repo. A push to a tool repo reaches the site on the next daily build,
+or straight away if you run the workflow by hand. GitHub pauses scheduled
+workflows after 60 days without activity in this repo; re-enable it from the
+Actions tab if that happens.
+
+To add a new tool to the site:
+
+1. Create its public repo at `github.com/mikecann/<name>` with a README (the
+   same "Get it" prompt as the site's Copy prompt), a `docs/header.webp`, and
+   ideally real screenshots in `docs/`.
+2. Add it to `website/src/tools.ts`: `url: repoUrl('<name>')`, and media with
+   `asset('<name>', 'docs/...')`, which serves the file from the repo's `main`
+   through jsDelivr.
+3. Add its page copy to `website/src/toolDetails.ts`.
+4. Draw its icon (`website/public/icons/<name>.png`, see below).
+5. Take its share image (`website/public/share/<name>.jpg`, see below).
+6. `npm test` and `npm run build` in `website/`, then commit and push.
+
+If a tool is renamed, rename its repo, entry, icon, share image and
+`toolDetails` key, and add `old: 'new'` to `RENAMED_TOOLS` in `tools.ts`.
+Old `/tools/<old>` links then open the tool under its new name, and the build
+writes `dist/tools/<old>.html` that previews the tool and redirects.
 
 - The site is a Windows XP desktop, in the style of Mike's Convex OS
   (github.com/mikecann/convex-os), built on XP.css plus `website/src/xp.css`.
@@ -618,35 +646,42 @@ The mikerosoft.app site in `website/` deploys from `main` through
   a few clouds) - not Microsoft's copyrighted photo and not Convex OS's
   logo-bearing copy of it. The small XP icons in `website/public/xp` come
   from Convex OS, which borrowed them from github.com/ShizukuIchi/winXP.
-- Tools come from `website/src/tools.ts`. Each one needs a `category` and its
-  own icon at `website/public/icons/<name>.png`. The icons are high-res
+- Tools come from `website/src/tools.ts`. Each one needs a `category`, a
+  `url` of its own repo, and its own icon at `website/public/icons/<name>.png`. The icons are high-res
   famfamfam-style drawings made with `website/scripts/icons/generate.py` and
   `slice.py`. For a new tool, add it to `SUBJECTS` there and draw its sheet so
   it matches the family. Tests fail if a tool has no category or icon.
-- Give every tool a `tools/<name>/docs/header.webp` (1376x768). It's used as
-  the share image, and as the tool page's artwork when there are no real
-  screenshots yet.
-- The added and updated dates on each tool come from git history.
-  `npm run dates` (run automatically before `dev` and `build`) writes the
-  ignored `website/src/toolDates.generated.ts`. Added dates follow renames, so
-  tools that moved from the repo root keep their first commit. Updated dates
-  ignore `docs/` and the tool's `README.md`, since those describe a tool
-  rather than change it.
-- CI checks out with `fetch-depth: 0`. The generator refuses a shallow clone
-  because every tool would get the same date.
+- Give every tool repo a `docs/header.webp` (1376x768). It's used as the
+  share image until one's been taken, and as the tool page's artwork when
+  there are no real screenshots yet. jsDelivr caches `@main` files for up to
+  12 hours, so a replaced image can take that long to show; purge it sooner
+  at `https://purge.jsdelivr.net/gh/mikecann/<name>@main/<path>`.
+- The added and updated dates on each tool come from its repo's git history.
+  `npm run dates` (run automatically before `dev` and `build`) keeps a
+  blob-less mirror of every tool repo in the ignored `website/.repo-cache/`,
+  cloning or fetching it (at most every 10 minutes, and falling back to the
+  cached copy when offline), and writes the ignored
+  `website/src/toolDates.generated.ts`. Added is the repo's first commit,
+  which is the tool's real age because the repos kept their monorepo history.
+  Updated is the latest commit that touched more than `docs/`, `README.md`,
+  `AGENTS.md`, `LICENSE` or `.github/`, since those describe or check a tool
+  rather than change it. The `Standalone repo: ...` commit that split each
+  tool out of this repo doesn't count either.
 - Every tool has its own page at `/tools/<name>` (`website/src/ToolContent.tsx`).
   It leads with real media: `video` first, then `screenshots`, and only falls
   back to the generated `header` art when there's nothing real. Give every tool
   real screenshots or a short clip of it working.
-- Setup on the page is one step: copy a prompt that tells your agent to copy the
-  source and make it your own. Don't add setup instructions to the page.
+- Setup on the page is one step: copy a prompt that tells your agent to clone
+  the tool's repo and make it your own (`makeItYoursPrompt`, word for word the
+  prompt in each tool repo's README). Don't add setup instructions to the page.
 - The page copy (a tagline and a short intro, in Mike's voice with no em dashes)
   lives in `website/src/toolDetails.ts`. A new tool needs an entry there or
   `npm test` fails.
-- "What's changed" on each page comes from git. `npm run changelog` (run
-  automatically before `dev` and `build`) writes the ignored
+- "What's changed" on each page comes from the tool repo's git history, with
+  the same rules as the updated date. `npm run changelog` (run automatically
+  before `dev` and `build`) writes the ignored
   `website/public/changelog/<tool>.json` from commit subjects and bodies, so
-  write commit bodies that say why something changed.
+  write commit bodies in the tool repos that say why something changed.
 - `npm run build` also writes `dist/tools/<name>.html` with that tool's title,
   description and share image, so links shared on social previews properly.
 - Link previews are 1200x630 screenshots in `website/public/share`: the
@@ -654,8 +689,8 @@ The mikerosoft.app site in `website/` deploys from `main` through
   committed, not built. After adding a tool or changing how the site looks,
   run `npm run dev` and then `npm run share-images` in `website/`, check a few,
   and commit them. A tool without one falls back to its header art.
-- `npm test` in `website/` runs the tool list, sorting, git-history and tool
-  page tests.
+- `npm test` in `website/` runs the tool list, sorting, git-history, changelog
+  and tool page tests. It doesn't touch the network; `npm run build` does.
 
 ---
 

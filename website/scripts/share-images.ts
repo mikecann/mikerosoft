@@ -2,6 +2,7 @@
 // screenshot of the desktop for the home page and one of each tool's window,
 // saved to public/share. Run it against a running site, then commit the
 // images: `npm run dev`, then `npm run share-images`, or pass a base URL.
+// Tool names after the URL retake just those tools' images.
 
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -15,10 +16,11 @@ const outputDir = fileURLToPath(new URL('../public/share/', import.meta.url));
 // the desktop looks like a desktop rather than a cramped phone.
 const scale = 0.75;
 
+const only = process.argv.slice(3);
 const pages = [
   { name: 'home', path: '/' },
   ...tools.map(tool => ({ name: tool.name, path: `/tools/${tool.name}` })),
-];
+].filter(page => only.length === 0 || only.includes(page.name));
 
 mkdirSync(outputDir, { recursive: true });
 const browser = await chromium.launch();
