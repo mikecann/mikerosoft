@@ -346,8 +346,6 @@ public enum ReviewDiff {
     /// How the clips and transitions before an edit correspond to the ones
     /// after it.
     struct Correspondence {
-        let before: Project
-        let after: Project
         let old: [String: Placed]
         let new: [String: Placed]
         /// The `cut` tracks, before the edit.
@@ -366,8 +364,6 @@ public enum ReviewDiff {
         let transitionReplacements: [String: String]
 
         init(_ before: Project, _ after: Project) {
-            self.before = before
-            self.after = after
             let old = ReviewDiff.index(before)
             let new = ReviewDiff.index(after)
             let take = Set(before.allTracks.filter { $0.rippleMode == .cut }.map(\.id))
