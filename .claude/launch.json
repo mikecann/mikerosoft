@@ -1,0 +1,32 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "website",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "website",
+        "--",
+        "--port",
+        "5188",
+        "--strictPort"
+      ],
+      "port": 5188
+    },
+    {
+      "name": "design-options",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5199",
+        "--directory",
+        "/private/tmp/claude-501/-Users-m5-mike-dev-me-mikerosoft--claude-worktrees-tool-detail-pages-8bdf99/a7277d2b-a904-40a2-ae6a-f37e0909c179/scratchpad/mockups"
+      ],
+      "port": 5199
+    }
+  ]
+}

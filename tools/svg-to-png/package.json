@@ -1,8 +1,0 @@
-{
-  "name": "svg-to-png",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@resvg/resvg-js": "latest"
-  }
-}

@@ -1,7 +1,0 @@
-# Chat logs are saved next to the user's videos, not in the repo
-*-titles.txt
-
-# Leftover Neutralinojs files (deleted - ignored in case of stale local copies)
-/frontend/
-/resources/
-/bin/

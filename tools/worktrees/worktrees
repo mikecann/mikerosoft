@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-tool_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec bun run "$tool_dir/index.ts" "$@"
