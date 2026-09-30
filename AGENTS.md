@@ -587,10 +587,19 @@ tail -f ~/Library/Logs/mikey-mouse.log
 The mikerosoft.app site in `website/` deploys from `main` through
 `.github/workflows/deploy-website.yml` whenever `website/` or `tools/` changes.
 
-- Tool cards come from `website/src/tools.ts`. Give every tool a
-  `tools/<name>/docs/header.webp` (1376x768, subject in the middle band because
-  the card crops it to a 180px strip) and reference it as `header`.
-- The added and updated dates on each card come from git history.
+- The site is **Mikerosoft 95**, a Windows 95 desktop (`website/src/win95.css`).
+  A Mikerosoft window on the left lists every tool by category, and the main
+  window shows My Tools or a tool opened as its own program window. There's a
+  taskbar and Start menu underneath. On phones the Start menu is the tool list.
+- Tools come from `website/src/tools.ts`. Each one needs a `category` and its
+  own icon at `website/public/icons/<name>.png`. The icons are high-res
+  famfamfam-style drawings made with `website/scripts/icons/generate.py` and
+  `slice.py`. For a new tool, add it to `SUBJECTS` there and draw its sheet so
+  it matches the family. Tests fail if a tool has no category or icon.
+- Give every tool a `tools/<name>/docs/header.webp` (1376x768). It's used as
+  the share image, and as the tool page's artwork when there are no real
+  screenshots yet.
+- The added and updated dates on each tool come from git history.
   `npm run dates` (run automatically before `dev` and `build`) writes the
   ignored `website/src/toolDates.generated.ts`. Added dates follow renames, so
   tools that moved from the repo root keep their first commit. Updated dates
@@ -598,7 +607,7 @@ The mikerosoft.app site in `website/` deploys from `main` through
   rather than change it.
 - CI checks out with `fetch-depth: 0`. The generator refuses a shallow clone
   because every tool would get the same date.
-- Every tool has its own page at `/tools/<name>` (`website/src/ToolPage.tsx`).
+- Every tool has its own page at `/tools/<name>` (`website/src/ToolWindow.tsx`).
   It leads with real media: `video` first, then `screenshots`, and only falls
   back to the generated `header` art when there's nothing real. Give every tool
   real screenshots or a short clip of it working.

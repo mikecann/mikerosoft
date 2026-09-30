@@ -2,3 +2,5 @@ node_modules
 .wrangler
 dist
 public/changelog
+scripts/icons/sheet-*.png
+scripts/icons/check.jpg

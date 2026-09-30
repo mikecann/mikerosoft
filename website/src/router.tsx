@@ -23,7 +23,6 @@ export function useRoute(): Route {
 export function navigate(path: string) {
   if (path === window.location.pathname) return;
   window.history.pushState(null, '', path);
-  window.scrollTo(0, 0);
   window.dispatchEvent(new Event(NAVIGATE_EVENT));
 }
 

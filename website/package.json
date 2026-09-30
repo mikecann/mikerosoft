@@ -15,8 +15,6 @@
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
-    "@mantine/core": "^7.17.0",
-    "@mantine/hooks": "^7.17.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -25,9 +23,6 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
-    "postcss": "^8.5.3",
-    "postcss-preset-mantine": "^1.17.0",
-    "postcss-simple-vars": "^7.0.1",
     "tsx": "^4.23.1",
     "typescript": "^5.7.3",
     "vite": "^6.2.0",

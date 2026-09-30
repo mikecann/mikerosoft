@@ -12,6 +12,7 @@ const fixture: Tool = {
   screenshots: [],
   url: 'https://github.com/mikecann/mikerosoft/tree/main/tools/record-it',
   platforms: ['macos'],
+  category: 'Video & recording',
 };
 
 test('every tool gets its own page path', () => {
