@@ -279,7 +279,7 @@ enum SectionCardEdits {
             return "As long as its words need: \(seconds(fitted)) for \(characters) character\(characters == 1 ? "" : "s")."
         }
         let reading = SectionCard.Reading.self
-        return "Makes the card \(seconds(fitted)) long for its words: \(seconds(Time(seconds: reading.wipes))) for the wipes, then \(characters) character\(characters == 1 ? "" : "s") of title, subtitle and kicker read at \(Int(reading.charactersPerSecond)) a second, from \(seconds(reading.shortest)) to \(seconds(reading.longest)). The whoosh out moves with the wipe out."
+        return "Makes the card \(seconds(fitted)) long for its words: \(seconds(Time(seconds: reading.wipes))) for the wipes and \(seconds(Time(seconds: reading.settle))) to take it in, then \(characters) character\(characters == 1 ? "" : "s") of title, subtitle and kicker read at \(Int(reading.charactersPerSecond)) a second, from \(seconds(reading.shortest)) to \(seconds(reading.longest)). The whoosh out moves with the wipe out."
     }
 
     /// "3.2 s".

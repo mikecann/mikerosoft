@@ -46,7 +46,7 @@ tandem pauses [--min 0.6]          silences between words
 tandem tighten [--min 0.6] [--keep 0.15] [--apply]
 tandem captions [--from T] [--to T] [--max-words 3] [--y 0.42] [--apply]
 tandem short [--apply]             lay out a 9:16 short from the same edit
-tandem cards [--kicker Section] [--insert] [--no-sounds] [--apply]   a section card at every section marker
+tandem cards [--insert] [--no-sounds] [--apply]   a section card at every section marker
 tandem apply <batch.json | ->      [--dry-run] [--expect N] [--label L] [--key K]
 tandem undo [--expect N]    tandem redo    tandem history    tandem validate
 tandem frame <time> [-o out.png]   tandem clip <start> <end> [-o out.mp4]
@@ -651,9 +651,10 @@ at the very start is the cold open, which gets none), or at `markerIDs`
 the count, the title is the marker's name and the subtitle its note. Each
 card starts just early enough to hide the whole frame from its marker on,
 so the cut between sections is never seen, and is as long as its words need
-to be read (1.4 s for the wipes, then the title, subtitle and kicker at 17
-characters a second, from 3.2 s to 6 s) unless `duration` sets one length
-for all. A section card already over a marker is renumbered (and gets
+to be read (1.4 s for the wipes and 0.8 s to take it in, then the title,
+subtitle and kicker at 15 characters a second, from 4 s to 7 s) unless
+`duration` sets one length for all. Leave `kicker` off unless Mike asks for
+one: he prefers the number alone, which reads faster. A section card already over a marker is renumbered (and gets
 `kicker` if you pass one) but keeps its own words, colours, length and
 sounds, so run it again after adding a section.
 
@@ -668,7 +669,7 @@ in, 0 out). `tandem cards` fills them in with the section card whooshes
 from the asset library, levelled for the project's speech.
 
 ```json
-{"addSectionCards": {"kicker": "Section", "soundIn": {"mediaID": "med_swishin", "gainDB": -5.4, "offset": 0}, "soundOut": {"mediaID": "med_swishout", "gainDB": -8.3}}}
+{"addSectionCards": {"soundIn": {"mediaID": "med_swishin", "gainDB": -5.4, "offset": 0}, "soundOut": {"mediaID": "med_swishout", "gainDB": -8.3}}}
 ```
 
 ### Cutting and trimming
@@ -1128,8 +1129,8 @@ a number chip, the title (Anton, upper case) with a yellow text cursor
 blinking after its last letter, a letter-spaced subtitle and progress bars
 (a bar for each section up to six, then one bar in proportion with a count
 like `3 / 14`); and the bands sweep across again to wipe it out, showing the
-next shot. It's as long as its words need to be read, from 3.2 s for a short
-title and subtitle to 6 s: a longer card holds longer and the wipes stay the
+next shot. It's as long as its words need to be read, from 4 s for a short
+title and subtitle to 7 s: a longer card holds longer and the wipes stay the
 same.
 
 The usual way is a card at every section marker. Mark where each section
@@ -1139,16 +1140,18 @@ the subtitle. Then:
 
 ```bash
 tandem cards                              # the plan: numbers, titles, where each card goes
-tandem cards --kicker Section --apply     # SECTION 1 OF 9 beside each number
+tandem cards --apply                      # just the number in the chip, as Mike likes
 tandem frame 0:33 -o /tmp/card.png        # look at one
 ```
 
 The cards go on Graphics, each starting 0.43 s before its marker so the
 card hides the whole frame from the marker on, and each as long as its
-words need: 1.4 s for the wipes, then the title, subtitle and kicker read at
-17 characters a second (Netflix's pace for adult subtitles), rounded up to a
-tenth of a second, at least 3.2 s and at most 6. `--duration` makes them
-all one length. The section keeps playing
+words need: 1.4 s for the wipes and 0.8 s to take it in, then the title,
+subtitle and kicker read at 15 characters a second (a little slower than
+Netflix's 17 for subtitles: Mike found cards at 17 a bit quick), rounded up
+to a tenth of a second, at least 4 s and at most 7. `--duration` makes them
+all one length. Mike prefers no kicker (`SECTION 1 OF 9` beside the number):
+only pass `--kicker` when he asks. The section keeps playing
 under it (Mike's voice too). With `--insert` each marker gets room instead:
 the take moves on by the card's hold, so the card is a pause and its wipes
 show the last shot of one section and the first of the next. A marker at
@@ -1172,14 +1175,14 @@ One card by hand, anywhere:
 
 ```json
 {"label": "Section card: Results", "commands": [
-  {"insertClip": {"trackID": "trk_graphics", "clip": {"content": {"graphic": {"template": "sectionCard", "props": {"number": "02", "title": "Results", "subtitle": "Finally!", "total": 3, "kicker": "Section"}}}, "start": 95, "duration": 3.2}}}
+  {"insertClip": {"trackID": "trk_graphics", "clip": {"content": {"graphic": {"template": "sectionCard", "props": {"number": "02", "title": "Results", "subtitle": "Finally!", "total": 3}}}, "start": 95, "duration": 4}}}
 ]}
 ```
 
 Props: `title`, `subtitle`, `number` (what the chip says; a number is
 written `02`), `total` (how many sections, for the progress bars; 0 hides
 them), `kicker` (`Section` or `Tip`, shown as `SECTION 2 OF 3` beside the
-chip), `cursor` (`false` turns off the cursor after the title; it's on by
+chip; off by default, and Mike prefers it off), `cursor` (`false` turns off the cursor after the title; it's on by
 default), and the colours `accent` (the first band, the chip, the subtitle,
 the lit bars and the cursor), `band2`, `band3` and `background`, as
 `{"r", "g", "b"}` or a hex string like `"#F3B01C"`. A missing word leaves

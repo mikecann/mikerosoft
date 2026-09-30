@@ -17,9 +17,11 @@ public enum SectionCard {
     /// `GraphicContent.template` for a section card.
     public static let template = "sectionCard"
 
-    /// A card's usual length, and the shortest a card fitted to its words
-    /// gets (`fittedDuration(for:)`). The wipes keep their length when a
-    /// card is longer or shorter; only the hold between them changes.
+    /// The mockup's length: the Templates tile's preview loop, and what
+    /// the motion is measured against. Cards made for their words get
+    /// `fittedDuration(for:)`, at least `Reading.shortest`. The wipes keep
+    /// their length when a card is longer or shorter; only the hold
+    /// between them changes.
     public static let defaultDuration = Time(seconds: 3.2)
 
     /// Prop keys in `GraphicContent.props`.
@@ -260,28 +262,31 @@ extension SectionCard {
     ///
     /// The words are fully shown from about 0.7 s (they've faded in) until
     /// about 0.7 s before the end (the first band of the wipe out reaches
-    /// them), so 1.4 s of a card isn't for reading. The rest is read at 17
-    /// characters a second, spaces included: the reading speed Netflix
-    /// sets for adult subtitles, and about the BBC's 160 to 180 words a
-    /// minute. A usual card, METHODOLOGY / LET'S KEEP IT FAIR (30
-    /// characters), then needs 3.2 s, the length cards have always had.
+    /// them), so 1.4 s of a card isn't for reading. A card isn't a
+    /// subtitle either: it arrives with a wipe and the viewer's eyes have
+    /// to find it, so 0.8 s goes to taking it in. The words are then read
+    /// at 15 characters a second, spaces included, a little slower than
+    /// Netflix's 17 for adult subtitles: Mike found cards at 17 went by a
+    /// bit fast. METHODOLOGY / LET'S KEEP IT FAIR (30 characters) gets
+    /// 4.2 s, and THE ONE I WOULD TURN ON / REQUIRE ACCESS CONTROL 5.3 s.
     public enum Reading {
-        public static let charactersPerSecond = 17.0
+        public static let charactersPerSecond = 15.0
         /// The wipes' share of a card, in seconds.
         public static let wipes = 1.4
-        /// A card is never shorter than it's always been.
-        public static let shortest = SectionCard.defaultDuration
-        /// About 78 characters. Longer than this a card stops being a
+        /// Seconds to find the card and take it in before reading.
+        public static let settle = 0.8
+        public static let shortest = Time(seconds: 4)
+        /// About 72 characters. Longer than this a card stops being a
         /// breather; shorten the words instead.
-        public static let longest = Time(seconds: 6)
+        public static let longest = Time(seconds: 7)
     }
 
     /// The length a card needs for its words (`Props.readingText`): 1.4 s
-    /// for the wipes plus the characters at 17 a second, rounded up to a
-    /// tenth of a second and kept to 3.2...6 s. With `frameRate`, rounded
-    /// up to a whole frame too.
+    /// for the wipes and 0.8 s to take it in, plus the characters at 15 a
+    /// second, rounded up to a tenth of a second and kept to 4...7 s. With
+    /// `frameRate`, rounded up to a whole frame too.
     public static func fittedDuration(for props: Props, frameRate: FrameRate? = nil) -> Time {
-        let reading = Reading.wipes + Double(props.readingText.count) / Reading.charactersPerSecond
+        let reading = Reading.wipes + Reading.settle + Double(props.readingText.count) / Reading.charactersPerSecond
         let clamped = min(max(reading, Reading.shortest.seconds), Reading.longest.seconds)
         let tenths = (clamped * 10 - 1e-9).rounded(.up) / 10
         guard let frameRate else { return Time(seconds: tenths) }

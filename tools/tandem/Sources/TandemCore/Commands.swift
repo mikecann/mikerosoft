@@ -75,7 +75,7 @@ public enum EditCommand: Codable, Equatable, Sendable {
     /// marker on, so the cut between sections isn't seen. A card already at
     /// a marker is renumbered and keeps its own words and length. Each new
     /// card is as long as its words need (`SectionCard.fittedDuration`,
-    /// 3.2 to 6 s) unless `duration` is given. `mode` `overwrite` (the
+    /// 4 to 7 s) unless `duration` is given. `mode` `overwrite` (the
     /// default) lays the cards over the timeline; `insert` also makes room,
     /// so the card is a pause and its wipes show the shots either side.
     /// `soundIn` and `soundOut` put a whoosh on SFX for each sweep.

@@ -176,32 +176,35 @@ final class SectionCardCursorTests: XCTestCase {
 }
 
 final class SectionCardFitTests: XCTestCase {
-    /// 1.4 s for the wipes, then 17 characters a second (spaces included)
-    /// for the title, subtitle and kicker, rounded up to a tenth of a
-    /// second, from 3.2 s to 6 s.
+    /// 1.4 s for the wipes and 0.8 s to take the card in, then 15
+    /// characters a second (spaces included) for the title, subtitle and
+    /// kicker, rounded up to a tenth of a second, from 4 s to 7 s.
     func testTheLengthFitsTheWords() {
         func fitted(_ props: SectionCard.Props) -> Double { SectionCard.fittedDuration(for: props).seconds }
         let usual = SectionCard.Props(title: "Methodology", subtitle: "Let's keep it fair", number: "01", total: 3)
         XCTAssertEqual(usual.readingText, "Methodology Let's keep it fair")
-        XCTAssertEqual(fitted(usual), 3.2, accuracy: 1e-9, "a usual card stays as it was")
-        XCTAssertEqual(fitted(SectionCard.Props(title: "Results")), 3.2, accuracy: 1e-9)
-        XCTAssertEqual(fitted(SectionCard.Props()), 3.2, accuracy: 1e-9)
+        XCTAssertEqual(fitted(usual), 4.2, accuracy: 1e-9, "2.2 + 30 / 15")
+        XCTAssertEqual(fitted(SectionCard.Props(title: "Results")), 4, accuracy: 1e-9, "at least 4 s")
+        XCTAssertEqual(fitted(SectionCard.Props()), 4, accuracy: 1e-9)
 
         let tip = SectionCard.Props(title: "Low change cost", subtitle: "Just do it & reverse", number: "01", total: 14, kicker: "Tip")
         XCTAssertEqual(tip.readingText, "Low change cost Just do it & reverse Tip 1 of 14", "the kicker as the card shows it")
         XCTAssertEqual(tip.readingText.count, 48)
-        XCTAssertEqual(fitted(tip), 4.3, accuracy: 1e-9, "1.4 + 48 / 17 = 4.22, up to 4.3")
+        XCTAssertEqual(fitted(tip), 5.4, accuracy: 1e-9, "2.2 + 48 / 15")
 
         let long = SectionCard.Props(title: "Why deterministic decision models beat vibes", subtitle: "And how we measured it across fourteen real tasks")
-        XCTAssertEqual(fitted(long), 6, accuracy: 1e-9, "at most 6 s")
+        XCTAssertEqual(fitted(long), 7, accuracy: 1e-9, "at most 7 s")
 
         // Spaces and line breaks count once.
         XCTAssertEqual(SectionCard.Props(title: "Low\nchange   cost ").readingText, "Low change cost")
-        // On a frame at the project's rate.
-        let at25 = SectionCard.fittedDuration(for: tip, frameRate: .fps25)
+        // On a frame at the project's rate: Mike's ESLint card needs
+        // 2.2 + 46 / 15 = 5.27 s, up to 5.3, which is 132.5 frames at 25.
+        let eslint = SectionCard.Props(title: "The one I would turn on", subtitle: "Require access control", number: "03", total: 5)
+        XCTAssertEqual(fitted(eslint), 5.3, accuracy: 1e-9)
+        let at25 = SectionCard.fittedDuration(for: eslint, frameRate: .fps25)
         XCTAssertEqual(at25.frameIndex(at: .fps25) * FrameRate.fps25.flicksPerFrame, at25.flicks)
-        XCTAssertEqual(at25.seconds, 4.32, accuracy: 1e-9, "4.3 s is 107.5 frames at 25, so 108")
-        XCTAssertEqual(SectionCard.fittedDuration(for: tip, frameRate: .fps30).seconds, 4.3, accuracy: 1e-9)
+        XCTAssertEqual(at25.seconds, 5.32, accuracy: 1e-9, "so 133 frames")
+        XCTAssertEqual(SectionCard.fittedDuration(for: eslint, frameRate: .fps30).seconds, 5.3, accuracy: 1e-9)
     }
 
     /// Fit to text: the card's length, and its whoosh out moved with the
@@ -225,7 +228,7 @@ final class SectionCardFitTests: XCTestCase {
         try c.apply(EditBatch(label: "Fit to text", commands: commands))
         let fitted = try XCTUnwrap(c.project.clip(card.id))
         XCTAssertEqual(fitted.start, card.start, "it keeps its start")
-        XCTAssertEqual(fitted.duration.seconds, 3.6, accuracy: 1e-9, "36 characters: 1.4 + 36 / 17 = 3.52, up to 3.6")
+        XCTAssertEqual(fitted.duration.seconds, 4.6, accuracy: 1e-9, "36 characters: 2.2 + 36 / 15 = 4.6")
         let after = sounds()
         XCTAssertEqual(after[0].start, before[0].start, "the whoosh in stays")
         XCTAssertEqual(after[1].start, fitted.start + Time(seconds: SectionCard.Motion(duration: fitted.duration.seconds).outStart(0)), "the whoosh out lands on the sweep out")
@@ -265,9 +268,9 @@ final class SectionCardCommandTests: XCTestCase {
         XCTAssertEqual(made[0].props.subtitle, "Let's keep it fair", "the subtitle from the note")
         XCTAssertEqual(made[1].props.subtitle, "")
         XCTAssertEqual(Set(made.map { c.project.track(containingClip: $0.clip.id)?.name }), ["Graphics"])
-        let covered = try XCTUnwrap(SectionCard.Motion(duration: 3.2, aspect: 9.0 / 16).covered)
         for (card, marker) in zip(made, [t(12), t(30), t(45)]) {
-            XCTAssertEqual(card.clip.duration, SectionCard.defaultDuration)
+            let covered = try XCTUnwrap(SectionCard.Motion(duration: card.clip.duration.seconds, aspect: 9.0 / 16).covered)
+            XCTAssertEqual(card.clip.duration, SectionCard.fittedDuration(for: card.props, frameRate: .fps30), "as long as its words need")
             XCTAssertEqual(card.clip.start.frameIndex(at: .fps30) * FrameRate.fps30.flicksPerFrame, card.clip.start.flicks, "on a frame")
             XCTAssertLessThanOrEqual(card.clip.start + Time(seconds: covered.lowerBound), marker, "the card hides the frame from the marker on")
             XCTAssertGreaterThan(card.clip.start + Time(seconds: covered.lowerBound + 0.034), marker)
@@ -301,7 +304,7 @@ final class SectionCardCommandTests: XCTestCase {
             XCTAssertEqual(sounds.map(\.mediaID), ["med_in", "med_out"])
             XCTAssertEqual(sounds[0].start, card.clip.start + t(0.2), "the whoosh in, 0.2 s into the card")
             XCTAssertEqual(sounds[0].audio?.gainDB, -14)
-            XCTAssertEqual(sounds[1].start, card.clip.start + t(3.2 - 0.88), "the whoosh out, as the out sweep starts")
+            XCTAssertEqual(sounds[1].start, card.clip.start + Time(seconds: SectionCard.Motion(duration: card.clip.duration.seconds).outStart(0)), "the whoosh out, as the out sweep starts")
             XCTAssertEqual(sounds[1].audio?.gainDB, -15, "sound effects' usual gain")
         }
         XCTAssertEqual(c.clips("SFX").first { $0.id == "clip_click" }?.duration, t(2), "a sound already there isn't cut")
@@ -341,13 +344,13 @@ final class SectionCardCommandTests: XCTestCase {
             .addMedia(item: MediaItem(id: "med_out", path: "assets/sfx/out.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true))
         )
         // "Which decision model should you pick? Three questions to ask
-        // first" is 66 characters: 1.4 + 66 / 17 = 5.28, up to 5.3 s.
+        // first" is 66 characters: 2.2 + 66 / 15 = 6.6 s.
         let placements = try SectionCard.placements(in: c.project, markerIDs: nil)
-        XCTAssertEqual(placements.map { ($0.duration.seconds * 10).rounded() / 10 }, [3.2, 3.2, 5.3])
+        XCTAssertEqual(placements.map { ($0.duration.seconds * 10).rounded() / 10 }, [4.2, 4, 6.6])
         // A kicker is read too: "Methodology Let's keep it fair Section 1
-        // of 3" is 45 characters, 4.1 s, and the long one reaches 6 s.
+        // of 3" is 45 characters, 5.2 s, and the long one reaches 7 s.
         let kicked = try SectionCard.placements(in: c.project, markerIDs: nil, kicker: "Section")
-        XCTAssertEqual(kicked.map { ($0.duration.seconds * 10).rounded() / 10 }, [4.1, 3.2, 6])
+        XCTAssertEqual(kicked.map { ($0.duration.seconds * 10).rounded() / 10 }, [5.2, 4, 7])
         try c.run("Cards", .addSectionCards(soundIn: SectionCardSound(mediaID: "med_in"), soundOut: SectionCardSound(mediaID: "med_out")))
         let made = cards(c)
         XCTAssertEqual(made.map(\.clip.duration), placements.map(\.duration))
@@ -369,7 +372,7 @@ final class SectionCardCommandTests: XCTestCase {
         let cameraBefore = c.clips("Camera")
         try c.run("Cards", .addSectionCards(markerIDs: ["mk_method"], mode: .insert))
         let card = try XCTUnwrap(cards(c).first)
-        let motion = SectionCard.Motion(duration: 3.2, aspect: 9.0 / 16)
+        let motion = SectionCard.Motion(duration: card.clip.duration.seconds, aspect: 9.0 / 16)
         let covered = try XCTUnwrap(motion.covered)
         let camera = c.clips("Camera")
         XCTAssertEqual(camera.count, cameraBefore.count + 1, "the take is cut at the marker")

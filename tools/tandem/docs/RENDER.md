@@ -224,13 +224,13 @@ export all show the same frame.
 - **Length.** A card's words set how long it needs
   (`SectionCard.fittedDuration(for:)`): 1.4 s for the wipes (the words
   are fully in from about 0.7 s, and the wipe out's first band reaches
-  them about 0.7 s before the end), then the title, subtitle and kicker
-  as the card shows them, spaces included, at 17 characters a second,
-  Netflix's reading speed for adult subtitles and about the BBC's 160 to
-  180 words a minute. Rounded up to a tenth of a second (and to a frame),
-  at least 3.2 s, so a usual card like METHODOLOGY / LET'S KEEP IT FAIR
-  (30 characters) stays as it was, and at most 6 s (about 78 characters;
-  longer stops being a breather). `addSectionCards`, `tandem cards` and
+  them about 0.7 s before the end), 0.8 s to find the card and take it
+  in, then the title, subtitle and kicker as the card shows them, spaces
+  included, at 15 characters a second: a little slower than Netflix's 17
+  for adult subtitles, since Mike found cards at 17 went by a bit fast.
+  Rounded up to a tenth of a second (and to a frame), at least 4 s and at
+  most 7 s (about 72 characters; longer stops being a breather), so
+  METHODOLOGY / LET'S KEEP IT FAIR (30 characters) gets 4.2 s. `addSectionCards`, `tandem cards` and
   the Templates tile use it unless given a length, and the Video tab's Fit
   to text sets it for a card whose words changed, moving its whoosh out
   with the wipe out.

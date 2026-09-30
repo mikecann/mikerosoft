@@ -34,7 +34,7 @@ final class SectionCardAppTests: XCTestCase {
         XCTAssertEqual(result.createdIDs.first { $0.hasPrefix("clip_") }, card.id)
         XCTAssertEqual(fixture.project.track(containingClip: card.id)?.name, "Graphics")
         XCTAssertEqual(card.start, t(40))
-        XCTAssertEqual(card.duration, SectionCard.defaultDuration)
+        XCTAssertEqual(card.duration.seconds, 4.1, accuracy: 1e-9, "fitted: 2.2 + 28 / 15, up to 4.1")
         let props = try XCTUnwrap(SectionCard.props(of: card))
         XCTAssertEqual(props.number, "01")
         XCTAssertEqual(props.title, "The leaderboard")
@@ -50,7 +50,7 @@ final class SectionCardAppTests: XCTestCase {
         let group = try XCTUnwrap(card.linkGroup, "the card and its sounds go together")
         let sounds = fixture.clips("SFX").filter { $0.linkGroup == group }
         XCTAssertEqual(sounds.map(\.mediaID), ["med_whooshin", "med_whooshout"])
-        XCTAssertEqual(sounds.map(\.start), [t(40.2), t(40 + 3.2 - 0.88)])
+        XCTAssertEqual(sounds.map(\.start), [t(40.2), t(40 + 4.1 - 0.88)], "the card is 4.1 s, fitted to its words")
         XCTAssertEqual(sounds.map { $0.audio?.gainDB }, [-14, -19])
         XCTAssertEqual(fixture.project.media("med_whooshin")?.path, "assets/sfx/whoosh-in.wav", "added with the card")
         // A second card uses the same files.
@@ -66,7 +66,7 @@ final class SectionCardAppTests: XCTestCase {
         sounds.soundIn.offset = .zero
         sounds.soundOut.offset = .zero
         let template = BuiltInTemplates.makeSectionCard(sounds: sounds)
-        XCTAssertEqual(template.clips.map(\.offset), [.zero, .zero, t(3.2 - 0.88)])
+        XCTAssertEqual(template.clips.map(\.offset), [.zero, .zero, t(4.1 - 0.88)])
         XCTAssertEqual(template.duration, SectionCard.fittedDuration(for: SectionCard.Props(title: "The leaderboard", subtitle: "Who's on top", number: "01")), "as long as its words need")
     }
 
@@ -162,15 +162,15 @@ final class SectionCardAppTests: XCTestCase {
         try fixture.apply(batch)
         clip = try XCTUnwrap(fixture.project.clip(clip.id))
         // "Which decision model should you pick? Who's on top": 50
-        // characters, 1.4 + 50 / 17 = 4.34 s, up to 4.4.
-        XCTAssertEqual(clip.duration.seconds, 4.4, accuracy: 1e-9)
+        // characters, 2.2 + 50 / 15 = 5.53 s, up to 5.6.
+        XCTAssertEqual(clip.duration.seconds, 5.6, accuracy: 1e-9)
         XCTAssertEqual(clip.start, t(40))
         let sounds = fixture.clips("SFX").filter { $0.linkGroup == clip.linkGroup }.sorted { $0.start < $1.start }
-        XCTAssertEqual(sounds.map(\.start), [t(40.2), t(40 + 4.4 - 0.88)], "the whoosh out moved with the wipe out")
+        XCTAssertEqual(sounds.map(\.start), [t(40.2), t(40 + 5.6 - 0.88)], "the whoosh out moved with the wipe out")
         XCTAssertNil(SectionCardEdits.fitToText(clip, in: fixture.project))
         let props = try XCTUnwrap(SectionCard.props(of: clip))
-        XCTAssertEqual(SectionCardEdits.fitHelp(props, length: clip.duration, frameRate: .fps30), "As long as its words need: 4.4 s for 50 characters.")
-        XCTAssertTrue(SectionCardEdits.fitHelp(props, length: t(3.2), frameRate: .fps30).hasPrefix("Makes the card 4.4 s long"))
+        XCTAssertEqual(SectionCardEdits.fitHelp(props, length: clip.duration, frameRate: .fps30), "As long as its words need: 5.6 s for 50 characters.")
+        XCTAssertTrue(SectionCardEdits.fitHelp(props, length: t(3.2), frameRate: .fps30).hasPrefix("Makes the card 5.6 s long"))
         XCTAssertEqual(SectionCardEdits.seconds(t(3.2)), "3.2 s")
         assertValid(fixture.project)
     }

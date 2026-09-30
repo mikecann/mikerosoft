@@ -58,7 +58,7 @@ final class SectionCardsAPITests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: sfx.path), "or copies anything")
         let text = plan.readableText
         XCTAssertTrue(text.hasPrefix("2 section cards (dry run, revision 1):"), text)
-        XCTAssertTrue(text.contains(#"01  00:08.000  "Methodology" / "Let's keep it fair"  card 00:07.567-00:10.767 (3.2 s)"#), text)
+        XCTAssertTrue(text.contains(#"01  00:08.000  "Methodology" / "Let's keep it fair"  card 00:07.567-00:11.767 (4.2 s)"#), text)
         XCTAssertTrue(text.contains("Run again with --apply"), text)
 
         let applied = try await h.service.cards(CardsRequest(kicker: "Section", apply: true), context: h.context)
@@ -69,9 +69,9 @@ final class SectionCardsAPITests: XCTestCase {
         XCTAssertEqual(made.map(\.props.label), ["01 Methodology", "02 Section 2"])
         XCTAssertEqual(made.map(\.props.kickerLine), ["Section 1 of 2", "Section 2 of 2"])
         // Fitted to their words: "Methodology Let's keep it fair Section
-        // 1 of 2" is 45 characters, 1.4 + 45 / 17 = 4.05, so 4.1 s.
-        XCTAssertEqual(made.map { $0.clip.duration.seconds }, [4.1, 3.2])
-        XCTAssertEqual(applied.cards.map { ($0.end - $0.start).seconds }, [4.1, 3.2], "as planned")
+        // 1 of 2" is 45 characters, 2.2 + 45 / 15 = 5.2 s.
+        XCTAssertEqual(made.map { $0.clip.duration.seconds }, [5.2, 4])
+        XCTAssertEqual(applied.cards.map { ($0.end - $0.start).seconds }, [5.2, 4], "as planned")
         let sounds = project.track(named: "SFX")?.clips ?? []
         XCTAssertEqual(sounds.count, 4, "a whoosh in and out for each card")
         XCTAssertEqual(Set(sounds.compactMap(\.linkGroup)), Set(made.compactMap(\.clip.linkGroup)))

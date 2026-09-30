@@ -129,7 +129,7 @@ public struct CardsRequest: ServiceCall {
     /// Marker IDs to put cards at. Default: every section marker after the
     /// start.
     public var markers: [String]?
-    /// Every card's length. Default: each fitted to its words (3.2 to 6 s,
+    /// Every card's length. Default: each fitted to its words (4 to 7 s,
     /// `SectionCard.fittedDuration(for:)`).
     public var duration: Time?
     /// "Section" or "Tip", shown as "SECTION 1 OF 3" beside the chip.
