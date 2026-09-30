@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   Anchor,
   Badge,
@@ -7,36 +7,34 @@ import {
   Code,
   Container,
   Group,
-  Image,
   Modal,
-  Paper,
   SimpleGrid,
   Stack,
   Text,
   Title,
   UnstyledButton,
 } from '@mantine/core';
+import type { ChangelogEntry } from './changelog';
 import { Link } from './router';
 import { formatToolDate } from './toolDates';
 import { TOOL_DATES } from './toolDates.generated';
 import { toolDetails } from './toolDetails';
-import { makeItYoursPrompt, readmeUrl, toolPath } from './toolPages';
+import { makeItYoursPrompt, toolPath } from './toolPages';
 import { PLATFORM_COLOR, PLATFORM_LABEL, sortPlatforms, tools, type Tool } from './tools';
 import { versionedAsset } from './versionedAsset';
 
-/** Turns `backticked` bits of copy into inline code and **starred** bits into bold. */
+const REPO_URL = 'https://github.com/mikecann/mikerosoft';
+const CHANGES_SHOWN = 6;
+
+/** Turns `backticked` bits of copy into inline code. */
 function RichText({ text }: { text: string }) {
   return (
     <>
-      {text.split(/(`[^`]+`|\*\*[^*]+\*\*)/).map((part, i) => {
-        if (part.length > 2 && part.startsWith('`') && part.endsWith('`')) {
-          return <Code key={i} className="inline-code">{part.slice(1, -1)}</Code>;
-        }
-        if (part.length > 4 && part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={i} className="rich-strong">{part.slice(2, -2)}</strong>;
-        }
-        return <Fragment key={i}>{part}</Fragment>;
-      })}
+      {text.split(/(`[^`]+`)/).map((part, i) => (
+        part.length > 2 && part.startsWith('`') && part.endsWith('`')
+          ? <Code key={i} className="inline-code">{part.slice(1, -1)}</Code>
+          : <Fragment key={i}>{part}</Fragment>
+      ))}
     </>
   );
 }
@@ -56,14 +54,6 @@ function ToolIcon({ src, className }: { src: string; className: string }) {
   );
 }
 
-function SectionTitle({ children }: { children: ReactNode }) {
-  return (
-    <Title order={2} size="h3" mb="md" className="section-title">
-      {children}
-    </Title>
-  );
-}
-
 function CopyIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -77,6 +67,14 @@ function CheckIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M8 5v14l11-7z" />
     </svg>
   );
 }
@@ -100,7 +98,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-function GetItCallout({ tool }: { tool: Tool }) {
+function GetIt({ tool }: { tool: Tool }) {
   const prompt = makeItYoursPrompt(tool);
   const promptRef = useRef<HTMLParagraphElement>(null);
   const [status, setStatus] = useState<'idle' | 'copied' | 'select'>('idle');
@@ -119,23 +117,34 @@ function GetItCallout({ tool }: { tool: Tool }) {
     }
     // No clipboard access, so select it and let them copy it themselves.
     const selection = window.getSelection();
-    if (promptRef.current && selection) {
-      selection.selectAllChildren(promptRef.current);
-    }
+    if (promptRef.current && selection) selection.selectAllChildren(promptRef.current);
     setStatus('select');
   }
 
   return (
-    <Paper className="callout callout-get" radius="lg" p={{ base: 'lg', sm: 'xl' }}>
-      <Text className="callout-kicker">How to get it</Text>
-      <Title order={2} size="h3" mt={4} mb="xs">Make it your own</Title>
-      <Text c="gray.4" lh={1.6} mb="md">
-        There's no installer, these are just my own tools. The easiest way to get one is to paste
-        this into your coding agent (Claude Code, Codex, Cursor or whatever you use) and let it copy
-        the source over and tweak it for you.
+    <Box className="get-it">
+      <Text className="get-it-kicker">Want it?</Text>
+      <Text c="gray.3" lh={1.6} mt={4}>
+        Paste this into your AI coding agent. It'll copy the code over and set it up for your
+        machine. Anything else you want to know, just ask it.
       </Text>
 
-      <Box className="prompt-box">
+      <Group mt="md" gap="sm" wrap="wrap">
+        <Button
+          onClick={copy}
+          size="md"
+          color={copied ? 'teal' : 'blue'}
+          radius="md"
+          leftSection={copied ? <CheckIcon /> : <CopyIcon />}
+        >
+          {copied ? 'Copied! Now paste it into your agent' : 'Copy prompt'}
+        </Button>
+        <Button component="a" href={tool.url} target="_blank" rel="noopener" size="md" variant="default" radius="md">
+          View source
+        </Button>
+      </Group>
+
+      <Box className="prompt-box" mt="md">
         <Text ref={promptRef} className="prompt-text">{prompt}</Text>
       </Box>
       {status === 'select' && (
@@ -143,115 +152,66 @@ function GetItCallout({ tool }: { tool: Tool }) {
           Your browser wouldn't let me copy it, so I've selected it. Press Cmd+C or Ctrl+C.
         </Text>
       )}
-
-      <Group mt="md" gap="sm" wrap="wrap">
-        <Button
-          onClick={copy}
-          color={copied ? 'teal' : 'blue'}
-          radius="md"
-          leftSection={copied ? <CheckIcon /> : <CopyIcon />}
-          className="copy-prompt-button"
-        >
-          {copied ? 'Copied! Now paste it into your agent' : 'Copy prompt'}
-        </Button>
-        <Button component="a" href={tool.url} target="_blank" rel="noopener" variant="default" radius="md">
-          View source
-        </Button>
-        <Button component="a" href={readmeUrl(tool)} target="_blank" rel="noopener" variant="subtle" color="gray" radius="md">
-          README
-        </Button>
-      </Group>
-
-      <Box className="by-hand" mt="lg" pt="md">
-        <Text size="sm" c="dimmed" lh={1.6} mb={8}>
-          Rather do it by hand? Grab the whole repo and you'll find it in{' '}
-          <Code className="inline-code">tools/{tool.name}</Code>.
-        </Text>
-        <Box className="prompt-box prompt-box-small">
-          <Text className="prompt-text">git clone https://github.com/mikecann/mikerosoft</Text>
-        </Box>
-      </Box>
-    </Paper>
+    </Box>
   );
 }
 
-function HowToUseCallout({ tool }: { tool: Tool }) {
-  const details = toolDetails[tool.name];
+type MediaItem = { kind: 'video' | 'image'; src: string; isArt?: boolean };
 
-  return (
-    <Paper className="callout callout-use" radius="lg" p={{ base: 'lg', sm: 'xl' }}>
-      <Text className="callout-kicker callout-kicker-teal">How to use it</Text>
-      <Title order={2} size="h3" mt={4} mb="md">Once it's set up</Title>
-
-      <Stack component="ol" gap="sm" className="steps">
-        {details.howToUse.map((step, i) => (
-          <li key={i} className="step">
-            <span className="step-number" aria-hidden="true">{i + 1}</span>
-            <Text lh={1.6} c="gray.3"><RichText text={step} /></Text>
-          </li>
-        ))}
-      </Stack>
-
-      {details.requirements.length > 0 && (
-        <Box mt="lg">
-          <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={8} className="letter-spaced">
-            You'll need
-          </Text>
-          <Stack component="ul" gap={6} className="requirements">
-            {details.requirements.map(requirement => (
-              <Text component="li" key={requirement} size="sm" lh={1.5} c="gray.4" className="requirement">
-                <RichText text={requirement} />
-              </Text>
-            ))}
-          </Stack>
-        </Box>
-      )}
-    </Paper>
-  );
+function mediaFor(tool: Tool): MediaItem[] {
+  const items: MediaItem[] = [];
+  if (tool.video) items.push({ kind: 'video', src: versionedAsset(tool.video) });
+  for (const shot of tool.screenshots) items.push({ kind: 'image', src: versionedAsset(shot) });
+  // The header is artwork rather than the tool itself, so it only fills in when there's nothing real.
+  if (items.length === 0 && tool.header) {
+    items.push({ kind: 'image', src: versionedAsset(tool.header), isArt: true });
+  }
+  return items;
 }
 
-function Gallery({ tool }: { tool: Tool }) {
+function Media({ tool }: { tool: Tool }) {
+  const items = mediaFor(tool);
   const [active, setActive] = useState(0);
   const [zoomed, setZoomed] = useState(false);
-  const shots = tool.screenshots.map(versionedAsset);
 
-  useEffect(() => setActive(0), [tool.name]);
-
-  if (shots.length === 0) return null;
-  const current = shots[Math.min(active, shots.length - 1)];
+  if (items.length === 0) return null;
+  const current = items[Math.min(active, items.length - 1)];
 
   return (
-    <Box component="section" mt={56}>
-      <SectionTitle>{shots.length === 1 ? 'Screenshot' : 'Screenshots'}</SectionTitle>
+    <Box>
+      <Box className="stage">
+        {current.kind === 'video' ? (
+          <video key={current.src} src={current.src} controls muted loop playsInline autoPlay preload="metadata" />
+        ) : (
+          <UnstyledButton onClick={() => setZoomed(true)} className="stage-image" aria-label="Open full size">
+            <img src={current.src} alt={`${tool.name} ${current.isArt ? 'artwork' : 'screenshot'}`} />
+          </UnstyledButton>
+        )}
+      </Box>
 
-      <UnstyledButton
-        onClick={() => setZoomed(true)}
-        className="shot-main"
-        aria-label="Open screenshot full size"
-      >
-        <img src={current} alt={`${tool.name} screenshot ${active + 1}`} />
-        <span className="shot-zoom-hint">Click to enlarge</span>
-      </UnstyledButton>
-
-      {shots.length > 1 && (
+      {items.length > 1 && (
         <Group gap="sm" mt="sm" wrap="wrap">
-          {shots.map((shot, i) => (
+          {items.map((item, i) => (
             <UnstyledButton
-              key={shot}
+              key={item.src}
               onClick={() => setActive(i)}
-              className="shot-thumb"
+              className="thumb"
               data-active={i === active || undefined}
-              aria-label={`Show screenshot ${i + 1}`}
+              aria-label={item.kind === 'video' ? 'Play the video' : `Show screenshot ${i + 1}`}
               aria-pressed={i === active}
             >
-              <img src={shot} alt="" />
+              {item.kind === 'video' ? (
+                <span className="thumb-video"><PlayIcon /></span>
+              ) : (
+                <img src={item.src} alt="" />
+              )}
             </UnstyledButton>
           ))}
         </Group>
       )}
 
       <Modal
-        opened={zoomed}
+        opened={zoomed && current.kind === 'image'}
         onClose={() => setZoomed(false)}
         size="auto"
         centered
@@ -261,22 +221,78 @@ function Gallery({ tool }: { tool: Tool }) {
         overlayProps={{ backgroundOpacity: 0.85, blur: 4 }}
       >
         <UnstyledButton onClick={() => setZoomed(false)} aria-label="Close" style={{ display: 'block' }}>
-          <img src={current} alt={`${tool.name} screenshot ${active + 1}`} className="shot-full" />
+          <img src={current.src} alt="" className="shot-full" />
         </UnstyledButton>
       </Modal>
     </Box>
   );
 }
 
-function Video({ tool }: { tool: Tool }) {
-  if (!tool.video) return null;
+function ChangeEntry({ entry }: { entry: ChangelogEntry }) {
+  const [open, setOpen] = useState(false);
+  const [why, ...more] = entry.paragraphs;
 
   return (
-    <Box component="section" mt={56}>
-      <SectionTitle>See it in action</SectionTitle>
-      <Box className="video-frame">
-        <video src={versionedAsset(tool.video)} controls muted loop playsInline autoPlay preload="metadata" />
-      </Box>
+    <li className="change">
+      <span className="change-dot" aria-hidden="true" />
+      <Text size="xs" c="dimmed" fw={600} title={new Date(entry.date).toLocaleString('en-AU')}>
+        {formatToolDate(entry.date)}
+      </Text>
+      <Text fw={700} c="gray.1" mt={2} lh={1.4}>{entry.title}</Text>
+      {why && <Text size="sm" c="gray.5" lh={1.6} mt={4} className="change-body">{why}</Text>}
+      {open && more.map((paragraph, i) => (
+        <Text key={i} size="sm" c="gray.5" lh={1.6} mt="xs" className="change-body">{paragraph}</Text>
+      ))}
+      <Group gap="md" mt={6}>
+        {more.length > 0 && (
+          <Anchor component="button" type="button" size="xs" c="blue.4" onClick={() => setOpen(value => !value)}>
+            {open ? 'Less' : 'More detail'}
+          </Anchor>
+        )}
+        <Anchor href={`${REPO_URL}/commit/${entry.hash}`} target="_blank" rel="noopener" size="xs" c="dimmed">
+          {entry.hash.slice(0, 7)}
+        </Anchor>
+      </Group>
+    </li>
+  );
+}
+
+function Changelog({ tool }: { tool: Tool }) {
+  const [entries, setEntries] = useState<ChangelogEntry[] | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/changelog/${tool.name}.json`)
+      .then(response => (response.ok ? response.json() : []))
+      .then((data: ChangelogEntry[]) => {
+        if (!cancelled) setEntries(data);
+      })
+      .catch(() => {
+        if (!cancelled) setEntries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tool.name]);
+
+  if (!entries || entries.length === 0) return null;
+  const shown = showAll ? entries : entries.slice(0, CHANGES_SHOWN);
+
+  return (
+    <Box component="section" mt={80} maw={760}>
+      <Title order={2} size="h3">What's changed</Title>
+      <Text c="dimmed" size="sm" mt={4} mb="xl">
+        {entries.length === 1 ? 'One change' : `${entries.length} changes`}, newest first, straight from the commit history.
+      </Text>
+      <Stack component="ol" gap="xl" className="changes">
+        {shown.map(entry => <ChangeEntry key={entry.hash} entry={entry} />)}
+      </Stack>
+      {entries.length > CHANGES_SHOWN && (
+        <Button variant="subtle" color="gray" mt="lg" radius="md" onClick={() => setShowAll(value => !value)}>
+          {showAll ? 'Show fewer' : `Show all ${entries.length} changes`}
+        </Button>
+      )}
     </Box>
   );
 }
@@ -309,8 +325,8 @@ export function ToolPage({ tool }: { tool: Tool }) {
 
   return (
     <Box className="tool-page">
-      <Container size={1100} px={{ base: 'md', sm: 'xl' }} pt="lg" pb={80}>
-        <Group justify="space-between" mb="lg" pr={{ base: 56, sm: 72 }}>
+      <Container size={1240} px={{ base: 'md', sm: 'xl' }} pt="lg" pb={80}>
+        <Group justify="space-between" mb="xl" pr={{ base: 56, sm: 72 }}>
           <Link href="/" className="back-link">
             <span aria-hidden="true">←</span> All tools
           </Link>
@@ -320,63 +336,48 @@ export function ToolPage({ tool }: { tool: Tool }) {
           </Link>
         </Group>
 
-        <Box className="hero">
-          {tool.header && (
-            <Image src={versionedAsset(tool.header)} alt="" className="hero-image" />
-          )}
-          <Box className="hero-fade" />
-        </Box>
+        <Box className="tool-hero">
+          <Box className="tool-hero-info">
+            <Group gap="md" wrap="nowrap" align="center">
+              <Box className="tool-icon-wrap">
+                <ToolIcon src={tool.icon} className="tool-icon" />
+              </Box>
+              <Box style={{ minWidth: 0 }}>
+                <Title order={1} className="tool-title">{tool.name}</Title>
+                <Group gap={6} mt={6}>
+                  {sortPlatforms(tool.platforms).map(id => (
+                    <Badge key={id} variant="light" color={PLATFORM_COLOR[id]}>{PLATFORM_LABEL[id]}</Badge>
+                  ))}
+                </Group>
+              </Box>
+            </Group>
 
-        <Box className="hero-body">
-          <Group gap="md" wrap="nowrap" align="center">
-            <Box className="tool-icon-wrap">
-              <ToolIcon src={tool.icon} className="tool-icon" />
-            </Box>
-            <Box style={{ minWidth: 0 }}>
-              <Title order={1} className="tool-title">{tool.name}</Title>
-              <Group gap={6} mt={6}>
-                {sortPlatforms(tool.platforms).map(id => (
-                  <Badge key={id} variant="light" color={PLATFORM_COLOR[id]}>{PLATFORM_LABEL[id]}</Badge>
-                ))}
-              </Group>
-            </Box>
-          </Group>
-          <Text className="tagline" mt="lg">{details.tagline}</Text>
-        </Box>
+            <Text className="tagline" mt="lg">{details.tagline}</Text>
+            <Stack gap="sm" mt="md">
+              {details.intro.map((paragraph, i) => (
+                <Text key={i} c="gray.4" lh={1.65}><RichText text={paragraph} /></Text>
+              ))}
+            </Stack>
 
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg" mt="xl">
-          <GetItCallout tool={tool} />
-          <HowToUseCallout tool={tool} />
-        </SimpleGrid>
-
-        <Box component="section" mt={56} maw={760}>
-          <SectionTitle>What is it?</SectionTitle>
-          <Stack gap="md">
-            {details.intro.map((paragraph, i) => (
-              <Text key={i} size="lg" lh={1.7} c="gray.3"><RichText text={paragraph} /></Text>
-            ))}
-          </Stack>
-          {details.specificToMike && (
-            <Paper className="heads-up" radius="md" p="md" mt="lg">
-              <Text size="sm" lh={1.6}>
-                <Text span fw={700} c="yellow.4">Heads up: </Text>
-                <RichText text={details.specificToMike} />
+            {dates && (
+              <Text size="xs" c="dimmed" mt="md">
+                Added {formatToolDate(dates.added)} · Updated {formatToolDate(dates.updated)}
               </Text>
-            </Paper>
-          )}
+            )}
+          </Box>
+
+          <Box className="tool-hero-media">
+            <Media tool={tool} />
+          </Box>
+
+          <Box className="tool-hero-get">
+            <GetIt tool={tool} />
+          </Box>
         </Box>
 
-        <Video tool={tool} />
-        <Gallery tool={tool} />
+        <Changelog tool={tool} />
 
-        {dates && (
-          <Text size="sm" c="dimmed" mt={56}>
-            Added {formatToolDate(dates.added)} · Last updated {formatToolDate(dates.updated)} ·{' '}
-            <Anchor href={tool.url} target="_blank" rel="noopener" size="sm">Browse the code on GitHub</Anchor>
-          </Text>
-        )}
-
-        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mt="xl">
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mt={80}>
           <NeighbourLink tool={previous} label="← Previous" align="left" />
           <NeighbourLink tool={next} label="Next →" align="right" />
         </SimpleGrid>

@@ -599,11 +599,18 @@ The mikerosoft.app site in `website/` deploys from `main` through
 - CI checks out with `fetch-depth: 0`. The generator refuses a shallow clone
   because every tool would get the same date.
 - Every tool has its own page at `/tools/<name>` (`website/src/ToolPage.tsx`).
-  Its friendly copy (tagline, intro, how-to-use steps, requirements and an
-  optional note on anything tied to Mike's setup) lives in
-  `website/src/toolDetails.ts`, written in Mike's voice with no em dashes.
-  A new tool needs an entry there or `npm test` fails. Add `video` in
-  `tools.ts` to show a demo clip on the page.
+  It leads with real media: `video` first, then `screenshots`, and only falls
+  back to the generated `header` art when there's nothing real. Give every tool
+  real screenshots or a short clip of it working.
+- Setup on the page is one step: copy a prompt that tells your agent to copy the
+  source and make it your own. Don't add setup instructions to the page.
+- The page copy (a tagline and a short intro, in Mike's voice with no em dashes)
+  lives in `website/src/toolDetails.ts`. A new tool needs an entry there or
+  `npm test` fails.
+- "What's changed" on each page comes from git. `npm run changelog` (run
+  automatically before `dev` and `build`) writes the ignored
+  `website/public/changelog/<tool>.json` from commit subjects and bodies, so
+  write commit bodies that say why something changed.
 - `npm run build` also writes `dist/tools/<name>.html` with that tool's title,
   description and share image, so links shared on social previews properly.
 - `npm test` in `website/` runs the tool list, sorting, git-history and tool

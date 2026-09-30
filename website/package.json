@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dates": "tsx scripts/generate-tool-dates.ts",
-    "predev": "npm run dates",
+    "changelog": "tsx scripts/generate-changelogs.ts",
+    "predev": "npm run dates && npm run changelog",
     "dev": "vite",
     "test": "tsx --test src/*.test.ts",
-    "prebuild": "npm run dates",
+    "prebuild": "npm run dates && npm run changelog",
     "build": "tsc -b && vite build && tsx scripts/generate-tool-pages.ts",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy"

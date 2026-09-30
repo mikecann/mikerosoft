@@ -48,7 +48,6 @@ test('every published tool has friendly page copy', () => {
     assert.ok(details, `${tool.name} has no details`);
     assert.ok(details.tagline.length > 0, `${tool.name} has no tagline`);
     assert.ok(details.intro.length > 0, `${tool.name} has no intro`);
-    assert.ok(details.howToUse.length >= 2, `${tool.name} needs usage steps`);
   }
 });
 
