@@ -98,9 +98,16 @@ enum BuiltInTemplates {
     /// Mike's section card: the built-in `sectionCard` graphic on Graphics
     /// (Convex's bands wipe in, the card holds the number, title, subtitle
     /// and progress, the bands wipe out) and, given the whooshes, one on
-    /// SFX for each sweep. The words are edited in the inspector.
+    /// SFX for each sweep. As long as its words need; they're edited in the
+    /// inspector, where Fit to text sets the length for new ones.
     static func makeSectionCard(sounds: SectionCardSounds.Resolved?) -> Template {
-        let length = SectionCard.defaultDuration
+        let fields = [
+            TemplateField(key: "number", label: "Number", defaultValue: "01"),
+            TemplateField(key: "title", label: "Title", defaultValue: "The leaderboard"),
+            TemplateField(key: "subtitle", label: "Subtitle", defaultValue: "Who's on top")
+        ]
+        let words = Dictionary(uniqueKeysWithValues: fields.map { ($0.key, $0.defaultValue) })
+        let length = SectionCard.fittedDuration(for: SectionCard.Props(title: words["title"] ?? "", subtitle: words["subtitle"] ?? "", number: words["number"] ?? ""))
         let props: [String: ParamValue] = [
             SectionCard.Key.number: .string("{{number}}"),
             SectionCard.Key.title: .string("{{title}}"),
@@ -140,11 +147,7 @@ enum BuiltInTemplates {
             id: "sectionCard",
             name: "Section card",
             duration: length,
-            fields: [
-                TemplateField(key: "number", label: "Number", defaultValue: "01"),
-                TemplateField(key: "title", label: "Title", defaultValue: "The leaderboard"),
-                TemplateField(key: "subtitle", label: "Subtitle", defaultValue: "Who's on top")
-            ],
+            fields: fields,
             clips: clips
         )
     }

@@ -39,14 +39,18 @@ extension SectionCard {
         /// from the marker on, so the cut between sections is never seen.
         /// On a frame.
         public var start: Time
+        /// How long it is: the length asked for, or fitted to its words
+        /// (`fittedDuration(for:)`). A card already there keeps its own.
+        public var duration: Time
         /// A section card already over the marker, which is renumbered
         /// instead of getting a new one.
         public var existingClipID: String?
     }
 
     /// The cards for `markerIDs` (every section marker after the start
-    /// when nil), in time order, for cards `duration` long.
-    public static func placements(in p: Project, markerIDs: [String]?, duration: Time = defaultDuration) throws -> [Placement] {
+    /// when nil), in time order: each `duration` long, or when that's nil
+    /// fitted to its words (the marker's name and note, and the kicker).
+    public static func placements(in p: Project, markerIDs: [String]?, duration: Time? = nil, kicker: String? = nil) throws -> [Placement] {
         var markers: [Marker]
         if let markerIDs {
             var seen = Set<String>()
@@ -65,17 +69,25 @@ extension SectionCard {
                 ? "there are no section markers after the start to put cards on. Mark where each section starts with a section marker (addMarker with kind section, or a marker's Kind menu in the app)"
                 : "no markers given")
         }
-        let covered = try coverage(of: duration, in: p)
+        if let duration { _ = try coverage(of: duration, in: p) }
         let rate = p.settings.frameRate
-        return markers.enumerated().map { offset, marker in
+        let total = markers.count
+        let word = kicker?.trimmingCharacters(in: .whitespaces) ?? ""
+        return try markers.enumerated().map { offset, marker in
+            let number = numberText(offset + 1)
+            // A card already there stays where it is, as long as it is.
+            if let existing = existingCard(at: marker.time, in: p) {
+                return Placement(marker: marker, number: number, start: existing.start, duration: existing.duration, existingClipID: existing.id)
+            }
+            let length = duration ?? fittedDuration(for: Props(
+                title: marker.name,
+                subtitle: (marker.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                number: number, total: total, kicker: word
+            ), frameRate: rate)
+            let covered = try coverage(of: length, in: p)
             let ideal = marker.time - Time(seconds: covered.lowerBound)
             let start = max(.zero, Time.frames(ideal.frameIndex(at: rate), at: rate))
-            return Placement(
-                marker: marker,
-                number: numberText(offset + 1),
-                start: start,
-                existingClipID: existingCard(at: marker.time, in: p)?.id
-            )
+            return Placement(marker: marker, number: number, start: start, duration: length, existingClipID: nil)
         }
     }
 
@@ -97,6 +109,34 @@ extension SectionCard {
         }
         return nil
     }
+
+    /// Fit to text: the edits that make card `clipID` as long as its words
+    /// need (`fittedDuration(for:)`, on the project's frames). Its start
+    /// stays and its end moves, and the sounds linked to it on its sweep
+    /// out move with that sweep; the ones on the sweep in stay. Empty when
+    /// it's that long already. A card that would run into the next clip on
+    /// its track fails when the edit is applied, saying so.
+    public static func fitToText(_ clipID: String, in p: Project) throws -> [EditCommand] {
+        guard let clip = p.clip(clipID), let props = props(of: clip) else {
+            throw EditError.invalid("\(clipID) isn't a section card")
+        }
+        let fitted = fittedDuration(for: props, frameRate: p.settings.frameRate)
+        guard fitted != clip.duration else { return [] }
+        var commands: [EditCommand] = [.trim(clipID: clip.id, edge: .end, to: clip.start + fitted, ripple: false, includeLinked: false)]
+        guard let group = clip.linkGroup else { return commands }
+        let before = Motion(duration: clip.duration, width: p.settings.width, height: p.settings.height)
+        let after = Motion(duration: fitted, width: p.settings.width, height: p.settings.height)
+        let sweepIn = clip.start + Time(seconds: before.inStart(0))
+        let sweepOut = clip.start + Time(seconds: before.outStart(0))
+        let outSounds = p.audioTracks.flatMap(\.clips).filter { sound in
+            sound.linkGroup == group && abs((sound.start - sweepOut).flicks) < abs((sound.start - sweepIn).flicks)
+        }
+        let delta = Time(seconds: after.outStart(0)) - Time(seconds: before.outStart(0))
+        if !outSounds.isEmpty, delta != .zero {
+            commands.append(.moveClips(clipIDs: outSounds.map(\.id), delta: delta, includeLinked: false, mode: .place))
+        }
+        return commands
+    }
 }
 
 extension Editing {
@@ -113,10 +153,7 @@ extension Editing {
         soundOut: SectionCardSound?,
         _ context: inout EditContext
     ) throws {
-        let length = duration ?? SectionCard.defaultDuration
-        let placements = try SectionCard.placements(in: p, markerIDs: markerIDs, duration: length)
-        let covered = try SectionCard.coverage(of: length, in: p)
-        let motion = SectionCard.Motion(duration: length, width: p.settings.width, height: p.settings.height)
+        let placements = try SectionCard.placements(in: p, markerIDs: markerIDs, duration: duration, kicker: kicker)
         let rate = p.settings.frameRate
 
         // Where the cards go: the named track, else Graphics (made on top if
@@ -143,7 +180,7 @@ extension Editing {
         let total = placements.count
         let kickerWord = kicker?.trimmingCharacters(in: .whitespaces)
         if mode != .insert {
-            for (a, b) in zip(placements, placements.dropFirst()) where a.existingClipID == nil && b.start < a.start + length {
+            for (a, b) in zip(placements, placements.dropFirst()) where a.existingClipID == nil && b.start < a.start + a.duration {
                 context.warn("The sections \"\(a.marker.name)\" and \"\(b.marker.name)\" are closer than a card is long, so the first card cuts into the second one's wipe in.")
             }
         }
@@ -172,6 +209,9 @@ extension Editing {
                 kicker: kickerWord ?? ""
             )
             let start = placement.start
+            let length = placement.duration
+            let covered = try SectionCard.coverage(of: length, in: p)
+            let motion = SectionCard.Motion(duration: length, width: p.settings.width, height: p.settings.height)
             if mode == .insert {
                 // Room for the hold: the shot before plays under the wipe in
                 // up to the marker, and the next one starts as the wipe out

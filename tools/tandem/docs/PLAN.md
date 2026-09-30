@@ -48,7 +48,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Native titles: Core Text, the four styles, in and out animations, word-by-word captions [render]
 - [x] Audio mix: gain, fades, keyframes, normalisation, voice isolation, crossfades, 3 ms micro-fades, pitch-kept speed changes [render]
 - [x] pitchShift audio effect [render]
-- [x] Built-in graphic clips drawn by the compositor: the section card (Convex's bands wipe in and out; number chip, Anton title, subtitle, progress bars), matching the mockup to a pixel [render]
+- [x] Built-in graphic clips drawn by the compositor: the section card (Convex's bands wipe in and out; number chip, Anton title with a blinking cursor, subtitle, progress bars), matching the mockup to a pixel [render]
 - [ ] Graphic template clips (Remotion props rendered in the background) [render]
 - [x] Frame renderer for grabs and tests [render]
 - [x] Exporter: VideoToolbox speed priority, presets, master loudness to -14 LUFS under -1 dBTP, range export, snapshot beside the file [render] (the whole 11 min v14 edit in 156 s, 4.3x real time)
@@ -61,7 +61,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] `tandem` CLI, headless when the app is closed (undo kept on disk), talks to the app when open [api]
 - [x] `tandem mcp` stdio server (both MCP protocol eras) [api]
 - [x] Transcript tools: find phrase, list pauses, tighten pauses [api]
-- [x] A section card at every section marker: `addSectionCards`, `tandem cards`, MCP `cards`, Timeline > Add section cards at section markers [api, app]
+- [x] A section card at every section marker: `addSectionCards`, `tandem cards`, MCP `cards`, Timeline > Add section cards at section markers, each as long as its words need (Fit to text in the inspector) with soft whooshes set against the project's speech [api, app]
 - [x] docs/AGENTS.md with an example of every command, checked by tests [api]
 
 ## Milestone 5: the app

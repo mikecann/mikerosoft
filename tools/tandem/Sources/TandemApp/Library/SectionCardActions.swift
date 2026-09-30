@@ -49,18 +49,19 @@ enum SectionCardActions {
         return host.library
     }
 
-    /// The whooshes copied into the model's project, or nil when the
-    /// library doesn't have them.
+    /// The whooshes copied into the model's project and levelled for its
+    /// speech, or nil when the library doesn't have them.
     static func sounds(for model: EditorModel) async -> SectionCardSounds.Resolved? {
         if let ready = SectionCardSoundCache.shared.sounds(for: model.folder.root),
            ready.media.allSatisfy({ FileManager.default.fileExists(atPath: model.folder.url(forPath: $0.path).path) }) {
-            return ready
+            return ready.levelled(for: model.project)
         }
         guard let library = await library(), SectionCardSounds.available(in: library) else { return nil }
         let folder = model.folder
         let projectID = model.project.id
         let file = model.fileURL
-        guard let sounds = try? await SectionCardSounds.use(in: library, folder: folder, projectID: projectID, projectFile: file) else { return nil }
+        guard let copied = try? await SectionCardSounds.use(in: library, folder: folder, projectID: projectID, projectFile: file) else { return nil }
+        let sounds = copied.levelled(for: model.project)
         SectionCardSoundCache.shared.set(sounds, for: folder.root)
         return sounds
     }

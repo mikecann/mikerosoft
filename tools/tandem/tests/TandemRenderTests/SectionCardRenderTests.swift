@@ -102,6 +102,56 @@ final class SectionCardRenderTests: XCTestCase {
         }
     }
 
+    // MARK: - The cursor
+
+    /// Where the cursor after METHODOLOGY sits at 1920x1080, ink edges
+    /// inclusive-exclusive: 0.07em after the Y (and its letter-spacing),
+    /// 0.1em wide, from the baseline up to the capitals' height. At 4K it's
+    /// twice that, give or take the pixel an edge falls on.
+    static let cursor = CGRect(x: 1464, y: 447, width: 17, height: 154)
+    static let cursor4K = CGRect(x: 2928, y: 893, width: 35, height: 310)
+
+    /// Right of the title and above the subtitle, where only the cursor is
+    /// the accent colour.
+    func cursorRegion(_ scale: CGFloat) -> CGRect {
+        CGRect(x: 1400 * scale, y: 380 * scale, width: 200 * scale, height: 250 * scale)
+    }
+
+    func testTheCursorBlinksAfterTheTitleAt1080pAnd4K() {
+        for (width, height) in [(1920, 1080), (3840, 2160)] {
+            let scale = CGFloat(width) / 1920
+            let h = harness(width: width, height: height)
+            let region = cursorRegion(scale)
+            // The card starts at 1 s: the title lands 0.97 s in, so the
+            // cursor is lit to 1.5 s, off to 2.03, and gone from 2.32, when
+            // the wipe out starts.
+            let lit = h.render(at: t(1 + 1.2))
+            let cursor = bounds(lit, in: region) { self.near($0, Self.accent, 12) }
+            assertBox(cursor, width == 1920 ? Self.cursor : Self.cursor4K, scale: 1, tolerance: 0.5, "the cursor at \(width)")
+            assertBox(cursor, Self.cursor, scale: scale, tolerance: scale, "the 4K cursor is the 1080p one, doubled")
+            let title = bounds(lit, in: CGRect(x: 0, y: 0, width: width, height: height)) { $0[0] > 200 && $0[1] > 200 && $0[2] > 200 }
+            assertBox(title, Self.chrome.title, scale: scale, tolerance: 2 * scale, "the title stays where the mockup has it at \(width)")
+            for (clipTime, what) in [(1.7, "off between blinks"), (2.4, "gone with the wipe out")] {
+                XCTAssertNil(bounds(h.render(at: t(1 + clipTime)), in: region) { self.near($0, Self.accent, 60) }, "\(what) at \(width)")
+            }
+        }
+        var props = Self.props
+        props.cursor = false
+        XCTAssertNil(bounds(harness(width: 1920, height: 1080, props: props).render(at: t(2.2)), in: cursorRegion(1)) { self.near($0, Self.accent, 60) }, "none when it's off")
+    }
+
+    func testTheCursorFollowsTheLastLine() {
+        let layout = SectionCardLayout(SectionCard.Props(title: "Which decision model should you pick?"), size: CGSize(width: 1920, height: 1080))
+        let lines = layout.texts.filter { $0.role == .title }
+        let cursor = try! XCTUnwrap(layout.cursor)
+        let last = lines.last!
+        XCTAssertEqual(cursor.minX, last.x + last.width + 0.07 * 9.4 * 19.2, accuracy: 0.01, "after the last line's last letter")
+        XCTAssertEqual(cursor.maxY, last.baseline, accuracy: 0.01, "on its baseline")
+        XCTAssertEqual(cursor.height, CTFontGetCapHeight(CardFonts.title(9.4 * 19.2)), accuracy: 0.01, "the capitals' height")
+        XCTAssertEqual(cursor.width, 0.1 * 9.4 * 19.2, accuracy: 0.01)
+        XCTAssertNil(SectionCardLayout(SectionCard.Props(subtitle: "No title"), size: CGSize(width: 1920, height: 1080)).cursor)
+    }
+
     func testFontsShipWithTandem() {
         XCTAssertTrue(CardFonts.bundled, "Anton, Instrument Sans and JetBrains Mono load from the resource bundle")
         XCTAssertEqual(CTFontCopyFamilyName(CardFonts.title(40)) as String, "Anton")
@@ -221,8 +271,12 @@ final class SectionCardRenderTests: XCTestCase {
         let perFrame = Date().timeIntervalSince(start) / 9
         print("Section card: \(String(format: "%.1f", perFrame * 1000)) ms a 4K frame during the wipe")
         XCTAssertLessThan(perFrame, 0.2)
-        let hold = SectionCardRenderer.shared.image(Self.props, size: size, time: 1.5, duration: 3.2)
-        XCTAssertTrue(hold === SectionCardRenderer.shared.image(Self.props, size: size, time: 2.0, duration: 3.2), "the hold is drawn once")
+        // The hold is drawn once with the cursor lit and once without.
+        let dark = SectionCardRenderer.shared.image(Self.props, size: size, time: 1.6, duration: 3.2)
+        XCTAssertTrue(dark === SectionCardRenderer.shared.image(Self.props, size: size, time: 1.9, duration: 3.2), "the hold is drawn once")
+        let lit = SectionCardRenderer.shared.image(Self.props, size: size, time: 1.1, duration: 3.2)
+        XCTAssertTrue(lit === SectionCardRenderer.shared.image(Self.props, size: size, time: 2.1, duration: 3.2))
+        XCTAssertFalse(lit === dark)
     }
 
     // MARK: - Through AVFoundation
@@ -243,6 +297,10 @@ final class SectionCardRenderTests: XCTestCase {
         assertColor(grab[5, 5], Self.background, tolerance: 1)
         let chip = bounds(grab, in: CGRect(x: 0, y: 0, width: 640, height: 160)) { self.near($0, Self.accent, 8) }
         assertBox(chip, Self.chrome.chip, scale: 1.0 / 3, tolerance: 1.5, "chip in the grab")
+        // The cursor, lit 1.2 s in, where the viewer draws it.
+        let cursorGrab = Bitmap(try await renderer.image(at: t(1.2)))
+        assertBox(bounds(cursorGrab, in: cursorRegion(1.0 / 3)) { self.near($0, Self.accent, 24) }, Self.cursor, scale: 1.0 / 3, tolerance: 1.5, "the cursor in the grab")
+        XCTAssertNil(bounds(grab, in: cursorRegion(1.0 / 3)) { self.near($0, Self.accent, 60) }, "and off between blinks")
 
         let out = media.folder.appendingPathComponent("exports/card.mp4")
         let preset = ExportPreset(name: "Test", codec: .h264, videoBitrate: 8_000_000, loudnessTarget: nil, truePeakCeiling: nil)
@@ -255,6 +313,9 @@ final class SectionCardRenderTests: XCTestCase {
         let exportedChip = bounds(exported, in: CGRect(x: 0, y: 0, width: 640, height: 160)) { self.near($0, Self.accent, 16) }
         // 4:2:0 chroma at a third of the size softens the edges a pixel or two.
         assertBox(exportedChip, Self.chrome.chip, scale: 1.0 / 3, tolerance: 3, "chip in the export")
+        let exportedCursor = Bitmap(try await generator.image(at: CMTime(seconds: 1.2, preferredTimescale: 600)).image)
+        assertBox(bounds(exportedCursor, in: cursorRegion(1.0 / 3)) { self.near($0, Self.accent, 40) }, Self.cursor, scale: 1.0 / 3, tolerance: 3, "the cursor in the export")
+        XCTAssertNil(bounds(exported, in: cursorRegion(1.0 / 3)) { self.near($0, Self.accent, 40) }, "and off between blinks")
     }
 
     func testOtherGraphicTemplatesStillWarn() {

@@ -88,6 +88,28 @@ public enum AudioLevels {
         }
     }
 
+    /// The level speech actually plays at in `project`, in LUFS: where its
+    /// levelled speech clips sit (their `normalizeTo` plus gain, the
+    /// middle one by length), or the project's speech level when none is
+    /// levelled. Usually the speech level itself; an imported edit keeps
+    /// its own until `normalizeSpeech` runs (the Decision Models import
+    /// plays at -28.7). Sounds set against the voice, like the section
+    /// card's whooshes, follow it.
+    public static func speechLevel(in project: Project) -> Double {
+        let levelled = speechClips(in: project).compactMap { item -> (level: Double, length: Double)? in
+            guard let audio = item.clip.audio, let target = audio.normalizeTo, !audio.muted else { return nil }
+            return (target + audio.gainDB, item.clip.duration.seconds)
+        }.sorted { $0.level < $1.level }
+        let total = levelled.reduce(0) { $0 + $1.length }
+        guard total > 0 else { return project.settings.speechLoudness }
+        var running = 0.0
+        for item in levelled {
+            running += item.length
+            if running >= total / 2 { return item.level }
+        }
+        return levelled.last?.level ?? project.settings.speechLoudness
+    }
+
     /// True when a clip already sits at `level` with no gain, the way
     /// `normalizeSpeech` leaves it.
     public static func isLevelled(_ clip: Clip, at level: Double) -> Bool {

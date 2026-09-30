@@ -32,9 +32,10 @@ public enum SectionCardArt {
         return SectionCardRenderer.shared.draw(props, size: size, motion: motion, time: time)
     }
 
-    /// The card as it holds: every word in, no bands.
+    /// The card as it holds: every word in, the cursor lit, no bands.
     public static func still(_ props: SectionCard.Props, size: CGSize) -> CGImage? {
-        image(props, size: size, time: SectionCard.defaultDuration.seconds / 2)
+        let motion = SectionCard.Motion(duration: SectionCard.defaultDuration.seconds)
+        return image(props, size: size, time: motion.cursorLands + 0.01)
     }
 }
 
@@ -46,9 +47,10 @@ public enum SectionCardArt {
 /// mockup's CSS has them.
 ///
 /// The words are laid out and drawn once per card and size; each frame
-/// fills the card, draws the words over it (fading and rising in), clips
-/// the card to where the wipes have got to, and draws the bands on top.
-/// The hold, where nothing moves, is drawn once.
+/// fills the card, draws the words over it (fading and rising in) with the
+/// cursor when it's lit, clips the card to where the wipes have got to,
+/// and draws the bands on top. The hold, where only the cursor changes, is
+/// drawn once with it lit and once without.
 final class SectionCardRenderer: @unchecked Sendable {
     static let shared = SectionCardRenderer()
 
@@ -56,11 +58,14 @@ final class SectionCardRenderer: @unchecked Sendable {
         let props: SectionCard.Props
         let width: Int
         let height: Int
+        /// For the hold: whether the cursor is lit.
+        let lit: Bool
 
-        init(_ props: SectionCard.Props, _ width: Int, _ height: Int) {
+        init(_ props: SectionCard.Props, _ width: Int, _ height: Int, lit: Bool = false) {
             self.props = props
             self.width = width
             self.height = height
+            self.lit = lit
         }
 
         override var hash: Int {
@@ -68,18 +73,25 @@ final class SectionCardRenderer: @unchecked Sendable {
             hasher.combine(props)
             hasher.combine(width)
             hasher.combine(height)
+            hasher.combine(lit)
             return hasher.finalize()
         }
 
         override func isEqual(_ object: Any?) -> Bool {
             guard let other = object as? Key else { return false }
-            return other.props == props && other.width == width && other.height == height
+            return other.props == props && other.width == width && other.height == height && other.lit == lit
         }
     }
 
+    /// The words, chip and bars, and where the cursor goes (Core Graphics'
+    /// way up).
     private final class Layer {
         let image: CGImage?
-        init(_ image: CGImage?) { self.image = image }
+        let cursor: CGRect?
+        init(_ image: CGImage?, cursor: CGRect?) {
+            self.image = image
+            self.cursor = cursor
+        }
     }
 
     private final class Hold {
@@ -105,7 +117,8 @@ final class SectionCardRenderer: @unchecked Sendable {
         let motion = SectionCard.Motion(duration: duration, aspect: size.height / size.width)
         let reveal = motion.reveal(at: t)
         if !reveal.hidden, reveal == .whole, motion.bands(at: t).isEmpty, motion.contentProgress(at: t) >= 1 {
-            let key = Key(props, Int(size.width.rounded()), Int(size.height.rounded()))
+            let lit = props.cursor && motion.cursorLit(at: t)
+            let key = Key(props, Int(size.width.rounded()), Int(size.height.rounded()), lit: lit)
             if let hit = holds.object(forKey: key) { return hit.image }
             let image = draw(props, size: size, motion: motion, time: t).map { CIImage(cgImage: $0) }
             holds.setObject(Hold(image), forKey: key)
@@ -157,7 +170,12 @@ final class SectionCardRenderer: @unchecked Sendable {
                 context.translateBy(x: w / 2, y: h / 2 - drop)
                 context.scaleBy(x: scale, y: scale)
                 context.translateBy(x: -w / 2, y: -h / 2)
-                context.draw(layer, in: CGRect(x: 0, y: 0, width: w, height: h))
+                if let image = layer.image { context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h)) }
+                // The cursor comes in with the words, then blinks.
+                if props.cursor, let cursor = layer.cursor, motion.cursorLit(at: t) {
+                    context.setFillColor(Self.color(props.colors.accent))
+                    context.fill(cursor)
+                }
             }
             context.restoreGState()
         }
@@ -217,18 +235,20 @@ final class SectionCardRenderer: @unchecked Sendable {
     }
 
     /// The words, chip and progress bars on a clear layer the size of the
-    /// frame, drawn once per card and size.
-    private func contentLayer(_ props: SectionCard.Props, width: Int, height: Int) -> CGImage? {
+    /// frame, drawn once per card and size, with where the cursor goes.
+    private func contentLayer(_ props: SectionCard.Props, width: Int, height: Int) -> Layer? {
         let key = Key(props, width, height)
-        if let hit = layers.object(forKey: key) { return hit.image }
+        if let hit = layers.object(forKey: key) { return hit }
+        let layout = SectionCardLayout(props, size: CGSize(width: width, height: height))
         var image: CGImage?
         if let context = Self.context(width, height) {
-            let layout = SectionCardLayout(props, size: CGSize(width: width, height: height))
             layout.draw(in: context)
             image = context.makeImage()
         }
-        layers.setObject(Layer(image), forKey: key)
-        return image
+        let cursor = layout.cursor.map { CGRect(x: $0.minX, y: CGFloat(height) - $0.maxY, width: $0.width, height: $0.height) }
+        let layer = Layer(image, cursor: cursor)
+        layers.setObject(layer, forKey: key)
+        return layer
     }
 }
 
@@ -276,12 +296,20 @@ struct SectionCardLayout {
     let size: CGSize
     private(set) var boxes: [Box] = []
     private(set) var texts: [Text] = []
-    /// The content's bounds, for tests.
+    /// The cursor after the title's last letter, from the top left: a bar
+    /// in the accent colour from the baseline up to the capitals' height,
+    /// `cursorGap` after the letter (and its letter-spacing). Nil when the
+    /// card has no title or its cursor is off. The renderer blinks it.
+    private(set) var cursor: CGRect?
+    /// The content's bounds (the cursor left out), for tests.
     private(set) var bounds: CGRect = .null
 
     static let kickerColor = RGBA(hex: 0xD9DCE1)
     static let countColor = RGBA(hex: 0xCFD3D9)
     static let unlitColor = RGBA(r: 1, g: 1, b: 1, a: 0.28)
+    /// The cursor's width and the gap before it, in ems of the title.
+    static let cursorWidth: CGFloat = 0.1
+    static let cursorGap: CGFloat = 0.07
 
     /// One row of the grid, laid out with its top at 0.
     private struct Row {
@@ -289,6 +317,7 @@ struct SectionCardLayout {
         var marginTop: CGFloat = 0
         var boxes: [Box] = []
         var texts: [Text] = []
+        var cursor: CGRect?
     }
 
     init(_ props: SectionCard.Props, size: CGSize) {
@@ -351,6 +380,17 @@ struct SectionCardLayout {
                 let (line, width) = Self.line(text, font: font, spacing: spacing, color: white)
                 row.texts.append(Text(role: .title, string: text, line: line, x: (w - width) / 2, baseline: Self.baseline(top: row.height, lineHeight: lineHeight, font: font), width: width))
                 row.height += lineHeight
+            }
+            // The cursor hangs after the last line, which stays centred as
+            // the mockup has it, so the words don't shift as it blinks.
+            if props.cursor, let last = row.texts.last {
+                let capHeight = CTFontGetCapHeight(font)
+                row.cursor = CGRect(
+                    x: last.x + last.width + Self.cursorGap * size,
+                    y: last.baseline - capHeight,
+                    width: Self.cursorWidth * size,
+                    height: capHeight
+                )
             }
             rows.append(row)
         }
@@ -430,6 +470,7 @@ struct SectionCardLayout {
                 CTLineGetTypographicBounds(text.line, &ascent, &descent, &leading)
                 bounds = bounds.union(CGRect(x: text.x, y: text.baseline - ascent, width: text.width, height: ascent + descent))
             }
+            if let rect = row.cursor { cursor = rect.offsetBy(dx: 0, dy: top) }
             top += row.height
         }
     }

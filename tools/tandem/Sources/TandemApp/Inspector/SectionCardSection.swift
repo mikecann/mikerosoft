@@ -2,10 +2,10 @@ import AppKit
 import SwiftUI
 import TandemCore
 
-/// A section card's words, number, progress and colours, at the top of the
-/// Video tab for `sectionCard` clips. Each change is one edit that patches
-/// `content.graphic.props`; text fields commit on Return or when you click
-/// away.
+/// A section card's words, number, progress, cursor, length and colours,
+/// at the top of the Video tab for `sectionCard` clips. Each change is one
+/// edit that patches `content.graphic.props` (Fit to text trims the card
+/// instead); text fields commit on Return or when you click away.
 struct SectionCardSection: View {
     let model: EditorModel
     let clip: Clip
@@ -47,12 +47,40 @@ struct SectionCardSection: View {
                     commit(SectionCardEdits.set(clip, SectionCard.Key.kicker, text: kicker, label: "Card kicker"))
                 }
             }
+            HStack(spacing: 8) {
+                RowLabel(title: "Cursor", icon: Icons.cardCursor)
+                Spacer(minLength: 0)
+                GraphiteSwitch(isOn: props.cursor) {
+                    commit(SectionCardEdits.cursor(clip, on: !props.cursor))
+                }
+            }
+            .help("A text cursor in the accent colour after the title's last letter. It comes in with the words and blinks like a terminal's until the wipe out.")
+            lengthRow
             ColoursRow(props: props) { key, colour, label in
                 commit(SectionCardEdits.colour(clip, key, colour, label: label))
             } reset: {
                 commit(SectionCardEdits.resetColours(clip))
             }
         }
+    }
+
+    /// The card's length, and Fit to text, which sets it for the words.
+    private var lengthRow: some View {
+        let rate = model.project.settings.frameRate
+        let fits = SectionCard.fittedDuration(for: props, frameRate: rate) == clip.duration
+        return HStack(spacing: 8) {
+            RowLabel(title: "Length", icon: Icons.cardLength)
+            Text(SectionCardEdits.seconds(clip.duration))
+                .font(.ui(12))
+                .foregroundStyle(Theme.text.color)
+            Spacer(minLength: 0)
+            OutlineButton(title: "Fit to text") {
+                commit(SectionCardEdits.fitToText(clip, in: model.project))
+            }
+            .disabled(fits)
+            .opacity(fits ? 0.45 : 1)
+        }
+        .help(SectionCardEdits.fitHelp(props, length: clip.duration, frameRate: rate))
     }
 
     private func commit(_ batch: EditBatch?) {
@@ -227,5 +255,35 @@ enum SectionCardEdits {
     static func kickers(current: String) -> [String] {
         let standard = ["", "Section", "Tip"]
         return standard.contains(current) ? standard : standard + [current]
+    }
+
+    /// Turns the cursor after the title on or off. Nil when nothing changes.
+    static func cursor(_ clip: Clip, on: Bool) -> EditBatch? {
+        guard let props = SectionCard.props(of: clip), props.cursor != on else { return nil }
+        // On is the default, so turning it on removes the prop.
+        return patch(clip, [SectionCard.Key.cursor: on ? .null : .bool(false)], label: on ? "Card cursor" : "No card cursor")
+    }
+
+    /// Fit to text: the card as long as its words need, its whoosh out
+    /// moved with the wipe out. Nil when it's that long already.
+    static func fitToText(_ clip: Clip, in project: Project) -> EditBatch? {
+        guard let commands = try? SectionCard.fitToText(clip.id, in: project), !commands.isEmpty else { return nil }
+        return EditBatch(label: "Fit card to text", commands: commands)
+    }
+
+    /// Fit to text's tooltip: what it would do, and why that long.
+    static func fitHelp(_ props: SectionCard.Props, length: Time, frameRate: FrameRate) -> String {
+        let fitted = SectionCard.fittedDuration(for: props, frameRate: frameRate)
+        let characters = props.readingText.count
+        guard fitted != length else {
+            return "As long as its words need: \(seconds(fitted)) for \(characters) character\(characters == 1 ? "" : "s")."
+        }
+        let reading = SectionCard.Reading.self
+        return "Makes the card \(seconds(fitted)) long for its words: \(seconds(Time(seconds: reading.wipes))) for the wipes, then \(characters) character\(characters == 1 ? "" : "s") of title, subtitle and kicker read at \(Int(reading.charactersPerSecond)) a second, from \(seconds(reading.shortest)) to \(seconds(reading.longest)). The whoosh out moves with the wipe out."
+    }
+
+    /// "3.2 s".
+    static func seconds(_ time: Time) -> String {
+        String(format: "%.1f s", time.seconds)
     }
 }

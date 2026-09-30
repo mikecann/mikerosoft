@@ -99,6 +99,8 @@ enum Icons {
     static let cardProgress = "chart.bar.xaxis"
     static let cardKicker = "tag"
     static let cardColours = "paintpalette"
+    static let cardCursor = "character.cursor.ibeam"
+    static let cardLength = "timer"
 
     // The Colour tab.
     /// What the grade applies to: every clip of the take, or this one.

@@ -118,6 +118,123 @@ final class SectionCardMotionTests: XCTestCase {
     }
 }
 
+final class SectionCardCursorTests: XCTestCase {
+    func testTheCursorIsAPropOnByDefault() {
+        XCTAssertTrue(SectionCard.Props().cursor)
+        XCTAssertTrue(SectionCard.Props([:]).cursor)
+        XCTAssertNil(SectionCard.Props(title: "Results").params[SectionCard.Key.cursor], "on is the default, so it's left out")
+        let off = SectionCard.Props(title: "Results", cursor: false)
+        XCTAssertEqual(off.params[SectionCard.Key.cursor], .bool(false))
+        XCTAssertEqual(SectionCard.Props(off.params), off, "a round trip")
+        // Read leniently, like the other props.
+        XCTAssertFalse(SectionCard.Props(["cursor": .string("off")]).cursor)
+        XCTAssertFalse(SectionCard.Props(["cursor": .string("false")]).cursor)
+        XCTAssertFalse(SectionCard.Props(["cursor": .number(0)]).cursor)
+        XCTAssertTrue(SectionCard.Props(["cursor": .string("on")]).cursor)
+        XCTAssertTrue(SectionCard.Props(["cursor": .bool(true)]).cursor)
+        XCTAssertTrue(SectionCard.Key.all.contains(SectionCard.Key.cursor))
+    }
+
+    /// Like a terminal's: it comes in with the words, is lit as the title
+    /// lands (0.97 s), then goes off and on every 0.53 s with hard steps,
+    /// and is gone once the wipe out starts.
+    func testTheCursorBlinksLikeATerminal() {
+        let motion = SectionCard.Motion(duration: 3.2)
+        XCTAssertEqual(motion.cursorLands, 0.97, accuracy: 1e-9)
+        XCTAssertFalse(motion.cursorLit(at: 0.3), "not before the words come in")
+        XCTAssertTrue(motion.cursorLit(at: 0.6), "in with the words")
+        XCTAssertTrue(motion.cursorLit(at: 0.97), "lit as the title lands")
+        XCTAssertTrue(motion.cursorLit(at: 0.97 + 0.529))
+        XCTAssertFalse(motion.cursorLit(at: 0.97 + 0.531), "then off")
+        XCTAssertFalse(motion.cursorLit(at: 0.97 + 1.059))
+        XCTAssertTrue(motion.cursorLit(at: 0.97 + 1.061), "and on again")
+        XCTAssertTrue(motion.cursorLit(at: motion.outStart(0) - 0.001))
+        XCTAssertFalse(motion.cursorLit(at: motion.outStart(0)), "gone with the wipe out")
+        XCTAssertFalse(motion.cursorLit(at: 3.1))
+
+        // All through a long hold: off at 1.50 s, on at 2.03, off 2.56, on
+        // 3.09, off 3.62; the next spell would start after the wipe out
+        // does (4.12).
+        let long = SectionCard.Motion(duration: 5)
+        var switches: [Double] = []
+        var previous = long.cursorLit(at: 1)
+        for frame in 30..<150 {
+            let lit = long.cursorLit(at: Double(frame) / 30)
+            if lit != previous { switches.append(Double(frame) / 30) }
+            previous = lit
+        }
+        XCTAssertEqual(switches.count, 5)
+        for (got, wanted) in zip(switches, [1.5, 2.03, 2.56, 3.09, 3.62]) {
+            XCTAssertEqual(got, wanted, accuracy: 1.0 / 30)
+        }
+
+        // A lit spell the wipe out would cut to a flash isn't started.
+        let brief = SectionCard.Motion(duration: 3.0)
+        XCTAssertLessThan(brief.outStart(0) - (brief.cursorLands + 2 * SectionCard.Motion.cursorBlink), SectionCard.Motion.cursorBlink / 2)
+        XCTAssertFalse(brief.cursorLit(at: brief.cursorLands + 2 * SectionCard.Motion.cursorBlink + 0.01))
+    }
+}
+
+final class SectionCardFitTests: XCTestCase {
+    /// 1.4 s for the wipes, then 17 characters a second (spaces included)
+    /// for the title, subtitle and kicker, rounded up to a tenth of a
+    /// second, from 3.2 s to 6 s.
+    func testTheLengthFitsTheWords() {
+        func fitted(_ props: SectionCard.Props) -> Double { SectionCard.fittedDuration(for: props).seconds }
+        let usual = SectionCard.Props(title: "Methodology", subtitle: "Let's keep it fair", number: "01", total: 3)
+        XCTAssertEqual(usual.readingText, "Methodology Let's keep it fair")
+        XCTAssertEqual(fitted(usual), 3.2, accuracy: 1e-9, "a usual card stays as it was")
+        XCTAssertEqual(fitted(SectionCard.Props(title: "Results")), 3.2, accuracy: 1e-9)
+        XCTAssertEqual(fitted(SectionCard.Props()), 3.2, accuracy: 1e-9)
+
+        let tip = SectionCard.Props(title: "Low change cost", subtitle: "Just do it & reverse", number: "01", total: 14, kicker: "Tip")
+        XCTAssertEqual(tip.readingText, "Low change cost Just do it & reverse Tip 1 of 14", "the kicker as the card shows it")
+        XCTAssertEqual(tip.readingText.count, 48)
+        XCTAssertEqual(fitted(tip), 4.3, accuracy: 1e-9, "1.4 + 48 / 17 = 4.22, up to 4.3")
+
+        let long = SectionCard.Props(title: "Why deterministic decision models beat vibes", subtitle: "And how we measured it across fourteen real tasks")
+        XCTAssertEqual(fitted(long), 6, accuracy: 1e-9, "at most 6 s")
+
+        // Spaces and line breaks count once.
+        XCTAssertEqual(SectionCard.Props(title: "Low\nchange   cost ").readingText, "Low change cost")
+        // On a frame at the project's rate.
+        let at25 = SectionCard.fittedDuration(for: tip, frameRate: .fps25)
+        XCTAssertEqual(at25.frameIndex(at: .fps25) * FrameRate.fps25.flicksPerFrame, at25.flicks)
+        XCTAssertEqual(at25.seconds, 4.32, accuracy: 1e-9, "4.3 s is 107.5 frames at 25, so 108")
+        XCTAssertEqual(SectionCard.fittedDuration(for: tip, frameRate: .fps30).seconds, 4.3, accuracy: 1e-9)
+    }
+
+    /// Fit to text: the card's length, and its whoosh out moved with the
+    /// sweep out; the whoosh in stays.
+    func testFittingACardMovesItsWhooshOut() throws {
+        let (_, c) = try Fixture.edited()
+        try c.run("Sounds",
+            .addMedia(item: MediaItem(id: "med_in", path: "assets/sfx/in.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)),
+            .addMedia(item: MediaItem(id: "med_out", path: "assets/sfx/out.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)),
+            .addMarker(marker: Marker(id: "mk_tip", time: t(12), name: "Low change cost", kind: .section, note: "Just do it & reverse"))
+        )
+        try c.run("Card", .addSectionCards(duration: t(3.2), soundIn: SectionCardSound(mediaID: "med_in", offset: .zero), soundOut: SectionCardSound(mediaID: "med_out")))
+        let card = try XCTUnwrap(c.clips("Graphics").first)
+        let group = try XCTUnwrap(card.linkGroup)
+        func sounds() -> [Clip] { c.project.audioTracks.flatMap(\.clips).filter { $0.linkGroup == group }.sorted { $0.start < $1.start } }
+        let before = sounds()
+        XCTAssertEqual(before.map(\.start), [card.start, card.start + t(3.2 - 0.88)])
+
+        let commands = try SectionCard.fitToText(card.id, in: c.project)
+        XCTAssertFalse(commands.isEmpty)
+        try c.apply(EditBatch(label: "Fit to text", commands: commands))
+        let fitted = try XCTUnwrap(c.project.clip(card.id))
+        XCTAssertEqual(fitted.start, card.start, "it keeps its start")
+        XCTAssertEqual(fitted.duration.seconds, 3.6, accuracy: 1e-9, "36 characters: 1.4 + 36 / 17 = 3.52, up to 3.6")
+        let after = sounds()
+        XCTAssertEqual(after[0].start, before[0].start, "the whoosh in stays")
+        XCTAssertEqual(after[1].start, fitted.start + Time(seconds: SectionCard.Motion(duration: fitted.duration.seconds).outStart(0)), "the whoosh out lands on the sweep out")
+        XCTAssertEqual(try SectionCard.fitToText(card.id, in: c.project), [], "already fitted")
+        XCTAssertThrowsError(try SectionCard.fitToText(c.clips("Camera")[0].id, in: c.project), "not a card")
+        assertValid(c.project)
+    }
+}
+
 final class SectionCardCommandTests: XCTestCase {
     /// The fixture's take (0 to 60 s) with section markers: the cold open
     /// at 0, Methodology at 12 (with a note), a plain marker at 20, the
@@ -210,6 +327,41 @@ final class SectionCardCommandTests: XCTestCase {
         XCTAssertEqual(made[1].props.subtitle, "Fair and square", "and keeps its words")
         XCTAssertEqual(made[1].clip.start, methodology.clip.start)
         assertValid(c.project)
+    }
+
+    /// Each card is as long as its words need, unless a length is given;
+    /// its whoosh out follows its own sweep out.
+    func testEachCardFitsItsWords() throws {
+        let (_, c) = try marked()
+        try c.run("Long", .updateMarker(markerID: "mk_results", patch: .object([
+            "name": .string("Which decision model should you pick?"), "note": .string("Three questions to ask first")
+        ])))
+        try c.run("Whooshes",
+            .addMedia(item: MediaItem(id: "med_in", path: "assets/sfx/in.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)),
+            .addMedia(item: MediaItem(id: "med_out", path: "assets/sfx/out.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true))
+        )
+        // "Which decision model should you pick? Three questions to ask
+        // first" is 66 characters: 1.4 + 66 / 17 = 5.28, up to 5.3 s.
+        let placements = try SectionCard.placements(in: c.project, markerIDs: nil)
+        XCTAssertEqual(placements.map { ($0.duration.seconds * 10).rounded() / 10 }, [3.2, 3.2, 5.3])
+        // A kicker is read too: "Methodology Let's keep it fair Section 1
+        // of 3" is 45 characters, 4.1 s, and the long one reaches 6 s.
+        let kicked = try SectionCard.placements(in: c.project, markerIDs: nil, kicker: "Section")
+        XCTAssertEqual(kicked.map { ($0.duration.seconds * 10).rounded() / 10 }, [4.1, 3.2, 6])
+        try c.run("Cards", .addSectionCards(soundIn: SectionCardSound(mediaID: "med_in"), soundOut: SectionCardSound(mediaID: "med_out")))
+        let made = cards(c)
+        XCTAssertEqual(made.map(\.clip.duration), placements.map(\.duration))
+        let last = try XCTUnwrap(made.last)
+        let sounds = c.project.audioTracks.flatMap(\.clips).filter { $0.linkGroup == last.clip.linkGroup }.sorted { $0.start < $1.start }
+        XCTAssertEqual(sounds.last?.start, last.clip.start + Time(seconds: SectionCard.Motion(duration: last.clip.duration.seconds).outStart(0)), "the whoosh out on its own sweep out")
+        let covered = try XCTUnwrap(SectionCard.Motion(duration: last.clip.duration.seconds).covered)
+        XCTAssertLessThanOrEqual(last.clip.start + Time(seconds: covered.lowerBound), t(45), "a long card still hides its cut")
+        assertValid(c.project)
+
+        // A length given is every card's.
+        XCTAssertNotNil(c.undo())
+        try c.run("Cards", .addSectionCards(duration: t(4)))
+        XCTAssertEqual(Set(cards(c).map(\.clip.duration)), [t(4)])
     }
 
     func testInsertMakesRoomSoTheWipesShowBothShots() throws {

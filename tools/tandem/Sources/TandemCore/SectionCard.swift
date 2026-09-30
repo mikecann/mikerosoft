@@ -17,8 +17,9 @@ public enum SectionCard {
     /// `GraphicContent.template` for a section card.
     public static let template = "sectionCard"
 
-    /// A card's usual length. The wipes keep their length when a card is
-    /// longer or shorter; only the hold between them changes.
+    /// A card's usual length, and the shortest a card fitted to its words
+    /// gets (`fittedDuration(for:)`). The wipes keep their length when a
+    /// card is longer or shorter; only the hold between them changes.
     public static let defaultDuration = Time(seconds: 3.2)
 
     /// Prop keys in `GraphicContent.props`.
@@ -39,8 +40,11 @@ public enum SectionCard {
         public static let band3 = "band3"
         /// The card behind the words.
         public static let background = "background"
+        /// A text cursor blinking after the title's last letter. On unless
+        /// this is false.
+        public static let cursor = "cursor"
 
-        public static let all = [title, subtitle, number, total, kicker, accent, band2, band3, background]
+        public static let all = [title, subtitle, number, total, kicker, accent, band2, band3, background, cursor]
     }
 
     public struct Colors: Hashable, Sendable {
@@ -81,20 +85,24 @@ public enum SectionCard {
         /// "Section" or "Tip"; empty shows no words beside the chip.
         public var kicker: String
         public var colors: Colors
+        /// A text cursor in the accent colour after the title's last letter,
+        /// blinking like a terminal's once the title lands.
+        public var cursor: Bool
 
-        public init(title: String = "", subtitle: String = "", number: String = "", total: Int = 0, kicker: String = "", colors: Colors = .convex) {
+        public init(title: String = "", subtitle: String = "", number: String = "", total: Int = 0, kicker: String = "", colors: Colors = .convex, cursor: Bool = true) {
             self.title = title
             self.subtitle = subtitle
             self.number = number
             self.total = max(0, total)
             self.kicker = kicker
             self.colors = colors
+            self.cursor = cursor
         }
 
         /// From `GraphicContent.props`. Missing values are empty (no chip,
-        /// no subtitle, no bars) and colours default to Convex's. The number
-        /// can be text ("01") or a number (1, written "01"); the total a
-        /// number or text.
+        /// no subtitle, no bars), colours default to Convex's and the cursor
+        /// is on. The number can be text ("01") or a number (1, written
+        /// "01"); the total a number or text; the cursor a switch, "off" or 0.
         public init(_ props: [String: ParamValue]) {
             func text(_ key: String) -> String {
                 switch props[key] {
@@ -119,6 +127,13 @@ public enum SectionCard {
             case .string(let value)?: total = Int(value.trimmingCharacters(in: .whitespaces)) ?? 0
             default: break
             }
+            var cursor = true
+            switch props[Key.cursor] {
+            case .bool(let value)?: cursor = value
+            case .number(let value)?: cursor = value != 0
+            case .string(let value)?: cursor = !["false", "off", "no", "0", "none"].contains(value.trimmingCharacters(in: .whitespaces).lowercased())
+            default: break
+            }
             let defaults = Colors.convex
             self.init(
                 title: text(Key.title),
@@ -131,12 +146,14 @@ public enum SectionCard {
                     band2: colour(Key.band2, defaults.band2),
                     band3: colour(Key.band3, defaults.band3),
                     background: colour(Key.background, defaults.background)
-                )
+                ),
+                cursor: cursor
             )
         }
 
-        /// As `GraphicContent.props`: empty words, a zero total and Convex's
-        /// colours are left out, so a card only says what's its own.
+        /// As `GraphicContent.props`: empty words, a zero total, Convex's
+        /// colours and the cursor on are left out, so a card only says
+        /// what's its own.
         public var params: [String: ParamValue] {
             var result: [String: ParamValue] = [:]
             if !title.isEmpty { result[Key.title] = .string(title) }
@@ -149,7 +166,18 @@ public enum SectionCard {
             if colors.band2 != defaults.band2 { result[Key.band2] = .color(colors.band2) }
             if colors.band3 != defaults.band3 { result[Key.band3] = .color(colors.band3) }
             if colors.background != defaults.background { result[Key.background] = .color(colors.background) }
+            if !cursor { result[Key.cursor] = .bool(false) }
             return result
+        }
+
+        /// The words a viewer reads, as `fittedDuration(for:)` counts them:
+        /// the title, the subtitle and the kicker as the card shows it
+        /// ("Section 1 of 3"), one space between words. The chip's number
+        /// and the progress count are taken in at a glance, so they aren't.
+        public var readingText: String {
+            [title, subtitle, kickerLine ?? ""]
+                .flatMap { $0.split(whereSeparator: { $0.isWhitespace }) }
+                .joined(separator: " ")
         }
 
         /// The number as a whole number, when it is one ("01" is 1).
@@ -222,6 +250,43 @@ public enum SectionCard {
     public static func props(of clip: Clip) -> Props? {
         guard case .graphic(let graphic) = clip.content, graphic.template == template else { return nil }
         return Props(graphic.props)
+    }
+}
+
+// MARK: - Length
+
+extension SectionCard {
+    /// How long a card's words need on screen, for `fittedDuration(for:)`.
+    ///
+    /// The words are fully shown from about 0.7 s (they've faded in) until
+    /// about 0.7 s before the end (the first band of the wipe out reaches
+    /// them), so 1.4 s of a card isn't for reading. The rest is read at 17
+    /// characters a second, spaces included: the reading speed Netflix
+    /// sets for adult subtitles, and about the BBC's 160 to 180 words a
+    /// minute. A usual card, METHODOLOGY / LET'S KEEP IT FAIR (30
+    /// characters), then needs 3.2 s, the length cards have always had.
+    public enum Reading {
+        public static let charactersPerSecond = 17.0
+        /// The wipes' share of a card, in seconds.
+        public static let wipes = 1.4
+        /// A card is never shorter than it's always been.
+        public static let shortest = SectionCard.defaultDuration
+        /// About 78 characters. Longer than this a card stops being a
+        /// breather; shorten the words instead.
+        public static let longest = Time(seconds: 6)
+    }
+
+    /// The length a card needs for its words (`Props.readingText`): 1.4 s
+    /// for the wipes plus the characters at 17 a second, rounded up to a
+    /// tenth of a second and kept to 3.2...6 s. With `frameRate`, rounded
+    /// up to a whole frame too.
+    public static func fittedDuration(for props: Props, frameRate: FrameRate? = nil) -> Time {
+        let reading = Reading.wipes + Double(props.readingText.count) / Reading.charactersPerSecond
+        let clamped = min(max(reading, Reading.shortest.seconds), Reading.longest.seconds)
+        let tenths = (clamped * 10 - 1e-9).rounded(.up) / 10
+        guard let frameRate else { return Time(seconds: tenths) }
+        let frames = (tenths * frameRate.framesPerSecond - 1e-6).rounded(.up)
+        return Time.frames(Int64(frames), at: frameRate)
     }
 }
 
@@ -367,6 +432,29 @@ extension SectionCard {
             let length = Self.contentLength * timeScale
             guard length > 0 else { return 1 }
             return Self.contentEasing.value(at: (t - start) / length)
+        }
+
+        /// The cursor is on this long, then off this long, with hard steps:
+        /// Windows' standard caret blink, 530 ms.
+        public static let cursorBlink = 0.53
+
+        /// When the title has landed: the words are all the way in.
+        public var cursorLands: Double { (Self.contentStart + Self.contentLength) * timeScale }
+
+        /// Whether the cursor after the title shows at `t`. It comes in with
+        /// the words, is lit as the title lands, then goes off and on every
+        /// 0.53 s, and it's gone once the wipe out starts. A lit spell the
+        /// wipe out would cut to under half its length isn't started, so it
+        /// never flashes for a frame or two before the wipe.
+        public func cursorLit(at t: Double) -> Bool {
+            let end = outStart(0)
+            guard t >= Self.contentStart * timeScale, t < end else { return false }
+            let lands = cursorLands
+            guard t >= lands else { return true }
+            let spell = ((t - lands) / Self.cursorBlink).rounded(.down)
+            guard Int(spell) % 2 == 0 else { return false }
+            let spellStart = lands + spell * Self.cursorBlink
+            return spell == 0 || end - spellStart >= Self.cursorBlink / 2
         }
 
         /// When the card first hides the whole frame (the first band's right

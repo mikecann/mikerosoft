@@ -9,44 +9,74 @@ import TandemMedia
 // section card whooshes from the asset library, as one undo step.
 
 /// The two whooshes that go with the section cards, one for each sweep:
-/// ElevenLabs sound effects made for them on 2026-09-29 and kept in Mike's
-/// asset library, so every use is recorded there with its licence. A Mac
-/// whose library doesn't have them makes silent cards. docs/ASSETS.md has
-/// the prompts, to make them again elsewhere.
+/// soft, airy swishes made with ElevenLabs on 2026-09-30 (the gentlest two
+/// of three takes of one prompt, by measurement) and kept in Mike's asset
+/// library, so every use is recorded there with its licence. They replaced
+/// the first pair, whose whoosh in read as an explosion. A Mac whose
+/// library doesn't have them makes silent cards. docs/ASSETS.md has the
+/// prompt and the measurements, to make them again elsewhere.
 public enum SectionCardSounds {
     public struct Sound: Equatable, Sendable {
         public var assetID: String
-        /// Clip gain in dB: both land about 11 dB under -20 LUFS speech at
-        /// their loudest moment.
+        /// Clip gain in dB for speech at -20 LUFS, Tandem's level: each
+        /// lands at -35 LUFS over its loudest 400 ms, 15 LU under the voice,
+        /// where Mike's own section swipes sit in Decision Models.
+        /// `Resolved.levelled(for:)` moves it with a project whose speech
+        /// plays elsewhere.
         public var gainDB: Double
         /// Seconds after its sweep starts; nil for the command's default.
         public var offset: Double?
     }
 
-    /// A deeper whoosh with its peak near its start: it starts 0.2 s into
-    /// the card, so the peak lands as the bands cross the frame.
-    public static let whooshIn = Sound(assetID: "elevenlabs:sfx_vda2xhs6", gainDB: -14, offset: nil)
-    /// A lighter swoosh that builds from the left and passes to the right,
-    /// peaking 0.37 s in: it starts with the sweep out.
-    public static let whooshOut = Sound(assetID: "elevenlabs:sfx_2ybnc2tu", gainDB: -19, offset: nil)
+    /// The level the gains are set against: Tandem's speech level.
+    public static let speechLevel = AudioLevels.defaultSpeechLoudness
+
+    /// The gentlest: a smooth swell with almost no low end, loudest 0.46 s
+    /// in, so starting with the sweep in it peaks as the middle band crosses
+    /// the frame. -29.6 LUFS at its loudest.
+    public static let whooshIn = Sound(assetID: "elevenlabs:sfx_4jhasduf", gainDB: -5.4, offset: 0)
+    /// Its sibling, a touch brighter and lighter, loudest 0.40 s in: it
+    /// starts with the sweep out. -26.7 LUFS at its loudest.
+    public static let whooshOut = Sound(assetID: "elevenlabs:sfx_k2dvisxs", gainDB: -8.3, offset: 0)
 
     /// Both sounds copied into a project, ready for `addSectionCards`.
     public struct Resolved: Equatable, Sendable {
         public var media: [MediaItem]
         public var soundIn: SectionCardSound
         public var soundOut: SectionCardSound
+        /// The speech level the sounds' gains are set against.
+        public var speechLevel: Double
 
-        public init(media: [MediaItem], soundIn: SectionCardSound, soundOut: SectionCardSound) {
+        public init(media: [MediaItem], soundIn: SectionCardSound, soundOut: SectionCardSound, speechLevel: Double = SectionCardSounds.speechLevel) {
             self.media = media
             self.soundIn = soundIn
             self.soundOut = soundOut
+            self.speechLevel = speechLevel
+        }
+
+        /// The sounds with their gains moved by as much as `project`'s
+        /// speech plays above or below the level they're set against
+        /// (`AudioLevels.speechLevel(in:)`), so they sit as far under the
+        /// voice in every project. An imported edit whose speech plays at
+        /// -28.7 LUFS gets them 8.7 dB quieter. Levelling again for the
+        /// same project changes nothing.
+        public func levelled(for project: Project) -> Resolved {
+            let level = AudioLevels.speechLevel(in: project)
+            let shift = level - speechLevel
+            guard abs(shift) >= 0.05 else { return self }
+            var copy = self
+            copy.soundIn.gainDB = ((soundIn.gainDB ?? SectionCard.soundGainDB) + shift).roundedToTenth
+            copy.soundOut.gainDB = ((soundOut.gainDB ?? SectionCard.soundGainDB) + shift).roundedToTenth
+            copy.speechLevel = level
+            return copy
         }
 
         /// The commands that add what the project doesn't have yet, and the
-        /// sounds pointing at the media it will have: a media item already
-        /// at the copied file (the folder watcher may have added it under
-        /// its own ID) is used as it is.
+        /// sounds pointing at the media it will have (a media item already
+        /// at the copied file, which the folder watcher may have added under
+        /// its own ID, is used as it is), levelled for its speech.
         public func prepared(for project: Project) -> (addMedia: [EditCommand], soundIn: SectionCardSound, soundOut: SectionCardSound) {
+            let sounds = self.levelled(for: project)
             var commands: [EditCommand] = []
             var ids: [String: String] = [:]
             for item in media {
@@ -59,7 +89,7 @@ public enum SectionCardSounds {
                     ids[item.id] = item.id
                 }
             }
-            var soundIn = self.soundIn, soundOut = self.soundOut
+            var soundIn = sounds.soundIn, soundOut = sounds.soundOut
             soundIn.mediaID = ids[soundIn.mediaID] ?? soundIn.mediaID
             soundOut.mediaID = ids[soundOut.mediaID] ?? soundOut.mediaID
             return (commands, soundIn, soundOut)
@@ -76,6 +106,8 @@ public enum SectionCardSounds {
 
     /// Copies both sounds into the project's `assets/sfx/` and records the
     /// use (for credits), or explains why they aren't there.
+    /// (Levelled for Tandem's speech level; `Resolved.levelled(for:)` moves
+    /// them for the project's.)
     public static func use(in library: AssetLibrary, folder: ProjectFolder, projectID: String, projectFile: URL?) async throws -> Resolved {
         guard available(in: library) else {
             throw ServiceError(.notFound, "The section card whooshes (\(whooshIn.assetID), \(whooshOut.assetID)) aren't in this Mac's asset library, so the cards are silent. docs/ASSETS.md has how to make them.")
@@ -97,7 +129,8 @@ public struct CardsRequest: ServiceCall {
     /// Marker IDs to put cards at. Default: every section marker after the
     /// start.
     public var markers: [String]?
-    /// Card length. Default 3.2 s.
+    /// Every card's length. Default: each fitted to its words (3.2 to 6 s,
+    /// `SectionCard.fittedDuration(for:)`).
     public var duration: Time?
     /// "Section" or "Tip", shown as "SECTION 1 OF 3" beside the chip.
     public var kicker: String?
@@ -180,10 +213,9 @@ extension TandemService {
         if let expected = request.expectedRevision, expected != revision {
             throw ServiceError.wrap(EditError.staleRevision(expected: expected, actual: revision))
         }
-        let length = request.duration ?? SectionCard.defaultDuration
         let placements: [SectionCard.Placement]
         do {
-            placements = try SectionCard.placements(in: project, markerIDs: request.markers, duration: length)
+            placements = try SectionCard.placements(in: project, markerIDs: request.markers, duration: request.duration, kicker: request.kicker)
         } catch {
             throw ServiceError.wrap(error)
         }
@@ -232,8 +264,8 @@ extension TandemService {
                 number: placement.number, title: title,
                 subtitle: (subtitle?.isEmpty ?? true) ? nil : subtitle,
                 markerID: placement.marker.id, at: placement.marker.time,
-                start: existing?.start ?? placement.start,
-                end: existing?.end ?? placement.start + length,
+                start: placement.start,
+                end: placement.start + placement.duration,
                 existingClipID: placement.existingClipID
             )
         }
@@ -259,7 +291,7 @@ extension CardsResult: ReadableResult {
         for card in cards {
             var line = "  \(card.number)  \(card.at)  \"\(card.title)\""
             if let subtitle = card.subtitle { line += " / \"\(subtitle)\"" }
-            line += "  card \(card.start)-\(card.end)"
+            line += "  card \(card.start)-\(card.end) (\(String(format: "%.1f", (card.end - card.start).seconds)) s)"
             if card.existingClipID != nil { line += "  already there, renumbered" }
             lines.append(line)
         }
@@ -272,4 +304,8 @@ extension CardsResult: ReadableResult {
         }
         return lines.joined(separator: "\n")
     }
+}
+
+private extension Double {
+    var roundedToTenth: Double { (self * 10).rounded() / 10 }
 }

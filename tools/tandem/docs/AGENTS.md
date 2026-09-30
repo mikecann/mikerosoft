@@ -650,9 +650,12 @@ at the very start is the cold open, which gets none), or at `markerIDs`
 (any kind). Cards are numbered in time order (`01`, `02`...), `total` is
 the count, the title is the marker's name and the subtitle its note. Each
 card starts just early enough to hide the whole frame from its marker on,
-so the cut between sections is never seen. A section card already over a
-marker is renumbered (and gets `kicker` if you pass one) but keeps its own
-words, colours and sounds, so run it again after adding a section.
+so the cut between sections is never seen, and is as long as its words need
+to be read (1.4 s for the wipes, then the title, subtitle and kicker at 17
+characters a second, from 3.2 s to 6 s) unless `duration` sets one length
+for all. A section card already over a marker is renumbered (and gets
+`kicker` if you pass one) but keeps its own words, colours, length and
+sounds, so run it again after adding a section.
 
 `mode` `overwrite` (the default) lays the cards over the timeline on
 Graphics (`trackID` for another video track). `insert` also makes room at
@@ -662,10 +665,10 @@ section and the first of the next; the whole take moves. `soundIn` and
 sweep, linked to its card: a media item already in the project, its gain
 (default -15 dB) and `offset`, seconds after its sweep starts (default 0.2
 in, 0 out). `tandem cards` fills them in with the section card whooshes
-from the asset library.
+from the asset library, levelled for the project's speech.
 
 ```json
-{"addSectionCards": {"kicker": "Section", "soundIn": {"mediaID": "med_whooshin", "gainDB": -14}, "soundOut": {"mediaID": "med_whooshout", "gainDB": -19}}}
+{"addSectionCards": {"kicker": "Section", "soundIn": {"mediaID": "med_swishin", "gainDB": -5.4, "offset": 0}, "soundOut": {"mediaID": "med_swishout", "gainDB": -8.3}}}
 ```
 
 ### Cutting and trimming
@@ -1121,11 +1124,13 @@ back to the preset's.
 Mike's section card is one clip, the built-in `sectionCard` graphic, about
 three seconds between the cold open, the intro and each section. Convex's
 yellow, red and purple bands sweep across to wipe it in; the dark card holds
-a number chip, the title (Anton, upper case), a letter-spaced subtitle and
-progress bars (a bar for each section up to six, then one bar in proportion
-with a count like `3 / 14`); and the bands sweep across again to wipe it
-out, showing the next shot. It lasts 3.2 s; a longer or shorter card holds
-longer or shorter and the wipes stay the same.
+a number chip, the title (Anton, upper case) with a yellow text cursor
+blinking after its last letter, a letter-spaced subtitle and progress bars
+(a bar for each section up to six, then one bar in proportion with a count
+like `3 / 14`); and the bands sweep across again to wipe it out, showing the
+next shot. It's as long as its words need to be read, from 3.2 s for a short
+title and subtitle to 6 s: a longer card holds longer and the wipes stay the
+same.
 
 The usual way is a card at every section marker. Mark where each section
 starts (`addMarker` with `"kind": "section"`, or a marker's Kind menu in the
@@ -1139,7 +1144,11 @@ tandem frame 0:33 -o /tmp/card.png        # look at one
 ```
 
 The cards go on Graphics, each starting 0.43 s before its marker so the
-card hides the whole frame from the marker on. The section keeps playing
+card hides the whole frame from the marker on, and each as long as its
+words need: 1.4 s for the wipes, then the title, subtitle and kicker read at
+17 characters a second (Netflix's pace for adult subtitles), rounded up to a
+tenth of a second, at least 3.2 s and at most 6. `--duration` makes them
+all one length. The section keeps playing
 under it (Mike's voice too). With `--insert` each marker gets room instead:
 the take moves on by the card's hold, so the card is a pause and its wipes
 show the last shot of one section and the first of the next. A marker at
@@ -1149,12 +1158,15 @@ keep their words. `--kicker Tip` suits a list video. It's one undo step,
 and in the app it's Timeline > Add section cards at section markers
 (Option-M).
 
-A whoosh goes with each sweep: two ElevenLabs sounds made for the card, kept
-in the asset library (docs/ASSETS.md). `tandem cards --apply` copies them
-into the project's `assets/sfx/` and puts them on SFX, linked to their card:
-the one in 0.2 s after the card starts at -14 dB, the one out as the out
-sweep starts, 0.88 s before the end, at -19 dB. A Mac whose library doesn't
-have them makes silent cards and says so; `--no-sounds` leaves them out.
+A soft whoosh goes with each sweep: two airy swishes made for the card with
+ElevenLabs, kept in the asset library (docs/ASSETS.md). `tandem cards
+--apply` copies them into the project's `assets/sfx/` and puts them on SFX,
+linked to their card: one as the card starts, one as the out sweep starts,
+0.88 s before the end. Their gains (-5.4 and -8.3 dB) put their loudest
+moment 15 LU under speech at -20 LUFS, where Mike's own swipes sit; in a
+project whose speech plays elsewhere they move with it (an imported edit at
+-28.7 gets -14.1 and -17). A Mac whose library doesn't have them makes
+silent cards and says so; `--no-sounds` leaves them out.
 
 One card by hand, anywhere:
 
@@ -1167,12 +1179,17 @@ One card by hand, anywhere:
 Props: `title`, `subtitle`, `number` (what the chip says; a number is
 written `02`), `total` (how many sections, for the progress bars; 0 hides
 them), `kicker` (`Section` or `Tip`, shown as `SECTION 2 OF 3` beside the
-chip), and the colours `accent` (the first band, the chip, the subtitle and
-the lit bars), `band2`, `band3` and `background`, as `{"r", "g", "b"}` or a
-hex string like `"#F3B01C"`. A missing word leaves that part out; colours
-default to Convex's. Change them later with a patch, for example
+chip), `cursor` (`false` turns off the cursor after the title; it's on by
+default), and the colours `accent` (the first band, the chip, the subtitle,
+the lit bars and the cursor), `band2`, `band3` and `background`, as
+`{"r", "g", "b"}` or a hex string like `"#F3B01C"`. A missing word leaves
+that part out; colours default to Convex's. Change them later with a patch, for example
 `{"updateClip": {"clipID": "clip_...", "patch": {"content": {"graphic": {"props": {"subtitle": "Let's keep it fair"}}}}}}`
-(`null` removes one). `tandem frame` shows the result.
+(`null` removes one). `tandem frame` shows the result. A card added by hand
+is as long as you make it. After changing its words, the Video tab's Fit to
+text sets the length they need, trimming the card's end and moving its
+whoosh out with the wipe out; by hand that's a `trim` of its end and a
+`moveClips` of the whoosh by the same amount.
 
 ### Set the PiP layout
 

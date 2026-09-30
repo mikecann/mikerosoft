@@ -207,6 +207,33 @@ export all show the same frame.
   come in 0.52 s after the start over 0.45 s with `cubic-bezier(.16, 1,
   .3, 1)`, from transparent, 2.5cqw lower and 98% of their size, about the
   frame's centre.
+- **Cursor.** Mike asked for a little life on the hold: a text cursor
+  after the last letter of the title's last line, a solid bar in the
+  accent 0.1em wide (of the title's size) from the baseline up to the
+  capitals' height, 0.07em after the letter and its letter-spacing. The
+  title stays centred as the mockup has it and the cursor hangs after it,
+  so nothing moves as it blinks. It comes in with the words (same fade
+  and rise), is lit as the title lands (0.97 s), then goes off and on
+  every 0.53 s with hard steps, like a terminal's (Windows' standard caret
+  blink), and is gone once the wipe out starts; a lit spell the wipe out
+  would cut to under half isn't started, so it never flashes before the
+  wipe. The `cursor` prop (on unless false) and the Video tab's switch
+  turn it off. `SectionCardRenderTests` pins it at 1080p (x 1464, y 447,
+  17 by 154 after METHODOLOGY) and 4K (twice that, to the pixel), in the
+  compositor, a frame grab and an export.
+- **Length.** A card's words set how long it needs
+  (`SectionCard.fittedDuration(for:)`): 1.4 s for the wipes (the words
+  are fully in from about 0.7 s, and the wipe out's first band reaches
+  them about 0.7 s before the end), then the title, subtitle and kicker
+  as the card shows them, spaces included, at 17 characters a second,
+  Netflix's reading speed for adult subtitles and about the BBC's 160 to
+  180 words a minute. Rounded up to a tenth of a second (and to a frame),
+  at least 3.2 s, so a usual card like METHODOLOGY / LET'S KEEP IT FAIR
+  (30 characters) stays as it was, and at most 6 s (about 78 characters;
+  longer stops being a breather). `addSectionCards`, `tandem cards` and
+  the Templates tile use it unless given a length, and the Video tab's Fit
+  to text sets it for a card whose words changed, moving its whoosh out
+  with the wipe out.
 - **Wipes.** The card shows behind the first band on the way in (left of
   its left edge) and the next shot shows behind the last band on the way
   out, so the wipes reveal the shots either side; the bands are drawn on
@@ -240,8 +267,9 @@ export all show the same frame.
   draws the same card. Without the bundle the card falls back to Impact,
   the system font and SF Mono or Menlo.
 - **Cost.** The words are drawn once per card and frame size; a wipe
-  frame fills the card, draws them over it, clips and draws the bands,
-  about 22 ms at 4K in a debug build. The hold is drawn once and reused.
+  frame fills the card, draws them over it (and the cursor), clips and
+  draws the bands, about 22 ms at 4K in a debug build. The hold is drawn
+  twice, cursor lit and not, and reused.
   A 3.2 s card exports at 4K in 1.1 s against 0.9 s for a plain solid
   (release build).
 

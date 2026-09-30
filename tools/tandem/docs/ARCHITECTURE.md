@@ -303,10 +303,14 @@ exports are tagged TV-range BT.709.
 Graphic clips are drawn by the compositor when their template is built
 in: the section card (`sectionCard`, RENDER.md has the design). Its props
 are plain values (`SectionCard.Props`: title, subtitle, number, total,
-kicker and four colours) that the inspector, agents and templates edit
-alike, and its motion (`SectionCard.Motion`) is in Core, so
-`addSectionCards` knows when a card hides the frame and puts the cut
-there. Other templates warn until Remotion renders exist.
+kicker, cursor and four colours) that the inspector, agents and templates
+edit alike. Its motion (`SectionCard.Motion`, the cursor's blink too) and
+the length its words need (`SectionCard.fittedDuration(for:)`) are in
+Core, so `addSectionCards` knows how long each card is, when it hides the
+frame and where to put the cut. Its whooshes are set against the voice:
+`AudioLevels.speechLevel(in:)` says where a project's speech plays, and
+the card's sounds move with it. Other templates warn until Remotion
+renders exist.
 
 Text and fonts:
 

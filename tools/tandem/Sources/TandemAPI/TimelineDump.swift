@@ -323,6 +323,7 @@ public enum TimelineDump {
             if !card.subtitle.isEmpty { result += " / \"\(shorten(card.subtitle, 32))\"" }
             if let index = card.index, card.total > 0 { result += " \(index) of \(card.total)" }
             if !card.kicker.isEmpty { result += " kicker \(card.kicker)" }
+            if !card.cursor { result += " no cursor" }
             return result
         case .solid(let color):
             return "solid \(hex(color))"

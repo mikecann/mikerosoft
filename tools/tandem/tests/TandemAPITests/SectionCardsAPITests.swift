@@ -58,7 +58,7 @@ final class SectionCardsAPITests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: sfx.path), "or copies anything")
         let text = plan.readableText
         XCTAssertTrue(text.hasPrefix("2 section cards (dry run, revision 1):"), text)
-        XCTAssertTrue(text.contains(#"01  00:08.000  "Methodology" / "Let's keep it fair"  card 00:07.567-00:10.767"#), text)
+        XCTAssertTrue(text.contains(#"01  00:08.000  "Methodology" / "Let's keep it fair"  card 00:07.567-00:10.767 (3.2 s)"#), text)
         XCTAssertTrue(text.contains("Run again with --apply"), text)
 
         let applied = try await h.service.cards(CardsRequest(kicker: "Section", apply: true), context: h.context)
@@ -68,15 +68,28 @@ final class SectionCardsAPITests: XCTestCase {
         let made = cards(project)
         XCTAssertEqual(made.map(\.props.label), ["01 Methodology", "02 Section 2"])
         XCTAssertEqual(made.map(\.props.kickerLine), ["Section 1 of 2", "Section 2 of 2"])
+        // Fitted to their words: "Methodology Let's keep it fair Section
+        // 1 of 2" is 45 characters, 1.4 + 45 / 17 = 4.05, so 4.1 s.
+        XCTAssertEqual(made.map { $0.clip.duration.seconds }, [4.1, 3.2])
+        XCTAssertEqual(applied.cards.map { ($0.end - $0.start).seconds }, [4.1, 3.2], "as planned")
         let sounds = project.track(named: "SFX")?.clips ?? []
         XCTAssertEqual(sounds.count, 4, "a whoosh in and out for each card")
         XCTAssertEqual(Set(sounds.compactMap(\.linkGroup)), Set(made.compactMap(\.clip.linkGroup)))
+        for card in made {
+            let own = sounds.filter { $0.linkGroup == card.clip.linkGroup }.sorted { $0.start < $1.start }
+            let motion = SectionCard.Motion(duration: card.clip.duration, width: project.settings.width, height: project.settings.height)
+            XCTAssertEqual(own.map(\.start), [card.clip.start, card.clip.start + Time(seconds: motion.outStart(0))], "each swish starts with its sweep")
+        }
         let media = project.media.filter { $0.path.hasPrefix("assets/sfx/") }
         XCTAssertEqual(media.count, 2)
         for item in media {
             XCTAssertTrue(FileManager.default.fileExists(atPath: h.url.deletingLastPathComponent().appendingPathComponent(item.path).path), item.path)
         }
-        XCTAssertEqual(Set(sounds.compactMap(\.audio?.gainDB)), [SectionCardSounds.whooshIn.gainDB, SectionCardSounds.whooshOut.gainDB])
+        // The fixture's speech plays at -14 LUFS, 6 dB over the -20 the
+        // gains are set against, so the whooshes come up 6 dB to stay as
+        // far under it.
+        XCTAssertEqual(AudioLevels.speechLevel(in: project), -14)
+        XCTAssertEqual(Set(sounds.compactMap(\.audio?.gainDB)), [0.6, -2.3], "-5.4 and -8.3, up 6 dB")
 
         // Running it again renumbers what's there, and adds nothing.
         let again = try await h.service.cards(CardsRequest(apply: true), context: h.context)
@@ -85,6 +98,33 @@ final class SectionCardsAPITests: XCTestCase {
         XCTAssertEqual(cards(h.service.coordinator.project).count, 2)
         XCTAssertEqual(h.service.coordinator.project.track(named: "SFX")?.clips.count, 4)
         XCTAssertTrue(again.readableText.contains("already there, renumbered"), again.readableText)
+    }
+
+    /// The whooshes sit 15 LU under the voice wherever it plays: set for
+    /// speech at -20 LUFS, moved for a project whose speech plays elsewhere.
+    func testTheWhooshesFollowTheSpeechLevel() {
+        let sounds = SectionCardSounds.Resolved(
+            media: [],
+            soundIn: SectionCardSound(mediaID: "med_in", gainDB: SectionCardSounds.whooshIn.gainDB),
+            soundOut: SectionCardSound(mediaID: "med_out", gainDB: SectionCardSounds.whooshOut.gainDB)
+        )
+        XCTAssertEqual(SectionCardSounds.whooshIn.gainDB, -5.4, "-29.6 LUFS at its loudest, to -35")
+        XCTAssertEqual(SectionCardSounds.whooshOut.gainDB, -8.3, "-26.7 LUFS at its loudest, to -35")
+        var imported = Self.project()
+        for index in imported.audioTracks[0].clips.indices {
+            imported.audioTracks[0].clips[index].audio = AudioProperties(normalizeTo: -28.74)
+        }
+        let levelled = sounds.levelled(for: imported)
+        XCTAssertEqual(levelled.soundIn.gainDB, -14.1, "8.7 dB quieter against speech at -28.7")
+        XCTAssertEqual(levelled.soundOut.gainDB, -17.0)
+        XCTAssertEqual(levelled.speechLevel, -28.74)
+        XCTAssertEqual(levelled.levelled(for: imported), levelled, "levelling twice changes nothing")
+        var standard = imported
+        for index in standard.audioTracks[0].clips.indices {
+            standard.audioTracks[0].clips[index].audio = AudioProperties(normalizeTo: -20)
+        }
+        XCTAssertEqual(sounds.levelled(for: standard), sounds, "at Tandem's speech level they're as set")
+        XCTAssertEqual(levelled.levelled(for: standard).soundIn.gainDB, -5.4, "and back")
     }
 
     func testSilentWithoutTheWhooshes() async throws {
@@ -139,6 +179,10 @@ final class SectionCardsAPITests: XCTestCase {
         try h.apply(.addSectionCards(kicker: "Section"))
         let dump = TimelineDump.render(h.service.coordinator.project, revision: 1)
         XCTAssertTrue(dump.contains(#"section card 01 "Methodology" / "Let's keep it fair" 1 of 2 kicker Section"#), dump)
+        let card = try XCTUnwrap(cards(h.service.coordinator.project).first)
+        try h.apply(.updateClip(clipID: card.clip.id, patch: .object(["content": .object(["graphic": .object(["props": .object(["cursor": .bool(false)])])])])))
+        let quiet = TimelineDump.render(h.service.coordinator.project, revision: 2)
+        XCTAssertTrue(quiet.contains(#"1 of 2 kicker Section no cursor"#), quiet)
     }
 
     func testTheCLIPlansThenAddsThem() async throws {

@@ -324,7 +324,7 @@ extension CommandSchema {
 
     static let graphicContent = S.object([
         "template": S.string("sectionCard (built in: Mike's section card), or a template like remotion:BarChart."),
-        "props": S.map(S.ref("ParamValue"), "A sectionCard takes title, subtitle, number (like \"01\"), total (sections, for the progress bars; 0 hides them), kicker (\"Section\" or \"Tip\", shown as SECTION 1 OF 3), and colours accent (first band, chip, subtitle, lit bars), band2, band3 and background. Missing words are left off; colours default to Convex's yellow, red and purple on #141418."),
+        "props": S.map(S.ref("ParamValue"), "A sectionCard takes title, subtitle, number (like \"01\"), total (sections, for the progress bars; 0 hides them), kicker (\"Section\" or \"Tip\", shown as SECTION 1 OF 3), cursor (false turns off the text cursor blinking after the title; on by default), and colours accent (first band, chip, subtitle, lit bars, cursor), band2, band3 and background. Missing words are left off; colours default to Convex's yellow, red and purple on #141418."),
         "propsJSON": S.string()
     ], required: ["template"])
 
@@ -571,17 +571,17 @@ extension CommandSchema {
         ),
         Entry(
             command: .addSectionCards,
-            summary: "Puts a numbered section card (the built-in sectionCard graphic: Convex bands wiping in and out, a number chip, the title, a subtitle and progress bars) at every section marker after the start, or at markerIDs. Cards are numbered in time order, total is the count, titles come from the marker names and subtitles from their notes. Each card hides the frame from its marker on. A card already at a marker is renumbered and keeps its own words. mode insert also makes room so the card is a pause.",
+            summary: "Puts a numbered section card (the built-in sectionCard graphic: Convex bands wiping in and out, a number chip, the title, a subtitle and progress bars) at every section marker after the start, or at markerIDs. Cards are numbered in time order, total is the count, titles come from the marker names and subtitles from their notes. Each card is as long as its words need (1.4 s for the wipes plus title, subtitle and kicker at 17 characters a second, 3.2 to 6 s) unless duration is given, and hides the frame from its marker on. A card already at a marker is renumbered and keeps its own words and length. mode insert also makes room so the card is a pause.",
             arguments: S.object([
                 "markerIDs": S.ids("Markers to put cards at, any kind. Default: every section marker after 0:00."),
                 "trackID": S.string("Video track for the cards. Default Graphics (made on top if missing)."),
-                "duration": S.time("Card length. Default 3.2; the wipes keep their length and the hold changes."),
+                "duration": S.time("Every card's length. Default: each fitted to its words (3.2 to 6 s); the wipes keep their length and the hold changes."),
                 "kicker": S.string("Words beside the chip, like Section or Tip (shown as SECTION 1 OF 3). Default none; on cards already there, empty removes it."),
                 "mode": S.enumeration(["overwrite", "insert", "place"], "overwrite (default) lays the cards over the timeline, insert also makes room at each marker (the whole take moves), place fails where the card track is taken."),
                 "soundIn": sectionCardSound("A sound for the sweep in, like a whoosh. Starts 0.2 s after the card unless offset says otherwise."),
                 "soundOut": sectionCardSound("A sound for the sweep out. Starts as the sweep out does unless offset says otherwise.")
             ]),
-            example: #"{"addSectionCards": {"kicker": "Section", "soundIn": {"mediaID": "med_whooshin", "gainDB": -14}, "soundOut": {"mediaID": "med_whooshout", "gainDB": -19}}}"#
+            example: #"{"addSectionCards": {"kicker": "Section", "soundIn": {"mediaID": "med_swishin", "gainDB": -3.4, "offset": 0}, "soundOut": {"mediaID": "med_swishout", "gainDB": -6.3}}}"#
         ),
         Entry(
             command: .blade,

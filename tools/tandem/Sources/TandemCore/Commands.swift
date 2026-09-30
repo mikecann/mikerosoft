@@ -73,10 +73,12 @@ public enum EditCommand: Codable, Equatable, Sendable {
     /// time order, `total` the count, the title from the marker's name and
     /// the subtitle from its note. Each card hides the frame from its
     /// marker on, so the cut between sections isn't seen. A card already at
-    /// a marker is renumbered and keeps its own words. `mode` `overwrite`
-    /// (the default) lays the cards over the timeline; `insert` also makes
-    /// room, so the card is a pause and its wipes show the shots either
-    /// side. `soundIn` and `soundOut` put a whoosh on SFX for each sweep.
+    /// a marker is renumbered and keeps its own words and length. Each new
+    /// card is as long as its words need (`SectionCard.fittedDuration`,
+    /// 3.2 to 6 s) unless `duration` is given. `mode` `overwrite` (the
+    /// default) lays the cards over the timeline; `insert` also makes room,
+    /// so the card is a pause and its wipes show the shots either side.
+    /// `soundIn` and `soundOut` put a whoosh on SFX for each sweep.
     case addSectionCards(
         markerIDs: [String]? = nil,
         trackID: String? = nil,

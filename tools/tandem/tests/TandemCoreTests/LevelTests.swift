@@ -97,6 +97,24 @@ final class LevelTests: XCTestCase {
         XCTAssertEqual(c.project, before, "one undo puts every clip back")
     }
 
+    /// Where speech plays: the project's speech level once it's levelled,
+    /// or an import's own level before that.
+    func testTheSpeechLevelIsWhereTheVoicePlays() throws {
+        let c = try imported()
+        // Levelled clips: -14 (10 s) is the only one; the others have
+        // gains but no level, so they don't say.
+        XCTAssertEqual(AudioLevels.speechLevel(in: c.project), -14)
+        try c.run("Normalise", .normalizeSpeech)
+        XCTAssertEqual(AudioLevels.speechLevel(in: c.project), -20)
+        // Like the Decision Models import: every take at -28.74.
+        for clip in c.clips("Voice") {
+            try c.run("Import level", .updateClip(clipID: clip.id, patch: .object(["audio": .object(["normalizeTo": .number(-28.74)])])))
+        }
+        XCTAssertEqual(AudioLevels.speechLevel(in: c.project), -28.74, accuracy: 1e-9)
+        // Nothing levelled: the project's speech level.
+        XCTAssertEqual(AudioLevels.speechLevel(in: Project.standard(name: "Empty")), -20)
+    }
+
     func testNormalizeSpeechSaysWhenThereIsNothingToDo() throws {
         let c = try imported()
         try c.run("Once", .normalizeSpeech)

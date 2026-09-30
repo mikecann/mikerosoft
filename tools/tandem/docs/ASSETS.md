@@ -282,34 +282,65 @@ assets, so their licence and every use are recorded.
   it in `Sources/TandemRender/Resources/Fonts`. Bundled rather than taken
   from Fontsource because the renderer has to draw the card in every
   process, CLI exports included, and on Bruce, without anything installed.
-- **Sounds.** Two ElevenLabs sound effects made for the card on
-  2026-09-29 on Mike's paid plan (commercial use, no credit), one a sweep
-  (`SectionCardSounds` in TandemAPI names them):
-  - in, `elevenlabs:sfx_vda2xhs6`, 1.2 s: "A big airy whoosh passing from
-    left to right across the stereo field as a bold stripe of colour
-    sweeps across the screen, swelling to a peak in the middle and fading
-    out cleanly, a little deeper than a light swoosh. No music, no voice."
-    It peaks about 0.1 s in and is nearly mono (-20.3 LUFS, -17.4 at its
-    loudest 400 ms). It starts 0.2 s into the card at -14 dB, so it peaks
-    as the bands cross the frame.
-  - out, `elevenlabs:sfx_2ybnc2tu`, 1.0 s: "A quick light swoosh sweeping
-    from left to right as a stripe of colour slides off the screen,
-    brighter and softer than a big whoosh, with a short clean tail. No
-    music, no voice." It builds on the left and passes to the right,
-    peaking 0.37 s in (-12.7 LUFS, -11.7 at its loudest). It starts with
-    the sweep out at -19 dB.
+- **Sounds.** Two soft, airy swishes made for the card with ElevenLabs on
+  2026-09-30 on Mike's paid plan (commercial use, no credit), one a sweep
+  (`SectionCardSounds` in TandemAPI names them). Both are takes of one
+  prompt, asked for 1.0 s:
 
-  Both land about -31 LUFS at their loudest, some 11 LU under speech at
-  -20. A first take of the whoosh in, `elevenlabs:sfx_2z7iwkfd`, peaked
-  at once and was plain mono; it's in the library, unused.
+  > A soft airy swish of air moving quickly from left to right across the
+  > stereo field, like a gentle gust of breath. Smooth and rounded: it
+  > swells in, peaks softly in the middle and fades out cleanly. Light and
+  > delicate, with no low end. No music, no voice.
+
+  - in, `elevenlabs:sfx_4jhasduf`: the gentlest of three takes. A smooth
+    swell with almost no low end (3% of its energy under 150 Hz), centred
+    around 1.9 kHz, loudest 0.46 s in (-29.6 LUFS over its loudest
+    400 ms). It starts with the card at -5.4 dB, so it peaks as the middle
+    band crosses the frame.
+  - out, `elevenlabs:sfx_k2dvisxs`: the next gentlest, a touch brighter
+    (2.8 kHz) and lighter, loudest 0.40 s in (-26.7 LUFS). It starts with
+    the sweep out at -8.3 dB.
+  - `elevenlabs:sfx_yzs4v5qd`, the third take, is in the library, unused:
+    half its energy is over 4 kHz, so it hisses.
+
+  **Level.** The gains put both at -35 LUFS over their loudest 400 ms, 15
+  LU under speech at Tandem's -20, which is where Mike's own section
+  swipes sit in Decision Models (`swipe.wav`, `in.wav` and `out.wav` at
+  -43.2 to -44.4 LUFS against his speech at -28.7). In a project whose
+  speech plays elsewhere the gains move with it
+  (`SectionCardSounds.Resolved.levelled(for:)`, from
+  `AudioLevels.speechLevel(in:)`): the Decision Models import, whose
+  speech plays at -28.7 until it's levelled, gets -14.1 and -17 dB.
+
+  **Why they replaced the first pair.** Mike found the whoosh in "a
+  little bit too much because it's a little bit jarring", an explosion.
+  Measured: the first whoosh in (`elevenlabs:sfx_vda2xhs6`, "a big airy
+  whoosh ... a little deeper than a light swoosh") had 73% of its energy
+  under 150 Hz and a spectral centroid of 210 Hz, a low boom, and the
+  steepest hit of the lot: within 20 dB of its peak it rose and fell about
+  10 dB every 10 ms, where the new ones move about 4 to 5. The first
+  whoosh out (`elevenlabs:sfx_2ybnc2tu`) had no boom (5% under 150 Hz,
+  centred near 1 kHz) but a hard, spiky peak (its loudest 50 ms 6.9 dB over
+  its loudest 300 ms, against 3.5 to 4.1 for the new ones) with 114
+  clipped samples, so it went too. And they were loud: at -14 and -19 dB
+  they sat 11 LU under speech at -20, and in the Decision Models demo,
+  whose speech plays at -28.7, the whoosh in reached -16.1 LUFS in a mix
+  mastered to -14, about as loud as Mike's voice. In the second demo the
+  new pair reach -25.4 to -26.8 LUFS in the same kind of mix, 11 to 13 LU
+  under the voice, and 9 to 12 LU under it where Mike talks over the sweep
+  out.
+  The first pair and a first take (`elevenlabs:sfx_2z7iwkfd`) stay in the
+  library, unused. The measurements are in
+  `~/dev/me/tandem-research/title-cards/tandem/sounds/`.
 - **Into projects.** `tandem cards --apply`, the Section card tile (a
   double-click, or a drag, which copies them as it starts) and Timeline >
   Add section cards at section markers copy both into `assets/sfx/` with
   `use` before the edit, so the card and its sounds are one undo step.
   A Mac whose library doesn't have them makes silent cards and says so.
-  To make them there, generate the prompts above (`tandem assets generate
-  sfx "<prompt>" --duration 1.2`) and point `SectionCardSounds` at the new
-  IDs, or copy the two `elevenlabs/` asset folders across and rebuild the
+  To make them there, generate the prompt above (`tandem assets generate
+  sfx "<prompt>" --duration 1 --variations 3`), measure the takes the same
+  way and point `SectionCardSounds` at the two gentlest with their gains,
+  or copy the two `elevenlabs/` asset folders across and rebuild the
   catalogue from disk (`AssetLibrary.rebuildCatalogFromDisk()`).
 
 ## Implementation (TandemAssets)

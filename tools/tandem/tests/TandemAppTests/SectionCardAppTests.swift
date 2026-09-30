@@ -59,6 +59,17 @@ final class SectionCardAppTests: XCTestCase {
         assertValid(fixture.project)
     }
 
+    /// The whooshes go where their offsets say: the section card's own
+    /// start with their sweeps.
+    func testTheTilePlacesTheWhooshesByTheirOffsets() {
+        var sounds = Self.sounds
+        sounds.soundIn.offset = .zero
+        sounds.soundOut.offset = .zero
+        let template = BuiltInTemplates.makeSectionCard(sounds: sounds)
+        XCTAssertEqual(template.clips.map(\.offset), [.zero, .zero, t(3.2 - 0.88)])
+        XCTAssertEqual(template.duration, SectionCard.fittedDuration(for: SectionCard.Props(title: "The leaderboard", subtitle: "Who's on top", number: "01")), "as long as its words need")
+    }
+
     func testADropUsesTheWhooshesTheDragBroughtIn() throws {
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cards-\(UUID().uuidString)")
         XCTAssertNil(SectionCardSoundCache.shared.sounds(for: folder))
@@ -116,6 +127,54 @@ final class SectionCardAppTests: XCTestCase {
         assertValid(fixture.project)
     }
 
+    func testTheCursorSwitch() throws {
+        let fixture = try AppFixture()
+        try fixture.apply(LibraryDrops.template(BuiltInTemplates.sectionCard, at: t(40)))
+        var clip = try XCTUnwrap(card(in: fixture.project))
+        func graphicProps() -> [String: ParamValue] {
+            if case .graphic(let graphic) = clip.content { return graphic.props }
+            return [:]
+        }
+        XCTAssertEqual(SectionCard.props(of: clip)?.cursor, true, "on by default")
+        XCTAssertNil(SectionCardEdits.cursor(clip, on: true), "no change, no edit")
+        let off = try XCTUnwrap(SectionCardEdits.cursor(clip, on: false))
+        XCTAssertEqual(off.label, "No card cursor")
+        try fixture.apply(off)
+        clip = try XCTUnwrap(fixture.project.clip(clip.id))
+        XCTAssertEqual(SectionCard.props(of: clip)?.cursor, false)
+        XCTAssertEqual(graphicProps()[SectionCard.Key.cursor], .bool(false))
+        try fixture.apply(SectionCardEdits.cursor(clip, on: true))
+        clip = try XCTUnwrap(fixture.project.clip(clip.id))
+        XCTAssertNil(graphicProps()[SectionCard.Key.cursor], "on is the default, so the prop goes")
+    }
+
+    /// Fit to text sets the card's length for its words and moves its
+    /// whoosh out with the wipe out.
+    func testFitToTextSetsTheLength() throws {
+        let fixture = try AppFixture()
+        try fixture.apply(LibraryDrops.template(BuiltInTemplates.makeSectionCard(sounds: Self.sounds), at: t(40)))
+        var clip = try XCTUnwrap(card(in: fixture.project))
+        XCTAssertNil(SectionCardEdits.fitToText(clip, in: fixture.project), "the tile's card fits its words already")
+        try fixture.apply(SectionCardEdits.set(clip, SectionCard.Key.title, text: "Which decision model should you pick?", label: "Card title"))
+        clip = try XCTUnwrap(fixture.project.clip(clip.id))
+        let batch = try XCTUnwrap(SectionCardEdits.fitToText(clip, in: fixture.project))
+        XCTAssertEqual(batch.label, "Fit card to text")
+        try fixture.apply(batch)
+        clip = try XCTUnwrap(fixture.project.clip(clip.id))
+        // "Which decision model should you pick? Who's on top": 50
+        // characters, 1.4 + 50 / 17 = 4.34 s, up to 4.4.
+        XCTAssertEqual(clip.duration.seconds, 4.4, accuracy: 1e-9)
+        XCTAssertEqual(clip.start, t(40))
+        let sounds = fixture.clips("SFX").filter { $0.linkGroup == clip.linkGroup }.sorted { $0.start < $1.start }
+        XCTAssertEqual(sounds.map(\.start), [t(40.2), t(40 + 4.4 - 0.88)], "the whoosh out moved with the wipe out")
+        XCTAssertNil(SectionCardEdits.fitToText(clip, in: fixture.project))
+        let props = try XCTUnwrap(SectionCard.props(of: clip))
+        XCTAssertEqual(SectionCardEdits.fitHelp(props, length: clip.duration, frameRate: .fps30), "As long as its words need: 4.4 s for 50 characters.")
+        XCTAssertTrue(SectionCardEdits.fitHelp(props, length: t(3.2), frameRate: .fps30).hasPrefix("Makes the card 4.4 s long"))
+        XCTAssertEqual(SectionCardEdits.seconds(t(3.2)), "3.2 s")
+        assertValid(fixture.project)
+    }
+
     // MARK: - Add section cards at section markers
 
     func testCardsAtSectionMarkersInOneStep() throws {
@@ -162,7 +221,7 @@ final class SectionCardAppTests: XCTestCase {
     @MainActor
     func testTheCommandHasAKeyATitleAndIcons() throws {
         XCTAssertEqual(EditorCommand.addSectionCards.title, "Add section cards at section markers")
-        for name in [Icons.command(.addSectionCards)!, Icons.sectionCard, Icons.cardTitle, Icons.cardSubtitle, Icons.cardNumber, Icons.cardProgress, Icons.cardKicker, Icons.cardColours] {
+        for name in [Icons.command(.addSectionCards)!, Icons.sectionCard, Icons.cardTitle, Icons.cardSubtitle, Icons.cardNumber, Icons.cardProgress, Icons.cardKicker, Icons.cardColours, Icons.cardCursor, Icons.cardLength] {
             XCTAssertNotNil(NSImage(systemSymbolName: name, accessibilityDescription: nil), name)
         }
     }
