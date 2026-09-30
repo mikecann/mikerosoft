@@ -367,6 +367,52 @@ final class SectionCardCommandTests: XCTestCase {
         XCTAssertEqual(Set(cards(c).map(\.clip.duration)), [t(4)])
     }
 
+    /// fitSectionCards refits cards made at an older length: each gets the
+    /// length its words need, keeping its start, and its whoosh out moves
+    /// with its sweep out. One undo step, and nothing ripples.
+    func testFittingEveryCardAtOnce() throws {
+        let (_, c) = try marked()
+        try c.run("Whooshes",
+            .addMedia(item: MediaItem(id: "med_in", path: "assets/sfx/in.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)),
+            .addMedia(item: MediaItem(id: "med_out", path: "assets/sfx/out.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true))
+        )
+        // Cards as they used to be made: 3.2 s each.
+        try c.run("Cards", .addSectionCards(duration: t(3.2), soundIn: SectionCardSound(mediaID: "med_in"), soundOut: SectionCardSound(mediaID: "med_out")))
+        let before = cards(c)
+        XCTAssertEqual(Set(before.map(\.clip.duration)), [t(3.2)])
+        let camera = c.clips("Camera")
+        try c.run("Fit", .fitSectionCards())
+        let after = cards(c)
+        XCTAssertEqual(after.map(\.clip.id), before.map(\.clip.id))
+        XCTAssertEqual(after.map(\.clip.start), before.map(\.clip.start), "each keeps its start")
+        XCTAssertEqual(after.map(\.clip.duration), after.map { SectionCard.fittedDuration(for: $0.props, frameRate: .fps30) })
+        for card in after {
+            let sounds = c.project.audioTracks.flatMap(\.clips).filter { $0.linkGroup == card.clip.linkGroup }.sorted { $0.start < $1.start }
+            XCTAssertEqual(sounds.first?.start, card.clip.start + t(0.2), "the whoosh in stays")
+            XCTAssertEqual(sounds.last?.start, card.clip.start + Time(seconds: SectionCard.Motion(duration: card.clip.duration.seconds).outStart(0)), "the whoosh out on its sweep out")
+        }
+        XCTAssertEqual(c.clips("Camera"), camera, "nothing ripples")
+        assertValid(c.project)
+        XCTAssertNotNil(c.undo())
+        XCTAssertEqual(cards(c).map(\.clip.duration), before.map(\.clip.duration), "one undo step")
+
+        // Just the cards named; already fitted ones are left alone.
+        try c.run("Fit one", .fitSectionCards(clipIDs: [before[0].clip.id]))
+        XCTAssertEqual(cards(c).map(\.clip.duration.seconds), [4.2, 3.2, 3.2])
+        try c.run("Fit all", .fitSectionCards())
+        let fitted = cards(c).map(\.clip)
+        XCTAssertNoThrow(try c.run("Again", .fitSectionCards()), "nothing left to fit is fine, so a batch with it still works")
+        XCTAssertEqual(cards(c).map(\.clip), fitted)
+        XCTAssertThrowsError(try c.run("Camera", .fitSectionCards(clipIDs: [camera[0].id])), "not a card")
+    }
+
+    func testFittingNeedsCards() throws {
+        let (_, c) = try marked()
+        XCTAssertThrowsError(try c.run("Fit", .fitSectionCards())) { error in
+            XCTAssertEqual(error as? EditError, .invalid("there are no section cards to fit"))
+        }
+    }
+
     func testInsertMakesRoomSoTheWipesShowBothShots() throws {
         let (_, c) = try marked()
         let cameraBefore = c.clips("Camera")

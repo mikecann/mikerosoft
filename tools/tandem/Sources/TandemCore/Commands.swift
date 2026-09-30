@@ -88,6 +88,12 @@ public enum EditCommand: Codable, Equatable, Sendable {
         soundIn: SectionCardSound? = nil,
         soundOut: SectionCardSound? = nil
     )
+    /// Makes section cards as long as their words need
+    /// (`SectionCard.fittedDuration`), like Fit to text in the app: every
+    /// card, or `clipIDs`. Each keeps its start, its end moves and its
+    /// whoosh out moves with its sweep out. Cards that fit already are left
+    /// alone. JSON: `{"fitSectionCards": {}}`.
+    case fitSectionCards(clipIDs: [String]? = nil)
 
     // MARK: Cutting and trimming
 

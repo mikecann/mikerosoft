@@ -142,6 +142,18 @@ extension SectionCard {
 extension Editing {
     /// Puts a numbered section card at section markers. See
     /// `EditCommand.addSectionCards`.
+    /// Fit to text for every card, or those in `clipIDs`, each worked out
+    /// against the project as the ones before left it.
+    static func fitSectionCards(_ p: inout Project, clipIDs: [String]?, _ context: inout EditContext) throws {
+        let ids = clipIDs ?? p.videoTracks.flatMap(\.clips).filter { SectionCard.isCard($0.content) }.map(\.id)
+        guard !ids.isEmpty else { throw EditError.invalid("there are no section cards to fit") }
+        for id in ids {
+            for command in try SectionCard.fitToText(id, in: p) {
+                try apply(command, to: &p, context: &context)
+            }
+        }
+    }
+
     static func addSectionCards(
         _ p: inout Project,
         markerIDs: [String]?,

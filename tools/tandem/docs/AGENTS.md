@@ -672,6 +672,19 @@ from the asset library, levelled for the project's speech.
 {"addSectionCards": {"soundIn": {"mediaID": "med_swishin", "gainDB": -5.4, "offset": 0}, "soundOut": {"mediaID": "med_swishout", "gainDB": -8.3}}}
 ```
 
+#### fitSectionCards
+
+Makes section cards as long as their words need, like Fit to text in the
+app: every card, or `clipIDs`. Each keeps its start and its end moves
+(nothing ripples, so a longer card covers a little more of the section it
+opens), and its whoosh out moves with its sweep out. Cards that fit already
+are left alone. Use it after changing a card's words, clearing its kicker,
+or on cards made before the lengths grew (they used to be 3.2 s).
+
+```json
+{"fitSectionCards": {}}
+```
+
 ### Cutting and trimming
 
 #### blade

@@ -575,13 +575,21 @@ extension CommandSchema {
             arguments: S.object([
                 "markerIDs": S.ids("Markers to put cards at, any kind. Default: every section marker after 0:00."),
                 "trackID": S.string("Video track for the cards. Default Graphics (made on top if missing)."),
-                "duration": S.time("Every card's length. Default: each fitted to its words (3.2 to 6 s); the wipes keep their length and the hold changes."),
+                "duration": S.time("Every card's length. Default: each fitted to its words (4 to 7 s); the wipes keep their length and the hold changes."),
                 "kicker": S.string("Words beside the chip, like Tip (shown as TIP 1 OF 14). Default none, which Mike prefers: the number alone reads faster. Only add one when asked. On cards already there, empty removes it."),
                 "mode": S.enumeration(["overwrite", "insert", "place"], "overwrite (default) lays the cards over the timeline, insert also makes room at each marker (the whole take moves), place fails where the card track is taken."),
                 "soundIn": sectionCardSound("A sound for the sweep in, like a whoosh. Starts 0.2 s after the card unless offset says otherwise."),
                 "soundOut": sectionCardSound("A sound for the sweep out. Starts as the sweep out does unless offset says otherwise.")
             ]),
             example: #"{"addSectionCards": {"soundIn": {"mediaID": "med_swishin", "gainDB": -3.4, "offset": 0}, "soundOut": {"mediaID": "med_swishout", "gainDB": -6.3}}}"#
+        ),
+        Entry(
+            command: .fitSectionCards,
+            summary: "Makes section cards as long as their words need, like Fit to text in the app: 1.4 s for the wipes and 0.8 s to take it in, plus title, subtitle and kicker at 15 characters a second, 4 to 7 s. Every card, or clipIDs. Each keeps its start, its end moves (nothing ripples) and its whoosh out moves with its sweep out. Cards that fit already are left alone; a card that would run into the next clip on its track fails.",
+            arguments: S.object([
+                "clipIDs": S.ids("Only these section cards. Default: every section card in the project.")
+            ]),
+            example: #"{"fitSectionCards": {}}"#
         ),
         Entry(
             command: .blade,

@@ -49,6 +49,8 @@ public enum Editing {
                 &project, markerIDs: markerIDs, trackID: trackID, duration: duration, kicker: kicker,
                 mode: mode ?? .overwrite, soundIn: soundIn, soundOut: soundOut, &context
             )
+        case .fitSectionCards(let clipIDs):
+            try fitSectionCards(&project, clipIDs: clipIDs, &context)
         case .blade(let at, let trackIDs, let clipIDs):
             try blade(&project, at: at, trackIDs: trackIDs, clipIDs: clipIDs, &context)
         case .trim(let clipID, let edge, let to, let ripple, let includeLinked):
