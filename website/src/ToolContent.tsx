@@ -1,13 +1,12 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ChangelogEntry } from './changelog';
-import { Link } from './router';
 import { formatToolDate } from './toolDates';
 import { TOOL_DATES } from './toolDates.generated';
 import { toolDetails } from './toolDetails';
-import { makeItYoursPrompt, toolPath } from './toolPages';
-import { PLATFORM_LABEL, sortPlatforms, tools, type Tool } from './tools';
+import { makeItYoursPrompt } from './toolPages';
+import { PLATFORM_LABEL, sortPlatforms, type Tool } from './tools';
 import { versionedAsset } from './versionedAsset';
-import { ImageViewer } from './win95';
+import { ImageViewer } from './XpDialogs';
 
 const REPO_URL = 'https://github.com/mikecann/mikerosoft';
 const CHANGES_SHOWN = 5;
@@ -46,7 +45,7 @@ async function copyText(text: string): Promise<boolean> {
 
 function GetIt({ tool }: { tool: Tool }) {
   const prompt = makeItYoursPrompt(tool);
-  const promptRef = useRef<HTMLDivElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const [status, setStatus] = useState('');
 
   useEffect(() => {
@@ -61,28 +60,30 @@ function GetIt({ tool }: { tool: Tool }) {
       return;
     }
     // No clipboard access, so select it and let them copy it themselves.
-    const selection = window.getSelection();
-    if (promptRef.current && selection) selection.selectAllChildren(promptRef.current);
+    promptRef.current?.select();
     setStatus('Selected. Press Ctrl+C or Cmd+C to copy it.');
   }
 
   return (
-    <fieldset className="groupbox get-it">
-      <legend>Get it</legend>
-      <p>
-        Paste this into your AI coding agent. It'll copy the code over and set it up for your machine. Anything
-        else, just ask it.
-      </p>
-      <button type="button" className="btn copy-button" onClick={copy}>
-        <span className="copy-button-icon" aria-hidden="true" />
-        Copy prompt
-      </button>
-      <span className="copy-status" role="status">{status}</span>
-      <div className="prompt sunken scroll" ref={promptRef}>{prompt}</div>
-      <div className="get-it-links">
-        <a className="btn btn-small" href={tool.url} target="_blank" rel="noopener">View source on GitHub</a>
+    <aside className="task-pane get-it" aria-labelledby={`get-${tool.name}`}>
+      <h2 className="task-pane-head" id={`get-${tool.name}`}>Get it</h2>
+      <div className="task-pane-body">
+        <p>
+          Paste this into your AI coding agent. It'll copy the code over and set it up for your machine. Anything
+          else, just ask it.
+        </p>
+        <button type="button" className="copy-button" onClick={copy}>
+          <img src="/xp/run.png" alt="" />
+          Copy prompt
+        </button>
+        <p className="copy-status" role="status">{status}</p>
+        <textarea ref={promptRef} readOnly value={prompt} rows={5} aria-label="The prompt" />
+        <a className="task-link" href={tool.url} target="_blank" rel="noopener">
+          <img src="/xp/github.png" alt="" />
+          View the source on GitHub
+        </a>
       </div>
-    </fieldset>
+    </aside>
   );
 }
 
@@ -99,53 +100,50 @@ function Media({ tool }: { tool: Tool }) {
 
   if (items.length === 0) {
     return (
-      <fieldset className="groupbox">
-        <legend>Screenshots</legend>
+      <section className="media" aria-label="Artwork">
         {tool.header && (
-          <div className="frame" data-art>
+          <div className="media-stage" data-art>
             <img src={versionedAsset(tool.header)} alt={`Artwork for ${tool.name}`} />
           </div>
         )}
         <p className="media-note">This is artwork I made for the tool, not a screenshot. Real ones are coming soon.</p>
-      </fieldset>
+      </section>
     );
   }
 
   const current = items[Math.min(active, items.length - 1)];
 
   return (
-    <fieldset className="groupbox">
-      <legend>{tool.video ? 'See it in action' : 'Screenshots'}</legend>
-      <div className="frame">
+    <section className="media" aria-label={tool.video ? 'Video and screenshots' : 'Screenshots'}>
+      <div className="media-stage">
         {current.kind === 'video' ? (
           <video key={current.src} src={current.src} controls autoPlay muted loop playsInline />
         ) : (
-          <button type="button" onClick={() => setViewing(images.indexOf(current.src))} aria-label="Open full size">
+          <button type="button" className="plain zoom" onClick={() => setViewing(images.indexOf(current.src))} aria-label="Open full size">
             <img src={current.src} alt={`Screenshot of ${tool.name}`} />
           </button>
         )}
       </div>
       {items.length > 1 && (
-        <div className="thumbs" role="group" aria-label="Media">
+        <div className="thumbs" role="group" aria-label="Pick a screenshot">
           {items.map((item, i) => (
             <button
               key={item.src}
               type="button"
-              className="thumb"
+              className="plain thumb"
               aria-pressed={i === active}
               aria-label={item.kind === 'video' ? 'Play the video' : `Screenshot ${i + 1}`}
               onClick={() => setActive(i)}
             >
-              {item.kind === 'video' ? <span className="thumb-video">Video</span> : <img src={item.src} alt="" />}
+              {item.kind === 'video' ? <span className="thumb-video">▶ Video</span> : <img src={item.src} alt="" />}
             </button>
           ))}
         </div>
       )}
-      {current.kind === 'image' && <p className="media-note">Click the screenshot to see it full size.</p>}
       {viewing !== null && (
         <ImageViewer images={images} index={viewing} onIndexChange={setViewing} onClose={() => setViewing(null)} />
       )}
-    </fieldset>
+    </section>
   );
 }
 
@@ -155,19 +153,19 @@ function Change({ entry }: { entry: ChangelogEntry }) {
 
   return (
     <li className="change">
-      <div className="change-date">{formatToolDate(entry.date)}</div>
+      <time dateTime={entry.date}>{formatToolDate(entry.date)}</time>
       <div>
         <p className="change-title">{entry.title}</p>
         {why && <p className="change-body">{why}</p>}
         {open && more.map((paragraph, i) => <p key={i} className="change-body">{paragraph}</p>)}
-        <div className="change-links">
+        <p className="change-links">
           {more.length > 0 && (
-            <button type="button" className="link-button" onClick={() => setOpen(value => !value)}>
+            <button type="button" className="plain link" onClick={() => setOpen(value => !value)}>
               {open ? 'Less' : 'More detail'}
             </button>
           )}
           <a href={`${REPO_URL}/commit/${entry.hash}`} target="_blank" rel="noopener">{entry.hash.slice(0, 7)}</a>
-        </div>
+        </p>
       </div>
     </li>
   );
@@ -196,65 +194,49 @@ function Changes({ tool }: { tool: Tool }) {
   const shown = showAll ? entries : entries.slice(0, CHANGES_SHOWN);
 
   return (
-    <fieldset className="groupbox">
-      <legend>What's changed ({entries.length})</legend>
-      <ol className="changes">
+    <section className="changes" aria-labelledby={`changes-${tool.name}`}>
+      <h2 id={`changes-${tool.name}`}>
+        What's changed <span>{entries.length === 1 ? '1 change' : `${entries.length} changes`}</span>
+      </h2>
+      <ol>
         {shown.map(entry => <Change key={entry.hash} entry={entry} />)}
       </ol>
       {entries.length > CHANGES_SHOWN && (
-        <div className="changes-footer">
-          <button type="button" className="btn btn-small" onClick={() => setShowAll(value => !value)}>
-            {showAll ? 'Show fewer' : `Show all ${entries.length} changes`}
-          </button>
-        </div>
+        <button type="button" onClick={() => setShowAll(value => !value)}>
+          {showAll ? 'Show fewer' : `Show all ${entries.length} changes`}
+        </button>
       )}
-    </fieldset>
+    </section>
   );
 }
 
-export function ToolWindow({ tool }: { tool: Tool }) {
+/** A tool's window: what it is and how to get it up top, then media, then its history. */
+export function ToolContent({ tool }: { tool: Tool }) {
   const details = toolDetails[tool.name];
   const dates = TOOL_DATES[tool.name];
-  const index = tools.indexOf(tool);
-  const previous = tools[(index - 1 + tools.length) % tools.length];
-  const next = tools[(index + 1) % tools.length];
 
   return (
-    <article className="tool">
-      <header className="tool-head">
-        <img src={tool.icon} alt="" />
-        <div>
-          <h1>{tool.name}</h1>
-          <p className="tool-tagline">{details.tagline}</p>
-          <div className="chips">
-            {sortPlatforms(tool.platforms).map(id => <span key={id} className="chip">{PLATFORM_LABEL[id]}</span>)}
-            <span className="chip">{tool.category}</span>
-            {dates && <span className="chip">Updated {formatToolDate(dates.updated)}</span>}
-          </div>
-        </div>
-      </header>
-
+    <div className="doc scroll-area">
       <div className="tool-top">
-        <Media tool={tool} />
-        <div className="tool-side">
-          <fieldset className="groupbox about">
-            <legend>What is it?</legend>
-            {details.intro.map((paragraph, i) => <p key={i}><RichText text={paragraph} /></p>)}
-          </fieldset>
-          <GetIt tool={tool} />
+        <div className="tool-intro">
+          <header className="tool-head">
+            <img src={tool.icon} alt="" />
+            <div>
+              <h1>{tool.name}</h1>
+              <p className="chips">
+                {sortPlatforms(tool.platforms).map(id => <span key={id}>{PLATFORM_LABEL[id]}</span>)}
+                <span>{tool.category}</span>
+                {dates && <span>Updated {formatToolDate(dates.updated)}</span>}
+              </p>
+            </div>
+          </header>
+          <p className="lead">{details.tagline}</p>
+          {details.intro.map((paragraph, i) => <p key={i}><RichText text={paragraph} /></p>)}
         </div>
+        <GetIt tool={tool} />
       </div>
-
+      <Media tool={tool} />
       <Changes tool={tool} />
-
-      <nav className="tool-neighbours" aria-label="More tools">
-        <Link href={toolPath(previous.name)} className="btn">
-          ‹ <img src={previous.icon} alt="" /> {previous.name}
-        </Link>
-        <Link href={toolPath(next.name)} className="btn">
-          {next.name} <img src={next.icon} alt="" /> ›
-        </Link>
-      </nav>
-    </article>
+    </div>
   );
 }

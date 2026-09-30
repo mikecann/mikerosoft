@@ -1,29 +1,35 @@
-import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from 'react';
-import { parseRoute, type Route } from './toolPages';
+import { useEffect, useRef, type AnchorHTMLAttributes, type MouseEvent } from 'react';
 
 const NAVIGATE_EVENT = 'mikerosoft:navigate';
 
-function subscribe(onChange: () => void) {
-  window.addEventListener('popstate', onChange);
-  window.addEventListener(NAVIGATE_EVENT, onChange);
-  return () => {
-    window.removeEventListener('popstate', onChange);
-    window.removeEventListener(NAVIGATE_EVENT, onChange);
-  };
-}
-
-export function usePathname(): string {
-  return useSyncExternalStore(subscribe, () => window.location.pathname);
-}
-
-export function useRoute(): Route {
-  return parseRoute(usePathname());
-}
-
+/**
+ * Goes to a path without a reload. It always tells listeners, even for the
+ * current path, because clicking a closed tool's icon should reopen it.
+ */
 export function navigate(path: string) {
-  if (path === window.location.pathname) return;
-  window.history.pushState(null, '', path);
+  if (path !== window.location.pathname) window.history.pushState(null, '', path);
   window.dispatchEvent(new Event(NAVIGATE_EVENT));
+}
+
+/** Changes the address bar to match what's on screen, without telling anyone. */
+export function replacePath(path: string) {
+  if (path !== window.location.pathname) window.history.replaceState(null, '', path);
+}
+
+/** Calls back with the path on every navigate() and every back or forward. */
+export function useNavigation(onNavigate: (pathname: string) => void) {
+  const callback = useRef(onNavigate);
+  callback.current = onNavigate;
+
+  useEffect(() => {
+    const handle = () => callback.current(window.location.pathname);
+    window.addEventListener('popstate', handle);
+    window.addEventListener(NAVIGATE_EVENT, handle);
+    return () => {
+      window.removeEventListener('popstate', handle);
+      window.removeEventListener(NAVIGATE_EVENT, handle);
+    };
+  }, []);
 }
 
 /** An anchor that changes page without a reload, unless opened in a new tab. */

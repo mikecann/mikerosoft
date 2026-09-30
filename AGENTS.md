@@ -587,10 +587,18 @@ tail -f ~/Library/Logs/mikey-mouse.log
 The mikerosoft.app site in `website/` deploys from `main` through
 `.github/workflows/deploy-website.yml` whenever `website/` or `tools/` changes.
 
-- The site is **Mikerosoft 95**, a Windows 95 desktop (`website/src/win95.css`).
-  A Mikerosoft window on the left lists every tool by category, and the main
-  window shows My Tools or a tool opened as its own program window. There's a
-  taskbar and Start menu underneath. On phones the Start menu is the tool list.
+- The site is a Windows XP desktop, in the style of Mike's Convex OS
+  (github.com/mikecann/convex-os), built on XP.css plus `website/src/xp.css`.
+  Every tool is a desktop icon down the left and right edges, and each one
+  opens in its own window that can be dragged, resized, minimised and
+  closed. The window in front sets the address bar, so `/tools/<name>` opens
+  that tool's window over the Mikerosoft one. The window logic lives in
+  `website/src/windowManager.ts` with tests. Tool windows follow the PostHog
+  homepage layout: the write-up on the left, a Get it card with the Copy
+  prompt button on the right, then media, then What's changed. On phones
+  windows fill the screen and the desktop is a grid of icons.
+- The Bliss wallpaper and the small XP icons in `website/public/xp` come from
+  Convex OS, which borrowed them from github.com/ShizukuIchi/winXP.
 - Tools come from `website/src/tools.ts`. Each one needs a `category` and its
   own icon at `website/public/icons/<name>.png`. The icons are high-res
   famfamfam-style drawings made with `website/scripts/icons/generate.py` and
@@ -607,7 +615,7 @@ The mikerosoft.app site in `website/` deploys from `main` through
   rather than change it.
 - CI checks out with `fetch-depth: 0`. The generator refuses a shallow clone
   because every tool would get the same date.
-- Every tool has its own page at `/tools/<name>` (`website/src/ToolWindow.tsx`).
+- Every tool has its own page at `/tools/<name>` (`website/src/ToolContent.tsx`).
   It leads with real media: `video` first, then `screenshots`, and only falls
   back to the generated `header` art when there's nothing real. Give every tool
   real screenshots or a short clip of it working.
