@@ -208,7 +208,10 @@ macOS does not currently use the Windows tray flow.
 - **Text injection** — Windows injects text via `SendInput` with
   `KEYEVENTF_UNICODE`. macOS re-activates the target app and pastes with an
   `NSPasteboard` + `Cmd+V` flow that restores every clipboard item and type,
-  including screenshots, files, rich text, and an empty clipboard.
+  including screenshots, files, rich text, and an empty clipboard. The old
+  clipboard only comes back once the target app has actually read the text.
+  If it never reads it within 2 seconds, the paste didn't land: Voice Type
+  plays a sound and leaves the text on the clipboard so `Cmd+V` pastes it.
 - **Optional transcript cleanup** — for `final_only`, `hybrid`, and
   `precompute`, an optional local GGUF instruct model can lightly clean the
   final transcript before it is typed. Guardrails reject outputs that remove

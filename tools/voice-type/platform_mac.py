@@ -340,12 +340,22 @@ def get_foreground_monitor_work_area() -> tuple[int, int, int, int]:
 # directly. CGEventPost is explicitly thread-safe. Every pasteboard item and
 # type is saved and restored so images, files, rich text, and empty clipboards
 # survive injection as well as plain text.
+#
+# The text is offered through a lazy data provider so we know when the target
+# app actually reads it. A busy app can take longer than any fixed delay to
+# handle Cmd+V, and restoring the old clipboard before it reads would paste
+# the wrong thing, or nothing. If the target never reads it, the paste didn't
+# land, so the text is left on the clipboard for a manual Cmd+V.
 # ---------------------------------------------------------------------------
 
 # macOS virtual keycodes
 _VK_CMD       = 55   # left Command
 _VK_V         = 9    # V (QWERTY)
 _VK_BACKSPACE = 51   # Delete / Backspace
+
+_TEXT_TYPE = "public.utf8-plain-text"  # NSPasteboardTypeString
+_PASTE_READ_TIMEOUT = 2.0
+_PASTE_FAILED_SOUND = "/System/Library/Sounds/Funk.aiff"
 
 
 def _post_events(vk_sequence: list[tuple[int, bool, int]]) -> None:
@@ -356,6 +366,17 @@ def _post_events(vk_sequence: list[tuple[int, bool, int]]) -> None:
         ev = Quartz.CGEventCreateKeyboardEvent(src, vk, is_down)
         Quartz.CGEventSetFlags(ev, flags)
         Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+
+
+def _post_cmd_v() -> None:
+    import Quartz
+    cmd_flag = Quartz.kCGEventFlagMaskCommand
+    _post_events([
+        (_VK_CMD, True,  cmd_flag),
+        (_VK_V,   True,  cmd_flag),
+        (_VK_V,   False, cmd_flag),
+        (_VK_CMD, False, 0),
+    ])
 
 
 def _snapshot_pasteboard(pasteboard) -> list[list[tuple[object, bytes]]]:
@@ -391,39 +412,113 @@ def _restore_pasteboard(pasteboard, snapshot, item_class=None) -> None:
         pasteboard.writeObjects_(restored_items)
 
 
-def inject_text(text: str, log: Callable[[str], None] | None = None) -> None:
+_text_provider_class = None
+# The pasteboard only holds a weak reference to its data provider.
+_live_text_provider = None
+
+
+def _lazy_text_item(text: str, on_read: Callable[[], None]):
+    """Return a pasteboard item that supplies `text` only when asked for it.
+
+    The provider is called on the main thread's run loop (Tk's mainloop), so
+    this must never be waited on from the main thread.
+    """
+    global _text_provider_class, _live_text_provider
+    import objc
+    from AppKit import NSPasteboardItem
+    from Foundation import NSObject
+
+    if _text_provider_class is None:
+        class VoiceTypeTextProvider(
+            NSObject,
+            protocols=[objc.protocolNamed("NSPasteboardItemDataProvider")],
+        ):
+            def pasteboard_item_provideDataForType_(self, _pasteboard, item, pasteboard_type):
+                item.setString_forType_(self.text, pasteboard_type)
+                self.on_read()
+
+            def pasteboardFinishedWithDataProvider_(self, _pasteboard):
+                pass
+
+        _text_provider_class = VoiceTypeTextProvider
+
+    provider = _text_provider_class.alloc().init()
+    provider.text = text
+    provider.on_read = on_read
+    _live_text_provider = provider
+
+    item = NSPasteboardItem.alloc().init()
+    item.setDataProvider_forTypes_(provider, [_TEXT_TYPE])
+    return item
+
+
+def _paste_via_pasteboard(
+    pasteboard,
+    text: str,
+    post_paste: Callable[[], None],
+    *,
+    make_item=None,
+    item_class=None,
+    timeout: float = _PASTE_READ_TIMEOUT,
+) -> float | None:
+    """Paste `text` and restore the old clipboard once the target has read it.
+
+    Returns the seconds the target took to read the text, or None if it never
+    did, in which case the text is left on the clipboard.
+    """
     import time
-    from AppKit import NSPasteboard, NSPasteboardTypeString
+    if make_item is None:
+        make_item = _lazy_text_item
+
+    snapshot = _snapshot_pasteboard(pasteboard)
+    read = threading.Event()
+    pasteboard.clearContents()
+    if not pasteboard.writeObjects_([make_item(text, read.set)]):
+        raise RuntimeError("Could not put transcription on the pasteboard")
+    offered = pasteboard.changeCount()
+
+    started = time.perf_counter()
+    post_paste()
+    if not read.wait(timeout):
+        # A plain string, so a manual Cmd+V (or a late read) still gets the text.
+        pasteboard.clearContents()
+        pasteboard.setString_forType_(text, _TEXT_TYPE)
+        return None
+    latency = time.perf_counter() - started
+
+    # The provider hands the data over when its callback returns.
+    time.sleep(0.05)
+    # Leave anything copied since the paste alone.
+    if pasteboard.changeCount() == offered:
+        _restore_pasteboard(pasteboard, snapshot, item_class)
+    return latency
+
+
+def inject_text(text: str, log: Callable[[str], None] | None = None) -> bool:
+    import time
+    from AppKit import NSPasteboard
 
     # Re-activate the app that had focus when recording started.
     # The overlay appearing may have moved focus away.
     restore_target_app_focus()
     time.sleep(0.15)  # wait for the app to actually come to front
 
-    pasteboard = NSPasteboard.generalPasteboard()
-    snapshot = _snapshot_pasteboard(pasteboard)
-
-    try:
-        pasteboard.clearContents()
-        if not pasteboard.setString_forType_(text, NSPasteboardTypeString):
-            raise RuntimeError("Could not put transcription on the pasteboard")
-        time.sleep(0.05)  # give the target app a stable pasteboard value
-
-        # Simulate Cmd+V: Command down, V down, V up, Command up.
-        import Quartz
-        cmd_flag = Quartz.kCGEventFlagMaskCommand
-        _post_events([
-            (_VK_CMD, True,  cmd_flag),
-            (_VK_V,   True,  cmd_flag),
-            (_VK_V,   False, cmd_flag),
-            (_VK_CMD, False, 0),
-        ])
-        time.sleep(0.1)  # let paste complete before restoring the pasteboard
-    finally:
-        _restore_pasteboard(pasteboard, snapshot)
-
+    latency = _paste_via_pasteboard(
+        NSPasteboard.generalPasteboard(), text, _post_cmd_v,
+    )
+    if latency is None:
+        subprocess.Popen(["afplay", _PASTE_FAILED_SOUND])
+        if log:
+            log(
+                f"Paste not confirmed: target never read the clipboard within "
+                f"{_PASTE_READ_TIMEOUT:.1f}s. Text left on the clipboard "
+                f"({len(text)} chars)."
+            )
+        return False
     if log:
-        log(f"NSPasteboard+Cmd+V: {len(text)} chars injected")
+        log(f"NSPasteboard+Cmd+V: {len(text)} chars injected "
+            f"(target read clipboard after {latency * 1000:.0f}ms)")
+    return True
 
 
 def inject_backspaces(count: int, log: Callable[[str], None] | None = None) -> None:

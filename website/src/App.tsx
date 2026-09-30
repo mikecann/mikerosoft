@@ -1,201 +1,394 @@
-import '@mantine/core/styles.css';
-import './App.css';
-import { useState } from 'react';
+import './xp.css';
+import { useEffect, useState } from 'react';
+import { Desktop, type DesktopItem } from './Desktop';
+import { categoryId, HOME_SEARCH_ID, HomeContent, type PlatformFilter } from './HomeContent';
+import { navigate, replacePath, useNavigation } from './router';
+import { Taskbar } from './Taskbar';
+import { ToolContent } from './ToolContent';
+import { toolPath } from './toolPages';
 import {
-  Anchor,
-  Box,
-  Button,
-  Container,
-  createTheme,
-  Group,
-  Image,
-  MantineProvider,
-  SegmentedControl,
-  SimpleGrid,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core';
-import { ToolCard } from './ToolCard';
-import { TOOL_DATES } from './toolDates.generated';
-import { SORT_OPTIONS, sortTools, type SortDirection, type SortField } from './toolDates';
-import {
+  CATEGORY_ORDER,
   filterToolsByPlatforms,
-  PLATFORM_COLOR,
-  PLATFORM_LABEL,
+  groupToolsByCategory,
   PLATFORM_ORDER,
+  searchTools,
   tools,
-  type PlatformId,
+  type Category,
+  type Tool,
 } from './tools';
+import {
+  closeWindow,
+  defaultGeometry,
+  dialogGeometry,
+  focusedWindow,
+  focusWindow,
+  maximiseWindow,
+  minimiseAll,
+  minimiseWindow,
+  moveWindow,
+  openWindow,
+  pathForWindow,
+  restoreWindow,
+  restoreWindows,
+  SMALL_SCREEN,
+  toggleMaximise,
+  windowForPath,
+  type Desktop as DesktopState,
+  type WindowId,
+} from './windowManager';
+import { DateTimeContent, MessageDialog, PowerScreen, RunDialog, TurnOffDialog, type PowerChoice } from './XpDialogs';
+import { XpWindow } from './XpWindow';
 
-const theme = createTheme({
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-  primaryColor: 'blue',
-});
+const REPO_URL = 'https://github.com/mikecann/mikerosoft';
+const TASKBAR_HEIGHT = 36;
+// Tools down the left edge of the desktop. The rest go down the right.
+const LEFT_CATEGORIES: readonly Category[] = ['Video & recording', 'Images'];
+const RECENT_KEY = 'mikerosoft:recent-tools';
+const RECENT_COUNT = 6;
+// What the Start menu shows before you've opened anything.
+const DEFAULT_RECENT = ['tandem', 'record-it', 'voice-type', 'taskbar', 'task-stats', 'telemprompit'];
 
-function GithubCorner() {
-  return (
-    <a
-      href="https://github.com/mikecann/mikerosoft"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="View source on GitHub"
-      title="View source on GitHub"
-      className="github-corner"
-      style={{
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        zIndex: 50,
-        color: 'var(--mantine-color-white)',
-      }}
-    >
-      <svg
-        width="80"
-        height="80"
-        viewBox="0 0 250 250"
-        aria-hidden="true"
-        style={{
-          display: 'block',
-        }}
-      >
-        <path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z" />
-        <path
-          d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2"
-          fill="currentColor"
-          className="github-corner-arm"
-        />
-        <path
-          d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z"
-          fill="currentColor"
-        />
-      </svg>
-    </a>
-  );
+type Dialog = 'help' | 'log-off' | 'turn-off' | 'not-found' | 'run' | null;
+
+const DATE_TIME: WindowId = 'app:datetime';
+
+function geometryFor(id: WindowId, openCount: number) {
+  const area = desktopArea();
+  return id === DATE_TIME ? dialogGeometry(area, { width: 500, height: 470 }) : defaultGeometry(area, openCount);
 }
 
-export default function App() {
-  const [activePlatforms, setActivePlatforms] = useState<PlatformId[]>([...PLATFORM_ORDER]);
-  const [sortField, setSortField] = useState<SortField>('default');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('newest');
-  const visibleTools = sortTools(
-    filterToolsByPlatforms(tools, activePlatforms),
-    TOOL_DATES,
-    sortField,
-    sortDirection,
-  );
+function desktopArea() {
+  return { width: window.innerWidth, height: window.innerHeight - TASKBAR_HEIGHT };
+}
 
-  function togglePlatform(platform: PlatformId) {
-    setActivePlatforms(current => (
-      current.includes(platform)
-        ? current.filter(id => id !== platform)
-        : PLATFORM_ORDER.filter(id => id === platform || current.includes(id))
-    ));
+function toolFor(id: WindowId): Tool | undefined {
+  return id === 'home' ? undefined : tools.find(tool => `tool:${tool.name}` === id);
+}
+
+/** Opens the Mikerosoft window, plus the tool in the address bar on top of it. */
+function initialDesktop(): { desktop: DesktopState; dialog: Dialog } {
+  const area = desktopArea();
+  let desktop = openWindow({ windows: [] }, 'home', defaultGeometry(area, 0));
+  const id = windowForPath(window.location.pathname);
+  if (id && id !== 'home') desktop = openWindow(desktop, id, defaultGeometry(area, 1));
+  return { desktop, dialog: id ? null : 'not-found' };
+}
+
+function readRecent(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as string[];
+    const known = saved.filter(name => tools.some(tool => tool.name === name));
+    return [...known, ...DEFAULT_RECENT.filter(name => !known.includes(name))].slice(0, RECENT_COUNT);
+  } catch {
+    return DEFAULT_RECENT;
+  }
+}
+
+function useArea() {
+  const [area, setArea] = useState(desktopArea);
+  useEffect(() => {
+    const handle = () => setArea(desktopArea());
+    window.addEventListener('resize', handle);
+    return () => window.removeEventListener('resize', handle);
+  }, []);
+  return area;
+}
+
+const grouped = groupToolsByCategory(tools);
+const desktopItems: DesktopItem[] = [
+  { id: 'home', label: 'Mikerosoft', icon: '/logo.png', href: '/' },
+  { id: 'github', label: 'GitHub', icon: '/xp/github.png', href: REPO_URL, external: true },
+  ...grouped.flatMap(group => group.tools).map(tool => ({
+    id: tool.name,
+    label: tool.name,
+    icon: tool.icon,
+    href: toolPath(tool.name),
+    sourceUrl: tool.url,
+  })),
+];
+const leftIds = ['home', 'github', ...grouped.filter(g => LEFT_CATEGORIES.includes(g.category)).flatMap(g => g.tools.map(t => t.name))];
+const rightIds = grouped.filter(g => !LEFT_CATEGORIES.includes(g.category)).flatMap(g => g.tools.map(t => t.name));
+
+export default function App() {
+  const area = useArea();
+  const isSmallScreen = area.width < SMALL_SCREEN;
+  const [{ desktop: initial, dialog: initialDialog }] = useState(initialDesktop);
+  const [desktop, setDesktop] = useState<DesktopState>(initial);
+  const [dialog, setDialog] = useState<Dialog>(initialDialog);
+  const [power, setPower] = useState<PowerChoice | null>(null);
+  const [startOpen, setStartOpen] = useState(false);
+  // Clicking the desktop greys out every title bar, like XP.
+  const [desktopActive, setDesktopActive] = useState(false);
+  const [hiddenByShowDesktop, setHiddenByShowDesktop] = useState<WindowId[]>([]);
+  const [recent, setRecent] = useState<string[]>(readRecent);
+  const [query, setQuery] = useState('');
+  const [platform, setPlatform] = useState<PlatformFilter>('all');
+
+  /** The title and icon each window shows in its title bar and on the taskbar. */
+  function windowInfo(id: WindowId): { title: string; taskTitle: string; icon: string } {
+    const tool = toolFor(id);
+    if (tool) return { title: `${tool.name} - Mikerosoft`, taskTitle: tool.name, icon: tool.icon };
+    if (id === DATE_TIME) return { title: 'Date and Time Properties', taskTitle: 'Date and Time Properties', icon: '/icons/ui-calendar.png' };
+    return { title: 'Mikerosoft', taskTitle: 'Mikerosoft', icon: '/logo.png' };
   }
 
-  return (
-    <MantineProvider theme={theme} defaultColorScheme="dark">
-      <Box
-        style={{
-          minHeight: '100vh',
-          background: 'var(--mantine-color-dark-8)',
-        }}
-      >
-        <GithubCorner />
-        <Container size={1800} py="xl" px="xl">
-          <Stack align="center" mb="xl" gap="md">
-            <Image
-              src="/logo.png"
-              alt="Mikerosoft logo"
-              maw={300}
-              w="100%"
-            />
-            <Title order={1} c="blue" mt="xs">Mikerosoft</Title>
-            <Text c="dimmed" ta="center" maw={600} lh={1.6}>
-              A collection of personalised desktop tools for{' '}
-              <Anchor href="https://mikecann.blog" target="_blank" rel="noopener">
-                Mike Cann
-              </Anchor>.
-              <br />
-              <Text span size="sm" c="gray.6">
-                (and is in no way affiliated with Microsoft... please don't sue me!)
-              </Text>
-            </Text>
-            <Group gap="lg" justify="center" wrap="wrap">
-              <Group
-                gap="xs"
-                justify="center"
-                wrap="wrap"
-                role="group"
-                aria-label="Filter tools by platform"
-              >
-                {PLATFORM_ORDER.map(id => {
-                  const isActive = activePlatforms.includes(id);
-                  return (
-                    <Button
-                      key={id}
-                      type="button"
-                      size="compact-sm"
-                      radius="xl"
-                      variant={isActive ? 'light' : 'outline'}
-                      color={isActive ? PLATFORM_COLOR[id] : 'gray'}
-                      aria-pressed={isActive}
-                      onClick={() => togglePlatform(id)}
-                      className="platform-filter"
-                    >
-                      {PLATFORM_LABEL[id]}
-                    </Button>
-                  );
-                })}
-              </Group>
-              <Group gap="xs" justify="center" wrap="wrap">
-                <SegmentedControl
-                  size="xs"
-                  radius="xl"
-                  value={sortField}
-                  onChange={value => setSortField(value as SortField)}
-                  data={[...SORT_OPTIONS]}
-                  aria-label="Sort tools"
-                />
-                {sortField !== 'default' && (
-                  <Button
-                    type="button"
-                    size="compact-sm"
-                    radius="xl"
-                    variant="subtle"
-                    color="gray"
-                    onClick={() => setSortDirection(current => (current === 'newest' ? 'oldest' : 'newest'))}
-                    aria-label={`Showing ${sortDirection} first. Click to reverse.`}
-                  >
-                    {sortDirection === 'newest' ? 'Newest first ↓' : 'Oldest first ↑'}
-                  </Button>
-                )}
-              </Group>
-            </Group>
-          </Stack>
+  const topWindow = focusedWindow(desktop);
+  const focused = desktopActive ? undefined : topWindow;
+  const focusedTool = topWindow && toolFor(topWindow.id);
+  const visibleTools = searchTools(
+    filterToolsByPlatforms(tools, platform === 'all' ? PLATFORM_ORDER : [platform]),
+    query,
+  );
 
-          {visibleTools.length > 0 ? (
-            <SimpleGrid
-              id="tool-grid"
-              cols={{ base: 1, sm: 2, md: 3, lg: 4 }}
-              spacing="lg"
-            >
-              {visibleTools.map(tool => (
-                <ToolCard
-                  key={tool.name}
-                  tool={tool}
-                  dates={TOOL_DATES[tool.name]}
-                  highlight={sortField === 'default' ? undefined : sortField}
-                />
-              ))}
-            </SimpleGrid>
-          ) : (
-            <Text ta="center" c="dimmed" py="xl" role="status">
-              Select Windows or macOS to show available tools.
-            </Text>
-          )}
-        </Container>
-      </Box>
-    </MantineProvider>
+  function change(update: (current: DesktopState) => DesktopState) {
+    setDesktopActive(false);
+    setHiddenByShowDesktop([]);
+    setDesktop(update);
+  }
+
+  function open(id: WindowId) {
+    change(current => openWindow(current, id, geometryFor(id, current.windows.length)));
+    const tool = toolFor(id);
+    if (!tool) return;
+    setRecent(current => {
+      const next = [tool.name, ...current.filter(name => name !== tool.name)].slice(0, RECENT_COUNT);
+      try {
+        localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+      } catch {
+        // Storage can be off. The Start menu just forgets.
+      }
+      return next;
+    });
+  }
+
+  useNavigation(pathname => {
+    const id = windowForPath(pathname);
+    if (id) open(id);
+    else setDialog('not-found');
+  });
+
+  // The address bar shows the page window in front, so it can be shared. App windows leave it alone.
+  const topPath = topWindow && pathForWindow(topWindow.id);
+  useEffect(() => {
+    if (topPath) replacePath(topPath);
+    document.title = focusedTool ? `${focusedTool.name} - Mikerosoft` : 'Mikerosoft';
+  }, [topPath, focusedTool]);
+
+  function openGithub() {
+    window.open(REPO_URL, '_blank', 'noopener');
+  }
+
+  // Ctrl+Esc opens the Start menu, as it always has.
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key === 'Escape') {
+        event.preventDefault();
+        setStartOpen(open => !open);
+      }
+    };
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  }, []);
+
+  function surprise() {
+    const others = tools.filter(tool => tool !== focusedTool);
+    navigate(toolPath(others[Math.floor(Math.random() * others.length)].name));
+  }
+
+  function showCategory(category: Category) {
+    setQuery('');
+    open('home');
+    // Wait for the window to render before scrolling to the category.
+    setTimeout(() => document.getElementById(categoryId(category))?.scrollIntoView({ behavior: 'smooth' }), 50);
+  }
+
+  function search() {
+    open('home');
+    setTimeout(() => document.getElementById(HOME_SEARCH_ID)?.focus(), 50);
+  }
+
+  function showDesktop() {
+    if (hiddenByShowDesktop.length > 0) {
+      const ids = hiddenByShowDesktop;
+      setDesktop(current => restoreWindows(current, ids));
+      setHiddenByShowDesktop([]);
+      return;
+    }
+    const { desktop: hidden, hiddenIds } = minimiseAll(desktop);
+    setDesktop(hidden);
+    setHiddenByShowDesktop(hiddenIds);
+  }
+
+  function openDesktopItem(item: DesktopItem, inNewTab?: boolean) {
+    if (item.external || inNewTab) window.open(item.href, '_blank', 'noopener');
+    else navigate(item.href);
+  }
+
+  function choosePower(choice: PowerChoice) {
+    setDialog(null);
+    setPower(choice);
+  }
+
+  function wake() {
+    if (power === 'restart') {
+      // A fresh boot: just the Mikerosoft window, like when you first arrive.
+      setDesktop(openWindow({ windows: [] }, 'home', defaultGeometry(desktopArea(), 0)));
+      replacePath('/');
+    }
+    setPower(null);
+  }
+
+  const windowActions = {
+    onActivate: (id: string) => {
+      const windowId = id as WindowId;
+      const isFront = focused?.id === windowId;
+      change(current => (isFront ? minimiseWindow(current, windowId) : focusWindow(current, windowId)));
+    },
+    onRestore: (id: string) => change(current => restoreWindow(current, id as WindowId)),
+    onMinimise: (id: string) => change(current => minimiseWindow(current, id as WindowId)),
+    onMaximise: (id: string) => change(current => maximiseWindow(current, id as WindowId)),
+    onClose: (id: string) => change(current => closeWindow(current, id as WindowId)),
+  };
+
+  // Taskbar buttons stay in the order the windows were opened, like XP.
+  const [openOrder, setOpenOrder] = useState<WindowId[]>(() => initial.windows.map(window => window.id));
+  useEffect(() => {
+    const ids = desktop.windows.map(window => window.id);
+    setOpenOrder(current => [...current.filter(id => ids.includes(id)), ...ids.filter(id => !current.includes(id))]);
+  }, [desktop.windows]);
+
+  return (
+    <div className="xp-desktop">
+      <Desktop
+        items={desktopItems}
+        leftIds={leftIds}
+        rightIds={rightIds}
+        area={area}
+        isSmallScreen={isSmallScreen}
+        onOpen={openDesktopItem}
+        onActivate={() => setDesktopActive(true)}
+        onProperties={() => setDialog('help')}
+      />
+
+      {desktop.windows.map((state, index) => {
+        const tool = toolFor(state.id);
+        const info = windowInfo(state.id);
+        const isPage = pathForWindow(state.id) !== undefined;
+        return (
+          <XpWindow
+            key={state.id}
+            window={state}
+            title={info.title}
+            icon={info.icon}
+            kind={state.id === DATE_TIME ? 'dialog' : 'document'}
+            zIndex={index + 1}
+            isFocused={state.id === focused?.id}
+            isSmallScreen={isSmallScreen}
+            area={area}
+            statusBar={isPage && (
+              <>
+                <p className="status-bar-field">{tool ? tool.desc : `${visibleTools.length} of ${tools.length} tools`}</p>
+                {tool && (
+                  <p className="status-bar-field status-bar-link">
+                    <a href={tool.url} target="_blank" rel="noopener">tools/{tool.name}</a>
+                  </p>
+                )}
+              </>
+            )}
+            onFocus={() => change(current => focusWindow(current, state.id))}
+            onMinimise={() => windowActions.onMinimise(state.id)}
+            onToggleMaximise={() => change(current => toggleMaximise(current, state.id))}
+            onClose={() => windowActions.onClose(state.id)}
+            onGeometryChange={geometry => setDesktop(current => moveWindow(current, state.id, geometry))}
+          >
+            {tool ? (
+              <ToolContent tool={tool} />
+            ) : state.id === DATE_TIME ? (
+              <DateTimeContent onClose={() => windowActions.onClose(DATE_TIME)} />
+            ) : (
+              <HomeContent
+                tools={visibleTools}
+                totalCount={tools.length}
+                query={query}
+                onQueryChange={setQuery}
+                platform={platform}
+                onPlatformChange={setPlatform}
+                onSurprise={surprise}
+              />
+            )}
+          </XpWindow>
+        );
+      })}
+
+      <Taskbar
+        items={openOrder.map(id => {
+          const info = windowInfo(id);
+          const state = desktop.windows.find(window => window.id === id);
+          return {
+            id,
+            title: info.taskTitle,
+            icon: info.icon,
+            isActive: id === focused?.id,
+            isMinimised: Boolean(state?.minimised),
+            isMaximised: Boolean(state?.maximised),
+          };
+        })}
+        actions={windowActions}
+        recent={recent.map(name => tools.find(tool => tool.name === name)).filter(tool => tool !== undefined)}
+        startOpen={startOpen}
+        onStartOpenChange={setStartOpen}
+        onShowDesktop={showDesktop}
+        onOpenHome={() => navigate('/')}
+        onOpenGithub={openGithub}
+        onShowCategory={showCategory}
+        onSearch={search}
+        onSurprise={surprise}
+        onRun={() => setDialog('run')}
+        onHelp={() => setDialog('help')}
+        onLogOff={() => setDialog('log-off')}
+        onTurnOff={() => setDialog('turn-off')}
+        onOpenClock={() => open(DATE_TIME)}
+      />
+
+      {dialog === 'help' && (
+        <MessageDialog title="Help and Support" onClose={() => setDialog(null)}>
+          <p><strong>Mikerosoft</strong>, {tools.length} tools installed.</p>
+          <p>
+            These are the little desktop tools I (Mike Cann) have built for myself on Windows and macOS. Double-click
+            one to open it, hit Copy prompt, and let your AI agent do the setup.
+          </p>
+          <p>They're also sorted into {CATEGORY_ORDER.length} folders in Start, All Programs.</p>
+          <p className="muted">Not affiliated with Microsoft in any way. Please don't sue me!</p>
+        </MessageDialog>
+      )}
+      {dialog === 'log-off' && (
+        <MessageDialog title="Log Off Mikerosoft" icon="/xp/logoff.png" onClose={() => setDialog(null)}>
+          <p>You can't log off, there's nobody logged on. It's just a website.</p>
+        </MessageDialog>
+      )}
+      {dialog === 'turn-off' && <TurnOffDialog onChoose={choosePower} onClose={() => setDialog(null)} />}
+      {dialog === 'run' && (
+        <RunDialog
+          names={tools.map(tool => tool.name)}
+          onClose={() => setDialog(null)}
+          onRun={name => {
+            if (name === 'mikerosoft' || name === 'explorer') {
+              navigate('/');
+              return true;
+            }
+            const tool = tools.find(candidate => candidate.name === name);
+            if (tool) navigate(toolPath(tool.name));
+            return Boolean(tool);
+          }}
+        />
+      )}
+      {dialog === 'not-found' && (
+        <MessageDialog title="Mikerosoft" icon="/xp/help.png" onClose={() => { setDialog(null); navigate('/'); }}>
+          <p>Hmm, I couldn't find that one. Maybe the tool got renamed?</p>
+          <p>Every tool is on the desktop, or in Start, All Programs.</p>
+        </MessageDialog>
+      )}
+      {power && <PowerScreen choice={power} onWake={wake} />}
+    </div>
   );
 }
